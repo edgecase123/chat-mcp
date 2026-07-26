@@ -5,6 +5,7 @@ import type { View } from '../views.js';
 import { HomeEmptyState, DmEmptyState, RoomEmptyState } from './EmptyState.js';
 import { ScrollableMessageList } from './ScrollableMessageList.js';
 import { Markdown } from '../util/markdown.js';
+import { useMessageViewport } from '../util/viewport.js';
 
 const KIND_LABEL: Record<MessageKind, string | null> = {
   chat: null,
@@ -24,7 +25,7 @@ function timeOf(ts: number): string {
 
 function renderRow(m: Message, meHandle: string): React.ReactElement {
   return (
-    <Box key={m.id} flexDirection="column" marginBottom={1}>
+    <Box key={m.id} flexDirection="column">
       <Text>
         <Text bold color={m.from_handle === meHandle ? 'cyan' : 'green'}>
           {m.from_handle}
@@ -53,6 +54,7 @@ interface MessagesPaneProps {
 }
 
 export function MessagesPane({ view, messages, meHandle }: MessagesPaneProps): React.ReactElement {
+  const viewportRows = useMessageViewport();
   const title =
     view.kind === 'home'
       ? '(select an agent or room)'
@@ -77,7 +79,7 @@ export function MessagesPane({ view, messages, meHandle }: MessagesPaneProps): R
           <ScrollableMessageList
             messages={messages}
             meHandle={meHandle}
-            viewportRows={20}
+            viewportRows={viewportRows}
             focused={true}
             renderRow={renderRow}
           />

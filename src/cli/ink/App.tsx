@@ -23,6 +23,7 @@ import { Sidebar } from './panes/Sidebar.js';
 import { Palette } from './palette/Palette.js';
 import { HintBar } from './HintBar.js';
 import { Markdown } from './util/markdown.js';
+import { useMessageViewport } from './util/viewport.js';
 
 export interface AppProps {
   handle: string;
@@ -59,6 +60,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [draft, setDraft] = useState<{ value: string; cursor: number } | null>(null);
+  const messageViewport = useMessageViewport();
 
   useEffect(() => {
     const bump = (): void => setTick((t) => t + 1);
@@ -607,7 +609,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
               <ScrollableMessageList
                 messages={watchMessages}
                 meHandle={handle}
-                viewportRows={10}
+                viewportRows={messageViewport}
                 focused={showWatch}
                 requireShift={true}
                 renderRow={(m) => (
