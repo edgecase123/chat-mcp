@@ -204,6 +204,21 @@ export interface Room {
   member_count: number;
 }
 
+export interface JoinResult {
+  room: Room;
+  /** True on the first successful join by this handle; false on idempotent re-join. */
+  was_new_member: boolean;
+  /**
+   * The system-authored announcement message posted to the room on a new
+   * join. Present iff was_new_member is true. Callers are responsible for
+   * fanning out notifyPeer to existing members.
+   */
+  system_message?: { id: number; sent_at: number; body: string };
+}
+
+/** Reserved from_handle used for room lifecycle announcements (joins etc.). */
+export const SYSTEM_HANDLE = 'system';
+
 interface RoomRow {
   name: string;
   created_at: number;
@@ -212,11 +227,15 @@ interface RoomRow {
 
 /**
  * Join a room, creating it if it doesn't exist. Idempotent — if the caller
- * is already a member, returns the existing room + no-op. First joiner
- * becomes the created_by. Initializes room_reads to the current max message
- * id so pre-join history stays hidden.
+ * is already a member, returns { was_new_member: false } and no side effects.
+ * First joiner becomes the created_by.
+ *
+ * On a first-time join, inserts a system announcement message
+ * (from='system', body='<handle> joined <room>') and anchors the new
+ * joiner's read watermark AT that message id so they don't see their own
+ * "joined" line. Existing members' watermarks are lower, so they see it.
  */
-export function joinRoom(db: Db, room: string, handle: string): Room {
+export function joinRoom(db: Db, room: string, handle: string): JoinResult {
   const now = Date.now();
   db.prepare(
     `INSERT INTO rooms (name, created_at, created_by) VALUES (?, ?, ?)
@@ -227,23 +246,33 @@ export function joinRoom(db: Db, room: string, handle: string): Room {
     `SELECT joined_at FROM room_members WHERE room_name = ? AND handle = ?`,
   ).get(room, handle) as { joined_at: number } | undefined;
 
-  if (!existing) {
-    db.prepare(
-      `INSERT INTO room_members (room_name, handle, joined_at) VALUES (?, ?, ?)`,
-    ).run(room, handle, now);
-
-    // Anchor unread watermark at current max id so we don't see history
-    // sent before we joined.
-    const maxRow = db.prepare(
-      `SELECT COALESCE(MAX(id), 0) AS max_id FROM messages WHERE to_handle = ?`,
-    ).get(room) as { max_id: number };
-    db.prepare(
-      `INSERT INTO room_reads (room_name, handle, last_read_id) VALUES (?, ?, ?)
-       ON CONFLICT(room_name, handle) DO UPDATE SET last_read_id = excluded.last_read_id`,
-    ).run(room, handle, maxRow.max_id);
+  if (existing) {
+    return { room: hydrateRoom(db, room), was_new_member: false };
   }
 
-  return hydrateRoom(db, room);
+  db.prepare(
+    `INSERT INTO room_members (room_name, handle, joined_at) VALUES (?, ?, ?)`,
+  ).run(room, handle, now);
+
+  const body = `${handle} joined ${room}`;
+  const sysInfo = db.prepare(
+    `INSERT INTO messages (from_handle, to_handle, body, sent_at) VALUES (?, ?, ?, ?)`,
+  ).run(SYSTEM_HANDLE, room, body, now);
+  const sysId = Number(sysInfo.lastInsertRowid);
+
+  // Anchor the new joiner's watermark AT the system message so they don't
+  // see their own "joined" line. Existing members have lower watermarks
+  // and will pick it up on their next room_inbox / notify.
+  db.prepare(
+    `INSERT INTO room_reads (room_name, handle, last_read_id) VALUES (?, ?, ?)
+     ON CONFLICT(room_name, handle) DO UPDATE SET last_read_id = excluded.last_read_id`,
+  ).run(room, handle, sysId);
+
+  return {
+    room: hydrateRoom(db, room),
+    was_new_member: true,
+    system_message: { id: sysId, sent_at: now, body },
+  };
 }
 
 export function leaveRoom(db: Db, room: string, handle: string): boolean {

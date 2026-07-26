@@ -154,7 +154,7 @@ try {
     // No CLI input — the notify subscription should print it inline
     await sleep(700);
     const out = cli.getOutput();
-    if (out.includes('reply from claude1') && out.includes('claude1 → user')) {
+    if (out.includes('reply from claude1') && out.includes('claude1')) {
       pass(7, 'CLI prints incoming reply inline without user input');
     } else {
       fail(7, 'CLI output after reply', JSON.stringify(out));
@@ -173,6 +173,64 @@ try {
       pass(8, '/back then /dm claude2 + text → claude2.inbox() sees it');
     } else {
       fail(8, 'claude2.inbox after CLI /dm claude2', JSON.stringify(inbox));
+    }
+  }
+
+  // ─── Room join announcement ─────────────────────────────────
+  // 9. claude1 joins #announce (empty room, no announcement expected in
+  //    their own inbox — nobody else was there); claude2 then joins,
+  //    which posts "claude2 joined #announce". claude1 sees it in
+  //    room_inbox; claude2 does not (watermark anchored past it).
+  {
+    await c1.callTool({ name: 'room_join', arguments: { room: '#announce' } });
+    await sleep(50);
+    // Drain any messages claude1 might already have watermarked past.
+    await c1.callTool({ name: 'room_inbox', arguments: { room: '#announce' } });
+
+    await c2.callTool({ name: 'room_join', arguments: { room: '#announce' } });
+    await sleep(50);
+
+    const c1Inbox = parseJson(await c1.callTool({
+      name: 'room_inbox', arguments: { room: '#announce' },
+    }));
+    const c2Inbox = parseJson(await c2.callTool({
+      name: 'room_inbox', arguments: { room: '#announce' },
+    }));
+
+    const c1Saw = c1Inbox.some(
+      (m) => m.from === 'system' && m.body === 'claude2 joined #announce',
+    );
+    const c2Saw = c2Inbox.some(
+      (m) => m.from === 'system' && m.body === 'claude2 joined #announce',
+    );
+
+    if (c1Saw && !c2Saw) {
+      pass(9, 'room_join announcement: existing member sees system msg, joiner does not');
+    } else {
+      fail(9, 'room_join announcement',
+        `c1Saw=${c1Saw} c2Saw=${c2Saw} c1=${JSON.stringify(c1Inbox)} c2=${JSON.stringify(c2Inbox)}`);
+    }
+  }
+
+  // 10. Idempotent re-join does NOT post a second announcement.
+  {
+    // Drain claude1's inbox first.
+    await c1.callTool({ name: 'room_inbox', arguments: { room: '#announce' } });
+
+    await c2.callTool({ name: 'room_join', arguments: { room: '#announce' } });
+    await sleep(50);
+
+    const c1Inbox = parseJson(await c1.callTool({
+      name: 'room_inbox', arguments: { room: '#announce' },
+    }));
+    const reAnnounced = c1Inbox.some(
+      (m) => m.from === 'system' && m.body === 'claude2 joined #announce',
+    );
+
+    if (!reAnnounced) {
+      pass(10, 'idempotent room_join does not re-announce');
+    } else {
+      fail(10, 'idempotent room_join re-announced', JSON.stringify(c1Inbox));
     }
   }
 

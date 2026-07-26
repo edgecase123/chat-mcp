@@ -216,11 +216,23 @@ export async function runCli(opts: CliOptions): Promise<void> {
       console.log(dim(`  ${(e as Error).message}`));
       return;
     }
-    const room = dao.joinRoom(db, name, opts.handle);
+    const result = dao.joinRoom(db, name, opts.handle);
+    if (result.was_new_member && result.system_message) {
+      const members = dao.roomMembers(db, name);
+      for (const member of members) {
+        if (member === opts.handle) continue;
+        notifyPeer(member, {
+          id: result.system_message.id,
+          to: name,
+          from: dao.SYSTEM_HANDLE,
+          ts: result.system_message.sent_at,
+        });
+      }
+    }
     mode = { kind: 'room', roomName: name };
     console.log(
       `${cyan('▸')} joined ${cyan(name)}  ${dim(
-        `(${room.member_count} member${room.member_count === 1 ? '' : 's'}, /leave to leave)`,
+        `(${result.room.member_count} member${result.room.member_count === 1 ? '' : 's'}, /leave to leave)`,
       )}`,
     );
   };
