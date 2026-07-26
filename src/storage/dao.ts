@@ -455,7 +455,7 @@ export function deleteAgent(db: Db, handle: string): boolean {
   const info = db.prepare('DELETE FROM agents WHERE handle = ?').run(handle);
   db.prepare('DELETE FROM room_members WHERE handle = ?').run(handle);
   db.prepare('DELETE FROM room_reads WHERE handle = ?').run(handle);
-  return info.changes > 0;
+  return Number(info.changes) > 0;
 }
 
 /**
@@ -468,7 +468,7 @@ export function deleteDmMessages(db: Db, a: string, b: string): number {
      WHERE (from_handle = ? AND to_handle = ?)
         OR (from_handle = ? AND to_handle = ?)`,
   ).run(a, b, b, a);
-  return info.changes;
+  return Number(info.changes);
 }
 
 /**
@@ -480,5 +480,5 @@ export function deleteDmMessages(db: Db, a: string, b: string): number {
 export function deleteRoomMessages(db: Db, room: string): number {
   const info = db.prepare('DELETE FROM messages WHERE to_handle = ?').run(room);
   db.prepare('UPDATE room_reads SET last_read_id = 0 WHERE room_name = ?').run(room);
-  return info.changes;
+  return Number(info.changes);
 }
