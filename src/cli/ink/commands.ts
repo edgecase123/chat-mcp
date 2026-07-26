@@ -31,7 +31,7 @@ export const COMMANDS: Command[] = [
   { name: '/join', args: [{ name: '#room', kind: 'room' }], description: 'join a room', category: 'conversation' },
   { name: '/leave', args: [], description: 'leave current room', category: 'conversation' },
   { name: '/back', args: [], description: 'return to home', category: 'conversation' },
-  { name: '/rooms', args: [], description: 'open room browser', category: 'conversation' },
+  { name: '/rooms', args: [{ name: '#room', kind: 'room', optional: true }, { name: 'verb', kind: 'text', variadic: true, optional: true }], description: 'open room browser (no args); or /rooms #x {delete|remove <peer>|invite <peer>}', category: 'conversation' },
 
   { name: '/dispatch', args: [{ name: 'peer', kind: 'peer' }, { name: 'text', kind: 'text', variadic: true }], description: 'send tagged [DISPATCH] to peer', category: 'messaging' },
   { name: '/broadcast', args: [{ name: '#room', kind: 'room' }, { name: 'text', kind: 'text', variadic: true }], description: 'send tagged [DISPATCH] to room', category: 'messaging' },

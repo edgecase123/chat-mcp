@@ -276,9 +276,78 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         case 'back':
           setView({ kind: 'home' });
           return;
-        case 'rooms':
-          setView({ kind: 'rooms' });
-          return;
+        case 'rooms': {
+          // Zero args → open the browser (existing behaviour).
+          if (args.length === 0) {
+            setView({ kind: 'rooms' });
+            return;
+          }
+          // Overload: /rooms <#room> <verb> [args]
+          //   /rooms #x delete
+          //   /rooms #x remove <peer>
+          //   /rooms #x invite <peer>
+          const [roomArg, verb, ...verbArgs] = args;
+          if (!roomArg) return setStatus('usage: /rooms [#room {delete|remove <peer>|invite <peer>}]');
+          try {
+            assertRoomName(roomArg);
+          } catch (e) {
+            return setStatus((e as Error).message);
+          }
+          if (verb === 'delete') {
+            if (!dao.isRoomMember(db, roomArg, handle)) return setStatus(`not a member of ${roomArg} — /join first`);
+            const notifyList = dao.roomMembers(db, roomArg).filter((h) => h !== handle);
+            const ok = dao.deleteRoom(db, roomArg);
+            if (!ok) return setStatus(`${roomArg} does not exist`);
+            // If we were viewing the room, bounce home.
+            if (view.kind === 'room' && view.room === roomArg) setView({ kind: 'home' });
+            for (const member of notifyList) {
+              notifyPeer(member, { id: 0, to: member, from: dao.SYSTEM_HANDLE, ts: Date.now() });
+            }
+            setStatus(`deleted ${roomArg}`);
+            setTick((t) => t + 1);
+            return;
+          }
+          if (verb === 'remove') {
+            const target = verbArgs[0];
+            if (!target) return setStatus(`usage: /rooms ${roomArg} remove <peer>`);
+            if (!dao.isRoomMember(db, roomArg, handle)) return setStatus(`not a member of ${roomArg} — /join first`);
+            if (target === handle) return setStatus('cannot remove yourself — /leave instead');
+            if (!dao.isRoomMember(db, roomArg, target)) return setStatus(`${target} is not a member of ${roomArg}`);
+            const ok = dao.bootFromRoom(db, roomArg, target);
+            if (!ok) return setStatus(`remove failed: ${target} not in ${roomArg}`);
+            notifyPeer(target, { id: 0, to: target, from: dao.SYSTEM_HANDLE, ts: Date.now() });
+            setStatus(`removed ${target} from ${roomArg}`);
+            setTick((t) => t + 1);
+            return;
+          }
+          if (verb === 'invite') {
+            const target = verbArgs[0];
+            if (!target) return setStatus(`usage: /rooms ${roomArg} invite <peer>`);
+            if (!dao.isRoomMember(db, roomArg, handle)) return setStatus(`not a member of ${roomArg} — /join first`);
+            if (target === handle) return setStatus('you\'re already in this room');
+            if (!dao.getAgent(db, target)) return setStatus(`unknown peer: ${target}`);
+            if (dao.isRoomMember(db, roomArg, target)) return setStatus(`${target} is already in ${roomArg}`);
+            // joinRoom on behalf of the target adds them + fires the system
+            // announcement to existing members (including the invitee's own
+            // "joined" line — anchored so THEY don't see it, others do).
+            const result = dao.joinRoom(db, roomArg, target);
+            if (result.was_new_member && result.system_message) {
+              for (const member of dao.roomMembers(db, roomArg)) {
+                if (member === handle) continue;
+                notifyPeer(member, {
+                  id: result.system_message.id,
+                  to: roomArg,
+                  from: dao.SYSTEM_HANDLE,
+                  ts: result.system_message.sent_at,
+                });
+              }
+            }
+            setStatus(`invited ${target} to ${roomArg}`);
+            setTick((t) => t + 1);
+            return;
+          }
+          return setStatus(`unknown /rooms verb: ${verb ?? '(missing)'} (try delete | remove | invite)`);
+        }
         case 'who':
           setView({ kind: 'who' });
           return;
