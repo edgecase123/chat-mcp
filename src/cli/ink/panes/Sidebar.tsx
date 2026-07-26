@@ -1,7 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import type { Agent, AgentStatus } from '../../../storage/dao.js';
-import type * as dao from '../../../storage/dao.js';
+import type { Agent, AgentStatus, Room } from '../../../storage/dao.js';
 import type { View } from '../views.js';
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
@@ -17,7 +16,8 @@ export interface SidebarProps {
   handle: string;
   view: View;
   peers: Agent[];
-  rooms: ReturnType<typeof dao.myRooms>;
+  memberRooms: Room[];
+  discoverRooms: Room[];
   dmUnreadByPeer: Map<string, number>;
   roomUnreadByName: Map<string, number>;
 }
@@ -25,7 +25,8 @@ export interface SidebarProps {
 export function Sidebar({
   view,
   peers,
-  rooms,
+  memberRooms,
+  discoverRooms,
   dmUnreadByPeer,
   roomUnreadByName,
 }: SidebarProps): React.ReactElement {
@@ -77,22 +78,32 @@ export function Sidebar({
           ROOMS
         </Text>
       </Box>
-      {rooms.length === 0 ? (
+      {memberRooms.length === 0 && discoverRooms.length === 0 ? (
         <Text dimColor>(none — /join #x)</Text>
       ) : (
-        rooms.map((r) => {
-          const active = view.kind === 'room' && view.room === r.name;
-          const unread = roomUnreadByName.get(r.name) ?? 0;
-          return (
-            <Text key={r.name}>
-              {active ? <Text color="cyan">▸ </Text> : <Text>  </Text>}
-              <Text color={active ? 'cyan' : undefined} bold={active}>
-                {r.name}
+        <>
+          {memberRooms.map((r) => {
+            const active = view.kind === 'room' && view.room === r.name;
+            const unread = roomUnreadByName.get(r.name) ?? 0;
+            return (
+              <Text key={r.name}>
+                {active ? <Text color="cyan">▸ </Text> : <Text>  </Text>}
+                <Text color="cyan" bold={active}>{r.name}</Text>
+                {unread > 0 && <Text color="yellow"> ({unread})</Text>}
               </Text>
-              {unread > 0 && <Text color="yellow"> ({unread})</Text>}
+            );
+          })}
+          {discoverRooms.length > 0 && (
+            <Text dimColor>  ── join ──</Text>
+          )}
+          {discoverRooms.map((r) => (
+            <Text key={r.name}>
+              {'  '}
+              <Text color="gray">＋ </Text>
+              <Text dimColor>{r.name}</Text>
             </Text>
-          );
-        })
+          ))}
+        </>
       )}
     </Box>
   );

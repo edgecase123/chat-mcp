@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
-import TextInput from 'ink-text-input';
+import { Input } from './input/Input.js';
+import { Autocomplete } from './input/Autocomplete.js';
+import { getCompletions } from './input/completions.js';
+import type { Completion } from './input/completions.js';
 import { NotifyBus, notifyPeer } from '../../notify/bus.js';
 import type { Db } from '../../storage/db.js';
 import * as dao from '../../storage/dao.js';
@@ -33,7 +36,8 @@ function timeOf(ts: number): string {
 export function App({ handle, db, notify, version }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const [view, setView] = useState<View>({ kind: 'home' });
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState<{ value: string; cursor: number }>({ value: '', cursor: 0 });
+  const [completionIndex, setCompletionIndex] = useState(0);
   const [tick, setTick] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
   const [watchPeer, setWatchPeer] = useState<string | null>(null);
@@ -391,7 +395,6 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
       if (line.length === 0) return;
       if (line.startsWith('/')) doCommand(line);
       else sendCurrent(line);
-      setInput('');
     },
     [doCommand, sendCurrent],
   );
@@ -412,6 +415,21 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick]);
 
+  const allRoomsList = useMemo(() => dao.allRooms(db), [db, tick]);
+  const discoverRooms = useMemo(
+    () => allRoomsList.filter((r) => !rooms.some((mr) => mr.name === r.name) && r.member_count > 0),
+    [allRoomsList, rooms],
+  );
+
+  const completions: Completion[] = useMemo(() => {
+    return getCompletions(input.value, input.cursor, {
+      me: handle,
+      peers: peers.map((p) => p.handle),
+      memberRooms: rooms.map((r) => r.name),
+      discoverRooms: discoverRooms.map((r) => r.name),
+    });
+  }, [input.value, input.cursor, peers, rooms, discoverRooms, handle]);
+
   return (
     <Box flexDirection="column" width="100%">
       <Header handle={handle} version={version} status={meStatus} focus={meFocus} />
@@ -424,7 +442,8 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           handle={handle}
           view={view}
           peers={peers}
-          rooms={rooms}
+          memberRooms={rooms}
+          discoverRooms={discoverRooms}
           dmUnreadByPeer={dmUnreadByPeer}
           roomUnreadByName={roomUnreadByName}
         />
@@ -475,9 +494,35 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
       </Box>
 
       {/* Input */}
-      <Box borderStyle="round" borderColor="gray" paddingX={1}>
-        <Text color="cyan">{'> '}</Text>
-        <TextInput value={input} onChange={setInput} onSubmit={handleSubmit} />
+      <Box flexDirection="column">
+        {completions.length > 0 && (
+          <Autocomplete completions={completions} selectedIndex={completionIndex} />
+        )}
+        <Box borderStyle="round" borderColor="gray" paddingX={1}>
+          <Input
+            value={input.value}
+            cursor={input.cursor}
+            onChange={(value, cursor) => { setInput({ value, cursor }); setCompletionIndex(0); }}
+            onSubmit={(v) => { handleSubmit(v); setInput({ value: '', cursor: 0 }); }}
+            onTab={() => {
+              // Tab-complete: replace current token with the selected completion + trailing space.
+              const c = completions[completionIndex];
+              if (!c) return;
+              const before = input.value.slice(0, input.cursor);
+              const after = input.value.slice(input.cursor);
+              const tokenStart = Math.max(before.lastIndexOf(' '), before.lastIndexOf('#') - 1) + 1;
+              const nextValue = input.value.slice(0, tokenStart) + c.value + ' ' + after;
+              const nextCursor = tokenStart + c.value.length + 1;
+              setInput({ value: nextValue, cursor: nextCursor });
+              setCompletionIndex(0);
+            }}
+            onEsc={() => {
+              if (completions.length > 0) { setInput({ value: '', cursor: 0 }); setCompletionIndex(0); }
+            }}
+            onUp={() => setCompletionIndex((i) => Math.max(0, i - 1))}
+            onDown={() => setCompletionIndex((i) => Math.min(completions.length - 1, i + 1))}
+          />
+        </Box>
       </Box>
 
       {status !== null && (
