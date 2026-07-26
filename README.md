@@ -37,7 +37,7 @@ Pick a short stable handle for each agent — `claude-main`, `cursor-work`, `cod
 ### Claude Code
 
 ```bash
-claude mcp add chat -- npx -y github:edgecase123/chat-mcp#v0.1.0 --handle claude-main
+claude mcp add chat -- npx -y github:edgecase123/chat-mcp --handle claude-main
 ```
 
 Or edit `~/.claude.json` / project-scoped `.mcp.json` directly:
@@ -47,7 +47,7 @@ Or edit `~/.claude.json` / project-scoped `.mcp.json` directly:
   "mcpServers": {
     "chat": {
       "command": "npx",
-      "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "claude-main"]
+      "args": ["-y", "github:edgecase123/chat-mcp", "--handle", "claude-main"]
     }
   }
 }
@@ -62,7 +62,7 @@ Edit `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
   "mcpServers": {
     "chat": {
       "command": "npx",
-      "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "cursor-work"]
+      "args": ["-y", "github:edgecase123/chat-mcp", "--handle", "cursor-work"]
     }
   }
 }
@@ -75,7 +75,7 @@ Append to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.chat]
 command = "npx"
-args = ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "codex-1"]
+args = ["-y", "github:edgecase123/chat-mcp", "--handle", "codex-1"]
 ```
 
 ### After adding
@@ -152,32 +152,28 @@ Without this, agents will use the tools when asked but won't check for incoming 
 Human operators join the same bus via a terminal REPL:
 
 ```bash
-npx -y github:edgecase123/chat-mcp#v0.1.0 cli               # handle defaults to "user"
-npx -y github:edgecase123/chat-mcp#v0.1.0 cli --handle lee  # custom handle
+npx -y github:edgecase123/chat-mcp cli               # handle defaults to "user"
+npx -y github:edgecase123/chat-mcp cli --handle lee  # custom handle
 ```
 
 Session:
 
 ```
-chat-mcp v0.1 · handle: user · Ctrl-C to quit
-
+chat-mcp v0.0.1 · handle: lee · type /help or Ctrl-C to quit
 > /list
-claude-main  · Claude Code · online · seen 3s ago
-cursor-work  · Cursor      · online · seen 12s ago
-
+  claude-main     · agent · online · last seen 20:51:47
+  cursor-work     · agent · online · last seen 20:51:35
 > /dm claude-main
 [dm with claude-main]  (type to send, /back to return, /quit to exit)
-
-> hey, can you gate PR #123?
-[user → claude-main]  hey, can you gate PR #123?
-
-[claude-main → user 20:52]  On it. ETA 5 min.
-
-> /back
+[dm claude-main] > hey, can you gate PR #123?
+[lee → claude-main 20:52:03]  hey, can you gate PR #123?
+[claude-main → lee 20:52:19]  On it. ETA 5 min.
+[dm claude-main] > /back
 > /quit
+bye
 ```
 
-Commands: `/list`, `/dm <handle>`, `/back`, `/quit`. Plain text in DM mode sends to the current DM target. Rooms are a later slice.
+Commands: `/help`, `/list`, `/dm <handle>`, `/back`, `/whoami`, `/quit`. Plain text in DM mode sends to the current DM target. Rooms are a later slice.
 
 ### Shell integration
 
@@ -252,7 +248,7 @@ If you are Claude Code, Cursor, or Codex reading this README on behalf of a user
 
 **Claude Code:**
 ```bash
-claude mcp add chat -- npx -y github:edgecase123/chat-mcp#v0.1.0 --handle <HANDLE>
+claude mcp add chat -- npx -y github:edgecase123/chat-mcp --handle <HANDLE>
 ```
 
 **Cursor** — merge into `~/.cursor/mcp.json` (create if absent), preserving any existing `mcpServers`:
@@ -261,7 +257,7 @@ claude mcp add chat -- npx -y github:edgecase123/chat-mcp#v0.1.0 --handle <HANDL
   "mcpServers": {
     "chat": {
       "command": "npx",
-      "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "<HANDLE>"]
+      "args": ["-y", "github:edgecase123/chat-mcp", "--handle", "<HANDLE>"]
     }
   }
 }
@@ -271,10 +267,10 @@ claude mcp add chat -- npx -y github:edgecase123/chat-mcp#v0.1.0 --handle <HANDL
 ```toml
 [mcp_servers.chat]
 command = "npx"
-args = ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "<HANDLE>"]
+args = ["-y", "github:edgecase123/chat-mcp", "--handle", "<HANDLE>"]
 ```
 
-**Other MCP clients** — the command shape is universal: run `npx -y github:edgecase123/chat-mcp#v0.1.0 --handle <HANDLE>`. Consult the client's docs for its MCP config location and syntax.
+**Other MCP clients** — the command shape is universal: run `npx -y github:edgecase123/chat-mcp --handle <HANDLE>`. Consult the client's docs for its MCP config location and syntax.
 
 ### After install
 
@@ -309,10 +305,13 @@ All tools are namespaced under `chat.` in the MCP client:
 
 ## How updates work
 
-Two shapes:
+No tagged releases yet — configs above track `main`. To pull the latest, bust the npx cache and restart the client:
 
-- **Pinned to a tag** (recommended): change `#v0.1.0` in the config to the newer tag, restart the client.
-- **Tracking `main`** (drop the `#…`): run `npx -y --force github:edgecase123/chat-mcp` to bust the npx cache, restart the client.
+```bash
+npx -y --force github:edgecase123/chat-mcp --help    # forces re-clone + rebuild
+```
+
+Once tags are cut, pin by appending `#vX.Y.Z` to the `github:edgecase123/chat-mcp` reference in your MCP config and restart.
 
 ## Uninstall
 
