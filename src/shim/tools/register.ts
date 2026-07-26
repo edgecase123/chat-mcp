@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as dao from '../../storage/dao.js';
+import { notifyPathFor } from '../../util/paths.js';
 import type { ShimContext } from '../index.js';
 
 export function installRegister(server: McpServer, ctx: ShimContext): void {
@@ -34,7 +35,11 @@ export function installRegister(server: McpServer, ctx: ShimContext): void {
         content: [
           {
             type: 'text',
-            text: JSON.stringify({ handle: me.handle, session_id: me.session_id }),
+            text: JSON.stringify({
+              handle: me.handle,
+              session_id: me.session_id,
+              notify_path: notifyPathFor(me.handle),
+            }),
           },
         ],
       };

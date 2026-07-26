@@ -2,7 +2,7 @@ import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import type { Database as Db } from 'better-sqlite3';
 import { openDb } from '../storage/db.js';
-import { NotifyBus } from '../notify/bus.js';
+import { NotifyBus, notifyPeer } from '../notify/bus.js';
 import * as dao from '../storage/dao.js';
 import type { Message } from '../storage/dao.js';
 
@@ -17,7 +17,7 @@ interface Mode {
 
 export async function runCli(opts: CliOptions): Promise<void> {
   const db = openDb();
-  const notify = new NotifyBus();
+  const notify = new NotifyBus(opts.handle);
   const session_id = randomUUID();
 
   dao.upsertAgent(db, {
@@ -155,7 +155,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
       return;
     }
     const sent = dao.insertMessage(db, { from: opts.handle, to: mode.dmTarget, body: text });
-    notify.touch({ id: sent.id, to: mode.dmTarget, from: opts.handle, ts: sent.sent_at });
+    notifyPeer(mode.dmTarget, { id: sent.id, to: mode.dmTarget, from: opts.handle, ts: sent.sent_at });
     const now = new Date().toTimeString().slice(0, 8);
     process.stdout.write(`\r\x1b[K[${opts.handle} → ${mode.dmTarget} ${now}]  ${text}\n`);
   };

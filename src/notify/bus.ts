@@ -1,6 +1,6 @@
 import chokidar, { type FSWatcher } from 'chokidar';
-import { writeFileSync } from 'node:fs';
-import { ensureStateDir, notifyPath } from '../util/paths.js';
+import { writeFileSync, existsSync, unlinkSync } from 'node:fs';
+import { ensureNotifyDir, notifyPathFor } from '../util/paths.js';
 
 type Callback = () => void;
 
@@ -11,14 +11,33 @@ export interface NotifyEnvelope {
   ts: number;
 }
 
+/**
+ * Write an inbox event to a peer's notify file. Any process (any shim, the
+ * CLI) can call this to signal that a message has arrived for `handle`.
+ * Missing envelope falls back to a bare timestamp — mtime still fires
+ * watchers for events that don't correspond to a specific message.
+ */
+export function notifyPeer(handle: string, envelope?: NotifyEnvelope): void {
+  ensureNotifyDir();
+  const payload = envelope ? JSON.stringify(envelope) : String(Date.now());
+  writeFileSync(notifyPathFor(handle), payload);
+}
+
+/**
+ * Per-agent inbox listener. Each registered peer has its own notify file
+ * under `~/.chat-mcp/notify/<handle>`; only writes to that file fire
+ * subscribers. External watchers (Claude Code Monitor, Cursor /loop) can
+ * target the same path — every event is guaranteed relevant, no filter
+ * needed.
+ */
 export class NotifyBus {
   private readonly subs = new Set<Callback>();
   private readonly watcher: FSWatcher;
   private readonly path: string;
 
-  constructor() {
-    ensureStateDir();
-    this.path = notifyPath();
+  constructor(handle: string) {
+    ensureNotifyDir();
+    this.path = notifyPathFor(handle);
     // Ensure the file exists so chokidar has something to watch on add
     try {
       writeFileSync(this.path, '', { flag: 'a' });
@@ -46,13 +65,12 @@ export class NotifyBus {
     }
   }
 
+  /**
+   * Write an event to this peer's own notify file. Rarely useful directly —
+   * senders should call `notifyPeer(recipientHandle, envelope)` to signal a
+   * message. Kept for symmetry / future presence pings.
+   */
   touch(envelope?: NotifyEnvelope): void {
-    // External watchers read this file to learn what changed. When an envelope
-    // is provided (a new message landed) we write a single-line JSON object
-    // carrying recipient + message id + sender, so a watcher can filter to its
-    // own handle without touching SQLite. Without an envelope we fall back to
-    // a bare timestamp — enough to fire mtime-based watchers for events that
-    // don't correspond to a specific message (future presence pings, etc.).
     const payload = envelope ? JSON.stringify(envelope) : String(Date.now());
     writeFileSync(this.path, payload);
   }
@@ -82,5 +100,12 @@ export class NotifyBus {
   async close(): Promise<void> {
     this.subs.clear();
     await this.watcher.close();
+    // Clean up our own notify file on shutdown so a stale entry doesn't
+    // linger for the next boot.
+    try {
+      if (existsSync(this.path)) unlinkSync(this.path);
+    } catch {
+      // Best-effort — the file may already be gone
+    }
   }
 }

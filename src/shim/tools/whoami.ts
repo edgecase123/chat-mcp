@@ -1,5 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as dao from '../../storage/dao.js';
+import { notifyPathFor } from '../../util/paths.js';
 import type { ShimContext } from '../index.js';
 
 export function installWhoami(server: McpServer, ctx: ShimContext): void {
@@ -21,6 +22,7 @@ export function installWhoami(server: McpServer, ctx: ShimContext): void {
         display_name: me.display_name,
         session_id: me.session_id,
         kind: me.kind,
+        notify_path: notifyPathFor(me.handle),
         online_peers: peers.map((a) => ({
           handle: a.handle,
           display_name: a.display_name,

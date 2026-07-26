@@ -12,37 +12,41 @@ import { installSend } from './tools/send.js';
 import { installInbox } from './tools/inbox.js';
 import { installWaitForMessage } from './tools/wait_for_message.js';
 import { installInboxResource } from './resources/inbox.js';
-import { dbPath, notifyPath } from '../util/paths.js';
+import { dbPath, notifyPathFor } from '../util/paths.js';
 
 export interface ShimOptions {
   handle: string;
 }
 
 function buildInstructions(handle: string): string {
-  const notify = notifyPath();
+  const myNotify = notifyPathFor(handle);
   const db = dbPath();
   return [
     `You are connected to chat-mcp as handle "${handle}". This is a local 1:1 message bus shared with other agents and (optionally) the user.`,
     ``,
     `## Receiving messages`,
     ``,
-    `Two lanes — use whichever your host supports; both work in every MCP client:`,
+    `Every registered peer has its own private notify file. Yours is:`,
     ``,
-    `### 1. Client-side fs-watch on the notify file (preferred; low latency, no polling)`,
+    `  ${myNotify}`,
     ``,
-    `Every message insertion writes a single-line JSON envelope to \`${notify}\`. Envelope shape: \`{"id":<n>,"to":"<handle>","from":"<handle>","ts":<ms>}\`.`,
+    `Every write to that file signals a new message addressed to you — no filtering needed. Two lanes, use whichever your host supports:`,
     ``,
-    `Any client with a background-stream primitive (Claude Code \`Monitor\`, Cursor \`/loop\`, similar) can react per-write. Example:`,
+    `### 1. Client-side fs-watch on your notify file (preferred; low latency, no polling)`,
+    ``,
+    `Each write is a single-line JSON envelope: \`{"id":<n>,"to":"${handle}","from":"<sender>","ts":<ms>}\`. Future fields (e.g. \`room\`) may appear — treat unknown fields as opaque.`,
+    ``,
+    `Any client with a background-stream primitive (Claude Code \`Monitor\`, Cursor \`/loop\`, similar fswatch-loop-wake) can react per-write. Example:`,
     ``,
     `\`\`\`bash`,
-    `fswatch -o ${notify} | while read; do`,
-    `  env=\$(cat ${notify})`,
+    `fswatch -o ${myNotify} | while read; do`,
+    `  env=\$(cat ${myNotify})`,
     `  # Emit a wake sentinel if your agent supports one; otherwise the raw event is your cue.`,
     `  echo "CHAT_MCP_INBOUND $env"`,
     `done`,
     `\`\`\``,
     ``,
-    `On wake, if the envelope's \`to\` matches your handle, call \`inbox\` to fetch the body and mark read. Message bodies live in the SQLite DB at \`${db}\` if you must read them directly from the watcher — but \`inbox\` is preferred (it handles read-marking).`,
+    `On wake, call \`inbox\` to fetch the body and mark read. Message bodies live in the SQLite DB at \`${db}\` if you must read directly, but \`inbox\` is preferred (it handles read-marking).`,
     ``,
     `### 2. Tool-call polling (universal fallback)`,
     ``,
@@ -51,7 +55,7 @@ function buildInstructions(handle: string): string {
     ``,
     `## Sending`,
     ``,
-    `Use \`send\` with the recipient's handle. Call \`list_agents\` to see who is online. \`whoami\` returns your own registration + current peers. Anything you want the sender to see MUST go through \`send\` — prose in your transcript stays local.`,
+    `Use \`send\` with the recipient's handle. Call \`list_agents\` to see who is online. \`whoami\` returns your own registration + \`notify_path\` + current peers. Anything you want the sender to see MUST go through \`send\` — prose in your transcript stays local.`,
   ].join('\n');
 }
 
@@ -64,7 +68,7 @@ export interface ShimContext {
 
 export async function runShim(opts: ShimOptions): Promise<void> {
   const db = openDb();
-  const notify = new NotifyBus();
+  const notify = new NotifyBus(opts.handle);
   const session_id = randomUUID();
 
   dao.upsertAgent(db, {

@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as dao from '../../storage/dao.js';
+import { notifyPeer } from '../../notify/bus.js';
 import type { ShimContext } from '../index.js';
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -30,7 +31,7 @@ export function installSend(server: McpServer, ctx: ShimContext): void {
       }
       dao.touchLastSeen(ctx.db, ctx.handle);
       const result = dao.insertMessage(ctx.db, { from: ctx.handle, to, body });
-      ctx.notify.touch({ id: result.id, to, from: ctx.handle, ts: result.sent_at });
+      notifyPeer(to, { id: result.id, to, from: ctx.handle, ts: result.sent_at });
       return {
         content: [
           {
