@@ -1,10 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import TextInput from 'ink-text-input';
-import InkTable from 'ink-table';
-// ink-table ships as CJS; the default import type doesn't resolve as a
-// React component under NodeNext ESM interop. Cast once, use everywhere.
-const Table = InkTable as unknown as React.ComponentType<{ data: Array<Record<string, string>> }>;
 import { NotifyBus, notifyPeer } from '../../notify/bus.js';
 import type { Db } from '../../storage/db.js';
 import * as dao from '../../storage/dao.js';
@@ -699,26 +695,73 @@ interface WhoPaneProps {
   meHandle: string;
 }
 
+interface Column {
+  key: 'handle' | 'kind' | 'online' | 'status' | 'focus' | 'seen';
+  label: string;
+  width: number;
+}
+
+const WHO_COLUMNS: Column[] = [
+  { key: 'handle', label: 'HANDLE', width: 14 },
+  { key: 'kind', label: 'KIND', width: 8 },
+  { key: 'online', label: 'ONLINE', width: 8 },
+  { key: 'status', label: 'STATUS', width: 10 },
+  { key: 'focus', label: 'FOCUS', width: 30 },
+  { key: 'seen', label: 'SEEN', width: 10 },
+];
+
+function pad(v: string, n: number): string {
+  if (v.length >= n) return v.slice(0, Math.max(0, n - 1)) + ' ';
+  return v + ' '.repeat(n - v.length);
+}
+
 function WhoPane({ peers, meHandle }: WhoPaneProps): React.ReactElement {
-  const rows = peers.map((p) => ({
-    handle: p.handle,
-    kind: p.kind,
-    online: p.online ? 'yes' : 'no',
-    status: p.status ?? '—',
-    focus: p.focus ?? '—',
-    seen: timeOf(p.last_seen_at),
-  }));
+  const totalWidth = WHO_COLUMNS.reduce((s, c) => s + c.width, 0);
   return (
     <>
       <Text bold color="cyan">
         who · {peers.length} peer{peers.length === 1 ? '' : 's'} (me: {meHandle})
       </Text>
-      <Text dimColor>{'─'.repeat(50)}</Text>
-      {rows.length === 0 ? (
+      <Text dimColor>{'─'.repeat(Math.min(totalWidth, 80))}</Text>
+
+      {/* header row */}
+      <Box>
+        {WHO_COLUMNS.map((c) => (
+          <Text key={c.key} bold color="magenta">
+            {pad(c.label, c.width)}
+          </Text>
+        ))}
+      </Box>
+      <Text dimColor>{'─'.repeat(Math.min(totalWidth, 80))}</Text>
+
+      {peers.length === 0 ? (
         <Text dimColor>(no peers)</Text>
       ) : (
-        <Table data={rows} />
+        peers.map((p) => {
+          const s = p.status;
+          const dotColor = !p.online ? 'gray' : s ? STATUS_COLOR[s] : 'green';
+          return (
+            <Box key={p.handle}>
+              <Box width={WHO_COLUMNS[0]!.width}>
+                <Text>
+                  <Text color={dotColor}>●</Text>{' '}
+                  <Text bold>{pad(p.handle, WHO_COLUMNS[0]!.width - 2)}</Text>
+                </Text>
+              </Box>
+              <Text dimColor>{pad(p.kind, WHO_COLUMNS[1]!.width)}</Text>
+              <Text color={p.online ? 'green' : 'gray'}>
+                {pad(p.online ? 'yes' : 'no', WHO_COLUMNS[2]!.width)}
+              </Text>
+              <Text color={s ? STATUS_COLOR[s] : undefined}>
+                {pad(s ?? '—', WHO_COLUMNS[3]!.width)}
+              </Text>
+              <Text>{pad(p.focus ?? '—', WHO_COLUMNS[4]!.width)}</Text>
+              <Text dimColor>{pad(timeOf(p.last_seen_at), WHO_COLUMNS[5]!.width)}</Text>
+            </Box>
+          );
+        })
       )}
+
       <Box marginTop={1}>
         <Text dimColor>/back to close</Text>
       </Box>

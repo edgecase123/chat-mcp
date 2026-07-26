@@ -28,7 +28,6 @@
     "chokidar": "^3.6.0",
     "commander": "^12.1.0",
     "ink": "^7.1.1",
-    "ink-table": "^3.1.0",
     "ink-text-input": "^6.0.0",
     "react": "^19.2.8"
   },
