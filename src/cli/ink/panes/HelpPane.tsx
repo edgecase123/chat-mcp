@@ -34,7 +34,8 @@ export function HelpPane(): React.ReactElement {
         <Text>  <Text color="cyan" bold>1-9</Text>      jump to sidebar entry (when input empty)</Text>
         <Text>  <Text color="cyan" bold>R</Text>        open /rooms browser (when input empty)</Text>
         <Text>  <Text color="cyan" bold>?</Text>        open this help (when input empty)</Text>
-        <Text>  <Text color="cyan" bold>Ctrl-A/E</Text>  cursor start/end of line</Text>
+        <Text>  <Text color="cyan" bold>Home/End</Text>  cursor start/end of line (preferred)</Text>
+        <Text>  <Text color="cyan" bold>Ctrl-A/E</Text>  same (some terminals swallow — e.g. screen)</Text>
         <Text>  <Text color="cyan" bold>Ctrl-W</Text>    delete previous word</Text>
         <Text>  <Text color="cyan" bold>Ctrl-U</Text>    delete to start of line</Text>
         <Text>  <Text color="cyan" bold>Opt-←/→</Text>   word navigation (Mac)</Text>

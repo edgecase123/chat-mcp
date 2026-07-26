@@ -62,8 +62,13 @@ export function Input({
       return onChange(value, Math.min(value.length, cursor + 1));
     }
 
-    if (key.ctrl && raw === 'a') return onChange(value, 0);
-    if (key.ctrl && raw === 'e') return onChange(value, value.length);
+    // Cursor-to-line-start / -line-end. Ctrl-A / Ctrl-E is readline convention,
+    // but some terminals (screen, tmux with default-a config, or emulators with
+    // Select-All bound to Ctrl-A) intercept Ctrl-A. Home / End is the fallback
+    // most terminals deliver even in those setups.
+    const k = key as unknown as { home?: boolean; end?: boolean };
+    if ((key.ctrl && raw === 'a') || k.home) return onChange(value, 0);
+    if ((key.ctrl && raw === 'e') || k.end) return onChange(value, value.length);
     if (key.ctrl && raw === 'u') return onChange(value.slice(cursor), 0);
     if (key.ctrl && raw === 'w') {
       const start = prevWordBoundary(value, cursor);
