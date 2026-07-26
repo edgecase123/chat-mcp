@@ -264,7 +264,7 @@ claude mcp add chat -- npx -y github:edgecase123/chat-mcp#v0.1.0 --handle claude
 
 **Codex CLI / ChatGPT Desktop** — same `command` / `args` shape, different config file (Codex uses `~/.codex/config.toml`).
 
-**3. Restart the MCP client.** First launch clones + npm-installs (~10–20 s, dominated by `better-sqlite3`); subsequent launches ~200 ms.
+**3. Restart the MCP client.** First launch clones + npm-installs (~2–5 s — no native builds, uses Node's built-in `node:sqlite`); subsequent launches ~200 ms.
 
 **4. Verify registration.** In the client, ask the agent: *"Call the `chat.whoami` tool."* It should return `{ handle: "claude-main", session_id, online_peers: […] }`. Also confirm `chat.list_agents`, `chat.send`, `chat.inbox`, `chat.wait_for_message` appear in its tool list. MCP clients namespace tools by server name — hence the `chat.` prefix.
 
@@ -312,7 +312,7 @@ Three terminals — Claude Code as `claude1`, Cursor (or a second Claude Code) a
 **Node.js + TypeScript.**
 
 - Most existing MCP servers are Node; ecosystem is best.
-- `better-sqlite3` is synchronous and fast (~50k ops/s), which matches the shim's non-concurrent workload.
+- `node:sqlite` (Node ≥ 22.5, built-in) is synchronous and fast, which matches the shim's non-concurrent workload — and being built-in means zero native-module rebuilds on Node upgrades.
 - Native `fs.watch` (via `chokidar` for cross-platform quirks).
 - `npx -y chat-mcp` install path matches other MCP servers users already run.
 - Node is already in the leagues2 dev stack (Vite), so no new runtime for local development.
@@ -323,7 +323,7 @@ Three terminals — Claude Code as `claude1`, Cursor (or a second Claude Code) a
 
 ### User install flow
 
-Prerequisites: Node 18+ and Git (both near-universal on dev machines).
+Prerequisites: Node 22.5+ (for built-in `node:sqlite`) and Git.
 
 **1. Add to their MCP client config.** Example for Claude Code (`~/.claude.json` or `claude mcp add`):
 
@@ -340,9 +340,9 @@ Prerequisites: Node 18+ and Git (both near-universal on dev machines).
 
 Cursor uses `~/.cursor/mcp.json` — same shape. Codex config lives elsewhere but the `command` / `args` pair is identical.
 
-**2. Restart the MCP client.** On first spawn, `npx` clones `github:edgecase123/chat-mcp` into `~/.npm/_npx/<hash>/`, runs `npm install` (fetches `better-sqlite3`, `@modelcontextprotocol/sdk`, etc.), and executes the compiled entry point.
+**2. Restart the MCP client.** On first spawn, `npx` clones `github:edgecase123/chat-mcp` into `~/.npm/_npx/<hash>/`, runs `npm install` (fetches `@modelcontextprotocol/sdk`, `chokidar`, `commander` — no native modules), and executes the compiled entry point.
 
-- Cold start: **~10–20 s**, dominated by native `better-sqlite3` install (fetches a prebuilt binary; falls back to compile-from-source only on rare platform/Node combos, which needs Xcode CLT / build-essential / MSVS Build Tools).
+- Cold start: **~2–5 s** (pure-JS deps only; the SQLite binding is Node's built-in `node:sqlite`).
 - Subsequent starts: **~200 ms** (npx cache hit).
 
 **3. Run the user CLI** from any shell:
@@ -372,7 +372,7 @@ alias chat-mcp='npx -y github:edgecase123/chat-mcp#v0.1.0'
 
 - **No version discipline required early.** Commit to `main`, tag when you want to draw a line. Users on pinned configs never see the in-between commits.
 - **npm publish is a later upgrade, not a redesign.** When (or if) the project earns a single-word `npx` name, `npm publish` is a 10-minute add. Existing git-based installs keep working — the two distribution channels coexist cleanly.
-- **`better-sqlite3` compile fallback.** On rare platform/Node combos without a prebuilt, install compiles from source and needs Xcode CLT / build-essential / MSVS Build Tools. Prebuilts cover all common platforms; document the fallback in the README, don't design around it.
+- **Node version floor.** `node:sqlite` requires Node ≥ 22.5. Users on older Node see `Cannot find module 'node:sqlite'`; the fix is upgrading Node (or `nvm use 22`). No native-binding rebuilds on Node upgrades — one of the reasons the built-in was preferred over `better-sqlite3`.
 
 ## Open items
 

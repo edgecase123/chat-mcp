@@ -1,8 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { randomUUID } from 'node:crypto';
-import type { Database as Db } from 'better-sqlite3';
-import { openDb } from '../storage/db.js';
+import { openDb, type Db } from '../storage/db.js';
 import { NotifyBus } from '../notify/bus.js';
 import * as dao from '../storage/dao.js';
 import { installWhoami } from './tools/whoami.js';
@@ -101,7 +100,7 @@ export async function runShim(opts: ShimOptions): Promise<void> {
   const adapterStatus = checkWakeAdapter(opts.handle);
   const ctx: ShimContext = { handle: opts.handle, session_id, db, notify, adapterStatus };
   const server = new McpServer(
-    { name: 'chat-mcp', version: '0.0.1' },
+    { name: 'chat-mcp', version: '0.1.0' },
     { instructions: prependAdapterWarning(buildInstructions(opts.handle), adapterStatus) },
   );
 
