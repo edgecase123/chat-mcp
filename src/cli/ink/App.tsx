@@ -6,6 +6,7 @@ import type { Db } from '../../storage/db.js';
 import * as dao from '../../storage/dao.js';
 import type { Message, MessageKind, AgentStatus, Agent } from '../../storage/dao.js';
 import { assertRoomName } from '../../util/naming.js';
+import type { View } from './views.js';
 
 export interface AppProps {
   handle: string;
@@ -13,12 +14,6 @@ export interface AppProps {
   notify: NotifyBus;
   version: string;
 }
-
-type View =
-  | { kind: 'home' }
-  | { kind: 'dm'; peer: string }
-  | { kind: 'room'; room: string }
-  | { kind: 'who' };
 
 interface Alert {
   id: number;
@@ -82,7 +77,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   );
 
   const messages = useMemo<Message[]>(() => {
-    if (view.kind === 'home' || view.kind === 'who') return [];
+    if (view.kind === 'home' || view.kind === 'who' || view.kind === 'help' || view.kind === 'rooms') return [];
     if (view.kind === 'dm') {
       return db
         .prepare(
