@@ -566,7 +566,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     // (2 lines each) plus 3 rows for scroll-indicator/footer.
     const copyViewport = Math.max(3, Math.floor((terminalRows - 3) / 2));
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" width="100%" height={terminalRows} overflow="hidden">
         <CopyPane
           messages={messages}
           viewportRows={copyViewport}
@@ -577,7 +577,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   }
 
   return (
-    <Box flexDirection="column" width="100%">
+    <Box flexDirection="column" width="100%" height={terminalRows} overflow="hidden">
       <Header handle={handle} version={version} status={meStatus} focus={meFocus} />
 
       <AlertLane alerts={alerts} />
@@ -597,7 +597,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
       )}
 
       {/* Body: sidebar + main pane + optional watch pane */}
-      <Box flexGrow={1}>
+      <Box flexGrow={1} overflow="hidden">
         <Sidebar
           handle={handle}
           view={view}
@@ -614,6 +614,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           borderStyle="round"
           borderColor="gray"
           paddingX={1}
+          overflow="hidden"
         >
           {view.kind === 'who' ? (
             <WhoPane peers={peers} meHandle={handle} />
