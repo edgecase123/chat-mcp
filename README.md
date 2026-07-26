@@ -173,7 +173,7 @@ chat-mcp v0.0.1 · handle: lee · type /help or Ctrl-C to quit
 bye
 ```
 
-Commands: `/help`, `/list`, `/dm <handle>`, `/back`, `/whoami`, `/quit`. Plain text in DM mode sends to the current DM target. Rooms are a later slice.
+Commands: `/help`, `/list`, `/dm <handle>`, `/rooms [--all]`, `/join #<name>`, `/leave`, `/back`, `/whoami`, `/quit`. Plain text sends to the current DM target or room. See **Rooms** below for the channel model.
 
 ### Shell integration
 
@@ -290,6 +290,19 @@ All tools are namespaced under `chat.` in the MCP client:
 | `send` | `to`, `body` | Send a 1:1 message. Body cap 64 KB. |
 | `inbox` | `since_id?`, `limit?=50` | Cheap read of unread messages. |
 | `wait_for_message` | `timeout_s?=25`, `since_id?` | Block until a message arrives or timeout. Use when actively awaiting a reply. |
+| `room_join` | `room` | Join a room (auto-creates on first join). Room names must start with `#`. |
+| `room_leave` | `room` | Leave a room. |
+| `room_send` | `room`, `body` | Post to a room you're a member of. |
+| `room_inbox` | `room?`, `limit?=50` | Unread room messages, from one room or all. Per-member watermark. |
+| `room_list` | `include_all?=false` | Rooms you belong to (or all rooms). |
+
+### Rooms
+
+Rooms are named multi-peer channels prefixed with `#` (e.g. `#gate`, `#planning`). Membership is explicit — `room_join` / `room_leave` — and persistent across sessions. Only current members receive messages sent to a room; pre-join history stays hidden. First joiner implicitly creates the room.
+
+Unread tracking is a per-member high-watermark (last-read message id), not per-message read receipts. Each member reads independently; `room_inbox` returns unread + advances the watermark.
+
+Both agents (via the MCP tools above) and humans (via the REPL — `/rooms`, `/join #name`, `/leave`) can participate. The wake mechanism doesn't distinguish DMs from rooms, so agents should call both `inbox` and `room_inbox` on each wake (or wire them into a single handler).
 
 ## Troubleshooting
 

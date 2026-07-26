@@ -4,6 +4,7 @@ import { openDb } from '../storage/db.js';
 import { NotifyBus, notifyPeer } from '../notify/bus.js';
 import * as dao from '../storage/dao.js';
 import type { Message } from '../storage/dao.js';
+import { assertRoomName } from '../util/naming.js';
 import { bold, cyan, dim, green } from './color.js';
 
 export interface CliOptions {
@@ -11,8 +12,9 @@ export interface CliOptions {
 }
 
 interface Mode {
-  kind: 'top' | 'dm';
+  kind: 'top' | 'dm' | 'room';
   dmTarget?: string;
+  roomName?: string;
 }
 
 export async function runCli(opts: CliOptions): Promise<void> {
@@ -35,8 +37,11 @@ export async function runCli(opts: CliOptions): Promise<void> {
   });
 
   let mode: Mode = { kind: 'top' };
-  const promptFor = (): string =>
-    mode.kind === 'dm' && mode.dmTarget ? `${cyan(mode.dmTarget)} > ` : '> ';
+  const promptFor = (): string => {
+    if (mode.kind === 'dm' && mode.dmTarget) return `${cyan(mode.dmTarget)} > `;
+    if (mode.kind === 'room' && mode.roomName) return `${cyan(mode.roomName)} > `;
+    return '> ';
+  };
 
   console.log(
     `${bold('chat-mcp')} ${dim('v0.0.1')}  ·  handle: ${cyan(opts.handle)}  ·  ${dim('/help or Ctrl-C to quit')}`,
@@ -46,25 +51,47 @@ export async function runCli(opts: CliOptions): Promise<void> {
 
   const timeOf = (ts: number): string => new Date(ts).toTimeString().slice(0, 8);
 
-  const printMessage = (m: Message): void => {
-    // Clear the current input line, print above it, then redraw prompt + buffer.
-    // Two-line format: bold sender + dim timestamp header, then indented body,
-    // with a leading + trailing blank line to separate conversation turns.
-    const header = `  ${bold(m.from_handle)}  ${dim(timeOf(m.sent_at))}`;
+  const printMessage = (m: Message, roomContext?: string): void => {
+    // Two-line format. For room messages, insert cyan room name between
+    // sender and timestamp so the channel is visible at a glance.
+    const ctx = roomContext ? `  ${cyan(roomContext)}` : '';
+    const header = `  ${bold(m.from_handle)}${ctx}  ${dim(timeOf(m.sent_at))}`;
     process.stdout.write(`\r\x1b[K\n${header}\n    ${m.body}\n\n`);
     rl.prompt(true);
   };
 
-  const flushPending = (): void => {
-    const pending = dao.pendingInbox(db, { to: opts.handle });
-    if (pending.length === 0) return;
-    dao.markRead(db, pending.map((m) => m.id));
-    dao.markDelivered(db, pending.map((m) => m.id));
-    for (const m of pending) printMessage(m);
+  const flushInbox = (): void => {
+    const dms = dao.pendingInbox(db, { to: opts.handle });
+    const roomMsgs = dao.allRoomsUnread(db, opts.handle);
+    if (dms.length === 0 && roomMsgs.length === 0) return;
+
+    if (dms.length > 0) {
+      const ids = dms.map((m) => m.id);
+      dao.markRead(db, ids);
+      dao.markDelivered(db, ids);
+    }
+
+    // Advance room watermarks by max-id-per-room.
+    const maxByRoom = new Map<string, number>();
+    for (const m of roomMsgs) {
+      const cur = maxByRoom.get(m.to_handle) ?? 0;
+      if (m.id > cur) maxByRoom.set(m.to_handle, m.id);
+    }
+    for (const [r, maxId] of maxByRoom) {
+      dao.advanceRoomRead(db, r, opts.handle, maxId);
+    }
+
+    type Entry = { m: Message; ctx?: string };
+    const merged: Entry[] = [
+      ...dms.map((m) => ({ m })),
+      ...roomMsgs.map((m) => ({ m, ctx: m.to_handle })),
+    ];
+    merged.sort((a, b) => a.m.id - b.m.id);
+    for (const { m, ctx } of merged) printMessage(m, ctx);
   };
 
-  notify.subscribe(flushPending);
-  flushPending();
+  notify.subscribe(flushInbox);
+  flushInbox();
 
   let closing = false;
   const cleanup = (): void => {
@@ -90,11 +117,14 @@ export async function runCli(opts: CliOptions): Promise<void> {
       case 'help':
         console.log([
           `  ${cyan('/list')}             list online peers`,
-          `  ${cyan('/dm')} <handle>      enter DM mode`,
-          `  ${cyan('/back')}             leave DM mode`,
+          `  ${cyan('/dm')} <handle>      enter DM mode with a peer`,
+          `  ${cyan('/rooms')} [--all]    list your rooms (or every room)`,
+          `  ${cyan('/join')} #<name>     join a room (auto-creates)`,
+          `  ${cyan('/leave')}            leave the current room (removes membership)`,
+          `  ${cyan('/back')}             exit DM or room mode (stay a member)`,
           `  ${cyan('/whoami')}           show your own handle`,
           `  ${cyan('/quit')}             exit`,
-          dim(`  (plain text in DM mode sends to the current DM target)`),
+          dim('  (plain text sends to the current DM target or room)'),
         ].join('\n'));
         break;
       case 'list':
@@ -102,6 +132,15 @@ export async function runCli(opts: CliOptions): Promise<void> {
         break;
       case 'dm':
         doDm(args[0]);
+        break;
+      case 'rooms':
+        doRooms(args.includes('--all'));
+        break;
+      case 'join':
+        doJoin(args[0]);
+        break;
+      case 'leave':
+        doLeave();
         break;
       case 'back':
         mode = { kind: 'top' };
@@ -133,6 +172,21 @@ export async function runCli(opts: CliOptions): Promise<void> {
     }
   };
 
+  const doRooms = (includeAll: boolean): void => {
+    const rooms = includeAll ? dao.allRooms(db) : dao.myRooms(db, opts.handle);
+    if (rooms.length === 0) {
+      console.log(
+        dim(includeAll ? '  (no rooms exist)' : '  (not in any rooms — /rooms --all to discover)'),
+      );
+      return;
+    }
+    for (const r of rooms) {
+      const name = cyan(r.name.padEnd(16));
+      const members = dim(`${r.member_count} member${r.member_count === 1 ? '' : 's'}`);
+      console.log(`  ${name}  ${members}`);
+    }
+  };
+
   const doDm = (target: string | undefined): void => {
     if (!target) {
       console.log(dim('  usage: /dm <handle>'));
@@ -151,21 +205,67 @@ export async function runCli(opts: CliOptions): Promise<void> {
     console.log(`${cyan('▸')} dm with ${cyan(target)}  ${dim('(/back to leave)')}`);
   };
 
+  const doJoin = (name: string | undefined): void => {
+    if (!name) {
+      console.log(dim('  usage: /join #<room-name>'));
+      return;
+    }
+    try {
+      assertRoomName(name);
+    } catch (e) {
+      console.log(dim(`  ${(e as Error).message}`));
+      return;
+    }
+    const room = dao.joinRoom(db, name, opts.handle);
+    mode = { kind: 'room', roomName: name };
+    console.log(
+      `${cyan('▸')} joined ${cyan(name)}  ${dim(
+        `(${room.member_count} member${room.member_count === 1 ? '' : 's'}, /leave to leave)`,
+      )}`,
+    );
+  };
+
+  const doLeave = (): void => {
+    if (mode.kind !== 'room' || !mode.roomName) {
+      console.log(dim('  not in a room. /rooms to list.'));
+      return;
+    }
+    const name = mode.roomName;
+    dao.leaveRoom(db, name, opts.handle);
+    mode = { kind: 'top' };
+    console.log(dim(`  left ${name}`));
+  };
+
   const doText = (text: string): void => {
-    if (mode.kind !== 'dm' || !mode.dmTarget) {
-      console.log(dim('  Not in a DM. Use /dm <handle> first (/list to see peers).'));
+    if (mode.kind === 'dm' && mode.dmTarget) {
+      const peer = dao.getAgent(db, mode.dmTarget);
+      if (!peer) {
+        console.log(dim(`  peer ${mode.dmTarget} no longer registered — /back and try again`));
+        return;
+      }
+      const sent = dao.insertMessage(db, { from: opts.handle, to: mode.dmTarget, body: text });
+      notifyPeer(mode.dmTarget, { id: sent.id, to: mode.dmTarget, from: opts.handle, ts: sent.sent_at });
+      process.stdout.write(`${dim(`          → sent ${timeOf(sent.sent_at)}`)}\n`);
       return;
     }
-    const peer = dao.getAgent(db, mode.dmTarget);
-    if (!peer) {
-      console.log(dim(`  peer ${mode.dmTarget} no longer registered — /back and try again`));
+    if (mode.kind === 'room' && mode.roomName) {
+      const roomName = mode.roomName;
+      if (!dao.isRoomMember(db, roomName, opts.handle)) {
+        console.log(dim(`  no longer a member of ${roomName} — /back and /join again`));
+        return;
+      }
+      const sent = dao.insertMessage(db, { from: opts.handle, to: roomName, body: text });
+      // Advance own watermark so we don't see our own message on next flush.
+      dao.advanceRoomRead(db, roomName, opts.handle, sent.id);
+      const members = dao.roomMembers(db, roomName);
+      for (const member of members) {
+        if (member === opts.handle) continue;
+        notifyPeer(member, { id: sent.id, to: roomName, from: opts.handle, ts: sent.sent_at });
+      }
+      process.stdout.write(`${dim(`          → sent ${timeOf(sent.sent_at)}`)}\n`);
       return;
     }
-    const sent = dao.insertMessage(db, { from: opts.handle, to: mode.dmTarget, body: text });
-    notifyPeer(mode.dmTarget, { id: sent.id, to: mode.dmTarget, from: opts.handle, ts: sent.sent_at });
-    // Own send: skip echoing the body (readline already showed it) and just
-    // print a dim timestamp confirmation aligned under the prompt.
-    process.stdout.write(`${dim(`          → sent ${timeOf(sent.sent_at)}`)}\n`);
+    console.log(dim('  Not in a DM or room. Use /dm <handle> or /join #<room>.'));
   };
 
   rl.on('line', (raw: string) => {
