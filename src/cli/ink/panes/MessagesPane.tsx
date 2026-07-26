@@ -77,6 +77,7 @@ export function MessagesPane({ view, messages, meHandle }: MessagesPaneProps): R
           null
         ) : (
           <ScrollableMessageList
+            key={view.kind === 'dm' ? `dm:${view.peer}` : view.kind === 'room' ? `room:${view.room}` : 'other'}
             messages={messages}
             meHandle={meHandle}
             viewportRows={viewportRows}

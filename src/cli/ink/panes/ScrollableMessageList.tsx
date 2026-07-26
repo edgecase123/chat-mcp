@@ -27,7 +27,13 @@ export function ScrollableMessageList({
   requireShift = false,
   renderRow,
 }: ScrollableMessageListProps): React.ReactElement {
-  const [scrollOffset, setScrollOffset] = useState(0);
+  // On mount (and on remount via `key` from the parent when the chat target
+  // changes), start at the TOP of the loaded window — the oldest message in
+  // scope, so the user reads forward instead of hunting backward. PgDn / End
+  // jumps to newest; auto-follow re-arms when the user reaches scrollOffset 0.
+  const [scrollOffset, setScrollOffset] = useState<number>(() =>
+    Math.max(0, messages.length - viewportRows),
+  );
   const prevLenRef = useRef(messages.length);
 
   // When new messages arrive AND we're scrolled back, grow the offset by
