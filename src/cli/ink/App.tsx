@@ -46,6 +46,9 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   const [tick, setTick] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
   const [watchPeer, setWatchPeer] = useState<string | null>(null);
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const [draft, setDraft] = useState<{ value: string; cursor: number } | null>(null);
 
   useEffect(() => {
     const bump = (): void => setTick((t) => t + 1);
@@ -396,11 +399,51 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     (value: string) => {
       const line = value.trim();
       if (line.length === 0) return;
+      setHistory((h) => {
+        // Collapse consecutive duplicates + cap ring at 100.
+        const last = h[h.length - 1];
+        const next = last === line ? h : [...h, line];
+        return next.length > 100 ? next.slice(next.length - 100) : next;
+      });
+      setHistoryIndex(null);
+      setDraft(null);
       if (line.startsWith('/')) doCommand(line);
       else sendCurrent(line);
     },
     [doCommand, sendCurrent],
   );
+
+  const historyUp = useCallback(() => {
+    if (history.length === 0) return;
+    setHistoryIndex((i) => {
+      if (i === null) {
+        // First press: save the current draft, jump to newest history entry.
+        setDraft({ value: input.value, cursor: input.cursor });
+        const newest = history.length - 1;
+        setInput({ value: history[newest]!, cursor: history[newest]!.length });
+        return newest;
+      }
+      if (i === 0) return 0;
+      const next = i - 1;
+      setInput({ value: history[next]!, cursor: history[next]!.length });
+      return next;
+    });
+  }, [history, input.value, input.cursor]);
+
+  const historyDown = useCallback(() => {
+    setHistoryIndex((i) => {
+      if (i === null) return null;
+      if (i >= history.length - 1) {
+        const d = draft ?? { value: '', cursor: 0 };
+        setInput(d);
+        setDraft(null);
+        return null;
+      }
+      const next = i + 1;
+      setInput({ value: history[next]!, cursor: history[next]!.length });
+      return next;
+    });
+  }, [history, draft]);
 
   useInput((raw, key) => {
     if (key.ctrl && raw === 'c') exit();
@@ -574,7 +617,11 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             <Input
               value={input.value}
               cursor={input.cursor}
-              onChange={(value, cursor) => { setInput({ value, cursor }); setCompletionIndex(0); }}
+              onChange={(value, cursor) => {
+                setInput({ value, cursor });
+                setCompletionIndex(0);
+                if (historyIndex !== null) { setHistoryIndex(null); setDraft(null); }
+              }}
               onSubmit={(v) => { handleSubmit(v); setInput({ value: '', cursor: 0 }); }}
               onTab={() => {
                 // Tab-complete: replace current token with the selected completion + trailing space.
@@ -591,8 +638,14 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
               onEsc={() => {
                 if (completions.length > 0) { setInput({ value: '', cursor: 0 }); setCompletionIndex(0); }
               }}
-              onUp={() => setCompletionIndex((i) => Math.max(0, i - 1))}
-              onDown={() => setCompletionIndex((i) => Math.min(completions.length - 1, i + 1))}
+              onUp={() => {
+                if (completions.length > 0) return setCompletionIndex((i) => Math.max(0, i - 1));
+                historyUp();
+              }}
+              onDown={() => {
+                if (completions.length > 0) return setCompletionIndex((i) => Math.min(completions.length - 1, i + 1));
+                historyDown();
+              }}
             />
           </Box>
         </Box>
