@@ -8,20 +8,14 @@ import type { Message, MessageKind, AgentStatus, Agent } from '../../storage/dao
 import { assertRoomName } from '../../util/naming.js';
 import type { View } from './views.js';
 import { Header } from './panes/Header.js';
+import { AlertLane } from './panes/AlertLane.js';
+import type { Alert } from './panes/AlertLane.js';
 
 export interface AppProps {
   handle: string;
   db: Db;
   notify: NotifyBus;
   version: string;
-}
-
-interface Alert {
-  id: number;
-  from: string;
-  to: string;
-  body: string;
-  ts: number;
 }
 
 function timeOf(ts: number): string {
@@ -440,24 +434,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     <Box flexDirection="column" width="100%">
       <Header handle={handle} version={version} status={meStatus} focus={meFocus} />
 
-      {/* Alert lane — only when there are unread alerts */}
-      {alerts.length > 0 && (
-        <Box borderStyle="round" borderColor="red" paddingX={1} flexDirection="column">
-          {alerts.map((a) => (
-            <Text key={a.id}>
-              <Text color="red" bold>
-                🚨 ALERT
-              </Text>{' '}
-              <Text color="green" bold>
-                {a.from}
-              </Text>{' '}
-              <Text dimColor>→ {a.to} · {timeOf(a.ts)}</Text>{' '}
-              <Text>{a.body}</Text>
-            </Text>
-          ))}
-          <Text dimColor>(/ack to dismiss)</Text>
-        </Box>
-      )}
+      <AlertLane alerts={alerts} />
 
       {/* Body: sidebar + main pane + optional watch pane */}
       <Box flexGrow={1}>
