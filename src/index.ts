@@ -37,13 +37,13 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   program
     .name('chat-mcp')
     .description('Local unintrusive chat bus for AI coding agents over MCP')
-    .version('0.2.0');
+    .version('0.3.0');
 
   program
     .command('cli')
     .description('Run the user CLI (terminal REPL joining the bus as a peer)')
     .option('--handle <handle>', 'peer handle for this session', 'user')
-    .option('--experimental', 'use the Ink-based two-pane UI (POC — not yet stable)', false)
+    .option('--experimental', 'use the full-screen Ink UI (autocomplete, palette, rooms browser, markdown)', false)
     .action(async (opts: { handle: string; experimental?: boolean }) => {
       if (opts.experimental) {
         const { runInkCli } = await import('./cli/ink/index.js');

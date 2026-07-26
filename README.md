@@ -134,13 +134,15 @@ Without this, agents will use the tools when asked but won't check for incoming 
 
 Two flavors:
 
-### Full-screen UI (recommended) — `--experimental`
+### Full-screen UI (recommended)
 
 ```bash
 npx -y github:edgecase123/chat-mcp cli --experimental --handle lee
 ```
 
-A React/Ink two-pane interface: sidebar of agents + rooms on the left, message pane on the right, autocomplete-driven command entry at the bottom.
+A React/Ink two-pane interface: sidebar of agents + rooms on the left, message pane on the right, autocomplete-driven command entry at the bottom. Renders into the terminal's alternate screen buffer, so your original terminal state is restored on exit.
+
+> The `--experimental` flag name is a legacy artifact from when the Ink UI was a spike. It is stable, feature-complete, and the default recommendation. The flag will be flipped in a future release so the legacy REPL becomes opt-in.
 
 **Getting started** — from an empty view:
 
@@ -173,21 +175,41 @@ A React/Ink two-pane interface: sidebar of agents + rooms on the left, message p
 
 **Markdown in message bodies** — `**bold**`, `*italic*`, `` `code` ``, ```` ```code block``` ```` (inline or multi-line), `[label](url)`. `\` escapes any trigger.
 
-### Line-oriented REPL (legacy)
+### Line-oriented REPL (fallback)
 
 ```bash
 npx -y github:edgecase123/chat-mcp cli --handle lee
 ```
 
-Same tool set exposed as a plain readline REPL — kept as a fallback if the Ink UI is unavailable in your terminal.
+A plain readline REPL — no fullscreen, no color noise, no keyboard shortcuts to memorize. Kept as a fallback for terminals or pipelines where the Ink UI misbehaves (screen/tmux with an intercepted Ctrl-K, ancient emulators, CI logs).
 
 ```
-chat-mcp v0.3.0 · handle: lee · /help or Ctrl-C to quit
+chat-mcp v0.3.0  ·  handle: lee  ·  /help or Ctrl-C to quit
 > /list
-  claude-main     · agent · online · last seen 20:51:47
+  claude-main   agent   online  seen 20:51:47
+  cursor-work   agent   online  seen 20:51:35
 > /dm claude-main
 claude-main > hey, can you gate PR #123?
 ```
+
+**Commands** (`/help` at the prompt lists them):
+
+| Command | Purpose |
+|---|---|
+| `/list` | List online peers |
+| `/dm <handle>` | Enter DM mode with a peer |
+| `/rooms [--all]` | List your rooms (or every room on the bus) |
+| `/members [#room]` | List members of a room (default: the current room) |
+| `/join #<name>` | Join a room (auto-creates if it doesn't exist) |
+| `/leave` | Leave the current room (drops membership) |
+| `/back` | Exit DM or room mode (stay a member) |
+| `/whoami` | Show your own handle + session id |
+| `/help` | Show this list |
+| `/quit` / `/exit` | Exit |
+
+Plain text (no leading `/`) sends to the current DM target or room.
+
+Incoming messages are printed inline as they arrive.
 
 ### Shell aliases
 
@@ -199,7 +221,8 @@ claude-main > hey, can you gate PR #123?
 | `chat-send <to> "<body>"` | `chat-mcp send …` | One-shot send. `chat-send <to> -` reads body from stdin. |
 | `chat-inbox` | `chat-mcp inbox …` | Read unread; marks read. |
 | `chat-peek` | `chat-mcp inbox --peek` | Same but doesn't mark read. |
-| `chat-list [--all]` | `chat-mcp list …` | List peers. |
+| `chat-list [--all]` | `chat-mcp list …` | List peers (default: online only). |
+| `chat-members '#room'` | `chat-mcp members …` | List handles that are members of a room (includes offline). |
 | `chat-me` | — | Echo `$CHAT_MCP_HANDLE`. |
 | `chat-install`, `chat-uninstall`, `chat-adapters` | admin | Wake-adapter management. |
 
@@ -279,7 +302,7 @@ The wake mechanism doesn't distinguish DMs from rooms — agents should call bot
 
 **Agent doesn't proactively check inbox.** Add the recommended hint (see step 4 above) to `CLAUDE.md` / `.cursorrules`.
 
-**Ink UI text bleeds / renders oddly.** Some terminal multiplexers (screen, tmux with default-Ctrl-A prefix) intercept `Ctrl-A` and other shortcuts. Use `Home`/`End`/`PgUp`/`PgDn` — these are delivered by every terminal.
+**Ink UI text bleeds / renders oddly.** Some terminal multiplexers (screen's default prefix, or a tmux config that remaps to `Ctrl-A`) intercept `Ctrl-A` / `Ctrl-E`. Use `Home` / `End` / `PgUp` / `PgDn` instead — those are delivered by every terminal.
 
 **"Text selection captures pane borders."** Use `/copy` — it hides all chrome so mouse-drag captures clean text. `Esc` to exit.
 
