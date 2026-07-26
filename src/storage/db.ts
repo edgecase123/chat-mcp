@@ -49,6 +49,23 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       CREATE INDEX ix_room_members_handle ON room_members(handle);
     `);
   },
+  (db) => {
+    // Message coordination metadata: 'chat' (default), 'dispatch' (task
+    // hand-off), 'alert' (blocking / high-severity). Existing rows keep the
+    // default via the NOT NULL DEFAULT clause.
+    db.exec(`
+      ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'chat';
+    `);
+  },
+  (db) => {
+    // Agent live status + freeform focus subtitle. Nullable — legacy agents
+    // that never set a status render as "unknown".
+    db.exec(`
+      ALTER TABLE agents ADD COLUMN status TEXT;
+      ALTER TABLE agents ADD COLUMN focus TEXT;
+      ALTER TABLE agents ADD COLUMN status_updated_at INTEGER;
+    `);
+  },
 ];
 
 function tx(db: Db, fn: () => void): void {

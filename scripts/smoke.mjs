@@ -261,6 +261,55 @@ try {
     }
   }
 
+  // ─── Coordination: set_status → dispatch → alert ─────────────
+  // 13. claude1 sets its status; claude2's list_agents sees it.
+  {
+    await c1.callTool({
+      name: 'set_status',
+      arguments: { status: 'tool', focus: 'running the gate' },
+    });
+    await sleep(50);
+    const list = parseJson(await c2.callTool({ name: 'list_agents', arguments: {} }));
+    const claude1 = list.find((a) => a.handle === 'claude1');
+    if (claude1?.status === 'tool' && claude1?.focus === 'running the gate') {
+      pass(13, 'set_status visible via list_agents');
+    } else {
+      fail(13, 'set_status projection', JSON.stringify(claude1));
+    }
+  }
+
+  // 14. Dispatch: kind stamped on message.
+  {
+    await c1.callTool({
+      name: 'send',
+      arguments: { to: 'claude2', body: 'handle #1234', kind: 'dispatch' },
+    });
+    await sleep(50);
+    const inbox = parseJson(await c2.callTool({ name: 'inbox', arguments: {} }));
+    const disp = inbox.find((m) => m.body === 'handle #1234');
+    if (disp?.kind === 'dispatch') {
+      pass(14, 'send with kind=dispatch stamps message');
+    } else {
+      fail(14, 'dispatch kind', JSON.stringify(disp));
+    }
+  }
+
+  // 15. Alert: kind stamped on message; surfaces to recipient inbox.
+  {
+    await c1.callTool({
+      name: 'send',
+      arguments: { to: 'claude2', body: 'GATE RED', kind: 'alert' },
+    });
+    await sleep(50);
+    const inbox = parseJson(await c2.callTool({ name: 'inbox', arguments: {} }));
+    const alert = inbox.find((m) => m.body === 'GATE RED');
+    if (alert?.kind === 'alert') {
+      pass(15, 'send with kind=alert stamps message');
+    } else {
+      fail(15, 'alert kind', JSON.stringify(alert));
+    }
+  }
+
 } finally {
   if (cli) await cli.close();
   if (c1) await c1.close().catch(() => {});

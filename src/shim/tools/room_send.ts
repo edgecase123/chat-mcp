@@ -17,9 +17,13 @@ export function installRoomSend(server: McpServer, ctx: ShimContext): void {
       inputSchema: {
         room: z.string().describe('Room name including leading # (e.g. "#gate")'),
         body: z.string().describe('Message body (UTF-8, max 64 KB)'),
+        kind: z
+          .enum(['chat', 'dispatch', 'alert'])
+          .optional()
+          .describe('Coordination kind. "chat" (default), "dispatch" (task hand-off), or "alert" (blocking / high-severity — surfaces in every member\'s alert lane).'),
       },
     },
-    async ({ room, body }) => {
+    async ({ room, body, kind }) => {
       assertRoomName(room);
       if (Buffer.byteLength(body, 'utf8') > MAX_BODY_BYTES) {
         throw new Error(`Message body exceeds ${MAX_BODY_BYTES}-byte cap`);
@@ -28,7 +32,7 @@ export function installRoomSend(server: McpServer, ctx: ShimContext): void {
         throw new Error(`Not a member of ${room}. Call room_join first.`);
       }
       dao.touchLastSeen(ctx.db, ctx.handle);
-      const result = dao.insertMessage(ctx.db, { from: ctx.handle, to: room, body });
+      const result = dao.insertMessage(ctx.db, { from: ctx.handle, to: room, body, kind });
 
       // Notify all currently-online members except sender. Offline members
       // pick it up via room_inbox when they come online.

@@ -33,6 +33,12 @@ export function installInbox(server: McpServer, ctx: ShimContext): void {
   );
 }
 
-export function toWireMessage(m: Message): { id: number; from: string; body: string; sent_at: number } {
-  return { id: m.id, from: m.from_handle, body: m.body, sent_at: m.sent_at };
+export function toWireMessage(m: Message): {
+  id: number;
+  from: string;
+  body: string;
+  sent_at: number;
+  kind: string;
+} {
+  return { id: m.id, from: m.from_handle, body: m.body, sent_at: m.sent_at, kind: m.kind };
 }

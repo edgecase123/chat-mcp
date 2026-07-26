@@ -43,9 +43,15 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .command('cli')
     .description('Run the user CLI (terminal REPL joining the bus as a peer)')
     .option('--handle <handle>', 'peer handle for this session', 'user')
-    .action(async (opts: { handle: string }) => {
-      const { runCli } = await import('./cli/index.js');
-      await runCli({ handle: opts.handle });
+    .option('--experimental', 'use the Ink-based two-pane UI (POC — not yet stable)', false)
+    .action(async (opts: { handle: string; experimental?: boolean }) => {
+      if (opts.experimental) {
+        const { runInkCli } = await import('./cli/ink/index.js');
+        await runInkCli({ handle: opts.handle });
+      } else {
+        const { runCli } = await import('./cli/index.js');
+        await runCli({ handle: opts.handle });
+      }
     });
 
   program
