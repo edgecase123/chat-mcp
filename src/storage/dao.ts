@@ -287,6 +287,35 @@ export function leaveRoom(db: Db, room: string, handle: string): boolean {
   return info.changes > 0;
 }
 
+/**
+ * Delete a room entirely. `rooms → room_members` cascades on FK; `room_reads`
+ * and `messages` (to_handle = room name) are cleaned up here since neither
+ * has an FK back to `rooms`. Idempotent — no error on unknown room.
+ * Authorization is a caller-layer concern (shim tool checks membership).
+ */
+export function deleteRoom(db: Db, room: string): boolean {
+  db.prepare(`DELETE FROM room_reads WHERE room_name = ?`).run(room);
+  db.prepare(`DELETE FROM messages WHERE to_handle = ?`).run(room);
+  const info = db.prepare(`DELETE FROM rooms WHERE name = ?`).run(room);
+  return info.changes > 0;
+}
+
+/**
+ * Boot a specific handle from a room. Removes membership + read watermark.
+ * Returns true iff the target was actually a member. Authorization is a
+ * caller-layer concern (shim tool checks the caller is themselves a member
+ * and isn't booting themselves).
+ */
+export function bootFromRoom(db: Db, room: string, handle: string): boolean {
+  const info = db.prepare(
+    `DELETE FROM room_members WHERE room_name = ? AND handle = ?`,
+  ).run(room, handle);
+  db.prepare(
+    `DELETE FROM room_reads WHERE room_name = ? AND handle = ?`,
+  ).run(room, handle);
+  return info.changes > 0;
+}
+
 export function isRoomMember(db: Db, room: string, handle: string): boolean {
   const row = db.prepare(
     `SELECT 1 AS x FROM room_members WHERE room_name = ? AND handle = ?`,

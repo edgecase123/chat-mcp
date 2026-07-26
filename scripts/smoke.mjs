@@ -261,6 +261,83 @@ try {
     }
   }
 
+  // ─── room_boot ──────────────────────────────────────────────
+  // Setup: claude1 + claude2 join a fresh #kick room.
+  {
+    await c1.callTool({ name: 'room_join', arguments: { room: '#kick' } });
+    await c2.callTool({ name: 'room_join', arguments: { room: '#kick' } });
+    await sleep(50);
+
+    // 13. Non-member cannot boot.
+    {
+      const r = await c1.callTool({ name: 'room_boot', arguments: { room: '#kick', handle: 'ghost' } });
+      const msg = r.content?.[0]?.text ?? '';
+      if (r.isError && msg.includes('not a member')) {
+        pass(13, 'room_boot rejects target that is not a member');
+      } else {
+        fail(13, 'room_boot phantom handle', `isError=${r.isError} text=${msg}`);
+      }
+    }
+
+    // 14. Cannot boot self.
+    {
+      const r = await c1.callTool({ name: 'room_boot', arguments: { room: '#kick', handle: 'claude1' } });
+      const msg = r.content?.[0]?.text ?? '';
+      if (r.isError && msg.includes('yourself')) {
+        pass(14, 'room_boot rejects booting yourself');
+      } else {
+        fail(14, 'room_boot self', `isError=${r.isError} text=${msg}`);
+      }
+    }
+
+    // 15. Happy path: claude1 boots claude2.
+    const before = parseJson(await c1.callTool({
+      name: 'room_members', arguments: { room: '#kick' },
+    }));
+    await c1.callTool({ name: 'room_boot', arguments: { room: '#kick', handle: 'claude2' } });
+    await sleep(50);
+    const after = parseJson(await c1.callTool({
+      name: 'room_members', arguments: { room: '#kick' },
+    }));
+    if (before.includes('claude2') && !after.includes('claude2') && after.includes('claude1')) {
+      pass(15, 'room_boot removes target from room_members');
+    } else {
+      fail(15, 'room_boot happy path',
+        `before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
+    }
+  }
+
+  // ─── room_delete ────────────────────────────────────────────
+  // 16. Non-member cannot delete.
+  {
+    const r = await c2.callTool({ name: 'room_delete', arguments: { room: '#kick' } });
+    const msg = r.content?.[0]?.text ?? '';
+    if (r.isError && msg.includes('not a member')) {
+      pass(16, 'room_delete rejects non-member caller');
+    } else {
+      fail(16, 'room_delete by non-member', `isError=${r.isError} text=${msg}`);
+    }
+  }
+
+  // 17. Member can delete; room disappears from allRooms.
+  {
+    const roomsBefore = parseJson(await c1.callTool({
+      name: 'room_list', arguments: { include_all: true },
+    }));
+    const hadKick = roomsBefore.some((r) => r.name === '#kick');
+    await c1.callTool({ name: 'room_delete', arguments: { room: '#kick' } });
+    const roomsAfter = parseJson(await c1.callTool({
+      name: 'room_list', arguments: { include_all: true },
+    }));
+    const stillThere = roomsAfter.some((r) => r.name === '#kick');
+    if (hadKick && !stillThere) {
+      pass(17, 'room_delete removes room from roster');
+    } else {
+      fail(17, 'room_delete cleanup',
+        `had=${hadKick} stillThere=${stillThere}`);
+    }
+  }
+
 } finally {
   if (cli) await cli.close();
   if (c1) await c1.close().catch(() => {});
