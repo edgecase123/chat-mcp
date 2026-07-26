@@ -20,6 +20,7 @@
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "clean": "rm -rf dist",
+    "smoke": "npm run build && node scripts/smoke.mjs",
     "prepare": "npm run build"
   },
   "dependencies": {
