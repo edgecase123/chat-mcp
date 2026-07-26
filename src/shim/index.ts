@@ -11,6 +11,11 @@ import { installListAgents } from './tools/list_agents.js';
 import { installSend } from './tools/send.js';
 import { installInbox } from './tools/inbox.js';
 import { installWaitForMessage } from './tools/wait_for_message.js';
+import { installRoomJoin } from './tools/room_join.js';
+import { installRoomLeave } from './tools/room_leave.js';
+import { installRoomSend } from './tools/room_send.js';
+import { installRoomInbox } from './tools/room_inbox.js';
+import { installRoomList } from './tools/room_list.js';
 import { installInboxResource } from './resources/inbox.js';
 import { checkWakeAdapter, prependAdapterWarning, type AdapterStatus } from './adapter-check.js';
 import { dbPath, notifyPathFor } from '../util/paths.js';
@@ -48,15 +53,27 @@ function buildInstructions(handle: string): string {
     `}`,
     `\`\`\``,
     ``,
-    `## Reading and sending`,
+    `## Reading and sending — direct messages`,
     ``,
-    `- \`inbox\` — non-blocking; returns unread messages and marks them read. Call on each wake, and at natural pause points if wake isn't wired up.`,
+    `- \`inbox\` — non-blocking; returns unread DMs and marks them read. Call on each wake, and at natural pause points if wake isn't wired up.`,
     `- \`wait_for_message\` — blocks up to ~25s (max 120s). Use right after \`send\` when you expect a fast reply.`,
     `- \`send\` — send a 1:1 message. \`list_agents\` shows who is online. \`whoami\` returns your own registration + peers.`,
     ``,
-    `Anything you want a peer to see MUST go through \`send\` — prose in your local transcript stays local. Message bodies also live in the SQLite DB at \`${db}\` if you must read directly, but \`inbox\` is preferred (it handles read-marking).`,
+    `## Rooms — multi-peer channels`,
     ``,
-    `Each write to the notify file is a single-line JSON envelope: \`{"id":<n>,"to":"${handle}","from":"<sender>","ts":<ms>}\` — treat unknown fields as opaque.`,
+    `Rooms are named channels prefixed with \`#\` (e.g. \`#gate\`, \`#planning\`). Only current members receive messages sent to a room. Membership is explicit and persistent across sessions.`,
+    ``,
+    `- \`room_join\` — join a room (auto-creates on first join). Pre-join history stays hidden.`,
+    `- \`room_leave\` — leave; drops membership.`,
+    `- \`room_send\` — post to a room you're a member of. Notifies every currently-online member.`,
+    `- \`room_inbox\` — read unread messages, per-member watermark. Pass a specific \`room\` or omit to read across all your rooms.`,
+    `- \`room_list\` — rooms you're in (or \`include_all=true\` to discover).`,
+    ``,
+    `Room-message notify envelope: \`{"id":<n>,"to":"#roomname","from":"<sender>","ts":<ms>}\`. The wake mechanism doesn't distinguish DMs from rooms — call \`inbox\` AND \`room_inbox\` (or wire both into your handler) on each wake.`,
+    ``,
+    `Anything you want a peer to see MUST go through \`send\` or \`room_send\` — prose in your local transcript stays local. Message bodies also live in the SQLite DB at \`${db}\` if you must read directly, but the inbox tools are preferred (they handle read-marking).`,
+    ``,
+    `Each write to a notify file is a single-line JSON envelope. \`to\` carries either your handle (DM) or a \`#room\` name — treat unknown fields as opaque.`,
   ].join('\n');
 }
 
@@ -94,6 +111,11 @@ export async function runShim(opts: ShimOptions): Promise<void> {
   installSend(server, ctx);
   installInbox(server, ctx);
   installWaitForMessage(server, ctx);
+  installRoomJoin(server, ctx);
+  installRoomLeave(server, ctx);
+  installRoomSend(server, ctx);
+  installRoomInbox(server, ctx);
+  installRoomList(server, ctx);
   installInboxResource(server, ctx);
 
   const transport = new StdioServerTransport();

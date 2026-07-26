@@ -192,3 +192,178 @@ function toMessage(row: MessageRow): Message {
     read_at: row.read_at,
   };
 }
+
+// ─────────────────────────────────────────────────────────────
+// Rooms (migration 2)
+// ─────────────────────────────────────────────────────────────
+
+export interface Room {
+  name: string;
+  created_at: number;
+  created_by: string;
+  member_count: number;
+}
+
+interface RoomRow {
+  name: string;
+  created_at: number;
+  created_by: string;
+}
+
+/**
+ * Join a room, creating it if it doesn't exist. Idempotent — if the caller
+ * is already a member, returns the existing room + no-op. First joiner
+ * becomes the created_by. Initializes room_reads to the current max message
+ * id so pre-join history stays hidden.
+ */
+export function joinRoom(db: Db, room: string, handle: string): Room {
+  const now = Date.now();
+  db.prepare(
+    `INSERT INTO rooms (name, created_at, created_by) VALUES (?, ?, ?)
+     ON CONFLICT(name) DO NOTHING`,
+  ).run(room, now, handle);
+
+  const existing = db.prepare(
+    `SELECT joined_at FROM room_members WHERE room_name = ? AND handle = ?`,
+  ).get(room, handle) as { joined_at: number } | undefined;
+
+  if (!existing) {
+    db.prepare(
+      `INSERT INTO room_members (room_name, handle, joined_at) VALUES (?, ?, ?)`,
+    ).run(room, handle, now);
+
+    // Anchor unread watermark at current max id so we don't see history
+    // sent before we joined.
+    const maxRow = db.prepare(
+      `SELECT COALESCE(MAX(id), 0) AS max_id FROM messages WHERE to_handle = ?`,
+    ).get(room) as { max_id: number };
+    db.prepare(
+      `INSERT INTO room_reads (room_name, handle, last_read_id) VALUES (?, ?, ?)
+       ON CONFLICT(room_name, handle) DO UPDATE SET last_read_id = excluded.last_read_id`,
+    ).run(room, handle, maxRow.max_id);
+  }
+
+  return hydrateRoom(db, room);
+}
+
+export function leaveRoom(db: Db, room: string, handle: string): boolean {
+  const info = db.prepare(
+    `DELETE FROM room_members WHERE room_name = ? AND handle = ?`,
+  ).run(room, handle);
+  // Drop the read watermark too — a subsequent rejoin will re-anchor at
+  // whatever the current max_id is at that time.
+  db.prepare(
+    `DELETE FROM room_reads WHERE room_name = ? AND handle = ?`,
+  ).run(room, handle);
+  return info.changes > 0;
+}
+
+export function isRoomMember(db: Db, room: string, handle: string): boolean {
+  const row = db.prepare(
+    `SELECT 1 AS x FROM room_members WHERE room_name = ? AND handle = ?`,
+  ).get(room, handle) as { x: number } | undefined;
+  return row !== undefined;
+}
+
+/** Members of a room, in join order. Includes offline members. */
+export function roomMembers(db: Db, room: string): string[] {
+  const rows = db.prepare(
+    `SELECT handle FROM room_members WHERE room_name = ? ORDER BY joined_at ASC`,
+  ).all(room) as { handle: string }[];
+  return rows.map((r) => r.handle);
+}
+
+/** Rooms the caller is a member of. */
+export function myRooms(db: Db, handle: string): Room[] {
+  const rows = db.prepare(
+    `SELECT r.name, r.created_at, r.created_by
+     FROM rooms r
+     JOIN room_members m ON m.room_name = r.name
+     WHERE m.handle = ?
+     ORDER BY r.name ASC`,
+  ).all(handle) as RoomRow[];
+  return rows.map((r) => hydrateRoomFromRow(db, r));
+}
+
+/** All rooms known to the bus (for /rooms --all). */
+export function allRooms(db: Db): Room[] {
+  const rows = db.prepare(
+    `SELECT name, created_at, created_by FROM rooms ORDER BY name ASC`,
+  ).all() as RoomRow[];
+  return rows.map((r) => hydrateRoomFromRow(db, r));
+}
+
+function hydrateRoom(db: Db, name: string): Room {
+  const row = db.prepare(
+    `SELECT name, created_at, created_by FROM rooms WHERE name = ?`,
+  ).get(name) as RoomRow | undefined;
+  if (!row) throw new Error(`Room ${name} does not exist`);
+  return hydrateRoomFromRow(db, row);
+}
+
+function hydrateRoomFromRow(db: Db, row: RoomRow): Room {
+  const count = db.prepare(
+    `SELECT COUNT(*) AS n FROM room_members WHERE room_name = ?`,
+  ).get(row.name) as { n: number };
+  return {
+    name: row.name,
+    created_at: row.created_at,
+    created_by: row.created_by,
+    member_count: count.n,
+  };
+}
+
+/**
+ * Unread messages for a (room, handle) pair. Uses the per-member watermark
+ * so each member reads independently. Does NOT advance the watermark —
+ * call `advanceRoomRead` after presenting the messages.
+ */
+export function roomUnread(
+  db: Db,
+  room: string,
+  handle: string,
+  limit = 50,
+): Message[] {
+  const read = db.prepare(
+    `SELECT last_read_id FROM room_reads WHERE room_name = ? AND handle = ?`,
+  ).get(room, handle) as { last_read_id: number } | undefined;
+  const since = read?.last_read_id ?? 0;
+  const rows = db.prepare(
+    `SELECT * FROM messages
+     WHERE to_handle = ? AND id > ?
+     ORDER BY id ASC
+     LIMIT ?`,
+  ).all(room, since, Math.min(Math.max(limit, 1), 500)) as MessageRow[];
+  return rows.map(toMessage);
+}
+
+export function advanceRoomRead(
+  db: Db,
+  room: string,
+  handle: string,
+  upToId: number,
+): void {
+  db.prepare(
+    `INSERT INTO room_reads (room_name, handle, last_read_id) VALUES (?, ?, ?)
+     ON CONFLICT(room_name, handle) DO UPDATE SET
+       last_read_id = MAX(room_reads.last_read_id, excluded.last_read_id)`,
+  ).run(room, handle, upToId);
+}
+
+/**
+ * Unread across every room the caller is a member of. Used by an
+ * unfiltered `chat.room_inbox` call.
+ */
+export function allRoomsUnread(db: Db, handle: string, limit = 50): Message[] {
+  const rooms = myRooms(db, handle);
+  const cap = Math.min(Math.max(limit, 1), 500);
+  const collected: Message[] = [];
+  for (const r of rooms) {
+    if (collected.length >= cap) break;
+    const remaining = cap - collected.length;
+    const batch = roomUnread(db, r.name, handle, remaining);
+    collected.push(...batch);
+  }
+  // Interleaved by id ascending so the caller sees chronological order.
+  return collected.sort((a, b) => a.id - b.id);
+}

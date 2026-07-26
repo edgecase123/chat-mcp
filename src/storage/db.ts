@@ -25,6 +25,28 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       CREATE INDEX ix_messages_to_read ON messages(to_handle, read_at);
     `);
   },
+  (db) => {
+    db.exec(`
+      CREATE TABLE rooms (
+        name        TEXT PRIMARY KEY,
+        created_at  INTEGER NOT NULL,
+        created_by  TEXT NOT NULL
+      );
+      CREATE TABLE room_members (
+        room_name   TEXT NOT NULL REFERENCES rooms(name) ON DELETE CASCADE,
+        handle      TEXT NOT NULL,
+        joined_at   INTEGER NOT NULL,
+        PRIMARY KEY (room_name, handle)
+      );
+      CREATE TABLE room_reads (
+        room_name     TEXT NOT NULL,
+        handle        TEXT NOT NULL,
+        last_read_id  INTEGER NOT NULL,
+        PRIMARY KEY (room_name, handle)
+      );
+      CREATE INDEX ix_room_members_handle ON room_members(handle);
+    `);
+  },
 ];
 
 function migrate(db: Db): void {
