@@ -663,6 +663,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                 messages={watchMessages}
                 meHandle={handle}
                 viewportRows={messageViewport}
+                contentColumns={30}
                 focused={showWatch}
                 requireShift={true}
                 renderRow={(m) => (

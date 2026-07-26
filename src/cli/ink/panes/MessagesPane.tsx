@@ -5,7 +5,12 @@ import type { View } from '../views.js';
 import { HomeEmptyState, DmEmptyState, RoomEmptyState } from './EmptyState.js';
 import { ScrollableMessageList } from './ScrollableMessageList.js';
 import { Markdown } from '../util/markdown.js';
-import { useMessageViewport } from '../util/viewport.js';
+import { useMessageViewport, useTerminalColumns } from '../util/viewport.js';
+
+// Sidebar (30) + borders (~4) + main-pane paddingX (2) + safety (4) = ~40
+// columns of chrome to the left of the message body. Subtract from total
+// terminal width for wrap-row estimation in ScrollableMessageList.
+const HORIZONTAL_CHROME = 40;
 
 const KIND_LABEL: Record<MessageKind, string | null> = {
   chat: null,
@@ -55,6 +60,7 @@ interface MessagesPaneProps {
 
 export function MessagesPane({ view, messages, meHandle }: MessagesPaneProps): React.ReactElement {
   const viewportRows = useMessageViewport();
+  const contentColumns = Math.max(20, useTerminalColumns() - HORIZONTAL_CHROME);
   const title =
     view.kind === 'home'
       ? '(select an agent or room)'
@@ -81,6 +87,7 @@ export function MessagesPane({ view, messages, meHandle }: MessagesPaneProps): R
             messages={messages}
             meHandle={meHandle}
             viewportRows={viewportRows}
+            contentColumns={contentColumns}
             focused={true}
             renderRow={renderRow}
           />

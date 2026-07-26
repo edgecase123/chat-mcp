@@ -5,15 +5,9 @@ import { useStdout } from 'ink';
  * Terminal rows reserved for chrome. Header(3) + HintBar(1) + Input(3) = 7
  * baseline, plus alert lane (3) when active and status line (1) when active,
  * plus title(1) + divider(1) inside the messages pane. Budget 14 to keep the
- * header visible even when alerts + status are up and one body line wraps.
+ * header visible even when alerts + status are up.
  */
 const CHROME_ROWS = 14;
-
-/**
- * Rows per rendered message. Header line + body line = 2 minimum, but bodies
- * frequently wrap once in a narrow main pane, so budget 3.
- */
-const ROWS_PER_MESSAGE = 3;
 
 /** Live terminal row count, re-computes on resize. */
 export function useTerminalRows(): number {
@@ -28,13 +22,27 @@ export function useTerminalRows(): number {
   return rows;
 }
 
+/** Live terminal column count, re-computes on resize. */
+export function useTerminalColumns(): number {
+  const { stdout } = useStdout();
+  const [cols, setCols] = useState<number>(stdout?.columns ?? 80);
+  useEffect(() => {
+    if (!stdout) return;
+    const onResize = (): void => setCols(stdout.columns);
+    stdout.on('resize', onResize);
+    return () => { stdout.off('resize', onResize); };
+  }, [stdout]);
+  return cols;
+}
+
 /**
- * Return the approximate number of full messages that fit in the current
- * terminal below the app chrome. Re-computes on terminal resize.
- * Floor at 3 messages so tight terminals still show recent context.
+ * Rows available in the messages pane after subtracting app chrome.
+ * ScrollableMessageList uses this as a ROW budget (not message count) —
+ * it walks messages backward from the anchor, estimating rendered rows per
+ * message, and stops when the budget is spent. Floor at 5 rows so tight
+ * terminals still show at least a header + body of one message.
  */
 export function useMessageViewport(): number {
   const rows = useTerminalRows();
-  const usable = Math.max(0, rows - CHROME_ROWS);
-  return Math.max(3, Math.floor(usable / ROWS_PER_MESSAGE));
+  return Math.max(5, rows - CHROME_ROWS);
 }
