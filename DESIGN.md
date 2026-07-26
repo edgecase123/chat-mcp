@@ -265,8 +265,61 @@ Three terminals — Claude Code as `claude1`, Cursor (or a second Claude Code) a
 - `npx -y chat-mcp` install path matches other MCP servers users already run.
 - Node is already in the leagues2 dev stack (Vite), so no new runtime for local development.
 
+## Distribution
+
+**Chosen path for slice 1 and initial open source: GitHub-only via `npx github:`.** No npm registry publish. Users install directly from the git repo. This costs zero infrastructure to set up and matches every existing MCP-config shape users have seen.
+
+### User install flow
+
+Prerequisites: Node 18+ and Git (both near-universal on dev machines).
+
+**1. Add to their MCP client config.** Example for Claude Code (`~/.claude.json` or `claude mcp add`):
+
+```json
+{
+  "mcpServers": {
+    "chat": {
+      "command": "npx",
+      "args": ["-y", "github:you/chat-mcp#v0.1.0", "--handle", "claude1"]
+    }
+  }
+}
+```
+
+Cursor uses `~/.cursor/mcp.json` — same shape. Codex config lives elsewhere but the `command` / `args` pair is identical.
+
+**2. Restart the MCP client.** On first spawn, `npx` clones `github:you/chat-mcp` into `~/.npm/_npx/<hash>/`, runs `npm install` (fetches `better-sqlite3`, `@modelcontextprotocol/sdk`, etc.), and executes the compiled entry point.
+
+- Cold start: **~10–20 s**, dominated by native `better-sqlite3` install (fetches a prebuilt binary; falls back to compile-from-source only on rare platform/Node combos, which needs Xcode CLT / build-essential / MSVS Build Tools).
+- Subsequent starts: **~200 ms** (npx cache hit).
+
+**3. Run the user CLI** from any shell:
+
+```bash
+npx -y github:you/chat-mcp#v0.1.0 cli
+```
+
+Optional convenience:
+
+```bash
+alias chat-mcp='npx -y github:you/chat-mcp#v0.1.0'
+```
+
+**4. Update to a newer version.** Two shapes:
+
+- **Pinned to a tag** (recommended, shown above): bump the `#vX.Y.Z` in the config when you want them to update. Reproducible, no surprises.
+- **Tracking `main`** (drop the `#…` suffix): user runs `npx -y --force github:you/chat-mcp` to bust the cache; otherwise `npx` reuses the cached copy indefinitely.
+
+**5. Uninstall.** Remove the MCP config entry; optionally `rm -rf ~/.npm/_npx` to clear the cache; `rm -rf ~/.chat-mcp` to drop state.
+
+### Distribution caveats
+
+- **Private repo = auth friction.** If limited distribution needs to be enforced by keeping the repo private, each user needs `gh auth login` or an SSH key with read access. Fine for a handful of collaborators; painful past that. For "limited" as in "not marketed" rather than "authorised only," keep the repo public.
+- **No version discipline required early.** Commit to `main`, tag when you want to draw a line. Users on pinned configs never see the in-between commits.
+- **npm publish is a later upgrade, not a redesign.** When (or if) the project earns a single-word `npx` name, `npm publish` is a 10-minute add. Existing git-based installs keep working — the two distribution channels coexist cleanly.
+
 ## Open items
 
 - **Package name.** `chat-mcp` is a placeholder; final name TBD before publishing.
 - **License.** MIT default unless there's a reason to pick otherwise.
-- **Distribution.** npm public registry vs. GitHub-only tarball for the private experiment phase — decide before the spin-off.
+- **GitHub org/user for the repo URL.** Determines the `github:you/chat-mcp` slug users will type. Decide before the first shared install.
