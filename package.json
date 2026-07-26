@@ -21,6 +21,7 @@
     "dev": "tsx src/index.ts",
     "clean": "rm -rf dist",
     "smoke": "npm run build && node scripts/smoke.mjs",
+    "test": "node --test --import tsx",
     "prepare": "npm run build"
   },
   "dependencies": {
