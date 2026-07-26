@@ -7,13 +7,55 @@ export type Token =
   | { kind: 'italic'; value: string }
   | { kind: 'code'; value: string }
   | { kind: 'code-block'; value: string }
-  | { kind: 'link'; label: string; url: string };
+  | { kind: 'link'; label: string; url: string }
+  | { kind: 'table'; header: string[]; rows: string[][] };
 
 const TRIGGERS = new Set(['*', '`', '[', '\\']);
 
 /**
+ * A GitHub-flavoured markdown table header separator: pipes and dashes,
+ * optionally with alignment colons and whitespace. `| :--- | ---: | :---: |`
+ * all match. The line must consist entirely of these characters.
+ */
+const TABLE_SEPARATOR_RE = /^\s*\|?(\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$/;
+
+/** Split a table row like `| a | b | c |` into cells (trims + drops empty
+ *  leading/trailing cell from surrounding pipes). */
+function splitTableRow(line: string): string[] {
+  const cells = line.split('|').map((c) => c.trim());
+  if (cells.length > 0 && cells[0] === '') cells.shift();
+  if (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
+  return cells;
+}
+
+/**
+ * Try to consume a table starting at line `startLineIdx` in `lines`.
+ * Returns { table, linesConsumed } on success, or null if the shape doesn't
+ * match (header row, separator, ≥0 body rows all starting with `|`).
+ */
+function tryTable(lines: string[], startLineIdx: number): { header: string[]; rows: string[][]; linesConsumed: number } | null {
+  const headerLine = lines[startLineIdx];
+  const sepLine = lines[startLineIdx + 1];
+  if (headerLine === undefined || sepLine === undefined) return null;
+  if (!headerLine.includes('|')) return null;
+  if (!TABLE_SEPARATOR_RE.test(sepLine)) return null;
+  const header = splitTableRow(headerLine);
+  if (header.length === 0) return null;
+  const rows: string[][] = [];
+  let i = startLineIdx + 2;
+  while (i < lines.length) {
+    const line = lines[i]!;
+    if (!line.includes('|') || line.trim() === '') break;
+    rows.push(splitTableRow(line));
+    i += 1;
+  }
+  return { header, rows, linesConsumed: i - startLineIdx };
+}
+
+/**
  * Tokenize a message body into a small subset of markdown.
  * - `**bold**`, `*italic*`, `` `code` ``, ```` ```code block``` ````, `[label](url)`
+ * - GitHub-flavoured tables (`| a | b |` + `|---|---|` separator)
  * - `\` before a trigger renders it literal
  * - Unterminated markers render literal (no wrap-around)
  * - No nesting — outermost marker wins
@@ -29,8 +71,45 @@ export function tokenize(input: string): Token[] {
     }
   };
 
+  // Pre-compute newline positions + current-line index so table detection
+  // (which needs whole-line context) can look ahead without re-splitting.
+  const lines = input.split('\n');
+  const lineStartAtChar = new Array<number>(lines.length);
+  {
+    let pos = 0;
+    for (let li = 0; li < lines.length; li++) {
+      lineStartAtChar[li] = pos;
+      pos += lines[li]!.length + 1; // +1 for the '\n'
+    }
+  }
+  function lineIndexAt(charIdx: number): number {
+    // Linear scan is fine — bodies are short (KB range) and this is only
+    // called at newline boundaries.
+    for (let li = lines.length - 1; li >= 0; li--) {
+      if (lineStartAtChar[li]! <= charIdx) return li;
+    }
+    return 0;
+  }
+
   while (i < input.length) {
     const ch = input[i]!;
+
+    // Table: only detect at the start of a line (i === 0 or previous char is
+    // a newline). Requires a header line, a separator line, and consumes
+    // all subsequent body lines that start with `|`.
+    if ((i === 0 || input[i - 1] === '\n') && ch === '|') {
+      const startLine = lineIndexAt(i);
+      const t = tryTable(lines, startLine);
+      if (t !== null) {
+        flush();
+        tokens.push({ kind: 'table', header: t.header, rows: t.rows });
+        // Advance past the last consumed line + its trailing newline (if any).
+        const lastLineIdx = startLine + t.linesConsumed - 1;
+        const afterLast = lineStartAtChar[lastLineIdx]! + lines[lastLineIdx]!.length;
+        i = afterLast < input.length && input[afterLast] === '\n' ? afterLast + 1 : afterLast;
+        continue;
+      }
+    }
 
     if (ch === '\\' && i + 1 < input.length && TRIGGERS.has(input[i + 1]!)) {
       buf += input[i + 1]!;
@@ -111,6 +190,41 @@ export function tokenize(input: string): Token[] {
   return tokens;
 }
 
+/** Render a table token as monospaced padded rows: header (bold) + a
+ *  dim divider line + body rows. Column widths auto-fit to the widest
+ *  cell so short cells align. Bounded at 40 chars/col to keep long
+ *  free-text cells from stretching the whole pane. */
+function renderTable(t: { kind: 'table'; header: string[]; rows: string[][] }, key: number): React.ReactElement {
+  const cols = t.header.length;
+  const allRows: string[][] = [t.header, ...t.rows.map((r) => {
+    const padded = r.slice(0, cols);
+    while (padded.length < cols) padded.push('');
+    return padded;
+  })];
+  const widths = new Array<number>(cols).fill(0);
+  for (const row of allRows) {
+    for (let c = 0; c < cols; c++) {
+      const cell = row[c] ?? '';
+      widths[c] = Math.min(40, Math.max(widths[c]!, cell.length));
+    }
+  }
+  function fmtCell(cell: string, w: number): string {
+    if (cell.length > w) return cell.slice(0, w - 1) + '…';
+    return cell + ' '.repeat(w - cell.length);
+  }
+  const divider = widths.map((w) => '─'.repeat(w)).join(' ─ ');
+  return (
+    <Text key={key}>
+      {'\n'}
+      <Text bold>{t.header.map((h, c) => fmtCell(h, widths[c]!)).join(' │ ')}</Text>{'\n'}
+      <Text dimColor>{divider}</Text>{'\n'}
+      {t.rows.map((row, rIdx) => (
+        <Text key={rIdx}>{row.slice(0, cols).map((cell, c) => fmtCell(cell ?? '', widths[c]!)).join(' │ ')}{'\n'}</Text>
+      ))}
+    </Text>
+  );
+}
+
 export function Markdown({ body, baseColor }: { body: string; baseColor?: string }): React.ReactElement {
   const tokens = tokenize(body);
   return (
@@ -123,6 +237,7 @@ export function Markdown({ body, baseColor }: { body: string; baseColor?: string
           case 'code':       return <Text key={idx} backgroundColor="gray"> {t.value} </Text>;
           case 'code-block': return <Text key={idx} dimColor>{'\n'}{t.value}{'\n'}</Text>;
           case 'link':       return <Text key={idx} color="cyan" underline>{t.label} <Text dimColor>({t.url})</Text></Text>;
+          case 'table':      return renderTable(t, idx);
         }
       })}
     </Text>

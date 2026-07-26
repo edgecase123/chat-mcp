@@ -70,3 +70,45 @@ test('mixed content', () => {
     { kind: 'text', value: ' now' },
   ]);
 });
+
+test('table: header + separator + rows', () => {
+  const input = [
+    '| col1 | col2 |',
+    '|------|------|',
+    '| a    | b    |',
+    '| c    | d    |',
+  ].join('\n');
+  assert.deepEqual(tokenize(input), [
+    { kind: 'table', header: ['col1', 'col2'], rows: [['a', 'b'], ['c', 'd']] },
+  ]);
+});
+
+test('table: text before and after', () => {
+  const input = [
+    'here is a table:',
+    '| a | b |',
+    '|---|---|',
+    '| 1 | 2 |',
+    'and text after',
+  ].join('\n');
+  assert.deepEqual(tokenize(input), [
+    { kind: 'text', value: 'here is a table:\n' },
+    { kind: 'table', header: ['a', 'b'], rows: [['1', '2']] },
+    { kind: 'text', value: 'and text after' },
+  ]);
+});
+
+test('table: separator with alignment colons still matches', () => {
+  const input = '| a | b |\n| :--- | ---: |\n| 1 | 2 |';
+  assert.deepEqual(tokenize(input), [
+    { kind: 'table', header: ['a', 'b'], rows: [['1', '2']] },
+  ]);
+});
+
+test('table: rejects when separator line is missing', () => {
+  const input = '| a | b |\n| 1 | 2 |';
+  const tokens = tokenize(input);
+  // No separator → falls through to plain text
+  assert.equal(tokens.length, 1);
+  assert.equal(tokens[0]!.kind, 'text');
+});
