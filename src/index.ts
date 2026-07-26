@@ -43,9 +43,14 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .description('Install the wake adapter for a framework (e.g. claude-code)')
     .requiredOption('--handle <handle>', 'agent handle this adapter arms')
     .option('--scope <scope>', 'adapter-specific scope (see list-adapters for defaults)')
-    .action(async (framework: string, opts: { handle: string; scope?: string }) => {
+    .option('--force', 'skip the .mcp.json handle-match check', false)
+    .action(async (framework: string, opts: { handle: string; scope?: string; force?: boolean }) => {
       const { runInstall } = await import('./adapters/index.js');
-      const result = await runInstall(framework, { handle: opts.handle, scope: opts.scope });
+      const result = await runInstall(framework, {
+        handle: opts.handle,
+        scope: opts.scope,
+        force: opts.force,
+      });
       console.log(result.message);
     });
 
