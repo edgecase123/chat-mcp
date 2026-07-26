@@ -23,6 +23,11 @@ export function installWhoami(server: McpServer, ctx: ShimContext): void {
         session_id: me.session_id,
         kind: me.kind,
         notify_path: notifyPathFor(me.handle),
+        wake_adapter: {
+          installed: ctx.adapterStatus.installed,
+          framework: ctx.adapterStatus.framework,
+          ...(ctx.adapterStatus.hint ? { hint: ctx.adapterStatus.hint } : {}),
+        },
         online_peers: peers.map((a) => ({
           handle: a.handle,
           display_name: a.display_name,
