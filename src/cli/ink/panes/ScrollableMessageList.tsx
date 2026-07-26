@@ -56,9 +56,18 @@ export function ScrollableMessageList({
   const start = Math.max(0, end - viewportRows);
   const visible = messages.slice(start, end);
   const newerHidden = scrollOffset;
+  const olderHidden = start;
+  const atTop = start === 0;
+  const scrolled = scrollOffset > 0;
 
   return (
     <Box flexDirection="column" flexGrow={1}>
+      {atTop && scrolled && (
+        <Text dimColor>— top of loaded history —</Text>
+      )}
+      {olderHidden > 0 && (
+        <Text dimColor>↑ {olderHidden} older</Text>
+      )}
       {visible.map((m) => renderRow(m, meHandle))}
       {newerHidden > 0 && (
         <Text dimColor>↓ {newerHidden} newer</Text>

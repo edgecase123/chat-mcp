@@ -1,15 +1,24 @@
 import { useEffect, useState } from 'react';
 import { useStdout } from 'ink';
 
-/** Terminal rows reserved for chrome (header, alert lane, hint bar, input). */
-const CHROME_ROWS = 10;
-/** Rows per rendered message (header line + body line). No margin. */
-const ROWS_PER_MESSAGE = 2;
+/**
+ * Terminal rows reserved for chrome. Header(3) + HintBar(1) + Input(3) = 7
+ * baseline, plus alert lane (3) when active and status line (1) when active,
+ * plus title(1) + divider(1) inside the messages pane. Budget 14 to keep the
+ * header visible even when alerts + status are up and one body line wraps.
+ */
+const CHROME_ROWS = 14;
+
+/**
+ * Rows per rendered message. Header line + body line = 2 minimum, but bodies
+ * frequently wrap once in a narrow main pane, so budget 3.
+ */
+const ROWS_PER_MESSAGE = 3;
 
 /**
  * Return the approximate number of full messages that fit in the current
  * terminal below the app chrome. Re-computes on terminal resize.
- * Minimum 5 so tiny terminals still show *something*.
+ * Floor at 3 messages so tight terminals still show recent context.
  */
 export function useMessageViewport(): number {
   const { stdout } = useStdout();
@@ -21,5 +30,5 @@ export function useMessageViewport(): number {
     return () => { stdout.off('resize', onResize); };
   }, [stdout]);
   const usable = Math.max(0, rows - CHROME_ROWS);
-  return Math.max(5, Math.floor(usable / ROWS_PER_MESSAGE));
+  return Math.max(3, Math.floor(usable / ROWS_PER_MESSAGE));
 }
