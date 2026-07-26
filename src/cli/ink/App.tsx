@@ -7,6 +7,7 @@ import * as dao from '../../storage/dao.js';
 import type { Message, MessageKind, AgentStatus, Agent } from '../../storage/dao.js';
 import { assertRoomName } from '../../util/naming.js';
 import type { View } from './views.js';
+import { Header } from './panes/Header.js';
 
 export interface AppProps {
   handle: string;
@@ -437,28 +438,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
 
   return (
     <Box flexDirection="column" width="100%">
-      {/* Header */}
-      <Box borderStyle="round" borderColor="gray" paddingX={1}>
-        <Text>
-          <Text bold>chat-mcp</Text>{' '}
-          <Text dimColor>v{version}-ink</Text> ·{' '}
-          <Text color="cyan">{handle}</Text>
-          {meStatus && (
-            <>
-              {' '}
-              · <Text color={STATUS_COLOR[meStatus]}>●</Text>{' '}
-              <Text>{meStatus}</Text>
-              {meFocus && (
-                <>
-                  {' '}
-                  <Text dimColor>({meFocus})</Text>
-                </>
-              )}
-            </>
-          )}{' '}
-          <Text dimColor>· /help · Ctrl-C</Text>
-        </Text>
-      </Box>
+      <Header handle={handle} version={version} status={meStatus} focus={meFocus} />
 
       {/* Alert lane — only when there are unread alerts */}
       {alerts.length > 0 && (
