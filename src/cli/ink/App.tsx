@@ -410,6 +410,32 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     if (input.value.length > 0 || paletteOpen) return;
     if (raw === '?') return setView({ kind: 'help' });
     if (raw === 'R' || raw === 'r') return setView({ kind: 'rooms' });
+    if (/^[1-9]$/.test(raw)) {
+      const n = parseInt(raw, 10) - 1;
+      // Order: peers first, then joined rooms, then discover rooms.
+      const targets: Array<{ kind: 'dm'; peer: string } | { kind: 'room'; room: string; join?: boolean }> = [
+        ...peers.map((p) => ({ kind: 'dm' as const, peer: p.handle })),
+        ...rooms.map((r) => ({ kind: 'room' as const, room: r.name })),
+        ...discoverRooms.map((r) => ({ kind: 'room' as const, room: r.name, join: true })),
+      ];
+      const t = targets[n];
+      if (!t) return;
+      if (t.kind === 'dm') {
+        setView({ kind: 'dm', peer: t.peer });
+      } else if (t.join) {
+        const result = dao.joinRoom(db, t.room, handle);
+        if (result.was_new_member && result.system_message) {
+          for (const member of dao.roomMembers(db, t.room)) {
+            if (member === handle) continue;
+            notifyPeer(member, { id: result.system_message.id, to: t.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at });
+          }
+        }
+        setView({ kind: 'room', room: t.room });
+        setTick((tk) => tk + 1);
+      } else {
+        setView({ kind: 'room', room: t.room });
+      }
+    }
   });
 
   const showWatch = watchPeer !== null;
