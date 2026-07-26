@@ -1,4 +1,14 @@
 #!/usr/bin/env node
+// node:sqlite is stable in v24 but still emits an ExperimentalWarning on
+// v22.5–v23. Filter that one warning without hiding others — the shim uses
+// stdio for MCP JSON-RPC on stdout and unrelated warnings would still land
+// on stderr where they're useful.
+process.removeAllListeners('warning');
+process.on('warning', (w) => {
+  if (w.name === 'ExperimentalWarning' && /SQLite/i.test(w.message)) return;
+  console.error(w.stack ?? `${w.name}: ${w.message}`);
+});
+
 import { Command } from 'commander';
 
 async function runShimEntry(handle: string | undefined): Promise<void> {
@@ -27,7 +37,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   program
     .name('chat-mcp')
     .description('Local unintrusive chat bus for AI coding agents over MCP')
-    .version('0.0.1');
+    .version('0.1.0');
 
   program
     .command('cli')

@@ -1,5 +1,7 @@
-import Database, { type Database as Db } from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { dbPath, ensureStateDir } from '../util/paths.js';
+
+export type Db = DatabaseSync;
 
 const MIGRATIONS: readonly ((db: Db) => void)[] = [
   (db) => {
@@ -49,27 +51,38 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
   },
 ];
 
+function tx(db: Db, fn: () => void): void {
+  db.exec('BEGIN');
+  try {
+    fn();
+    db.exec('COMMIT');
+  } catch (e) {
+    db.exec('ROLLBACK');
+    throw e;
+  }
+}
+
 function migrate(db: Db): void {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)`);
-  const row = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number | null };
+  const row = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as unknown as { v: number | null };
   const current = row.v ?? 0;
   for (let i = current; i < MIGRATIONS.length; i++) {
     const version = i + 1;
     const migration = MIGRATIONS[i];
     if (!migration) throw new Error(`Missing migration ${version}`);
-    db.transaction(() => {
+    tx(db, () => {
       migration(db);
       db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(version);
-    })();
+    });
   }
 }
 
 export function openDb(): Db {
   ensureStateDir();
-  const db = new Database(dbPath());
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  db.pragma('foreign_keys = ON');
+  const db = new DatabaseSync(dbPath());
+  db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA synchronous = NORMAL');
+  db.exec('PRAGMA foreign_keys = ON');
   migrate(db);
   return db;
 }

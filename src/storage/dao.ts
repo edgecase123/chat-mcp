@@ -1,4 +1,4 @@
-import type { Database as Db } from 'better-sqlite3';
+import type { Db } from './db.js';
 
 export interface Agent {
   handle: string;
@@ -103,12 +103,12 @@ export function upsertAgent(db: Db, input: RegisterInput): Agent {
 }
 
 export function getAgent(db: Db, handle: string): Agent | null {
-  const row = db.prepare(`SELECT * FROM agents WHERE handle = ?`).get(handle) as AgentRow | undefined;
+  const row = db.prepare(`SELECT * FROM agents WHERE handle = ?`).get(handle) as unknown as AgentRow | undefined;
   return row ? hydrate(row) : null;
 }
 
 export function listAgents(db: Db, includeOffline = false): Agent[] {
-  const rows = db.prepare(`SELECT * FROM agents ORDER BY last_seen_at DESC`).all() as AgentRow[];
+  const rows = db.prepare(`SELECT * FROM agents ORDER BY last_seen_at DESC`).all() as unknown as AgentRow[];
   const agents = rows.map(hydrate);
   return includeOffline ? agents : agents.filter((a) => a.online);
 }
@@ -150,7 +150,7 @@ export function pendingInbox(db: Db, query: InboxQuery): Message[] {
      WHERE to_handle = ? AND read_at IS NULL AND id > ?
      ORDER BY id ASC
      LIMIT ?`,
-  ).all(query.to, since, limit) as MessageRow[];
+  ).all(query.to, since, limit) as unknown as MessageRow[];
   return rows.map(toMessage);
 }
 
@@ -177,7 +177,7 @@ export function markDelivered(db: Db, ids: number[]): void {
 export function undeliveredFor(db: Db, handle: string): Message[] {
   const rows = db.prepare(
     `SELECT * FROM messages WHERE to_handle = ? AND delivered_at IS NULL ORDER BY id ASC`,
-  ).all(handle) as MessageRow[];
+  ).all(handle) as unknown as MessageRow[];
   return rows.map(toMessage);
 }
 
@@ -244,7 +244,7 @@ export function joinRoom(db: Db, room: string, handle: string): JoinResult {
 
   const existing = db.prepare(
     `SELECT joined_at FROM room_members WHERE room_name = ? AND handle = ?`,
-  ).get(room, handle) as { joined_at: number } | undefined;
+  ).get(room, handle) as unknown as { joined_at: number } | undefined;
 
   if (existing) {
     return { room: hydrateRoom(db, room), was_new_member: false };
@@ -290,7 +290,7 @@ export function leaveRoom(db: Db, room: string, handle: string): boolean {
 export function isRoomMember(db: Db, room: string, handle: string): boolean {
   const row = db.prepare(
     `SELECT 1 AS x FROM room_members WHERE room_name = ? AND handle = ?`,
-  ).get(room, handle) as { x: number } | undefined;
+  ).get(room, handle) as unknown as { x: number } | undefined;
   return row !== undefined;
 }
 
@@ -298,7 +298,7 @@ export function isRoomMember(db: Db, room: string, handle: string): boolean {
 export function roomMembers(db: Db, room: string): string[] {
   const rows = db.prepare(
     `SELECT handle FROM room_members WHERE room_name = ? ORDER BY joined_at ASC`,
-  ).all(room) as { handle: string }[];
+  ).all(room) as unknown as { handle: string }[];
   return rows.map((r) => r.handle);
 }
 
@@ -310,7 +310,7 @@ export function myRooms(db: Db, handle: string): Room[] {
      JOIN room_members m ON m.room_name = r.name
      WHERE m.handle = ?
      ORDER BY r.name ASC`,
-  ).all(handle) as RoomRow[];
+  ).all(handle) as unknown as RoomRow[];
   return rows.map((r) => hydrateRoomFromRow(db, r));
 }
 
@@ -318,14 +318,14 @@ export function myRooms(db: Db, handle: string): Room[] {
 export function allRooms(db: Db): Room[] {
   const rows = db.prepare(
     `SELECT name, created_at, created_by FROM rooms ORDER BY name ASC`,
-  ).all() as RoomRow[];
+  ).all() as unknown as RoomRow[];
   return rows.map((r) => hydrateRoomFromRow(db, r));
 }
 
 function hydrateRoom(db: Db, name: string): Room {
   const row = db.prepare(
     `SELECT name, created_at, created_by FROM rooms WHERE name = ?`,
-  ).get(name) as RoomRow | undefined;
+  ).get(name) as unknown as RoomRow | undefined;
   if (!row) throw new Error(`Room ${name} does not exist`);
   return hydrateRoomFromRow(db, row);
 }
@@ -333,7 +333,7 @@ function hydrateRoom(db: Db, name: string): Room {
 function hydrateRoomFromRow(db: Db, row: RoomRow): Room {
   const count = db.prepare(
     `SELECT COUNT(*) AS n FROM room_members WHERE room_name = ?`,
-  ).get(row.name) as { n: number };
+  ).get(row.name) as unknown as { n: number };
   return {
     name: row.name,
     created_at: row.created_at,
@@ -355,14 +355,14 @@ export function roomUnread(
 ): Message[] {
   const read = db.prepare(
     `SELECT last_read_id FROM room_reads WHERE room_name = ? AND handle = ?`,
-  ).get(room, handle) as { last_read_id: number } | undefined;
+  ).get(room, handle) as unknown as { last_read_id: number } | undefined;
   const since = read?.last_read_id ?? 0;
   const rows = db.prepare(
     `SELECT * FROM messages
      WHERE to_handle = ? AND id > ?
      ORDER BY id ASC
      LIMIT ?`,
-  ).all(room, since, Math.min(Math.max(limit, 1), 500)) as MessageRow[];
+  ).all(room, since, Math.min(Math.max(limit, 1), 500)) as unknown as MessageRow[];
   return rows.map(toMessage);
 }
 

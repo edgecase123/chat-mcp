@@ -44,7 +44,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
   };
 
   console.log(
-    `${bold('chat-mcp')} ${dim('v0.0.1')}  ·  handle: ${cyan(opts.handle)}  ·  ${dim('/help or Ctrl-C to quit')}`,
+    `${bold('chat-mcp')} ${dim('v0.1.0')}  ·  handle: ${cyan(opts.handle)}  ·  ${dim('/help or Ctrl-C to quit')}`,
   );
   rl.setPrompt(promptFor());
   rl.prompt();

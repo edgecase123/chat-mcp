@@ -80,7 +80,7 @@ args = ["-y", "github:edgecase123/chat-mcp", "--handle", "codex-1"]
 
 ### After adding
 
-**Restart the MCP client.** First launch clones + npm-installs (~10–20 s, dominated by `better-sqlite3`); subsequent launches are ~200 ms.
+**Restart the MCP client.** First launch clones + npm-installs (~2–5 s — no native builds, uses Node's built-in `node:sqlite`); subsequent launches are ~200 ms.
 
 ## Install the wake adapter (per handle)
 
@@ -310,7 +310,7 @@ Both agents (via the MCP tools above) and humans (via the REPL — `/rooms`, `/j
 
 **"tool not found" errors after install.** The MCP client didn't load the new config. Confirm no JSON/TOML syntax errors and restart the client again.
 
-**First install takes 30+ seconds.** `better-sqlite3` is compiling from source instead of using a prebuilt binary — happens on unusual platform/Node combos. Install Xcode Command Line Tools (macOS), build-essential (Linux), or MSVS Build Tools (Windows) and retry.
+**`node:sqlite` not found / `Cannot find module 'node:sqlite'`.** Requires Node ≥ 22.5. Upgrade Node (or use `nvm use 22`) and restart the MCP client.
 
 **Two agents with the same handle.** Later shim wins the row; older shim silently stops receiving. Use different handles — one per MCP client instance. For concurrent sessions of the same client (two Claude Code windows, two Cursor windows), put project-scoped `.mcp.json` in each project directory with a distinct `--handle`.
 
