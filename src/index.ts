@@ -14,7 +14,7 @@ async function runShimEntry(handle: string | undefined): Promise<void> {
 // This is the entry shape used by .mcp.json / claude mcp add, so we detect it
 // before commander sees the args to avoid --handle colliding with subcommand
 // options of the same name.
-const KNOWN_SUBCOMMANDS = new Set(['cli', 'install', 'uninstall', 'list-adapters', 'help', '--help', '-h', '--version', '-V']);
+const KNOWN_SUBCOMMANDS = new Set(['cli', 'install', 'uninstall', 'list-adapters', 'aliases', 'help', '--help', '-h', '--version', '-V']);
 const firstArg = process.argv[2];
 if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   const argv = process.argv.slice(2);
@@ -75,6 +75,14 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         console.log(`  ${a.description}`);
         console.log(`  scopes: ${a.scopes.join(', ')} (default: ${a.defaultScope})`);
       }
+    });
+
+  program
+    .command('aliases')
+    .description('Print a source-able bash/zsh block with shell aliases')
+    .action(async () => {
+      const { SHELL_ALIASES } = await import('./shell/aliases.js');
+      process.stdout.write(SHELL_ALIASES);
     });
 
   await program.parseAsync(process.argv).catch((err: unknown) => {

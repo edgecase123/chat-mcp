@@ -168,10 +168,31 @@ cursor-work  · Cursor      · online · seen 12s ago
 
 Commands: `/list`, `/dm <handle>`, `/back`, `/quit`. Plain text in DM mode sends to the current DM target. Rooms are a later slice.
 
-Convenience alias:
+### Shell integration
+
+`chat-mcp aliases` prints a source-able bash/zsh block that gives you:
+
+- `chat [handle]` — join the bus as a peer (defaults to `$CHAT_MCP_HANDLE`, else `$USER`).
+- `chat-install`, `chat-uninstall`, `chat-adapters` — thin wrappers over the corresponding subcommands.
+
+Install once:
 
 ```bash
-alias chat-mcp='npx -y github:edgecase123/chat-mcp#v0.1.0'
+mkdir -p ~/.chat-mcp
+npx -y github:edgecase123/chat-mcp aliases > ~/.chat-mcp/aliases.sh
+echo 'source ~/.chat-mcp/aliases.sh' >> ~/.zshrc   # or ~/.bashrc
+```
+
+Override the default handle in your rc before sourcing:
+
+```bash
+export CHAT_MCP_HANDLE="lee"
+```
+
+For a local checkout, point the wrappers at your build instead of `npx`:
+
+```bash
+export CHAT_MCP_BIN="node /path/to/chat-mcp/dist/index.js"
 ```
 
 ## For AI coding agents installing this on behalf of your user
