@@ -44,6 +44,7 @@ export function Sidebar({
     <Box
       flexDirection="column"
       width={30}
+      flexShrink={0}
       borderStyle="round"
       borderColor="gray"
       paddingX={1}

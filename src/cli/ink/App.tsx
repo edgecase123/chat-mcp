@@ -717,6 +717,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           <Box
             flexDirection="column"
             width={34}
+            flexShrink={0}
             borderStyle="round"
             borderColor="magenta"
             paddingX={1}
