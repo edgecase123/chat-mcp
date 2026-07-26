@@ -15,6 +15,7 @@ import { installRoomLeave } from './tools/room_leave.js';
 import { installRoomSend } from './tools/room_send.js';
 import { installRoomInbox } from './tools/room_inbox.js';
 import { installRoomList } from './tools/room_list.js';
+import { installRoomMembers } from './tools/room_members.js';
 import { installInboxResource } from './resources/inbox.js';
 import { checkWakeAdapter, prependAdapterWarning, type AdapterStatus } from './adapter-check.js';
 import { dbPath, notifyPathFor } from '../util/paths.js';
@@ -67,6 +68,7 @@ function buildInstructions(handle: string): string {
     `- \`room_send\` — post to a room you're a member of. Notifies every currently-online member.`,
     `- \`room_inbox\` — read unread messages, per-member watermark. Pass a specific \`room\` or omit to read across all your rooms.`,
     `- \`room_list\` — rooms you're in (or \`include_all=true\` to discover).`,
+    `- \`room_members\` — handles currently in a specific room (offline members included).`,
     ``,
     `Room-message notify envelope: \`{"id":<n>,"to":"#roomname","from":"<sender>","ts":<ms>}\`. The wake mechanism doesn't distinguish DMs from rooms — call \`inbox\` AND \`room_inbox\` (or wire both into your handler) on each wake.`,
     ``,
@@ -100,7 +102,7 @@ export async function runShim(opts: ShimOptions): Promise<void> {
   const adapterStatus = checkWakeAdapter(opts.handle);
   const ctx: ShimContext = { handle: opts.handle, session_id, db, notify, adapterStatus };
   const server = new McpServer(
-    { name: 'chat-mcp', version: '0.1.0' },
+    { name: 'chat-mcp', version: '0.2.0' },
     { instructions: prependAdapterWarning(buildInstructions(opts.handle), adapterStatus) },
   );
 
@@ -115,6 +117,7 @@ export async function runShim(opts: ShimOptions): Promise<void> {
   installRoomSend(server, ctx);
   installRoomInbox(server, ctx);
   installRoomList(server, ctx);
+  installRoomMembers(server, ctx);
   installInboxResource(server, ctx);
 
   const transport = new StdioServerTransport();
