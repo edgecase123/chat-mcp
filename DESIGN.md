@@ -85,11 +85,12 @@ Rooms, room membership, and presence pings are later-slice tables; the slice-1 s
 
 ## MCP surface
 
-### Tools (5)
+### Tools (6)
 
 | Tool | Args | Returns |
 |---|---|---|
-| `register` | `display_name?`, `metadata?` | `{ handle, session_id }` — idempotent, called automatically on shim boot from CLI arg |
+| `register` | `display_name?`, `metadata?` | `{ handle, session_id }` — idempotent, called automatically on shim boot from CLI arg. Rarely called directly by the agent; use `whoami` for self-discovery. |
+| `whoami` | — | `{ handle, display_name, session_id, kind, online_peers: [{ handle, display_name, kind }] }` — cheap self-discovery. Use to confirm registration and see who's currently on the bus. |
 | `list_agents` | `include_offline?=false` | `[{ handle, display_name, last_seen_at, online, kind }]` — `online` = shim process is still alive (verified via `kill -0 pid`); by default filters to online only |
 | `send` | `to`, `body` | `{ message_id, sent_at }` |
 | `inbox` | `since_id?`, `limit?=50` | `[{ id, from, body, sent_at }]` — sets `read_at` on returned rows |
@@ -213,25 +214,76 @@ The CLI runs `fs.watch(~/.chat-mcp/notify)` the same way the agent shims do. Whe
 
 No TUI framework (ncurses, bubbletea, textual). Slice 1 is line-oriented — `readline` + ANSI escapes for prompt redraw. If a richer TUI is ever wanted, it lands as a separate optional subcommand (`chat-mcp tui`) and doesn't replace the plain CLI. Rich content (attachments, formatting) is out of scope for the CLI at every slice — it stays text-first.
 
-## Install / config UX
+## Invocation modes
 
-Two invocation modes from the same npm package:
+Two modes from the same package, selected by the first positional arg:
 
-- **MCP shim mode** (spawned by an MCP client — Claude Code, Cursor, Codex):
+- **MCP shim mode** (spawned by an MCP client — Claude Code, Cursor, Codex; positional arg absent):
   ```json
   {
     "mcpServers": {
-      "chat": { "command": "npx", "args": ["-y", "chat-mcp", "--handle", "claude1"] }
+      "chat": {
+        "command": "npx",
+        "args": ["-y", "github:you/chat-mcp#v0.1.0", "--handle", "claude1"]
+      }
     }
   }
   ```
-- **User CLI mode** (run from a shell):
-  ```
-  npx -y chat-mcp cli               # handle defaults to "user"
-  npx -y chat-mcp cli --handle lee  # custom handle
+- **User CLI mode** (run from a shell; positional arg is `cli`):
+  ```bash
+  npx -y github:you/chat-mcp#v0.1.0 cli                # handle defaults to "user"
+  npx -y github:you/chat-mcp#v0.1.0 cli --handle lee   # custom handle
   ```
 
-Behaviour is selected by the first positional arg (`cli` vs. absent). No global install required; state lives entirely in `~/.chat-mcp/`. Uninstall = delete `~/.chat-mcp/` and remove MCP client entries.
+No global install required; state lives entirely in `~/.chat-mcp/`. Uninstall = delete `~/.chat-mcp/` and remove MCP client entries.
+
+## Registering an agent (operator flow)
+
+One-time setup, performed by the human operator once per agent they want on the bus.
+
+**1. Pick a handle.** Any unique string on the local bus. Convention: short and stable — `claude-main`, `cursor-work`, `codex-1`.
+
+**2. Add the MCP server to the client's config.** Location and syntax depend on the client:
+
+**Claude Code** — global `~/.claude.json`, project-scoped `.mcp.json` in the working directory, or via the CLI:
+```bash
+claude mcp add chat -- npx -y github:you/chat-mcp#v0.1.0 --handle claude-main
+```
+
+**Cursor** — `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
+```json
+{
+  "mcpServers": {
+    "chat": {
+      "command": "npx",
+      "args": ["-y", "github:you/chat-mcp#v0.1.0", "--handle", "cursor-work"]
+    }
+  }
+}
+```
+
+**Codex CLI / ChatGPT Desktop** — same `command` / `args` shape, different config file (Codex uses `~/.codex/config.toml`).
+
+**3. Restart the MCP client.** First launch clones + npm-installs (~10–20 s, dominated by `better-sqlite3`); subsequent launches ~200 ms.
+
+**4. Verify registration.** In the client, ask the agent: *"Call the `chat.whoami` tool."* It should return `{ handle: "claude-main", session_id, online_peers: […] }`. Also confirm `chat.list_agents`, `chat.send`, `chat.inbox`, `chat.wait_for_message` appear in its tool list. MCP clients namespace tools by server name — hence the `chat.` prefix.
+
+**5. Give the agent context (optional but recommended).** Add a line to `CLAUDE.md`, `.cursorrules`, or the equivalent system prompt:
+
+> You're registered on the chat-mcp bus as `claude-main`. Use `chat.list_agents` to see who else is online, `chat.send` to message them, and `chat.inbox` (or `chat.wait_for_message` when actively awaiting a reply) to receive.
+
+Without this hint, agents will use the tools when explicitly asked but won't proactively check for messages.
+
+### Multi-agent case (concurrent sessions of the same client)
+
+Two Claude Code sessions can't share one global MCP config or they'll both boot with the same handle. Use **project-scoped `.mcp.json`** in each working directory:
+
+- `~/dev/project-a/.mcp.json` → `--handle claude1`
+- `~/dev/project-b/.mcp.json` → `--handle claude2`
+
+Each Claude Code process reads the config from its cwd and spawns its own shim with its own handle. They see each other via `chat.list_agents`.
+
+The same pattern works for concurrent Cursor windows via `.cursor/mcp.json` per project.
 
 ## Testable acceptance criteria (slice 1)
 
