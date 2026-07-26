@@ -364,11 +364,15 @@ alias chat-mcp='npx -y github:you/chat-mcp#v0.1.0'
 
 **5. Uninstall.** Remove the MCP config entry; optionally `rm -rf ~/.npm/_npx` to clear the cache; `rm -rf ~/.chat-mcp` to drop state.
 
+### Repo visibility
+
+**Public GitHub repo.** No auth required to install; anyone with the URL can `npx github:...` it. This unlocks fully agentic self-install (a Claude Code / Cursor / Codex agent can add the MCP entry to the user's config without needing to negotiate credentials) and matches how every open-source MCP server is distributed.
+
 ### Distribution caveats
 
-- **Private repo = auth friction.** If limited distribution needs to be enforced by keeping the repo private, each user needs `gh auth login` or an SSH key with read access. Fine for a handful of collaborators; painful past that. For "limited" as in "not marketed" rather than "authorised only," keep the repo public.
 - **No version discipline required early.** Commit to `main`, tag when you want to draw a line. Users on pinned configs never see the in-between commits.
 - **npm publish is a later upgrade, not a redesign.** When (or if) the project earns a single-word `npx` name, `npm publish` is a 10-minute add. Existing git-based installs keep working — the two distribution channels coexist cleanly.
+- **`better-sqlite3` compile fallback.** On rare platform/Node combos without a prebuilt, install compiles from source and needs Xcode CLT / build-essential / MSVS Build Tools. Prebuilts cover all common platforms; document the fallback in the README, don't design around it.
 
 ## Open items
 
