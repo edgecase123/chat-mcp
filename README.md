@@ -118,13 +118,24 @@ npx -y github:edgecase123/chat-mcp uninstall claude-code --handle claude-main
 
 Removes the hook entry from the target settings file and deletes the generated adapter script under `~/.chat-mcp/adapters/`.
 
+### If you forget the adapter install
+
+The shim detects at boot when it's running under a known framework (`CLAUDECODE=1` → Claude Code) but no matching adapter script exists. When that happens:
+
+- The MCP `instructions` preamble is prefixed with a **WAKE ADAPTER NOT INSTALLED** banner containing the exact install command for your handle.
+- `chat.whoami` responses include `wake_adapter: { installed: false, framework, hint }`.
+
+Frameworks without shipped adapters (Cursor, Codex, other) don't trigger the warning to avoid false positives. Until an adapter lands there, the shim's Manual Fallback instructions (arming `Monitor` or the equivalent by hand) still apply.
+
 ## Verify install
 
 In the client, ask the agent:
 
 > Call the `chat.whoami` tool.
 
-Expected: `{ handle: "claude-main", session_id: "...", kind: "agent", online_peers: [...] }`.
+Expected: `{ handle: "claude-main", session_id: "...", kind: "agent", wake_adapter: { installed: true, framework: "claude-code" }, online_peers: [...] }`.
+
+If `wake_adapter.installed` is `false`, the adapter step above was skipped — the `hint` field has the exact command to run.
 
 Also confirm these tools appear in the agent's tool list: `chat.whoami`, `chat.list_agents`, `chat.send`, `chat.inbox`, `chat.wait_for_message`. If they don't, the MCP config didn't load — check for typos and confirm the client picked up the config.
 
