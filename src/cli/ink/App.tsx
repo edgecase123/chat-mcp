@@ -14,6 +14,7 @@ import { Header } from './panes/Header.js';
 import { AlertLane } from './panes/AlertLane.js';
 import type { Alert } from './panes/AlertLane.js';
 import { MessagesPane } from './panes/MessagesPane.js';
+import { ScrollableMessageList } from './panes/ScrollableMessageList.js';
 import { WhoPane } from './panes/WhoPane.js';
 import { HelpPane } from './panes/HelpPane.js';
 import { RoomsBrowserPane } from './panes/RoomsBrowserPane.js';
@@ -73,7 +74,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           `SELECT * FROM messages
            WHERE (from_handle = ? AND to_handle = ?)
               OR (from_handle = ? AND to_handle = ?)
-           ORDER BY id DESC LIMIT 30`,
+           ORDER BY id DESC LIMIT 200`,
         )
         .all(handle, view.peer, view.peer, handle)
         .reverse()
@@ -90,7 +91,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     }
     return db
       .prepare(
-        `SELECT * FROM messages WHERE to_handle = ? ORDER BY id DESC LIMIT 30`,
+        `SELECT * FROM messages WHERE to_handle = ? ORDER BY id DESC LIMIT 200`,
       )
       .all(view.room)
       .reverse()
@@ -114,7 +115,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
       .prepare(
         `SELECT * FROM messages
          WHERE from_handle = ? OR to_handle = ?
-         ORDER BY id DESC LIMIT 10`,
+         ORDER BY id DESC LIMIT 100`,
       )
       .all(watchPeer, watchPeer)
       .reverse()
@@ -589,17 +590,24 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             {watchMessages.length === 0 ? (
               <Text dimColor>(no traffic)</Text>
             ) : (
-              watchMessages.map((m) => (
-                <Box key={m.id} flexDirection="column">
-                  <Text>
-                    <Text bold color={m.from_handle === watchPeer ? 'green' : 'cyan'}>
-                      {m.from_handle}
-                    </Text>{' '}
-                    <Text dimColor>→ {m.to_handle} · {timeOf(m.sent_at)}</Text>
-                  </Text>
-                  <Text>  {m.body}</Text>
-                </Box>
-              ))
+              <ScrollableMessageList
+                messages={watchMessages}
+                meHandle={handle}
+                viewportRows={10}
+                focused={showWatch}
+                requireShift={true}
+                renderRow={(m) => (
+                  <Box key={m.id} flexDirection="column">
+                    <Text>
+                      <Text bold color={m.from_handle === watchPeer ? 'green' : 'cyan'}>
+                        {m.from_handle}
+                      </Text>{' '}
+                      <Text dimColor>→ {m.to_handle} · {timeOf(m.sent_at)}</Text>
+                    </Text>
+                    <Text>  {m.body}</Text>
+                  </Box>
+                )}
+              />
             )}
           </Box>
         )}

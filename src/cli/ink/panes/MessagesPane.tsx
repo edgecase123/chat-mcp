@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import type { Message, MessageKind } from '../../../storage/dao.js';
 import type { View } from '../views.js';
 import { HomeEmptyState, DmEmptyState, RoomEmptyState } from './EmptyState.js';
+import { ScrollableMessageList } from './ScrollableMessageList.js';
 
 const KIND_LABEL: Record<MessageKind, string | null> = {
   chat: null,
@@ -18,6 +19,28 @@ const KIND_COLOR: Record<MessageKind, string | undefined> = {
 
 function timeOf(ts: number): string {
   return new Date(ts).toTimeString().slice(0, 8);
+}
+
+function renderRow(m: Message, meHandle: string): React.ReactElement {
+  return (
+    <Box key={m.id} flexDirection="column" marginBottom={1}>
+      <Text>
+        <Text bold color={m.from_handle === meHandle ? 'cyan' : 'green'}>
+          {m.from_handle}
+        </Text>{' '}
+        <Text dimColor>{timeOf(m.sent_at)}</Text>
+        {KIND_LABEL[m.kind] && (
+          <>
+            {' '}
+            <Text color={KIND_COLOR[m.kind]} bold>
+              [{KIND_LABEL[m.kind]}]
+            </Text>
+          </>
+        )}
+      </Text>
+      <Text color={KIND_COLOR[m.kind]}>  {m.body}</Text>
+    </Box>
+  );
 }
 
 interface MessagesPaneProps {
@@ -48,25 +71,13 @@ export function MessagesPane({ view, messages, meHandle }: MessagesPaneProps): R
           view.kind === 'room' ? <RoomEmptyState room={view.room} /> :
           null
         ) : (
-          messages.map((m) => (
-            <Box key={m.id} flexDirection="column" marginBottom={1}>
-              <Text>
-                <Text bold color={m.from_handle === meHandle ? 'cyan' : 'green'}>
-                  {m.from_handle}
-                </Text>{' '}
-                <Text dimColor>{timeOf(m.sent_at)}</Text>
-                {KIND_LABEL[m.kind] && (
-                  <>
-                    {' '}
-                    <Text color={KIND_COLOR[m.kind]} bold>
-                      [{KIND_LABEL[m.kind]}]
-                    </Text>
-                  </>
-                )}
-              </Text>
-              <Text color={KIND_COLOR[m.kind]}>  {m.body}</Text>
-            </Box>
-          ))
+          <ScrollableMessageList
+            messages={messages}
+            meHandle={meHandle}
+            viewportRows={20}
+            focused={true}
+            renderRow={renderRow}
+          />
         )}
       </Box>
     </>
