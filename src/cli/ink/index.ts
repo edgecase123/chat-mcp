@@ -6,7 +6,14 @@ import { NotifyBus } from '../../notify/bus.js';
 import * as dao from '../../storage/dao.js';
 import { App } from './App.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
+
+/** DEC private-mode sequence: enter alternate screen buffer (save cursor +
+ *  switch to a fresh scroll region so the app owns the visible viewport and
+ *  does not pollute the user's terminal scrollback). */
+const ENTER_ALT_SCREEN = '\x1b[?1049h';
+/** Restore original scrollback + cursor. */
+const EXIT_ALT_SCREEN = '\x1b[?1049l';
 
 export interface InkCliOptions {
   handle: string;
@@ -33,16 +40,38 @@ export async function runInkCli(opts: InkCliOptions): Promise<void> {
     metadata: { kind: 'human' },
   });
 
-  const { waitUntilExit } = render(
-    React.createElement(App, { handle: opts.handle, db, notify, version: VERSION }),
-  );
+  // Full-screen: switch to alternate buffer so the Ink app doesn't scroll
+  // frames into the terminal's history. Register cleanup on every reasonable
+  // exit path — normal exit, Ctrl-C, kill, uncaught error.
+  process.stdout.write(ENTER_ALT_SCREEN);
+  let exited = false;
+  const restoreTerminal = (): void => {
+    if (exited) return;
+    exited = true;
+    process.stdout.write(EXIT_ALT_SCREEN);
+  };
+  process.on('exit', restoreTerminal);
+  process.on('SIGINT', () => { restoreTerminal(); process.exit(130); });
+  process.on('SIGTERM', () => { restoreTerminal(); process.exit(143); });
+  process.on('uncaughtException', (err) => {
+    restoreTerminal();
+    console.error(err);
+    process.exit(1);
+  });
 
-  await waitUntilExit();
-
-  await notify.close();
   try {
-    db.close();
-  } catch {
-    // Best-effort
+    const { waitUntilExit } = render(
+      React.createElement(App, { handle: opts.handle, db, notify, version: VERSION }),
+    );
+
+    await waitUntilExit();
+  } finally {
+    restoreTerminal();
+    await notify.close();
+    try {
+      db.close();
+    } catch {
+      // Best-effort
+    }
   }
 }
