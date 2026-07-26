@@ -42,7 +42,7 @@ function timeOf(ts: number): string {
  * empty. Input skips inserting these so they don't echo into the field.
  * Keep in sync with the empty-input branches of the global useInput below.
  */
-const EMPTY_BUFFER_HOTKEYS = ['?', 'R', 'r', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+const EMPTY_BUFFER_HOTKEYS = ['?', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
 
 /**
  * Ink POC — chat + agent coordination console. Two/three-pane layout:
@@ -498,11 +498,11 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   useInput((raw, key) => {
     if (key.ctrl && raw === 'c') exit();
     if (key.ctrl && raw === 'k' && !paletteOpen) return setPaletteOpen(true);
+    if (key.ctrl && raw === 'r' && !paletteOpen) return setView({ kind: 'rooms' });
 
     // Empty-input hotkeys — must not fire while palette is open.
     if (input.value.length > 0 || paletteOpen) return;
     if (raw === '?') return setView({ kind: 'help' });
-    if (raw === 'R' || raw === 'r') return setView({ kind: 'rooms' });
     if (/^[1-9]$/.test(raw)) {
       const n = parseInt(raw, 10) - 1;
       // Order: peers first, then joined rooms, then discover rooms.
@@ -566,7 +566,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     // (2 lines each) plus 3 rows for scroll-indicator/footer.
     const copyViewport = Math.max(3, Math.floor((terminalRows - 3) / 2));
     return (
-      <Box flexDirection="column" width="100%" height={terminalRows} overflow="hidden">
+      <Box flexDirection="column" width="100%">
         <CopyPane
           messages={messages}
           viewportRows={copyViewport}
@@ -577,7 +577,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   }
 
   return (
-    <Box flexDirection="column" width="100%" height={terminalRows} overflow="hidden">
+    <Box flexDirection="column" width="100%">
       <Header handle={handle} version={version} status={meStatus} focus={meFocus} />
 
       <AlertLane alerts={alerts} />
@@ -597,7 +597,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
       )}
 
       {/* Body: sidebar + main pane + optional watch pane */}
-      <Box flexGrow={1} overflow="hidden">
+      <Box flexGrow={1}>
         <Sidebar
           handle={handle}
           view={view}

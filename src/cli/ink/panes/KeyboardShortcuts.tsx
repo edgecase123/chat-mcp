@@ -14,7 +14,7 @@ export function KeyboardShortcuts(): React.ReactElement {
       <Text>  <Text color="cyan" bold>Tab</Text>      complete peer/room in current arg</Text>
       <Text>  <Text color="cyan" bold>↑↓</Text>       navigate autocomplete / palette</Text>
       <Text>  <Text color="cyan" bold>1-9</Text>      jump to sidebar entry (when input empty)</Text>
-      <Text>  <Text color="cyan" bold>R</Text>        open /rooms browser (when input empty)</Text>
+      <Text>  <Text color="cyan" bold>Ctrl-R</Text>   open /rooms browser</Text>
       <Text>  <Text color="cyan" bold>?</Text>        open /help (when input empty)</Text>
       <Text>  <Text color="cyan" bold>Home/End</Text>  cursor start/end of line (preferred)</Text>
       <Text>  <Text color="cyan" bold>Ctrl-A/E</Text>  same (some terminals swallow — e.g. screen)</Text>
