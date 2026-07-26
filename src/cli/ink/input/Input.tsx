@@ -11,6 +11,14 @@ export interface InputProps {
   onUp?: () => void;
   onDown?: () => void;
   prompt?: string;
+  /**
+   * Characters the parent claims as hotkeys when the buffer is empty.
+   * When any listed char is typed AND the buffer is empty, Input skips the
+   * insert so the parent's global useInput handler owns the keystroke without
+   * echoing the char into the input. Necessary because Ink dispatches every
+   * key event to every mounted useInput handler.
+   */
+  emptyBufferHotkeys?: readonly string[];
 }
 
 function isWordChar(ch: string): boolean {
@@ -41,6 +49,7 @@ export function Input({
   onUp,
   onDown,
   prompt = '> ',
+  emptyBufferHotkeys,
 }: InputProps): React.ReactElement {
   useInput((raw, key) => {
     if (key.return) return onSubmit(value);
@@ -98,6 +107,9 @@ export function Input({
 
     // Printable insert. Ink hands us `raw` as the pasted/typed string.
     if (raw && !key.ctrl && !key.meta) {
+      // If buffer is empty and this char is claimed by the parent (e.g. sidebar
+      // jump digits or ? / R hotkeys), skip the insert so it doesn't echo.
+      if (value.length === 0 && emptyBufferHotkeys && emptyBufferHotkeys.includes(raw)) return;
       const next = value.slice(0, cursor) + raw + value.slice(cursor);
       return onChange(next, cursor + raw.length);
     }

@@ -35,6 +35,13 @@ function timeOf(ts: number): string {
 }
 
 /**
+ * Characters our global useInput handler claims when the input buffer is
+ * empty. Input skips inserting these so they don't echo into the field.
+ * Keep in sync with the empty-input branches of the global useInput below.
+ */
+const EMPTY_BUFFER_HOTKEYS = ['?', 'R', 'r', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+
+/**
  * Ink POC — chat + agent coordination console. Two/three-pane layout:
  * sidebar (agents + rooms + optional watch peer) + main pane + optional
  * mirror pane + alert lane + input bar.
@@ -657,6 +664,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                 if (completions.length > 0) return setCompletionIndex((i) => Math.min(completions.length - 1, i + 1));
                 historyDown();
               }}
+              emptyBufferHotkeys={EMPTY_BUFFER_HOTKEYS}
             />
           </Box>
         </Box>
