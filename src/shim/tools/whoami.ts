@@ -2,13 +2,13 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import * as dao from '../../storage/dao.js';
 import type { ShimContext } from '../index.js';
 
-export function registerWhoami(server: McpServer, ctx: ShimContext): void {
+export function installWhoami(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
     'whoami',
     {
       title: 'Who am I on the chat bus?',
       description:
-        'Return this shim\'s handle, session_id, and kind, plus the current list of online peers on the chat bus. Cheap self-discovery — call this after your MCP client starts to confirm you\'re registered and see who else is available to chat with.',
+        "Return this shim's handle, session_id, kind, and the current list of online peers. Cheap self-discovery — call this after your MCP client starts to confirm you're registered and see who else is available.",
       inputSchema: {},
     },
     async () => {

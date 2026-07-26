@@ -5,7 +5,13 @@ import type { Database as Db } from 'better-sqlite3';
 import { openDb } from '../storage/db.js';
 import { NotifyBus } from '../notify/bus.js';
 import * as dao from '../storage/dao.js';
-import { registerWhoami } from './tools/whoami.js';
+import { installWhoami } from './tools/whoami.js';
+import { installRegister } from './tools/register.js';
+import { installListAgents } from './tools/list_agents.js';
+import { installSend } from './tools/send.js';
+import { installInbox } from './tools/inbox.js';
+import { installWaitForMessage } from './tools/wait_for_message.js';
+import { installInboxResource } from './resources/inbox.js';
 
 export interface ShimOptions {
   handle: string;
@@ -34,7 +40,13 @@ export async function runShim(opts: ShimOptions): Promise<void> {
   const ctx: ShimContext = { handle: opts.handle, session_id, db, notify };
   const server = new McpServer({ name: 'chat-mcp', version: '0.0.1' });
 
-  registerWhoami(server, ctx);
+  installWhoami(server, ctx);
+  installRegister(server, ctx);
+  installListAgents(server, ctx);
+  installSend(server, ctx);
+  installInbox(server, ctx);
+  installWaitForMessage(server, ctx);
+  installInboxResource(server, ctx);
 
   const transport = new StdioServerTransport();
 
