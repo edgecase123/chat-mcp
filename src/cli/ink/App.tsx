@@ -15,6 +15,8 @@ import { AlertLane } from './panes/AlertLane.js';
 import type { Alert } from './panes/AlertLane.js';
 import { MessagesPane } from './panes/MessagesPane.js';
 import { WhoPane } from './panes/WhoPane.js';
+import { HelpPane } from './panes/HelpPane.js';
+import { RoomsBrowserPane } from './panes/RoomsBrowserPane.js';
 import { Sidebar } from './panes/Sidebar.js';
 import { Palette } from './palette/Palette.js';
 
@@ -244,15 +246,13 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           exit();
           return;
         case 'help':
-          setStatus(
-            '/dm /join #x /leave /back /rooms /who /set-status <s> [focus...] /dispatch <peer> <text> /broadcast #room <text> /alert <target> <text> /watch <peer> /unwatch /ack /quit',
-          );
+          setView({ kind: 'help' });
           return;
         case 'back':
           setView({ kind: 'home' });
           return;
         case 'rooms':
-          setView({ kind: 'home' });
+          setView({ kind: 'rooms' });
           return;
         case 'who':
           setView({ kind: 'who' });
@@ -403,7 +403,12 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
 
   useInput((raw, key) => {
     if (key.ctrl && raw === 'c') exit();
-    if (key.ctrl && raw === 'k' && !paletteOpen) setPaletteOpen(true);
+    if (key.ctrl && raw === 'k' && !paletteOpen) return setPaletteOpen(true);
+
+    // Empty-input hotkeys — must not fire while palette is open.
+    if (input.value.length > 0 || paletteOpen) return;
+    if (raw === '?') return setView({ kind: 'help' });
+    if (raw === 'R' || raw === 'r') return setView({ kind: 'rooms' });
   });
 
   const showWatch = watchPeer !== null;
@@ -474,6 +479,26 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         >
           {view.kind === 'who' ? (
             <WhoPane peers={peers} meHandle={handle} />
+          ) : view.kind === 'help' ? (
+            <HelpPane />
+          ) : view.kind === 'rooms' ? (
+            <RoomsBrowserPane
+              db={db}
+              handle={handle}
+              rooms={allRoomsList.filter((r) => r.member_count > 0)}
+              onOpen={(room) => setView({ kind: 'room', room })}
+              onJoin={(room) => {
+                const result = dao.joinRoom(db, room, handle);
+                if (result.was_new_member && result.system_message) {
+                  for (const member of dao.roomMembers(db, room)) {
+                    if (member === handle) continue;
+                    notifyPeer(member, { id: result.system_message.id, to: room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at });
+                  }
+                }
+                setView({ kind: 'room', room });
+                setTick((t) => t + 1);
+              }}
+            />
           ) : (
             <MessagesPane view={view} messages={messages} meHandle={handle} />
           )}
