@@ -116,15 +116,17 @@ export async function runCli(opts: CliOptions): Promise<void> {
     switch (cmd) {
       case 'help':
         console.log([
-          `  ${cyan('/list')}             list online peers`,
-          `  ${cyan('/dm')} <handle>      enter DM mode with a peer`,
-          `  ${cyan('/rooms')} [--all]    list your rooms (or every room)`,
-          `  ${cyan('/members')} [#room]  list members of a room (default: current)`,
-          `  ${cyan('/join')} #<name>     join a room (auto-creates)`,
-          `  ${cyan('/leave')}            leave the current room (removes membership)`,
-          `  ${cyan('/back')}             exit DM or room mode (stay a member)`,
-          `  ${cyan('/whoami')}           show your own handle`,
-          `  ${cyan('/quit')}             exit`,
+          `  ${cyan('/list')}                    list online peers`,
+          `  ${cyan('/dm')} <handle>             enter DM mode with a peer`,
+          `  ${cyan('/rooms')} [--all]           list your rooms (or every room)`,
+          `  ${cyan('/rooms list')} [#room]      list participants of a room (default: current)`,
+          `  ${cyan('/rooms delete')} #<name>    delete a room (must be a member)`,
+          `  ${cyan('/rooms boot')} @<handle>    remove a participant from the current room`,
+          `  ${cyan('/join')} #<name>            join a room (auto-creates)`,
+          `  ${cyan('/leave')}                   leave the current room (removes membership)`,
+          `  ${cyan('/back')}                    exit DM or room mode (stay a member)`,
+          `  ${cyan('/whoami')}                  show your own handle`,
+          `  ${cyan('/quit')}                    exit`,
           dim('  (plain text sends to the current DM target or room)'),
         ].join('\n'));
         break;
@@ -135,10 +137,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
         doDm(args[0]);
         break;
       case 'rooms':
-        doRooms(args.includes('--all'));
-        break;
-      case 'members':
-        doMembers(args[0]);
+        doRoomsDispatch(args);
         break;
       case 'join':
         doJoin(args[0]);
@@ -176,7 +175,30 @@ export async function runCli(opts: CliOptions): Promise<void> {
     }
   };
 
-  const doRooms = (includeAll: boolean): void => {
+  const doRoomsDispatch = (args: string[]): void => {
+    // No subcommand → legacy "list your rooms" (preserves back-compat with
+    // /rooms and /rooms --all).
+    const sub = args[0];
+    if (!sub || sub === '--all') {
+      doRoomsIndex(args.includes('--all'));
+      return;
+    }
+    switch (sub) {
+      case 'list':
+        doRoomsListMembers(args[1]);
+        break;
+      case 'delete':
+        doRoomsDelete(args[1]);
+        break;
+      case 'boot':
+        doRoomsBoot(args[1]);
+        break;
+      default:
+        console.log(dim(`  unknown /rooms subcommand: ${sub} (try /help)`));
+    }
+  };
+
+  const doRoomsIndex = (includeAll: boolean): void => {
     const rooms = includeAll ? dao.allRooms(db) : dao.myRooms(db, opts.handle);
     if (rooms.length === 0) {
       console.log(
@@ -191,10 +213,10 @@ export async function runCli(opts: CliOptions): Promise<void> {
     }
   };
 
-  const doMembers = (roomArg: string | undefined): void => {
+  const doRoomsListMembers = (roomArg: string | undefined): void => {
     const name = roomArg ?? (mode.kind === 'room' ? mode.roomName : undefined);
     if (!name) {
-      console.log(dim('  usage: /members #<room>  (or /join a room first)'));
+      console.log(dim('  usage: /rooms list #<room>  (or /join a room first)'));
       return;
     }
     try {
@@ -212,6 +234,75 @@ export async function runCli(opts: CliOptions): Promise<void> {
       const marker = handle === opts.handle ? cyan('▸') : ' ';
       console.log(`  ${marker} ${handle}`);
     }
+  };
+
+  const doRoomsDelete = (roomArg: string | undefined): void => {
+    if (!roomArg) {
+      console.log(dim('  usage: /rooms delete #<room>'));
+      return;
+    }
+    try {
+      assertRoomName(roomArg);
+    } catch (e) {
+      console.log(dim(`  ${(e as Error).message}`));
+      return;
+    }
+    if (!dao.isRoomMember(db, roomArg, opts.handle)) {
+      console.log(dim(`  cannot delete ${roomArg}: you are not a member`));
+      return;
+    }
+    const deleted = dao.deleteRoom(db, roomArg);
+    if (deleted) {
+      if (mode.kind === 'room' && mode.roomName === roomArg) {
+        mode = { kind: 'top' };
+      }
+      console.log(dim(`  deleted ${roomArg}`));
+    } else {
+      console.log(dim(`  ${roomArg} does not exist`));
+    }
+  };
+
+  const doRoomsBoot = (targetArg: string | undefined): void => {
+    if (mode.kind !== 'room' || !mode.roomName) {
+      console.log(dim('  usage: /rooms boot @<handle>  (must be in a room — /join first)'));
+      return;
+    }
+    if (!targetArg) {
+      console.log(dim('  usage: /rooms boot @<handle>'));
+      return;
+    }
+    const target = targetArg.startsWith('@') ? targetArg.slice(1) : targetArg;
+    const roomName = mode.roomName;
+    if (target === opts.handle) {
+      console.log(dim('  cannot boot yourself — /leave instead'));
+      return;
+    }
+    if (!dao.isRoomMember(db, roomName, opts.handle)) {
+      console.log(dim(`  you are no longer a member of ${roomName}`));
+      return;
+    }
+    if (!dao.isRoomMember(db, roomName, target)) {
+      console.log(dim(`  ${target} is not a member of ${roomName}`));
+      return;
+    }
+    dao.bootFromRoom(db, roomName, target);
+
+    const now = Date.now();
+    const body = `${opts.handle} booted ${target} from ${roomName}`;
+    const sysInfo = db.prepare(
+      `INSERT INTO messages (from_handle, to_handle, body, sent_at) VALUES (?, ?, ?, ?)`,
+    ).run(dao.SYSTEM_HANDLE, roomName, body, now);
+    const sysId = Number(sysInfo.lastInsertRowid);
+    // Advance the caller's watermark past the announcement so it doesn't
+    // echo back to them on next flushInbox.
+    dao.advanceRoomRead(db, roomName, opts.handle, sysId);
+
+    const remaining = dao.roomMembers(db, roomName);
+    for (const member of remaining) {
+      if (member === opts.handle) continue;
+      notifyPeer(member, { id: sysId, to: roomName, from: dao.SYSTEM_HANDLE, ts: now });
+    }
+    console.log(dim(`  booted ${target} from ${roomName}`));
   };
 
   const doDm = (target: string | undefined): void => {

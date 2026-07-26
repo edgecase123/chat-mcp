@@ -24,7 +24,7 @@ async function runShimEntry(handle: string | undefined): Promise<void> {
 // This is the entry shape used by .mcp.json / claude mcp add, so we detect it
 // before commander sees the args to avoid --handle colliding with subcommand
 // options of the same name.
-const KNOWN_SUBCOMMANDS = new Set(['cli', 'send', 'inbox', 'list', 'members', 'install', 'uninstall', 'list-adapters', 'aliases', 'help', '--help', '-h', '--version', '-V']);
+const KNOWN_SUBCOMMANDS = new Set(['cli', 'send', 'inbox', 'list', 'members', 'delete-room', 'boot', 'install', 'uninstall', 'list-adapters', 'aliases', 'help', '--help', '-h', '--version', '-V']);
 const firstArg = process.argv[2];
 if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   const argv = process.argv.slice(2);
@@ -97,6 +97,26 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .action(async (room: string, opts: { json?: boolean }) => {
       const { runMembers } = await import('./oneshot/members.js');
       await runMembers({ room, json: opts.json });
+    });
+
+  program
+    .command('delete-room <room>')
+    .description('Delete a room entirely (caller must be a member)')
+    .option('--from <handle>', 'caller handle (default: $CHAT_MCP_HANDLE)')
+    .option('--json', 'emit {room, deleted} as JSON', false)
+    .action(async (room: string, opts: { from?: string; json?: boolean }) => {
+      const { runDeleteRoom } = await import('./oneshot/delete_room.js');
+      await runDeleteRoom({ room, from: opts.from, json: opts.json });
+    });
+
+  program
+    .command('boot <room> <handle>')
+    .description('Boot a participant from a room (caller must be a member; posts a system announcement)')
+    .option('--from <handle>', 'caller handle (default: $CHAT_MCP_HANDLE)')
+    .option('--json', 'emit {room, handle, removed} as JSON', false)
+    .action(async (room: string, handle: string, opts: { from?: string; json?: boolean }) => {
+      const { runBoot } = await import('./oneshot/boot.js');
+      await runBoot({ room, handle, from: opts.from, json: opts.json });
     });
 
   program

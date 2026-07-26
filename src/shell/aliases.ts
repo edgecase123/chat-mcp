@@ -88,6 +88,26 @@ chat-members() {
   _chat_mcp_bin members "\$@"
 }
 
+# Delete a room entirely (caller must be a member).
+#   chat-delete-room '#leagues'
+chat-delete-room() {
+  if [ "\$#" -lt 1 ]; then
+    echo "usage: chat-delete-room '#room'" >&2
+    return 2
+  fi
+  _chat_mcp_bin delete-room --from "\$CHAT_MCP_HANDLE" "\$@"
+}
+
+# Boot a participant from a room (caller must be a member).
+#   chat-boot '#leagues' bob
+chat-boot() {
+  if [ "\$#" -lt 2 ]; then
+    echo "usage: chat-boot '#room' <handle>" >&2
+    return 2
+  fi
+  _chat_mcp_bin boot --from "\$CHAT_MCP_HANDLE" "\$@"
+}
+
 # Print own handle (quick sanity check).
 chat-me()    { printf '%s\\n' "\$CHAT_MCP_HANDLE"; }
 
