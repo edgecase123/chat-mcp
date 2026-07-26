@@ -1,7 +1,12 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { stateDir, notifyPathFor, ensureStateDir } from '../util/paths.js';
+import {
+  adapterScriptPath,
+  adaptersDir,
+  ensureStateDir,
+  notifyPathFor,
+} from '../util/paths.js';
 import { detectChatHandleInCwd } from '../util/mcp-config.js';
 import type { Adapter, AdapterInstallOptions, AdapterResult } from './types.js';
 
@@ -10,7 +15,6 @@ const SCOPES = ['user', 'project', 'local'] as const;
 type Scope = (typeof SCOPES)[number];
 
 const MARKER_PREFIX = 'chat-mcp adapter';
-const SCRIPT_SUBDIR = 'adapters';
 
 interface CommandHookEntry {
   type?: string;
@@ -45,7 +49,7 @@ function settingsPathForScope(scope: Scope, cwd: string): string {
 }
 
 function scriptPath(handle: string): string {
-  return join(stateDir(), SCRIPT_SUBDIR, `${ADAPTER_NAME}-${handle}.sh`);
+  return adapterScriptPath(ADAPTER_NAME, handle);
 }
 
 function buildAdditionalContext(handle: string): string {
@@ -202,7 +206,7 @@ async function install(opts: AdapterInstallOptions): Promise<AdapterResult> {
   const script = scriptPath(opts.handle);
 
   ensureStateDir();
-  mkdirSync(join(stateDir(), SCRIPT_SUBDIR), { recursive: true });
+  mkdirSync(adaptersDir(), { recursive: true });
   writeFileSync(script, buildScript(opts.handle));
   chmodSync(script, 0o755);
 

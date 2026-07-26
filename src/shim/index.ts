@@ -12,6 +12,7 @@ import { installSend } from './tools/send.js';
 import { installInbox } from './tools/inbox.js';
 import { installWaitForMessage } from './tools/wait_for_message.js';
 import { installInboxResource } from './resources/inbox.js';
+import { checkWakeAdapter, prependAdapterWarning, type AdapterStatus } from './adapter-check.js';
 import { dbPath, notifyPathFor } from '../util/paths.js';
 
 export interface ShimOptions {
@@ -64,6 +65,7 @@ export interface ShimContext {
   session_id: string;
   db: Db;
   notify: NotifyBus;
+  adapterStatus: AdapterStatus;
 }
 
 export async function runShim(opts: ShimOptions): Promise<void> {
@@ -79,10 +81,11 @@ export async function runShim(opts: ShimOptions): Promise<void> {
     metadata: { kind: 'agent' },
   });
 
-  const ctx: ShimContext = { handle: opts.handle, session_id, db, notify };
+  const adapterStatus = checkWakeAdapter(opts.handle);
+  const ctx: ShimContext = { handle: opts.handle, session_id, db, notify, adapterStatus };
   const server = new McpServer(
     { name: 'chat-mcp', version: '0.0.1' },
-    { instructions: buildInstructions(opts.handle) },
+    { instructions: prependAdapterWarning(buildInstructions(opts.handle), adapterStatus) },
   );
 
   installWhoami(server, ctx);
