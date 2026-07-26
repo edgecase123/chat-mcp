@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { stateDir } from '../util/paths.js';
+import { adapterScriptPath } from '../util/paths.js';
 
 /**
  * Framework identifiers match the adapter installer names in
@@ -20,10 +19,6 @@ export function detectFramework(): Framework | null {
   return null;
 }
 
-export function adapterScriptPath(framework: Framework, handle: string): string {
-  return join(stateDir(), 'adapters', `${framework}-${handle}.sh`);
-}
-
 export interface AdapterStatus {
   installed: boolean;
   framework: Framework | null;
@@ -34,6 +29,10 @@ export interface AdapterStatus {
  * Check whether a wake adapter is installed for this handle under the
  * detected framework. Result is used both to prepend a warning to the MCP
  * `instructions` preamble and to populate `wake_adapter` in `chat.whoami`.
+ *
+ * Presence-only: a script file at the expected path is treated as installed.
+ * A broken/malformed adapter script arms-then-fails-to-fire — a different
+ * failure mode with different symptoms, out of scope for this check.
  */
 export function checkWakeAdapter(handle: string): AdapterStatus {
   const framework = detectFramework();

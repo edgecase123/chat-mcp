@@ -20,6 +20,19 @@ export function notifyPathFor(handle: string): string {
   return join(notifyDir(), handle);
 }
 
+export function adaptersDir(): string {
+  return join(stateDir(), 'adapters');
+}
+
+/**
+ * Canonical path for a wake-adapter script. Shared by the installer (which
+ * writes it) and the shim's boot check (which tests its presence) so a
+ * rename doesn't silently desync the two sides.
+ */
+export function adapterScriptPath(framework: string, handle: string): string {
+  return join(adaptersDir(), `${framework}-${handle}.sh`);
+}
+
 export function ensureStateDir(): string {
   const dir = stateDir();
   mkdirSync(dir, { recursive: true });
