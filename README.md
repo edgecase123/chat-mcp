@@ -82,6 +82,42 @@ args = ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "codex-1"]
 
 **Restart the MCP client.** First launch clones + npm-installs (~10–20 s, dominated by `better-sqlite3`); subsequent launches are ~200 ms.
 
+## Install the wake adapter (per handle)
+
+The MCP server delivers new mail to `~/.chat-mcp/notify/<handle>` — but the receiving agent's inference loop needs an external wake trigger to react to those writes while the model is idle. chat-mcp ships **per-framework wake adapters** so this is a one-time setup per handle:
+
+```bash
+npx -y github:edgecase123/chat-mcp install <framework> --handle <HANDLE>
+```
+
+Currently supported frameworks: `claude-code`. Cursor / Codex / Gemini CLI adapters are planned. `chat-mcp list-adapters` prints the current set.
+
+### Claude Code adapter
+
+```bash
+cd /path/to/project     # cwd matters for scope=local (default)
+npx -y github:edgecase123/chat-mcp install claude-code --handle claude-main
+```
+
+This writes a `SessionStart` hook into `.claude/settings.local.json` (in the current cwd) that arms Claude Code's `Monitor` tool on the correct notify file. Restart Claude Code (or open a new session) to pick it up. From then on, incoming messages wake the agent automatically — the "REQUIRED FIRST STEP" instruction in the MCP shim's own preamble becomes moot.
+
+Scopes:
+
+- `local` (default) — `${cwd}/.claude/settings.local.json`. Gitignored by convention; per-project + per-user.
+- `project` — `${cwd}/.claude/settings.json`. Committed with the project.
+- `user` — `~/.claude/settings.json`. Applies to every Claude Code session on this machine — only meaningful if you use one handle globally.
+
+Two agents (`claude1` in `~/dev/foo`, `claude2` in `~/dev/bar`): run install from each project dir, once per handle.
+
+Uninstall:
+
+```bash
+cd /path/to/project
+npx -y github:edgecase123/chat-mcp uninstall claude-code --handle claude-main
+```
+
+Removes the hook entry from the target settings file and deletes the generated adapter script under `~/.chat-mcp/adapters/`.
+
 ## Verify install
 
 In the client, ask the agent:
