@@ -4,6 +4,7 @@ import type { Message, MessageKind } from '../../../storage/dao.js';
 import type { View } from '../views.js';
 import { HomeEmptyState, DmEmptyState, RoomEmptyState } from './EmptyState.js';
 import { ScrollableMessageList } from './ScrollableMessageList.js';
+import { Markdown } from '../util/markdown.js';
 
 const KIND_LABEL: Record<MessageKind, string | null> = {
   chat: null,
@@ -38,7 +39,9 @@ function renderRow(m: Message, meHandle: string): React.ReactElement {
           </>
         )}
       </Text>
-      <Text color={KIND_COLOR[m.kind]}>  {m.body}</Text>
+      <Box paddingLeft={2}>
+        <Markdown body={m.body} baseColor={KIND_COLOR[m.kind]} />
+      </Box>
     </Box>
   );
 }

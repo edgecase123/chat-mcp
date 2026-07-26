@@ -21,6 +21,7 @@ import { RoomsBrowserPane } from './panes/RoomsBrowserPane.js';
 import { Sidebar } from './panes/Sidebar.js';
 import { Palette } from './palette/Palette.js';
 import { HintBar } from './HintBar.js';
+import { Markdown } from './util/markdown.js';
 
 export interface AppProps {
   handle: string;
@@ -604,7 +605,9 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                       </Text>{' '}
                       <Text dimColor>→ {m.to_handle} · {timeOf(m.sent_at)}</Text>
                     </Text>
-                    <Text>  {m.body}</Text>
+                    <Box paddingLeft={2}>
+                      <Markdown body={m.body} />
+                    </Box>
                   </Box>
                 )}
               />
