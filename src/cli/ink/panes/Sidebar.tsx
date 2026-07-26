@@ -22,6 +22,13 @@ export interface SidebarProps {
   roomUnreadByName: Map<string, number>;
 }
 
+/** Prefix shown before the first 9 sidebar entries — matches the 1-9
+ *  jump-key ordering (peers → member rooms → discover rooms). Items past
+ *  the 9th get a 3-space pad so vertical alignment stays intact. */
+function jumpPrefix(nth: number): string {
+  return nth < 9 ? `[${nth + 1}]` : '   ';
+}
+
 export function Sidebar({
   view,
   peers,
@@ -30,6 +37,9 @@ export function Sidebar({
   dmUnreadByPeer,
   roomUnreadByName,
 }: SidebarProps): React.ReactElement {
+  // Running index across all three sections so the [N] prefix matches
+  // App.tsx's 1-9 jump ordering exactly.
+  let jumpN = 0;
   return (
     <Box
       flexDirection="column"
@@ -49,10 +59,12 @@ export function Sidebar({
           const unread = dmUnreadByPeer.get(p.handle) ?? 0;
           const s = p.status;
           const dotColor = !p.online ? 'gray' : s ? STATUS_COLOR[s] : 'green';
+          const prefix = jumpPrefix(jumpN++);
           return (
             <Box key={p.handle} flexDirection="column">
               <Text>
-                {active ? <Text color="cyan">▸ </Text> : <Text>  </Text>}
+                {active ? <Text color="cyan">▸</Text> : <Text> </Text>}
+                <Text dimColor>{prefix} </Text>
                 <Text color={dotColor}>●</Text>{' '}
                 <Text color={active ? 'cyan' : undefined} bold={active}>
                   {p.handle}
@@ -66,7 +78,7 @@ export function Sidebar({
                 {unread > 0 && <Text color="yellow"> ({unread})</Text>}
               </Text>
               {p.focus && (
-                <Text dimColor>    {p.focus}</Text>
+                <Text dimColor>       {p.focus}</Text>
               )}
             </Box>
           );
@@ -85,24 +97,30 @@ export function Sidebar({
           {memberRooms.map((r) => {
             const active = view.kind === 'room' && view.room === r.name;
             const unread = roomUnreadByName.get(r.name) ?? 0;
+            const prefix = jumpPrefix(jumpN++);
             return (
               <Text key={r.name}>
-                {active ? <Text color="cyan">▸ </Text> : <Text>  </Text>}
+                {active ? <Text color="cyan">▸</Text> : <Text> </Text>}
+                <Text dimColor>{prefix} </Text>
                 <Text color="cyan" bold={active}>{r.name}</Text>
                 {unread > 0 && <Text color="yellow"> ({unread})</Text>}
               </Text>
             );
           })}
           {discoverRooms.length > 0 && (
-            <Text dimColor>  ── join ──</Text>
+            <Text dimColor>     ── join ──</Text>
           )}
-          {discoverRooms.map((r) => (
-            <Text key={r.name}>
-              {'  '}
-              <Text color="gray">＋ </Text>
-              <Text dimColor>{r.name}</Text>
-            </Text>
-          ))}
+          {discoverRooms.map((r) => {
+            const prefix = jumpPrefix(jumpN++);
+            return (
+              <Text key={r.name}>
+                {' '}
+                <Text dimColor>{prefix} </Text>
+                <Text color="gray">＋ </Text>
+                <Text dimColor>{r.name}</Text>
+              </Text>
+            );
+          })}
         </>
       )}
     </Box>
