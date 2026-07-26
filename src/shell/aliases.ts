@@ -78,6 +78,16 @@ chat-peek()  { _chat_mcp_bin inbox --handle "\$CHAT_MCP_HANDLE" --peek "\$@"; }
 # List peers. Default: online only. \`chat-list --all\` to include offline.
 chat-list()  { _chat_mcp_bin list "\$@"; }
 
+# List members of a room (includes offline members).
+#   chat-members '#leagues'
+chat-members() {
+  if [ "\$#" -lt 1 ]; then
+    echo "usage: chat-members '#room'" >&2
+    return 2
+  fi
+  _chat_mcp_bin members "\$@"
+}
+
 # Print own handle (quick sanity check).
 chat-me()    { printf '%s\\n' "\$CHAT_MCP_HANDLE"; }
 

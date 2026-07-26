@@ -234,6 +234,33 @@ try {
     }
   }
 
+  // ─── room_members ───────────────────────────────────────────
+  // 11. #announce now has claude1 + claude2 as members (from tests 9-10).
+  //     room_members should return both handles in join order.
+  {
+    const members = parseJson(await c1.callTool({
+      name: 'room_members', arguments: { room: '#announce' },
+    }));
+    if (Array.isArray(members) && members.length === 2 &&
+        members[0] === 'claude1' && members[1] === 'claude2') {
+      pass(11, 'room_members lists both peers in join order');
+    } else {
+      fail(11, 'room_members #announce', JSON.stringify(members));
+    }
+  }
+
+  // 12. Unknown room → empty array, not an error.
+  {
+    const members = parseJson(await c1.callTool({
+      name: 'room_members', arguments: { room: '#nonexistent' },
+    }));
+    if (Array.isArray(members) && members.length === 0) {
+      pass(12, 'room_members on unknown room returns []');
+    } else {
+      fail(12, 'room_members #nonexistent', JSON.stringify(members));
+    }
+  }
+
 } finally {
   if (cli) await cli.close();
   if (c1) await c1.close().catch(() => {});

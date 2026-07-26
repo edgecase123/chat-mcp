@@ -44,7 +44,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
   };
 
   console.log(
-    `${bold('chat-mcp')} ${dim('v0.1.0')}  ·  handle: ${cyan(opts.handle)}  ·  ${dim('/help or Ctrl-C to quit')}`,
+    `${bold('chat-mcp')} ${dim('v0.2.0')}  ·  handle: ${cyan(opts.handle)}  ·  ${dim('/help or Ctrl-C to quit')}`,
   );
   rl.setPrompt(promptFor());
   rl.prompt();
@@ -119,6 +119,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
           `  ${cyan('/list')}             list online peers`,
           `  ${cyan('/dm')} <handle>      enter DM mode with a peer`,
           `  ${cyan('/rooms')} [--all]    list your rooms (or every room)`,
+          `  ${cyan('/members')} [#room]  list members of a room (default: current)`,
           `  ${cyan('/join')} #<name>     join a room (auto-creates)`,
           `  ${cyan('/leave')}            leave the current room (removes membership)`,
           `  ${cyan('/back')}             exit DM or room mode (stay a member)`,
@@ -135,6 +136,9 @@ export async function runCli(opts: CliOptions): Promise<void> {
         break;
       case 'rooms':
         doRooms(args.includes('--all'));
+        break;
+      case 'members':
+        doMembers(args[0]);
         break;
       case 'join':
         doJoin(args[0]);
@@ -184,6 +188,29 @@ export async function runCli(opts: CliOptions): Promise<void> {
       const name = cyan(r.name.padEnd(16));
       const members = dim(`${r.member_count} member${r.member_count === 1 ? '' : 's'}`);
       console.log(`  ${name}  ${members}`);
+    }
+  };
+
+  const doMembers = (roomArg: string | undefined): void => {
+    const name = roomArg ?? (mode.kind === 'room' ? mode.roomName : undefined);
+    if (!name) {
+      console.log(dim('  usage: /members #<room>  (or /join a room first)'));
+      return;
+    }
+    try {
+      assertRoomName(name);
+    } catch (e) {
+      console.log(dim(`  ${(e as Error).message}`));
+      return;
+    }
+    const members = dao.roomMembers(db, name);
+    if (members.length === 0) {
+      console.log(dim(`  (no members in ${name})`));
+      return;
+    }
+    for (const handle of members) {
+      const marker = handle === opts.handle ? cyan('▸') : ' ';
+      console.log(`  ${marker} ${handle}`);
     }
   };
 

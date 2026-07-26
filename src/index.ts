@@ -24,7 +24,7 @@ async function runShimEntry(handle: string | undefined): Promise<void> {
 // This is the entry shape used by .mcp.json / claude mcp add, so we detect it
 // before commander sees the args to avoid --handle colliding with subcommand
 // options of the same name.
-const KNOWN_SUBCOMMANDS = new Set(['cli', 'send', 'inbox', 'list', 'install', 'uninstall', 'list-adapters', 'aliases', 'help', '--help', '-h', '--version', '-V']);
+const KNOWN_SUBCOMMANDS = new Set(['cli', 'send', 'inbox', 'list', 'members', 'install', 'uninstall', 'list-adapters', 'aliases', 'help', '--help', '-h', '--version', '-V']);
 const firstArg = process.argv[2];
 if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   const argv = process.argv.slice(2);
@@ -37,7 +37,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   program
     .name('chat-mcp')
     .description('Local unintrusive chat bus for AI coding agents over MCP')
-    .version('0.1.0');
+    .version('0.2.0');
 
   program
     .command('cli')
@@ -82,6 +82,15 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .action(async (opts: { all?: boolean; json?: boolean }) => {
       const { runList } = await import('./oneshot/list.js');
       await runList({ all: opts.all, json: opts.json });
+    });
+
+  program
+    .command('members <room>')
+    .description('List handles that are members of a room (includes offline members)')
+    .option('--json', 'emit member list as JSON', false)
+    .action(async (room: string, opts: { json?: boolean }) => {
+      const { runMembers } = await import('./oneshot/members.js');
+      await runMembers({ room, json: opts.json });
     });
 
   program
