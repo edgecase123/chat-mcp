@@ -38,14 +38,24 @@ export function tokenize(input: string): Token[] {
       continue;
     }
 
-    // Fenced code block
+    // Fenced code block. Accept both the multi-line shape (```\ncode\n```)
+    // and the single-line shape (```code```) — the Ink CLI's input can't
+    // carry newlines, so users type inline fences.
     if (input.startsWith('```', i)) {
-      const nlAfterOpen = input.indexOf('\n', i + 3);
-      const close = input.indexOf('\n```', nlAfterOpen >= 0 ? nlAfterOpen : i + 3);
-      if (nlAfterOpen >= 0 && close >= 0) {
+      const close = input.indexOf('```', i + 3);
+      if (close > i + 2) {
+        // If the first char after ``` is a newline (multi-line form) OR
+        // there's a newline before the first close (```lang\ncode\n```),
+        // treat that first line as an optional language tag and skip it.
+        let contentStart = i + 3;
+        const firstNl = input.indexOf('\n', contentStart);
+        if (firstNl >= 0 && firstNl < close) contentStart = firstNl + 1;
+        // Strip a trailing newline right before the close.
+        let contentEnd = close;
+        if (input[contentEnd - 1] === '\n') contentEnd -= 1;
         flush();
-        tokens.push({ kind: 'code-block', value: input.slice(nlAfterOpen + 1, close) });
-        i = close + 4;
+        tokens.push({ kind: 'code-block', value: input.slice(contentStart, contentEnd) });
+        i = close + 3;
         continue;
       }
     }

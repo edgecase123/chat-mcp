@@ -33,11 +33,25 @@ test('link: [label](url)', () => {
   ]);
 });
 
-test('fenced code block', () => {
+test('fenced code block (multi-line form)', () => {
   assert.deepEqual(tokenize('before\n```\nfoo\nbar\n```\nafter'), [
     { kind: 'text', value: 'before\n' },
     { kind: 'code-block', value: 'foo\nbar' },
     { kind: 'text', value: '\nafter' },
+  ]);
+});
+
+test('fenced code block (inline form — CLI input cannot carry newlines)', () => {
+  assert.deepEqual(tokenize('run ```const x = 1;``` please'), [
+    { kind: 'text', value: 'run ' },
+    { kind: 'code-block', value: 'const x = 1;' },
+    { kind: 'text', value: ' please' },
+  ]);
+});
+
+test('fenced code block with lang tag', () => {
+  assert.deepEqual(tokenize('```js\nconst x = 1;\n```'), [
+    { kind: 'code-block', value: 'const x = 1;' },
   ]);
 });
 
