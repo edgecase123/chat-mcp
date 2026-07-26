@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, unlinkSy
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { stateDir, notifyPathFor, ensureStateDir } from '../util/paths.js';
+import { detectChatHandleInCwd } from '../util/mcp-config.js';
 import type { Adapter, AdapterInstallOptions, AdapterResult } from './types.js';
 
 const ADAPTER_NAME = 'claude-code';
@@ -177,6 +178,26 @@ function assertScope(scope: string | undefined): Scope {
 async function install(opts: AdapterInstallOptions): Promise<AdapterResult> {
   const scope = assertScope(opts.scope);
   const cwd = opts.cwd ?? process.cwd();
+
+  // Guard: hook fires in this cwd's Claude Code sessions and arms Monitor on
+  // notify/<opts.handle>. If the tree's .mcp.json launches the chat MCP with a
+  // different handle, the two disagree silently — Monitor watches an empty
+  // notify path forever. --force intentionally opts out.
+  if (!opts.force && (scope === 'local' || scope === 'project')) {
+    const detected = detectChatHandleInCwd(cwd);
+    if (detected && detected.handle !== opts.handle) {
+      throw new Error(
+        [
+          `Handle mismatch: --handle "${opts.handle}" does not match the chat server handle in ${detected.sourcePath}.`,
+          `  ${detected.sourcePath} launches the chat MCP with --handle "${detected.handle}".`,
+          `  A "${scope}"-scope hook fires in this tree's Claude Code sessions, which register as "${detected.handle}", not "${opts.handle}".`,
+          `  → to install for the tree's handle: re-run with --handle ${detected.handle}`,
+          `  → to install anyway:                re-run with --force`,
+        ].join('\n'),
+      );
+    }
+  }
+
   const settingsPath = settingsPathForScope(scope, cwd);
   const script = scriptPath(opts.handle);
 

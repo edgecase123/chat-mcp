@@ -2,6 +2,7 @@ export interface AdapterInstallOptions {
   handle: string;
   scope?: string;
   cwd?: string;
+  force?: boolean;
 }
 
 export interface AdapterResult {
