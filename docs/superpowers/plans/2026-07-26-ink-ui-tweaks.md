@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship the Ink UI polish spec — slash autocomplete, argument completion, Ctrl-K command palette, context-aware hint bar, rooms discoverability (sidebar shape B + `/rooms` browser), formatted `/help`, empty-state guidance, readline-style input editing, and number-key sidebar jumps.
+**Goal:** Ship the Ink UI polish spec — slash autocomplete, argument completion, Ctrl-K command palette, context-aware hint bar, rooms discoverability (sidebar shape B + `/rooms` browser), formatted `/help`, empty-state guidance, readline-style input editing, number-key sidebar jumps, and input history recall (↑/↓).
 
 **Architecture:** Split the single 770-line `App.tsx` into focused component files under `src/cli/ink/`. Introduce a canonical command catalogue (`commands.ts`) that Autocomplete, Palette, and HelpPane all read. Replace `ink-text-input` with a hand-rolled `Input.tsx` to gain per-key control. Pure-logic modules (`commands.ts`, `fuzzy.ts`, `completions.ts`) get real unit tests via Node's built-in `node:test`; UI components get manual smoke via the CLI subprocess.
 
@@ -1258,6 +1258,7 @@ export function HelpPane(): React.ReactElement {
         <Text>  <Text color="cyan" bold>Ctrl-U</Text>    delete to start of line</Text>
         <Text>  <Text color="cyan" bold>Opt-←/→</Text>   word navigation (Mac)</Text>
         <Text>  <Text color="cyan" bold>Opt-⌫</Text>     delete previous word (Mac)</Text>
+        <Text>  <Text color="cyan" bold>↑↓</Text>        input history (when no dropdown)</Text>
         <Text>  <Text color="cyan" bold>Ctrl-C</Text>    quit</Text>
         <Text dimColor>  (Cmd-* combos are intercepted by the terminal and unavailable.)</Text>
       </Box>
@@ -1961,7 +1962,146 @@ git commit -m "feat(ink): number-key sidebar jumps (1-9 when input empty)"
 
 ---
 
-## Task 24: Version bump + integration smoke
+## Task 24: Input history recall (↑/↓)
+
+**Files:**
+- Modify: `src/cli/ink/App.tsx`
+- Modify: `src/cli/ink/HintBar.tsx` (add history hints)
+
+- [ ] **Step 1: Add history state**
+
+In App.tsx, add state:
+
+```typescript
+const [history, setHistory] = useState<string[]>([]);
+const [historyIndex, setHistoryIndex] = useState<number | null>(null); // null = "not recalling"; -1..history.length-1 = index into history
+const [draft, setDraft] = useState<{ value: string; cursor: number } | null>(null);
+```
+
+- [ ] **Step 2: Record submitted lines**
+
+Change `handleSubmit`:
+
+```typescript
+const handleSubmit = useCallback(
+  (value: string) => {
+    const line = value.trim();
+    if (line.length === 0) return;
+    setHistory((h) => {
+      // Collapse consecutive duplicates + cap ring at 100.
+      const last = h[h.length - 1];
+      const next = last === line ? h : [...h, line];
+      return next.length > 100 ? next.slice(next.length - 100) : next;
+    });
+    setHistoryIndex(null);
+    setDraft(null);
+    if (line.startsWith('/')) doCommand(line);
+    else sendCurrent(line);
+  },
+  [doCommand, sendCurrent],
+);
+```
+
+- [ ] **Step 3: Add history navigation helpers**
+
+Add before the input wire-up:
+
+```typescript
+const historyUp = useCallback(() => {
+  if (history.length === 0) return;
+  setHistoryIndex((i) => {
+    if (i === null) {
+      // First press: save the current draft, jump to newest history entry.
+      setDraft({ value: input.value, cursor: input.cursor });
+      const newest = history.length - 1;
+      setInput({ value: history[newest]!, cursor: history[newest]!.length });
+      return newest;
+    }
+    if (i === 0) return 0;
+    const next = i - 1;
+    setInput({ value: history[next]!, cursor: history[next]!.length });
+    return next;
+  });
+}, [history, input.value, input.cursor]);
+
+const historyDown = useCallback(() => {
+  setHistoryIndex((i) => {
+    if (i === null) return null;
+    if (i >= history.length - 1) {
+      // Past newest → restore draft (or empty if no draft).
+      const d = draft ?? { value: '', cursor: 0 };
+      setInput(d);
+      setDraft(null);
+      return null;
+    }
+    const next = i + 1;
+    setInput({ value: history[next]!, cursor: history[next]!.length });
+    return next;
+  });
+}, [history, draft]);
+```
+
+- [ ] **Step 4: Change the `onUp`/`onDown` wire-up to gate on completions**
+
+Replace the Input `onUp` / `onDown` from Task 18 Step 4:
+
+```typescript
+onUp={() => {
+  if (completions.length > 0) return setCompletionIndex((i) => Math.max(0, i - 1));
+  historyUp();
+}}
+onDown={() => {
+  if (completions.length > 0) return setCompletionIndex((i) => Math.min(completions.length - 1, i + 1));
+  historyDown();
+}}
+```
+
+- [ ] **Step 5: Reset history pointer on any manual edit**
+
+Change the Input `onChange`:
+
+```typescript
+onChange={(value, cursor) => {
+  setInput({ value, cursor });
+  setCompletionIndex(0);
+  if (historyIndex !== null) { setHistoryIndex(null); setDraft(null); }
+}}
+```
+
+- [ ] **Step 6: Update `HintBar.tsx` hint strings**
+
+```typescript
+const HINTS: Record<View['kind'], string> = {
+  home:   'Ctrl-K commands · ↑↓ history · /join #room · /dm peer · 1-9 jump · ? help',
+  dm:     '↑↓ history · Tab complete · Ctrl-K commands · /watch peer · /back home · ? help',
+  room:   '↑↓ history · Tab complete · Ctrl-K commands · /leave · /back home · ? help',
+  rooms:  '↑↓ move · Enter open/join · /back home',
+  who:    '/back close · ? help',
+  help:   '/back close',
+};
+```
+
+- [ ] **Step 7: Build + smoke**
+
+Run: `npm run build && node dist/index.js cli --experimental --handle testuser`
+
+Manual test:
+- Type `hello<Enter>`, type `world<Enter>`, press `↑` — input shows `world`. `↑` again — `hello`. `↑` again — stays on `hello`. `↓` — `world`. `↓` — empty.
+- Start typing `foo`, press `↑` — recalls history. `↓` past newest — restores `foo`.
+- With `/d` typed (autocomplete open), `↑`/`↓` navigate matches, not history.
+- Type any character mid-recall — history pointer resets; further `↑` starts from newest.
+- Submit `hello<Enter>` twice — history has one `hello` entry (duplicate collapse).
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/cli/ink/App.tsx src/cli/ink/HintBar.tsx
+git commit -m "feat(ink): input history recall (↑↓ with completion gating)"
+```
+
+---
+
+## Task 25: Version bump + integration smoke
 
 **Files:**
 - Modify: `package.json`

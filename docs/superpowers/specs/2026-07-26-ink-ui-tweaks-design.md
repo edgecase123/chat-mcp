@@ -31,6 +31,7 @@ This design addresses all three together because the fixes share plumbing (keybi
 | Command palette | Ctrl-K opens fuzzy-search overlay of all commands with one-line descriptions. |
 | Hint bar | Context-aware single-line strip at the bottom of the screen. Content changes per view. |
 | Number-key jumps | `1`–`9` (when input is empty) jump focus to the Nth sidebar entry. |
+| Input history (↑/↓) | Session-only ring buffer (last 100 submitted entries). `↑`/`↓` recall when the autocomplete dropdown is closed. |
 | `/help` | Renders as a formatted, categorised table in the main pane — not a status-line dump. Also bound to `?`. |
 | Rooms sidebar | Single ROOMS list: joined rooms first (cyan), a `── join ──` divider, then discoverable rooms dimmed with a `＋` prefix. |
 | `/rooms` browser | Dedicated full-pane view (also opened by hotkey `R`) listing every active room with member count + handles. Enter opens (joined) or joins (not). |
@@ -101,14 +102,14 @@ Single-line dim strip immediately above the input bar. Content is determined by 
 
 | View | Hint content |
 |---|---|
-| home (`kind: 'home'`) | `Ctrl-K` commands · `/join` #room · `/dm` peer · `1-9` jump · `?` help |
-| dm | `Tab` complete · `Ctrl-K` commands · `/watch` peer · `/back` home · `?` help |
-| room | `Tab` complete · `Ctrl-K` commands · `/leave` · `/back` home · `?` help |
+| home (`kind: 'home'`) | `Ctrl-K` commands · `↑↓` history · `/join` #room · `/dm` peer · `1-9` jump · `?` help |
+| dm | `↑↓` history · `Tab` complete · `Ctrl-K` commands · `/watch` peer · `/back` home · `?` help |
+| room | `↑↓` history · `Tab` complete · `Ctrl-K` commands · `/leave` · `/back` home · `?` help |
 | rooms browser | `↑↓` move · `Enter` open/join · `/back` home |
 | who | `/back` close · `?` help |
 | help | `/back` close |
 
-Bindings shown are **existing or added-in-this-spec** bindings — no aspirational entries. In particular: no `↑↓ history` — message-history recall is called out under future work and does not appear in any hint.
+Bindings shown are **existing or added-in-this-spec** bindings — no aspirational entries. `↑↓` overloads by context: when the autocomplete dropdown is open, arrows navigate matches; otherwise they recall history (see §7.5).
 
 ### 5. Number-key jumps
 
@@ -168,6 +169,25 @@ Replaces the current `myRooms(…)` list with a single ROOMS section that includ
 - Jumping to a discoverable room opens it in the same view as `/join #<name>` would — i.e. joins and switches. (Design choice: no confirmation. Joining is cheap; the visible member-count trigger on other members is the only side effect.)
 
 **Member counts in the sidebar**: **omitted**. `(N)` in the sidebar means unread only. Member counts live in the /rooms browser to keep the sidebar scannable.
+
+### 7.5 Input history recall (↑ / ↓)
+
+**Trigger**: `↑` or `↓` in the input, **only when the autocomplete dropdown is not open**. If the dropdown is open, arrows navigate matches (per §1); otherwise they navigate history.
+
+**Behaviour**:
+
+- **`↑`** — replace the input with the previous submitted entry (message or slash command). Repeated `↑` walks further back.
+- **`↓`** — walk forward toward the most recent; past the newest entry, restores whatever the user had typed at the moment they first pressed `↑` (call this the "draft").
+- **Reset**: any user edit (character insert, backspace, cursor move via Ctrl-A/E/Left/Right, etc.) resets the history pointer to "nothing recalled" and clears the saved draft.
+
+**Scope**:
+
+- Session-only. Not persisted across restarts.
+- Ring buffer of the last 100 submitted entries — same buffer across all views. Rationale: TUI users treat history as a single stream regardless of context; per-view history is surprising when you re-run "the last thing" and get skipped over.
+- Empty submissions are not recorded.
+- Consecutive duplicates are collapsed (one entry, not one per repeat).
+
+**Implementation**: an in-memory `string[]` and an integer pointer live at App.tsx state. `Input` exposes `onUp` / `onDown` callbacks (already planned for autocomplete); App wires them to autocomplete when `completions.length > 0` and to history otherwise. Reset triggers off `onChange`.
 
 ### 8. `/rooms` browser (also `R` hotkey when input empty)
 
@@ -319,7 +339,7 @@ No schema changes. No message-kind changes. No notify-bus changes.
 
 - Palette actions: `Open DM with <peer>`, `Join #<room>`, `Watch <peer>`.
 - Scrollback + search in the messages pane.
-- History recall via ↑ in the input (mentioned in hint bar for consistency but not implemented in this pass — will be a fast follow).
+- Persistent history across sessions.
 - Message editing / deletion.
 - Themes.
 
