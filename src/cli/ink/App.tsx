@@ -18,12 +18,13 @@ import { ScrollableMessageList } from './panes/ScrollableMessageList.js';
 import { WhoPane } from './panes/WhoPane.js';
 import { HelpPane } from './panes/HelpPane.js';
 import { KeyboardPane } from './panes/KeyboardPane.js';
+import { CopyPane } from './panes/CopyPane.js';
 import { RoomsBrowserPane } from './panes/RoomsBrowserPane.js';
 import { Sidebar } from './panes/Sidebar.js';
 import { Palette } from './palette/Palette.js';
 import { HintBar } from './HintBar.js';
 import { Markdown } from './util/markdown.js';
-import { useMessageViewport } from './util/viewport.js';
+import { useMessageViewport, useTerminalRows } from './util/viewport.js';
 
 export interface AppProps {
   handle: string;
@@ -54,6 +55,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   const [input, setInput] = useState<{ value: string; cursor: number }>({ value: '', cursor: 0 });
   const [completionIndex, setCompletionIndex] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [copyMode, setCopyMode] = useState(false);
   const [tick, setTick] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
   const [watchPeer, setWatchPeer] = useState<string | null>(null);
@@ -61,6 +63,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [draft, setDraft] = useState<{ value: string; cursor: number } | null>(null);
   const messageViewport = useMessageViewport();
+  const terminalRows = useTerminalRows();
 
   useEffect(() => {
     const bump = (): void => setTick((t) => t + 1);
@@ -266,6 +269,9 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           return;
         case 'keyboard':
           setView({ kind: 'keyboard' });
+          return;
+        case 'copy':
+          setCopyMode(true);
           return;
         case 'back':
           setView({ kind: 'home' });
@@ -522,6 +528,24 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
       discoverRooms: discoverRooms.map((r) => r.name),
     });
   }, [input.value, input.cursor, peers, rooms, discoverRooms, handle]);
+
+  // Copy mode: render just the message list with no chrome so mouse-drag
+  // selection doesn't scoop up borders or adjacent pane content. Esc returns
+  // to normal. viewportRows uses ~all terminal rows since chrome is hidden.
+  if (copyMode) {
+    // In copy mode there's no chrome — just header/body rows for each message
+    // (2 lines each) plus 3 rows for scroll-indicator/footer.
+    const copyViewport = Math.max(3, Math.floor((terminalRows - 3) / 2));
+    return (
+      <Box flexDirection="column">
+        <CopyPane
+          messages={messages}
+          viewportRows={copyViewport}
+          onExit={() => setCopyMode(false)}
+        />
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" width="100%">

@@ -26,6 +26,7 @@ export function KeyboardShortcuts(): React.ReactElement {
       <Text>  <Text color="cyan" bold>↑↓</Text>        input history (when no dropdown)</Text>
       <Text>  <Text color="cyan" bold>PgUp/Dn</Text>   scroll messages pane</Text>
       <Text>  <Text color="cyan" bold>Shift-PgUp/Dn</Text> scroll watch pane</Text>
+      <Text>  <Text color="cyan" bold>/copy</Text>    chrome-free view for mouse-copy (Esc to exit)</Text>
       <Text>  <Text color="cyan" bold>Ctrl-C</Text>    quit</Text>
       <Text dimColor>  (Cmd-* combos are intercepted by the terminal and unavailable.)</Text>
     </Box>

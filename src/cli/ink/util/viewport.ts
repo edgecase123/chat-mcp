@@ -15,12 +15,8 @@ const CHROME_ROWS = 14;
  */
 const ROWS_PER_MESSAGE = 3;
 
-/**
- * Return the approximate number of full messages that fit in the current
- * terminal below the app chrome. Re-computes on terminal resize.
- * Floor at 3 messages so tight terminals still show recent context.
- */
-export function useMessageViewport(): number {
+/** Live terminal row count, re-computes on resize. */
+export function useTerminalRows(): number {
   const { stdout } = useStdout();
   const [rows, setRows] = useState<number>(stdout?.rows ?? 24);
   useEffect(() => {
@@ -29,6 +25,16 @@ export function useMessageViewport(): number {
     stdout.on('resize', onResize);
     return () => { stdout.off('resize', onResize); };
   }, [stdout]);
+  return rows;
+}
+
+/**
+ * Return the approximate number of full messages that fit in the current
+ * terminal below the app chrome. Re-computes on terminal resize.
+ * Floor at 3 messages so tight terminals still show recent context.
+ */
+export function useMessageViewport(): number {
+  const rows = useTerminalRows();
   const usable = Math.max(0, rows - CHROME_ROWS);
   return Math.max(3, Math.floor(usable / ROWS_PER_MESSAGE));
 }

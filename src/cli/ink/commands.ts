@@ -44,6 +44,7 @@ export const COMMANDS: Command[] = [
 
   { name: '/help', args: [], description: 'open this help', category: 'system' },
   { name: '/keyboard', args: [], description: 'show keyboard shortcuts only', category: 'system' },
+  { name: '/copy', args: [], description: 'chrome-free mode for mouse copy (Esc to exit)', category: 'system' },
   { name: '/quit', args: [], description: 'quit', category: 'system' },
   { name: '/exit', args: [], description: 'quit', category: 'system' },
 ];
