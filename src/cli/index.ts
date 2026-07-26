@@ -154,8 +154,8 @@ export async function runCli(opts: CliOptions): Promise<void> {
       console.log(`peer ${mode.dmTarget} no longer registered — /back and try again`);
       return;
     }
-    dao.insertMessage(db, { from: opts.handle, to: mode.dmTarget, body: text });
-    notify.touch();
+    const sent = dao.insertMessage(db, { from: opts.handle, to: mode.dmTarget, body: text });
+    notify.touch({ id: sent.id, to: mode.dmTarget, from: opts.handle, ts: sent.sent_at });
     const now = new Date().toTimeString().slice(0, 8);
     process.stdout.write(`\r\x1b[K[${opts.handle} → ${mode.dmTarget} ${now}]  ${text}\n`);
   };

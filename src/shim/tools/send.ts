@@ -30,7 +30,7 @@ export function installSend(server: McpServer, ctx: ShimContext): void {
       }
       dao.touchLastSeen(ctx.db, ctx.handle);
       const result = dao.insertMessage(ctx.db, { from: ctx.handle, to, body });
-      ctx.notify.touch();
+      ctx.notify.touch({ id: result.id, to, from: ctx.handle, ts: result.sent_at });
       return {
         content: [
           {

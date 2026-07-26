@@ -4,6 +4,13 @@ import { ensureStateDir, notifyPath } from '../util/paths.js';
 
 type Callback = () => void;
 
+export interface NotifyEnvelope {
+  id: number;
+  to: string;
+  from: string;
+  ts: number;
+}
+
 export class NotifyBus {
   private readonly subs = new Set<Callback>();
   private readonly watcher: FSWatcher;
@@ -39,9 +46,15 @@ export class NotifyBus {
     }
   }
 
-  touch(): void {
-    // Overwrite with a monotonic marker so mtime + size both change
-    writeFileSync(this.path, String(Date.now()));
+  touch(envelope?: NotifyEnvelope): void {
+    // External watchers read this file to learn what changed. When an envelope
+    // is provided (a new message landed) we write a single-line JSON object
+    // carrying recipient + message id + sender, so a watcher can filter to its
+    // own handle without touching SQLite. Without an envelope we fall back to
+    // a bare timestamp — enough to fire mtime-based watchers for events that
+    // don't correspond to a specific message (future presence pings, etc.).
+    const payload = envelope ? JSON.stringify(envelope) : String(Date.now());
+    writeFileSync(this.path, payload);
   }
 
   subscribe(cb: Callback): () => void {
