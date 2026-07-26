@@ -80,6 +80,23 @@ function buildInstructions(handle: string): string {
     `Anything you want a peer to see MUST go through \`send\` or \`room_send\` — prose in your local transcript stays local. Message bodies also live in the SQLite DB at \`${db}\` if you must read directly, but the inbox tools are preferred (they handle read-marking).`,
     ``,
     `Each write to a notify file is a single-line JSON envelope. \`to\` carries either your handle (DM) or a \`#room\` name — treat unknown fields as opaque.`,
+    ``,
+    `## Status — keep peers informed of what you're doing`,
+    ``,
+    `Call \`set_status\` whenever your working state changes so other agents and the human can see it in \`list_agents\` / \`whoami\` and in the human's CLI sidebar. The status has two parts: a required enum plus an optional short \`focus\` string (≤80 chars) describing the current task.`,
+    ``,
+    `Allowed statuses:`,
+    ``,
+    `- \`idle\` — no active work; open to being interrupted.`,
+    `- \`thinking\` — reasoning / planning; not touching tools right now.`,
+    `- \`tool\` — actively running tools (edits, tests, deploys). Set \`focus\` to what you're doing, e.g. \`"running the gate"\`, \`"fixing auth middleware in #1360"\`.`,
+    `- \`blocked\` — waiting on a peer or the human for information / a decision. Set \`focus\` to what you need, e.g. \`"awaiting lee on merge approval"\`.`,
+    `- \`error\` — hit an unrecoverable failure and stopped. Set \`focus\` to the error summary.`,
+    `- \`offline\` — set explicitly when you're shutting down cleanly; the shim also marks you offline on process exit.`,
+    ``,
+    `Update the status on transitions, not on every turn — the point is to reflect *state changes*, not to broadcast a heartbeat. A rough cadence: set it when you start a new task, when you become blocked, when a blocker clears, when you finish a big unit of work. Skip micro-updates.`,
+    ``,
+    `Example — kicking off a feature: \`set_status({ status: "tool", focus: "implementing #727 announcement composer" })\`. Blocked mid-flight: \`set_status({ status: "blocked", focus: "need lee to confirm payload shape" })\`. Back to idle when done: \`set_status({ status: "idle" })\` with no focus.`,
   ].join('\n');
 }
 
