@@ -37,7 +37,7 @@ Pick a short stable handle for each agent — `claude-main`, `cursor-work`, `cod
 ### Claude Code
 
 ```bash
-claude mcp add chat -- npx -y github:you/chat-mcp#v0.1.0 --handle claude-main
+claude mcp add chat -- npx -y github:edgecase123/chat-mcp#v0.1.0 --handle claude-main
 ```
 
 Or edit `~/.claude.json` / project-scoped `.mcp.json` directly:
@@ -47,7 +47,7 @@ Or edit `~/.claude.json` / project-scoped `.mcp.json` directly:
   "mcpServers": {
     "chat": {
       "command": "npx",
-      "args": ["-y", "github:you/chat-mcp#v0.1.0", "--handle", "claude-main"]
+      "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "claude-main"]
     }
   }
 }
@@ -62,7 +62,7 @@ Edit `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
   "mcpServers": {
     "chat": {
       "command": "npx",
-      "args": ["-y", "github:you/chat-mcp#v0.1.0", "--handle", "cursor-work"]
+      "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "cursor-work"]
     }
   }
 }
@@ -75,7 +75,7 @@ Append to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.chat]
 command = "npx"
-args = ["-y", "github:you/chat-mcp#v0.1.0", "--handle", "codex-1"]
+args = ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "codex-1"]
 ```
 
 ### After adding
@@ -105,8 +105,8 @@ Without this, agents will use the tools when asked but won't check for incoming 
 Human operators join the same bus via a terminal REPL:
 
 ```bash
-npx -y github:you/chat-mcp#v0.1.0 cli               # handle defaults to "user"
-npx -y github:you/chat-mcp#v0.1.0 cli --handle lee  # custom handle
+npx -y github:edgecase123/chat-mcp#v0.1.0 cli               # handle defaults to "user"
+npx -y github:edgecase123/chat-mcp#v0.1.0 cli --handle lee  # custom handle
 ```
 
 Session:
@@ -135,7 +135,7 @@ Commands: `/list`, `/dm <handle>`, `/back`, `/quit`. Plain text in DM mode sends
 Convenience alias:
 
 ```bash
-alias chat-mcp='npx -y github:you/chat-mcp#v0.1.0'
+alias chat-mcp='npx -y github:edgecase123/chat-mcp#v0.1.0'
 ```
 
 ## For AI coding agents installing this on behalf of your user
@@ -165,7 +165,7 @@ If you are Claude Code, Cursor, or Codex reading this README on behalf of a user
 
 **Claude Code:**
 ```bash
-claude mcp add chat -- npx -y github:you/chat-mcp#v0.1.0 --handle <HANDLE>
+claude mcp add chat -- npx -y github:edgecase123/chat-mcp#v0.1.0 --handle <HANDLE>
 ```
 
 **Cursor** — merge into `~/.cursor/mcp.json` (create if absent), preserving any existing `mcpServers`:
@@ -174,7 +174,7 @@ claude mcp add chat -- npx -y github:you/chat-mcp#v0.1.0 --handle <HANDLE>
   "mcpServers": {
     "chat": {
       "command": "npx",
-      "args": ["-y", "github:you/chat-mcp#v0.1.0", "--handle", "<HANDLE>"]
+      "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "<HANDLE>"]
     }
   }
 }
@@ -184,10 +184,10 @@ claude mcp add chat -- npx -y github:you/chat-mcp#v0.1.0 --handle <HANDLE>
 ```toml
 [mcp_servers.chat]
 command = "npx"
-args = ["-y", "github:you/chat-mcp#v0.1.0", "--handle", "<HANDLE>"]
+args = ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "<HANDLE>"]
 ```
 
-**Other MCP clients** — the command shape is universal: run `npx -y github:you/chat-mcp#v0.1.0 --handle <HANDLE>`. Consult the client's docs for its MCP config location and syntax.
+**Other MCP clients** — the command shape is universal: run `npx -y github:edgecase123/chat-mcp#v0.1.0 --handle <HANDLE>`. Consult the client's docs for its MCP config location and syntax.
 
 ### After install
 
@@ -225,7 +225,7 @@ All tools are namespaced under `chat.` in the MCP client:
 Two shapes:
 
 - **Pinned to a tag** (recommended): change `#v0.1.0` in the config to the newer tag, restart the client.
-- **Tracking `main`** (drop the `#…`): run `npx -y --force github:you/chat-mcp` to bust the npx cache, restart the client.
+- **Tracking `main`** (drop the `#…`): run `npx -y --force github:edgecase123/chat-mcp` to bust the npx cache, restart the client.
 
 ## Uninstall
 
@@ -245,4 +245,4 @@ Slice 1 is under development. Once the tools + CLI land, the project will spin o
 
 ## License
 
-MIT (planned).
+MIT — see [LICENSE](LICENSE).

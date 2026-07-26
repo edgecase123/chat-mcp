@@ -224,15 +224,15 @@ Two modes from the same package, selected by the first positional arg:
     "mcpServers": {
       "chat": {
         "command": "npx",
-        "args": ["-y", "github:you/chat-mcp#v0.1.0", "--handle", "claude1"]
+        "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "claude1"]
       }
     }
   }
   ```
 - **User CLI mode** (run from a shell; positional arg is `cli`):
   ```bash
-  npx -y github:you/chat-mcp#v0.1.0 cli                # handle defaults to "user"
-  npx -y github:you/chat-mcp#v0.1.0 cli --handle lee   # custom handle
+  npx -y github:edgecase123/chat-mcp#v0.1.0 cli                # handle defaults to "user"
+  npx -y github:edgecase123/chat-mcp#v0.1.0 cli --handle lee   # custom handle
   ```
 
 No global install required; state lives entirely in `~/.chat-mcp/`. Uninstall = delete `~/.chat-mcp/` and remove MCP client entries.
@@ -247,7 +247,7 @@ One-time setup, performed by the human operator once per agent they want on the 
 
 **Claude Code** — global `~/.claude.json`, project-scoped `.mcp.json` in the working directory, or via the CLI:
 ```bash
-claude mcp add chat -- npx -y github:you/chat-mcp#v0.1.0 --handle claude-main
+claude mcp add chat -- npx -y github:edgecase123/chat-mcp#v0.1.0 --handle claude-main
 ```
 
 **Cursor** — `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
@@ -256,7 +256,7 @@ claude mcp add chat -- npx -y github:you/chat-mcp#v0.1.0 --handle claude-main
   "mcpServers": {
     "chat": {
       "command": "npx",
-      "args": ["-y", "github:you/chat-mcp#v0.1.0", "--handle", "cursor-work"]
+      "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "cursor-work"]
     }
   }
 }
@@ -332,7 +332,7 @@ Prerequisites: Node 18+ and Git (both near-universal on dev machines).
   "mcpServers": {
     "chat": {
       "command": "npx",
-      "args": ["-y", "github:you/chat-mcp#v0.1.0", "--handle", "claude1"]
+      "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "claude1"]
     }
   }
 }
@@ -340,7 +340,7 @@ Prerequisites: Node 18+ and Git (both near-universal on dev machines).
 
 Cursor uses `~/.cursor/mcp.json` — same shape. Codex config lives elsewhere but the `command` / `args` pair is identical.
 
-**2. Restart the MCP client.** On first spawn, `npx` clones `github:you/chat-mcp` into `~/.npm/_npx/<hash>/`, runs `npm install` (fetches `better-sqlite3`, `@modelcontextprotocol/sdk`, etc.), and executes the compiled entry point.
+**2. Restart the MCP client.** On first spawn, `npx` clones `github:edgecase123/chat-mcp` into `~/.npm/_npx/<hash>/`, runs `npm install` (fetches `better-sqlite3`, `@modelcontextprotocol/sdk`, etc.), and executes the compiled entry point.
 
 - Cold start: **~10–20 s**, dominated by native `better-sqlite3` install (fetches a prebuilt binary; falls back to compile-from-source only on rare platform/Node combos, which needs Xcode CLT / build-essential / MSVS Build Tools).
 - Subsequent starts: **~200 ms** (npx cache hit).
@@ -348,19 +348,19 @@ Cursor uses `~/.cursor/mcp.json` — same shape. Codex config lives elsewhere bu
 **3. Run the user CLI** from any shell:
 
 ```bash
-npx -y github:you/chat-mcp#v0.1.0 cli
+npx -y github:edgecase123/chat-mcp#v0.1.0 cli
 ```
 
 Optional convenience:
 
 ```bash
-alias chat-mcp='npx -y github:you/chat-mcp#v0.1.0'
+alias chat-mcp='npx -y github:edgecase123/chat-mcp#v0.1.0'
 ```
 
 **4. Update to a newer version.** Two shapes:
 
 - **Pinned to a tag** (recommended, shown above): bump the `#vX.Y.Z` in the config when you want them to update. Reproducible, no surprises.
-- **Tracking `main`** (drop the `#…` suffix): user runs `npx -y --force github:you/chat-mcp` to bust the cache; otherwise `npx` reuses the cached copy indefinitely.
+- **Tracking `main`** (drop the `#…` suffix): user runs `npx -y --force github:edgecase123/chat-mcp` to bust the cache; otherwise `npx` reuses the cached copy indefinitely.
 
 **5. Uninstall.** Remove the MCP config entry; optionally `rm -rf ~/.npm/_npx` to clear the cache; `rm -rf ~/.chat-mcp` to drop state.
 
@@ -376,6 +376,4 @@ alias chat-mcp='npx -y github:you/chat-mcp#v0.1.0'
 
 ## Open items
 
-- **Package name.** `chat-mcp` is a placeholder; final name TBD before publishing.
-- **License.** MIT default unless there's a reason to pick otherwise.
-- **GitHub org/user for the repo URL.** Determines the `github:you/chat-mcp` slug users will type. Decide before the first shared install.
+None blocking slice 1. Package name `chat-mcp`, license MIT, and repo `github.com/edgecase123/chat-mcp` are all locked in for the public push.
