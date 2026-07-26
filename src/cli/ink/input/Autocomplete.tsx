@@ -29,7 +29,7 @@ export function Autocomplete({ completions, selectedIndex, maxRows = 6 }: Autoco
   const below = completions.length - windowEnd;
 
   return (
-    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1}>
+    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} flexShrink={0}>
       {above > 0 && <Text dimColor>↑ {above} more</Text>}
       {visible.map((c, i) => {
         const absoluteIndex = windowStart + i;

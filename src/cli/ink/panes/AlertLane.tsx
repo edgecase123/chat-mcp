@@ -16,7 +16,7 @@ function timeOf(ts: number): string {
 export function AlertLane({ alerts }: { alerts: Alert[] }): React.ReactElement | null {
   if (alerts.length === 0) return null;
   return (
-    <Box borderStyle="round" borderColor="red" paddingX={1} flexDirection="column">
+    <Box borderStyle="round" borderColor="red" paddingX={1} flexDirection="column" flexShrink={0}>
       {alerts.map((a) => (
         <Text key={a.id}>
           <Text color="red" bold>🚨 ALERT</Text>{' '}

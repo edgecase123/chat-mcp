@@ -20,7 +20,7 @@ export interface HeaderProps {
 
 export function Header({ handle, version, status, focus }: HeaderProps): React.ReactElement {
   return (
-    <Box borderStyle="round" borderColor="gray" paddingX={1}>
+    <Box borderStyle="round" borderColor="gray" paddingX={1} flexShrink={0}>
       <Text>
         <Text bold>chat-mcp</Text>{' '}
         <Text dimColor>v{version}-ink</Text> ·{' '}

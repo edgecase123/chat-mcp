@@ -614,7 +614,6 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           borderStyle="round"
           borderColor="gray"
           paddingX={1}
-          overflow="hidden"
         >
           {view.kind === 'who' ? (
             <WhoPane peers={peers} meHandle={handle} />
@@ -689,11 +688,11 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
 
       {/* Input — hidden while palette is open so keys don't dispatch to both handlers */}
       {!paletteOpen && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" flexShrink={0}>
           {completions.length > 0 && (
             <Autocomplete completions={completions} selectedIndex={completionIndex} />
           )}
-          <Box borderStyle="round" borderColor="gray" paddingX={1}>
+          <Box borderStyle="round" borderColor="gray" paddingX={1} flexShrink={0}>
             <Input
               value={input.value}
               cursor={input.cursor}

@@ -14,7 +14,7 @@ const HINTS: Record<View['kind'], string> = {
 
 export function HintBar({ view }: { view: View }): React.ReactElement {
   return (
-    <Box paddingX={1}>
+    <Box paddingX={1} flexShrink={0}>
       <Text dimColor>{HINTS[view.kind]}</Text>
     </Box>
   );
