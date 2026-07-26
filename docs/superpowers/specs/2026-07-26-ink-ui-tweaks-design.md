@@ -17,7 +17,7 @@ This design addresses all three together because the fixes share plumbing (keybi
 ## Non-goals
 
 - Message-body autocomplete / spell-check.
-- Scrollback, search, history navigation of the messages themselves (deferred — separate future spec).
+- Search across message history (grep-like) — separate future spec.
 - Mouse support.
 - Theme customisation.
 - New MCP tools or DAO methods beyond those needed for room enumeration.
@@ -32,6 +32,8 @@ This design addresses all three together because the fixes share plumbing (keybi
 | Hint bar | Context-aware single-line strip at the bottom of the screen. Content changes per view. |
 | Number-key jumps | `1`–`9` (when input is empty) jump focus to the Nth sidebar entry. |
 | Input history (↑/↓) | Session-only ring buffer (last 100 submitted entries). `↑`/`↓` recall when the autocomplete dropdown is closed. |
+| Scrollable messages pane | Last 200 messages queried per view; PageUp/PageDown/Home/End navigate. Auto-follow new messages when scrolled to bottom. |
+| Markdown in message bodies | Inline `**bold**`, `*italic*`, `` `code` ``, `[link](url)`, and fenced ```` ```code blocks``` ```` render styled. Non-matching text renders verbatim. |
 | `/help` | Renders as a formatted, categorised table in the main pane — not a status-line dump. Also bound to `?`. |
 | Rooms sidebar | Single ROOMS list: joined rooms first (cyan), a `── join ──` divider, then discoverable rooms dimmed with a `＋` prefix. |
 | `/rooms` browser | Dedicated full-pane view (also opened by hotkey `R`) listing every active room with member count + handles. Enter opens (joined) or joins (not). |
@@ -103,8 +105,8 @@ Single-line dim strip immediately above the input bar. Content is determined by 
 | View | Hint content |
 |---|---|
 | home (`kind: 'home'`) | `Ctrl-K` commands · `↑↓` history · `/join` #room · `/dm` peer · `1-9` jump · `?` help |
-| dm | `↑↓` history · `Tab` complete · `Ctrl-K` commands · `/watch` peer · `/back` home · `?` help |
-| room | `↑↓` history · `Tab` complete · `Ctrl-K` commands · `/leave` · `/back` home · `?` help |
+| dm | `↑↓` history · `PgUp/Dn` scroll · `Tab` complete · `Ctrl-K` commands · `/watch` peer · `/back` home · `?` help |
+| room | `↑↓` history · `PgUp/Dn` scroll · `Tab` complete · `Ctrl-K` commands · `/leave` · `/back` home · `?` help |
 | rooms browser | `↑↓` move · `Enter` open/join · `/back` home |
 | who | `/back` close · `?` help |
 | help | `/back` close |
@@ -279,6 +281,62 @@ No messages in #leagues yet.
 
 Each empty state is inline-static — no runtime dispatch on which hints to show. Copy chosen once per view.
 
+### 11. Scrollable message lists (messages pane + watch pane)
+
+Both the main messages pane and the optional watch pane render a list of `Message` objects. Today the messages pane caps at 30 rows and the watch pane at 10; both cut off silently and the user cannot scroll back to see older messages. Fix: shared `ScrollableMessageList` component, used in both places.
+
+**Data**:
+
+- Messages pane query lifted from `LIMIT 30` to `LIMIT 200` per view (DM or room). Preserves the "latest first, reverse to chronological" pattern.
+- Watch pane query lifted from `LIMIT 10` to `LIMIT 100`.
+- Both are still hard caps for MVP — no infinite scroll / progressive load. A 200-message ceiling covers "the current conversation" in practice.
+
+**Rendering**:
+
+- Component takes `messages: Message[]` + `viewportRows: number` and internally tracks a `scrollOffset` (0 = pinned to newest, N = scrolled back N lines).
+- Wrapped-line height matters for accuracy but is expensive in Ink. MVP treats each message as ~2 rows (header line + body line); overflow beyond that pushes into the next "page." Good enough — precision is a future polish.
+
+**Keybindings** (delivered to the pane when the pane is focused; when the input is empty and the messages pane owns focus by default):
+
+| Key | Action |
+|---|---|
+| `PageUp` | Scroll up by `viewportRows - 2` (near-full page, keep 2 rows for continuity). |
+| `PageDown` | Scroll down by same. |
+| `Home` | Jump to the top of the loaded window (oldest visible). |
+| `End` | Jump to bottom (newest); re-arms auto-follow. |
+
+**Auto-follow**: when `scrollOffset === 0` (pinned to newest), incoming messages cause the pane to stay pinned to newest. If `scrollOffset > 0` (user has scrolled back), incoming messages do NOT snap the view back — the user's read position is preserved. A dim `↓ N new` indicator at the bottom of the pane surfaces how many newer messages the user hasn't seen.
+
+**Focus routing**: the input bar always owns character keys (typing). PageUp/PageDown/Home/End are dispatched to the currently-visible message list. When both messages and watch are visible, `PageUp` moves the messages pane; a modifier (`Shift-PageUp` / `Shift-PageDown`) targets the watch pane. If Shift-Page delivery is unreliable in a terminal, fall back to a `/watch-scroll <up|down>` slash command — but MVP tries Shift-Page first.
+
+**Scope**: `HelpPane`, `RoomsBrowserPane`, and `WhoPane` are NOT scrollable in this pass — their content is bounded (finite command list, finite rooms count, finite peers). If they grow beyond a screen, revisit.
+
+### 12. Markdown rendering in message bodies
+
+Message bodies (the text posted via `/dispatch`, `/broadcast`, or plain chat) render with a minimal markdown subset:
+
+| Syntax | Effect |
+|---|---|
+| `**bold**` | Bold text. |
+| `*italic*` | Italic text (terminal support varies; degrades to bold-off if unsupported). |
+| `` `code` `` | Inline code — dim background, monospace already default. |
+| ```` ```lang\ncode\n``` ```` | Fenced code block — indented, dim-boxed. `lang` is ignored (no syntax highlight in MVP). |
+| `[label](url)` | The label renders as underlined + cyan; the URL renders dim in parens after (terminals rarely support click-through OSC-8, but that's a nice future). |
+
+**Scope of the parser**:
+
+- Message-body text only. Header lines (sender, timestamp, `[DISPATCH]` / `[ALERT]` tags) render as today.
+- Applies uniformly in the messages pane AND the watch pane.
+- Alerts (`kind === 'alert'`) render body with markdown, but the alert-lane wrapping / color stays as today.
+- No block-level markdown (headers, lists, blockquotes, tables). If a user posts `# foo`, it renders as literal `# foo`.
+
+**Implementation**:
+
+- Hand-rolled tokenizer + Ink `<Text>` renderer, no new dependencies. ~80 lines in `src/cli/ink/util/markdown.tsx` — see plan.
+- Escape hatch: a leading `\` before any of the trigger characters (`*`, `` ` ``, `[`) renders it literal.
+
+**Testing**: unit-test the tokenizer with `node:test` — verify each syntax + escape + a mixed-content case.
+
 ## Architecture / decomposition
 
 Current `App.tsx` is 770 lines in one file. This spec grows the file materially — palette overlay, autocomplete dropdown, /rooms browser, empty-state panels — plus a hand-rolled input. Splitting is required to keep components under ~200 lines each.
@@ -338,8 +396,9 @@ No schema changes. No message-kind changes. No notify-bus changes.
 ## Future work (explicitly out of scope)
 
 - Palette actions: `Open DM with <peer>`, `Join #<room>`, `Watch <peer>`.
-- Scrollback + search in the messages pane.
+- Search across message history (grep, jump-to-hit).
 - Persistent history across sessions.
+- Persistent scroll position across sessions.
 - Message editing / deletion.
 - Themes.
 

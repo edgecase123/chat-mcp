@@ -2101,7 +2101,332 @@ git commit -m "feat(ink): input history recall (↑↓ with completion gating)"
 
 ---
 
-## Task 25: Version bump + integration smoke
+## Task 25: Scrollable message lists (messages pane + watch pane)
+
+**Files:**
+- Create: `src/cli/ink/panes/ScrollableMessageList.tsx`
+- Modify: `src/cli/ink/panes/MessagesPane.tsx`
+- Modify: `src/cli/ink/App.tsx`
+
+- [ ] **Step 1: Create `ScrollableMessageList.tsx`**
+
+```typescript
+import React, { useEffect, useRef, useState } from 'react';
+import { Box, Text, useInput } from 'ink';
+import type { Message, MessageKind } from '../../../storage/dao.js';
+
+export interface ScrollableMessageListProps {
+  messages: Message[];
+  meHandle: string;
+  viewportRows: number;
+  /** When true, this list receives PgUp/PgDn/Home/End */
+  focused?: boolean;
+  /** Optional shift modifier to route keys — used when two lists are visible */
+  requireShift?: boolean;
+  renderRow: (m: Message, meHandle: string) => React.ReactElement;
+}
+
+/**
+ * Message list with keyboard scrolling + auto-follow at bottom.
+ * scrollOffset === 0 means pinned to newest; N means scrolled back N rows.
+ * When pinned, incoming messages stay pinned. When scrolled back, incoming
+ * messages don't shift the view — a `↓ N new` indicator surfaces the delta.
+ */
+export function ScrollableMessageList({
+  messages,
+  meHandle,
+  viewportRows,
+  focused = true,
+  requireShift = false,
+  renderRow,
+}: ScrollableMessageListProps): React.ReactElement {
+  const [scrollOffset, setScrollOffset] = useState(0);
+  const prevLenRef = useRef(messages.length);
+
+  // When new messages arrive AND we're not scrolled back, stay pinned.
+  // When scrolled back, preserve position by growing offset by the delta.
+  useEffect(() => {
+    const delta = messages.length - prevLenRef.current;
+    prevLenRef.current = messages.length;
+    if (delta > 0 && scrollOffset > 0) {
+      setScrollOffset((o) => o + delta);
+    }
+  }, [messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useInput((_raw, key) => {
+    if (!focused) return;
+    if (requireShift && !key.shift) return;
+    const step = Math.max(1, viewportRows - 2);
+    if (key.pageUp) return setScrollOffset((o) => Math.min(messages.length - viewportRows, o + step));
+    if (key.pageDown) return setScrollOffset((o) => Math.max(0, o - step));
+    // Home / End: Ink exposes these via key.home / key.end on modern versions.
+    if ((key as unknown as { home?: boolean }).home) return setScrollOffset(Math.max(0, messages.length - viewportRows));
+    if ((key as unknown as { end?: boolean }).end) return setScrollOffset(0);
+  });
+
+  const end = messages.length - scrollOffset;
+  const start = Math.max(0, end - viewportRows);
+  const visible = messages.slice(start, end);
+  const newerHidden = scrollOffset > 0 ? scrollOffset : 0;
+
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      {visible.map((m) => renderRow(m, meHandle))}
+      {newerHidden > 0 && (
+        <Text dimColor>↓ {newerHidden} newer</Text>
+      )}
+    </Box>
+  );
+}
+```
+
+- [ ] **Step 2: Update `MessagesPane.tsx` to use `ScrollableMessageList`**
+
+Extract the existing per-message JSX into a `renderRow` function; delegate the list rendering to `<ScrollableMessageList messages={messages} meHandle={meHandle} viewportRows={20} focused={true} renderRow={renderRow} />`. Keep the title + divider lines as today.
+
+`viewportRows={20}` is a reasonable default for MVP; a follow-up can measure the actual pane height with Ink's `useStdout` if needed.
+
+- [ ] **Step 3: Update message queries in `App.tsx`**
+
+Change the two `LIMIT 30` clauses in the DM + room message queries to `LIMIT 200`. Change the watch-pane query from `LIMIT 10` to `LIMIT 100`.
+
+- [ ] **Step 4: Update the watch-pane render in `App.tsx` to use `ScrollableMessageList`**
+
+Wrap the existing watch-pane message loop with `<ScrollableMessageList messages={watchMessages} meHandle={handle} viewportRows={10} focused={showWatch} requireShift={true} renderRow={...} />`. `requireShift` lets `Shift-PgUp/Dn` target the watch pane while unmodified `PgUp/Dn` targets the main messages list.
+
+- [ ] **Step 5: Build + smoke**
+
+`npm run build && node dist/index.js cli --experimental --handle testuser` — with a peer that has many messages (or force by seeding), PgUp/PgDn scrolls; new messages arriving while scrolled back leave the position pinned + show `↓ N newer`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/cli/ink/panes/ScrollableMessageList.tsx src/cli/ink/panes/MessagesPane.tsx src/cli/ink/App.tsx
+git commit -m "feat(ink): scrollable messages + watch panes (PgUp/Dn/Home/End, auto-follow)"
+```
+
+---
+
+## Task 26: Markdown rendering in message bodies
+
+**Files:**
+- Create: `src/cli/ink/util/markdown.tsx`
+- Create: `test/cli/ink/util/markdown.test.ts`
+- Modify: `src/cli/ink/panes/MessagesPane.tsx` (renderRow)
+- Modify: `src/cli/ink/App.tsx` (watch-pane renderRow)
+
+- [ ] **Step 1: Write the failing tokenizer test**
+
+Create `test/cli/ink/util/markdown.test.ts`:
+
+```typescript
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { tokenize } from '../../../../src/cli/ink/util/markdown.js';
+
+test('plain text tokenizes to a single text token', () => {
+  assert.deepEqual(tokenize('hello world'), [{ kind: 'text', value: 'hello world' }]);
+});
+
+test('bold: **foo**', () => {
+  assert.deepEqual(tokenize('a **b** c'), [
+    { kind: 'text', value: 'a ' },
+    { kind: 'bold', value: 'b' },
+    { kind: 'text', value: ' c' },
+  ]);
+});
+
+test('italic: *foo*', () => {
+  assert.deepEqual(tokenize('*foo*'), [{ kind: 'italic', value: 'foo' }]);
+});
+
+test('inline code: `foo`', () => {
+  assert.deepEqual(tokenize('run `npm test` please'), [
+    { kind: 'text', value: 'run ' },
+    { kind: 'code', value: 'npm test' },
+    { kind: 'text', value: ' please' },
+  ]);
+});
+
+test('link: [label](url)', () => {
+  assert.deepEqual(tokenize('see [docs](https://example.com)'), [
+    { kind: 'text', value: 'see ' },
+    { kind: 'link', label: 'docs', url: 'https://example.com' },
+  ]);
+});
+
+test('fenced code block', () => {
+  assert.deepEqual(tokenize('before\n```\nfoo\nbar\n```\nafter'), [
+    { kind: 'text', value: 'before\n' },
+    { kind: 'code-block', value: 'foo\nbar' },
+    { kind: 'text', value: '\nafter' },
+  ]);
+});
+
+test('escaped triggers render literal', () => {
+  assert.deepEqual(tokenize('a \\*b\\* c'), [{ kind: 'text', value: 'a *b* c' }]);
+});
+
+test('unterminated bold renders literal', () => {
+  assert.deepEqual(tokenize('a **b c'), [{ kind: 'text', value: 'a **b c' }]);
+});
+
+test('mixed content', () => {
+  assert.deepEqual(tokenize('run **`npm test`** now'), [
+    { kind: 'text', value: 'run ' },
+    { kind: 'bold', value: '`npm test`' }, // nested markdown not parsed — bold takes precedence
+    { kind: 'text', value: ' now' },
+  ]);
+});
+```
+
+- [ ] **Step 2: Run `npm test` — expect FAIL (`tokenize` missing)**
+
+- [ ] **Step 3: Create `src/cli/ink/util/markdown.tsx`**
+
+```typescript
+import React from 'react';
+import { Text } from 'ink';
+
+export type Token =
+  | { kind: 'text'; value: string }
+  | { kind: 'bold'; value: string }
+  | { kind: 'italic'; value: string }
+  | { kind: 'code'; value: string }
+  | { kind: 'code-block'; value: string }
+  | { kind: 'link'; label: string; url: string };
+
+const TRIGGERS = new Set(['*', '`', '[', '\\']);
+
+/**
+ * Tokenize a message body into a small subset of markdown.
+ * - `**bold**`, `*italic*`, `` `code` ``, ```` ```code block``` ````, `[label](url)`
+ * - `\` before a trigger renders it literal
+ * - Unterminated markers render literal (no wrap-around)
+ * - No nesting — the outermost marker wins
+ */
+export function tokenize(input: string): Token[] {
+  const tokens: Token[] = [];
+  let buf = '';
+  let i = 0;
+  const flush = (): void => {
+    if (buf.length > 0) {
+      tokens.push({ kind: 'text', value: buf });
+      buf = '';
+    }
+  };
+
+  while (i < input.length) {
+    const ch = input[i]!;
+
+    if (ch === '\\' && i + 1 < input.length && TRIGGERS.has(input[i + 1]!)) {
+      buf += input[i + 1]!;
+      i += 2;
+      continue;
+    }
+
+    // Fenced code block
+    if (input.startsWith('```', i)) {
+      const nlAfterOpen = input.indexOf('\n', i + 3);
+      const close = input.indexOf('\n```', nlAfterOpen >= 0 ? nlAfterOpen : i + 3);
+      if (nlAfterOpen >= 0 && close >= 0) {
+        flush();
+        tokens.push({ kind: 'code-block', value: input.slice(nlAfterOpen + 1, close) });
+        i = close + 4;
+        continue;
+      }
+    }
+
+    if (ch === '*' && input[i + 1] === '*') {
+      const close = input.indexOf('**', i + 2);
+      if (close > i + 2) {
+        flush();
+        tokens.push({ kind: 'bold', value: input.slice(i + 2, close) });
+        i = close + 2;
+        continue;
+      }
+    }
+
+    if (ch === '*') {
+      const close = input.indexOf('*', i + 1);
+      if (close > i + 1) {
+        flush();
+        tokens.push({ kind: 'italic', value: input.slice(i + 1, close) });
+        i = close + 1;
+        continue;
+      }
+    }
+
+    if (ch === '`') {
+      const close = input.indexOf('`', i + 1);
+      if (close > i + 1) {
+        flush();
+        tokens.push({ kind: 'code', value: input.slice(i + 1, close) });
+        i = close + 1;
+        continue;
+      }
+    }
+
+    if (ch === '[') {
+      const closeLabel = input.indexOf(']', i + 1);
+      if (closeLabel > i + 1 && input[closeLabel + 1] === '(') {
+        const closeUrl = input.indexOf(')', closeLabel + 2);
+        if (closeUrl > closeLabel + 2) {
+          flush();
+          tokens.push({ kind: 'link', label: input.slice(i + 1, closeLabel), url: input.slice(closeLabel + 2, closeUrl) });
+          i = closeUrl + 1;
+          continue;
+        }
+      }
+    }
+
+    buf += ch;
+    i += 1;
+  }
+
+  flush();
+  return tokens;
+}
+
+export function Markdown({ body, baseColor }: { body: string; baseColor?: string }): React.ReactElement {
+  const tokens = tokenize(body);
+  return (
+    <Text color={baseColor}>
+      {tokens.map((t, idx) => {
+        switch (t.kind) {
+          case 'text':       return <Text key={idx}>{t.value}</Text>;
+          case 'bold':       return <Text key={idx} bold>{t.value}</Text>;
+          case 'italic':     return <Text key={idx} italic>{t.value}</Text>;
+          case 'code':       return <Text key={idx} backgroundColor="gray"> {t.value} </Text>;
+          case 'code-block': return <Text key={idx} dimColor>{'\n'}{t.value}{'\n'}</Text>;
+          case 'link':       return <Text key={idx} color="cyan" underline>{t.label} <Text dimColor>({t.url})</Text></Text>;
+        }
+      })}
+    </Text>
+  );
+}
+```
+
+- [ ] **Step 4: Run `npm test` — expect PASS (9 new tests)**
+
+- [ ] **Step 5: Use `<Markdown>` in `MessagesPane.tsx` and the watch-pane renderRow**
+
+Replace `<Text color={KIND_COLOR[m.kind]}>  {m.body}</Text>` with `<Markdown body={m.body} baseColor={KIND_COLOR[m.kind]} />` inside the two-line message layout. Same substitution in App.tsx watch-pane render.
+
+- [ ] **Step 6: Build + smoke**
+
+Send yourself a DM with body `run **`npm test`** please — see [docs](https://example.com)` via a sibling shim or a scripted `dao.insertMessage`. Verify bold + code + link render as expected in the Ink UI.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/cli/ink/util/markdown.tsx test/cli/ink/util/markdown.test.ts src/cli/ink/panes/MessagesPane.tsx src/cli/ink/App.tsx
+git commit -m "feat(ink): markdown rendering in message bodies (bold/italic/code/link)"
+```
+
+---
+
+## Task 27: Version bump + integration smoke
 
 **Files:**
 - Modify: `package.json`
