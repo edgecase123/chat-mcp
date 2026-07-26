@@ -43,6 +43,7 @@ export const COMMANDS: Command[] = [
   { name: '/unwatch', args: [], description: 'close watch pane', category: 'status' },
 
   { name: '/help', args: [], description: 'open this help', category: 'system' },
+  { name: '/keyboard', args: [], description: 'show keyboard shortcuts only', category: 'system' },
   { name: '/quit', args: [], description: 'quit', category: 'system' },
   { name: '/exit', args: [], description: 'quit', category: 'system' },
 ];

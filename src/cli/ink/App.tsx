@@ -17,6 +17,7 @@ import { MessagesPane } from './panes/MessagesPane.js';
 import { ScrollableMessageList } from './panes/ScrollableMessageList.js';
 import { WhoPane } from './panes/WhoPane.js';
 import { HelpPane } from './panes/HelpPane.js';
+import { KeyboardPane } from './panes/KeyboardPane.js';
 import { RoomsBrowserPane } from './panes/RoomsBrowserPane.js';
 import { Sidebar } from './panes/Sidebar.js';
 import { Palette } from './palette/Palette.js';
@@ -75,7 +76,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   );
 
   const messages = useMemo<Message[]>(() => {
-    if (view.kind === 'home' || view.kind === 'who' || view.kind === 'help' || view.kind === 'rooms') return [];
+    if (view.kind === 'home' || view.kind === 'who' || view.kind === 'help' || view.kind === 'keyboard' || view.kind === 'rooms') return [];
     if (view.kind === 'dm') {
       return db
         .prepare(
@@ -260,6 +261,9 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           return;
         case 'help':
           setView({ kind: 'help' });
+          return;
+        case 'keyboard':
+          setView({ kind: 'keyboard' });
           return;
         case 'back':
           setView({ kind: 'home' });
@@ -560,6 +564,8 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             <WhoPane peers={peers} meHandle={handle} />
           ) : view.kind === 'help' ? (
             <HelpPane />
+          ) : view.kind === 'keyboard' ? (
+            <KeyboardPane />
           ) : view.kind === 'rooms' ? (
             <RoomsBrowserPane
               db={db}

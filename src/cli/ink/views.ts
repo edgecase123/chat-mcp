@@ -4,4 +4,5 @@ export type View =
   | { kind: 'room'; room: string }
   | { kind: 'who' }
   | { kind: 'help' }
+  | { kind: 'keyboard' }
   | { kind: 'rooms' };
