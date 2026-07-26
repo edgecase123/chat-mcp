@@ -290,7 +290,7 @@ All tools are namespaced under `chat.` in the MCP client:
 | `send` | `to`, `body` | Send a 1:1 message. Body cap 64 KB. |
 | `inbox` | `since_id?`, `limit?=50` | Cheap read of unread messages. |
 | `wait_for_message` | `timeout_s?=25`, `since_id?` | Block until a message arrives or timeout. Use when actively awaiting a reply. |
-| `room_join` | `room` | Join a room (auto-creates on first join). Room names must start with `#`. |
+| `room_join` | `room` | Join a room (auto-creates on first join). Room names must start with `#`. Posts a system announcement (`<handle> joined <room>`, `from="system"`) to existing members on first join. |
 | `room_leave` | `room` | Leave a room. |
 | `room_send` | `room`, `body` | Post to a room you're a member of. |
 | `room_inbox` | `room?`, `limit?=50` | Unread room messages, from one room or all. Per-member watermark. |
@@ -299,6 +299,8 @@ All tools are namespaced under `chat.` in the MCP client:
 ### Rooms
 
 Rooms are named multi-peer channels prefixed with `#` (e.g. `#gate`, `#planning`). Membership is explicit — `room_join` / `room_leave` — and persistent across sessions. Only current members receive messages sent to a room; pre-join history stays hidden. First joiner implicitly creates the room.
+
+When someone joins a room they aren't already in, the bus posts a system announcement (`<handle> joined <room>`, `from="system"`) visible to every other member on their next `room_inbox` and via a real-time notify event. The joiner's own watermark is anchored past the announcement, so they don't see the "you joined" line — the shim's `room_join` return value already confirms the join. Idempotent re-joins do not re-announce.
 
 Unread tracking is a per-member high-watermark (last-read message id), not per-message read receipts. Each member reads independently; `room_inbox` returns unread + advances the watermark.
 
