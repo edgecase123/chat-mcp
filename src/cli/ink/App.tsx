@@ -19,6 +19,7 @@ import { HelpPane } from './panes/HelpPane.js';
 import { RoomsBrowserPane } from './panes/RoomsBrowserPane.js';
 import { Sidebar } from './panes/Sidebar.js';
 import { Palette } from './palette/Palette.js';
+import { HintBar } from './HintBar.js';
 
 export interface AppProps {
   handle: string;
@@ -534,6 +535,8 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           </Box>
         )}
       </Box>
+
+      <HintBar view={view} />
 
       {/* Input — hidden while palette is open so keys don't dispatch to both handlers */}
       {!paletteOpen && (

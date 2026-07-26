@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { Message, MessageKind } from '../../../storage/dao.js';
 import type { View } from '../views.js';
+import { HomeEmptyState, DmEmptyState, RoomEmptyState } from './EmptyState.js';
 
 const KIND_LABEL: Record<MessageKind, string | null> = {
   chat: null,
@@ -42,7 +43,10 @@ export function MessagesPane({ view, messages, meHandle }: MessagesPaneProps): R
       <Text dimColor>{'─'.repeat(50)}</Text>
       <Box flexDirection="column" flexGrow={1}>
         {messages.length === 0 ? (
-          <Text dimColor>{view.kind === 'home' ? '' : '(no messages)'}</Text>
+          view.kind === 'home' ? <HomeEmptyState /> :
+          view.kind === 'dm' ? <DmEmptyState peer={view.peer} /> :
+          view.kind === 'room' ? <RoomEmptyState room={view.room} /> :
+          null
         ) : (
           messages.map((m) => (
             <Box key={m.id} flexDirection="column" marginBottom={1}>
