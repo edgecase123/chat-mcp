@@ -1,10 +1,10 @@
 import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
-import type { Database as Db } from 'better-sqlite3';
 import { openDb } from '../storage/db.js';
 import { NotifyBus, notifyPeer } from '../notify/bus.js';
 import * as dao from '../storage/dao.js';
 import type { Message } from '../storage/dao.js';
+import { bold, cyan, dim, green } from './color.js';
 
 export interface CliOptions {
   handle: string;
@@ -35,17 +35,23 @@ export async function runCli(opts: CliOptions): Promise<void> {
   });
 
   let mode: Mode = { kind: 'top' };
-  const promptFor = (): string => (mode.kind === 'dm' ? `[dm ${mode.dmTarget}] > ` : '> ');
+  const promptFor = (): string =>
+    mode.kind === 'dm' && mode.dmTarget ? `${cyan(mode.dmTarget)} > ` : '> ';
 
-  console.log(`chat-mcp v0.0.1 · handle: ${opts.handle} · type /help or Ctrl-C to quit`);
+  console.log(
+    `${bold('chat-mcp')} ${dim('v0.0.1')}  ·  handle: ${cyan(opts.handle)}  ·  ${dim('/help or Ctrl-C to quit')}`,
+  );
   rl.setPrompt(promptFor());
   rl.prompt();
 
   const timeOf = (ts: number): string => new Date(ts).toTimeString().slice(0, 8);
 
   const printMessage = (m: Message): void => {
-    // Clear the current input line, print above it, then redraw prompt + buffer
-    process.stdout.write(`\r\x1b[K[${m.from_handle} → ${opts.handle} ${timeOf(m.sent_at)}]  ${m.body}\n`);
+    // Clear the current input line, print above it, then redraw prompt + buffer.
+    // Two-line format: bold sender + dim timestamp header, then indented body,
+    // with a leading + trailing blank line to separate conversation turns.
+    const header = `  ${bold(m.from_handle)}  ${dim(timeOf(m.sent_at))}`;
+    process.stdout.write(`\r\x1b[K\n${header}\n    ${m.body}\n\n`);
     rl.prompt(true);
   };
 
@@ -64,7 +70,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
   const cleanup = (): void => {
     if (closing) return;
     closing = true;
-    console.log('bye');
+    console.log(dim('bye'));
     rl.close();
     void notify.close().finally(() => {
       try {
@@ -83,12 +89,12 @@ export async function runCli(opts: CliOptions): Promise<void> {
     switch (cmd) {
       case 'help':
         console.log([
-          '/list             — list online peers',
-          '/dm <handle>      — enter DM mode with a peer',
-          '/back             — leave DM mode',
-          '/whoami           — show your own handle',
-          '/quit             — exit',
-          '(plain text in DM mode is sent to the current DM target)',
+          `  ${cyan('/list')}             list online peers`,
+          `  ${cyan('/dm')} <handle>      enter DM mode`,
+          `  ${cyan('/back')}             leave DM mode`,
+          `  ${cyan('/whoami')}           show your own handle`,
+          `  ${cyan('/quit')}             exit`,
+          dim(`  (plain text in DM mode sends to the current DM target)`),
         ].join('\n'));
         break;
       case 'list':
@@ -101,63 +107,65 @@ export async function runCli(opts: CliOptions): Promise<void> {
         mode = { kind: 'top' };
         break;
       case 'whoami':
-        console.log(`handle: ${opts.handle} · session_id: ${session_id}`);
+        console.log(`  handle: ${cyan(opts.handle)}  ${dim(`session_id: ${session_id}`)}`);
         break;
       case 'quit':
       case 'exit':
         cleanup();
         return;
       default:
-        console.log(`unknown command: /${cmd} (try /help)`);
+        console.log(dim(`  unknown command: /${cmd} (try /help)`));
     }
   };
 
   const doList = (): void => {
     const agents = dao.listAgents(db, false).filter((a) => a.handle !== opts.handle);
     if (agents.length === 0) {
-      console.log('(no peers online)');
+      console.log(dim('  (no peers online)'));
       return;
     }
     for (const a of agents) {
-      const name = a.handle.padEnd(16);
+      const name = bold(a.handle.padEnd(12));
       const kind = a.kind.padEnd(6);
-      const seen = timeOf(a.last_seen_at);
-      console.log(`  ${name}· ${kind}· online · last seen ${seen}`);
+      const status = green('online');
+      const seen = dim(`seen ${timeOf(a.last_seen_at)}`);
+      console.log(`  ${name}  ${kind}  ${status}  ${seen}`);
     }
   };
 
   const doDm = (target: string | undefined): void => {
     if (!target) {
-      console.log('usage: /dm <handle>');
+      console.log(dim('  usage: /dm <handle>'));
       return;
     }
     if (target === opts.handle) {
-      console.log('cannot dm yourself');
+      console.log(dim('  cannot dm yourself'));
       return;
     }
     const peer = dao.getAgent(db, target);
     if (!peer) {
-      console.log(`unknown peer: ${target}`);
+      console.log(dim(`  unknown peer: ${target}`));
       return;
     }
     mode = { kind: 'dm', dmTarget: target };
-    console.log(`[dm with ${target}]  (type to send, /back to return, /quit to exit)`);
+    console.log(`${cyan('▸')} dm with ${cyan(target)}  ${dim('(/back to leave)')}`);
   };
 
   const doText = (text: string): void => {
     if (mode.kind !== 'dm' || !mode.dmTarget) {
-      console.log('Not in a DM. Use /dm <handle> first (/list to see peers).');
+      console.log(dim('  Not in a DM. Use /dm <handle> first (/list to see peers).'));
       return;
     }
     const peer = dao.getAgent(db, mode.dmTarget);
     if (!peer) {
-      console.log(`peer ${mode.dmTarget} no longer registered — /back and try again`);
+      console.log(dim(`  peer ${mode.dmTarget} no longer registered — /back and try again`));
       return;
     }
     const sent = dao.insertMessage(db, { from: opts.handle, to: mode.dmTarget, body: text });
     notifyPeer(mode.dmTarget, { id: sent.id, to: mode.dmTarget, from: opts.handle, ts: sent.sent_at });
-    const now = new Date().toTimeString().slice(0, 8);
-    process.stdout.write(`\r\x1b[K[${opts.handle} → ${mode.dmTarget} ${now}]  ${text}\n`);
+    // Own send: skip echoing the body (readline already showed it) and just
+    // print a dim timestamp confirmation aligned under the prompt.
+    process.stdout.write(`${dim(`          → sent ${timeOf(sent.sent_at)}`)}\n`);
   };
 
   rl.on('line', (raw: string) => {
@@ -175,7 +183,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
       }
     } catch (e) {
       const err = e as Error;
-      console.log(`error: ${err.message}`);
+      console.log(dim(`  error: ${err.message}`));
     }
     if (!closing) {
       rl.setPrompt(promptFor());
