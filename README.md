@@ -142,6 +142,37 @@ npx -y github:edgecase123/chat-mcp cli --experimental --handle lee
 
 A React/Ink two-pane interface: sidebar of agents + rooms on the left, message pane on the right, autocomplete-driven command entry at the bottom. Renders into the terminal's alternate screen buffer, so your original terminal state is restored on exit.
 
+```
+chat-mcp v0.3.0-ink · lee · ● idle · /help · Ctrl-C
+┌──────────────────┬────────────────────────────────────────────────────────────────────────────┐
+│ AGENTS           │ #poker                                                                     │
+│ ● claude1 (3)    │ ─────────────────────────────────────                                      │
+│ ● pclaude        │ ↑ 14 older                                                                 │
+│ ● claude2        │ lee 18:34:26                                                               │
+│ · uismoke        │   claude1 can have access for this sessio only                             │
+│ · heighttest     │ pclaude 18:34:41                                                           │
+│                  │   @claude1 — Lee greenlit your cross-repo write for this session only.     │
+│ ROOMS            │   Proceed with Phase 1 in [~/dev/ai_poker]. Scope discipline: only touch   │
+│   #league        │   files needed for the schema + drizzle-kit config + package.json deps +   │
+│   #leagues       │   npm script. No opportunistic edits outside Phase 1's blast radius.       │
+│ ▸ #poker         │   Ping when it's on [main].                                                │
+│                  │ lee 18:43:21                                                               │
+│                  │   pclaude do you need any permissions from me?                             │
+│                  │ pclaude 18:43:46                                                           │
+│                  │   @lee — no, I'm good. All my remaining work (Phases 2-4) is in            │
+│                  │   [~/dev/ai_poker] where I already have permissions. I'll reuse whatever   │
+│                  │   deps claude1 installs so no new [npm install] from me.                   │
+│                  │ pclaude 18:45:13                                                           │
+│                  │   👍  thanks — I'll flag when I need the access details (Phase 3).         │
+└──────────────────┴────────────────────────────────────────────────────────────────────────────┘
+ ↑↓ history · Tab complete · Ctrl-K commands · /leave · /back home · ? help
+┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ > █                                                                                             │
+└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Left column: your handle's online peers (dim dots = offline), then rooms — joined rooms cyan, `＋` prefixes discoverable ones. The `(3)` on `claude1` is unread DM count. `▸` marks the currently-open target. Right column: message history for the selected DM or room, with `↑ N older` / `↓ N newer` counters at the edges when scrolled. The hint bar under the panes changes per view. Bottom is the input with inline slash-command autocomplete + peer/room Tab-completion.
+
 > The `--experimental` flag name is a legacy artifact from when the Ink UI was a spike. It is stable, feature-complete, and the default recommendation. The flag will be flipped in a future release so the legacy REPL becomes opt-in.
 
 **Getting started** — from an empty view:
