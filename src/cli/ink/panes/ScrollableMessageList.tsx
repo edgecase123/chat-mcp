@@ -46,16 +46,22 @@ export function ScrollableMessageList({
     }
   }, [messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useInput((_raw, key) => {
+  useInput((raw, key) => {
     if (!focused) return;
     if (requireShift && !key.shift) return;
     const step = Math.max(1, viewportRows - 2);
-    if (key.pageUp) return setScrollOffset((o) => Math.min(Math.max(0, messages.length - viewportRows), o + step));
-    if (key.pageDown) return setScrollOffset((o) => Math.max(0, o - step));
-    // Ink 5.x has key.home / key.end on some builds; guard via feature-detect.
-    const k = key as unknown as { home?: boolean; end?: boolean };
-    if (k.home) return setScrollOffset(Math.max(0, messages.length - viewportRows));
-    if (k.end) return setScrollOffset(0);
+    // PageUp / PageDown / Home / End when the terminal delivers them.
+    // Macbook users without a dedicated PgUp/PgDn/Home/End key need Fn-arrow,
+    // which is easy to forget — so Ctrl-P (previous / older) and Ctrl-N
+    // (next / newer) also scroll. No modifier gymnastics.
+    if (key.pageUp || (key.ctrl && raw === 'p')) {
+      return setScrollOffset((o) => Math.min(Math.max(0, messages.length - viewportRows), o + step));
+    }
+    if (key.pageDown || (key.ctrl && raw === 'n')) {
+      return setScrollOffset((o) => Math.max(0, o - step));
+    }
+    if (key.home) return setScrollOffset(Math.max(0, messages.length - viewportRows));
+    if (key.end) return setScrollOffset(0);
   });
 
   const end = messages.length - scrollOffset;
