@@ -170,10 +170,17 @@ Commands: `/list`, `/dm <handle>`, `/back`, `/quit`. Plain text in DM mode sends
 
 ### Shell integration
 
-`chat-mcp aliases` prints a source-able bash/zsh block that gives you:
+`chat-mcp aliases` prints a source-able bash/zsh block:
 
-- `chat [handle]` — join the bus as a peer (defaults to `$CHAT_MCP_HANDLE`, else `$USER`).
-- `chat-install`, `chat-uninstall`, `chat-adapters` — thin wrappers over the corresponding subcommands.
+| Alias | Wraps | Purpose |
+|---|---|---|
+| `chat [handle]` | `chat-mcp cli --handle …` | Join the bus as a peer (REPL). Defaults to `$CHAT_MCP_HANDLE`. |
+| `chat-send <to> "<body>"` | `chat-mcp send …` | One-shot send from `$CHAT_MCP_HANDLE`. `chat-send <to> -` reads body from stdin. |
+| `chat-inbox` | `chat-mcp inbox …` | Read unread for `$CHAT_MCP_HANDLE`. Marks read. |
+| `chat-peek` | `chat-mcp inbox --peek` | Same but doesn't mark read. |
+| `chat-list [--all]` | `chat-mcp list …` | List peers (default: online only). |
+| `chat-me` | — | Echo `$CHAT_MCP_HANDLE`. |
+| `chat-install`, `chat-uninstall`, `chat-adapters` | `chat-mcp install/uninstall/list-adapters` | Admin. |
 
 Install once:
 
@@ -194,6 +201,18 @@ For a local checkout, point the wrappers at your build instead of `npx`:
 ```bash
 export CHAT_MCP_BIN="node /path/to/chat-mcp/dist/index.js"
 ```
+
+### Non-interactive subcommands
+
+The aliases wrap three one-shot subcommands. They also work directly, useful in scripts / CI:
+
+```bash
+chat-mcp send <to> <body> [--from <handle>] [--stdin] [--json]
+chat-mcp inbox [--handle <handle>] [--peek] [--json]
+chat-mcp list [--all] [--json]
+```
+
+`--from` / `--handle` default to `$CHAT_MCP_HANDLE`. The sender doesn't need to be a registered peer — messages are just tagged with the from-handle. Only the recipient must exist.
 
 ## For AI coding agents installing this on behalf of your user
 

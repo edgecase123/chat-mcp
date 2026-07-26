@@ -14,7 +14,7 @@ async function runShimEntry(handle: string | undefined): Promise<void> {
 // This is the entry shape used by .mcp.json / claude mcp add, so we detect it
 // before commander sees the args to avoid --handle colliding with subcommand
 // options of the same name.
-const KNOWN_SUBCOMMANDS = new Set(['cli', 'install', 'uninstall', 'list-adapters', 'aliases', 'help', '--help', '-h', '--version', '-V']);
+const KNOWN_SUBCOMMANDS = new Set(['cli', 'send', 'inbox', 'list', 'install', 'uninstall', 'list-adapters', 'aliases', 'help', '--help', '-h', '--version', '-V']);
 const firstArg = process.argv[2];
 if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   const argv = process.argv.slice(2);
@@ -36,6 +36,42 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .action(async (opts: { handle: string }) => {
       const { runCli } = await import('./cli/index.js');
       await runCli({ handle: opts.handle });
+    });
+
+  program
+    .command('send <to> [body]')
+    .description('Send a one-shot message to a peer (sender: --from or $CHAT_MCP_HANDLE)')
+    .option('--from <handle>', 'sender handle (default: $CHAT_MCP_HANDLE)')
+    .option('--stdin', 'read body from stdin (overrides positional body)', false)
+    .option('--json', 'emit {message_id, sent_at} as JSON', false)
+    .action(async (
+      to: string,
+      body: string | undefined,
+      opts: { from?: string; stdin?: boolean; json?: boolean },
+    ) => {
+      const { runSend } = await import('./oneshot/send.js');
+      await runSend({ to, body, from: opts.from, stdin: opts.stdin, json: opts.json });
+    });
+
+  program
+    .command('inbox')
+    .description('Read unread messages for a handle (default: $CHAT_MCP_HANDLE)')
+    .option('--handle <handle>', 'recipient handle (default: $CHAT_MCP_HANDLE)')
+    .option('--peek', 'do not mark messages read', false)
+    .option('--json', 'emit an array of {id, from, body, sent_at} as JSON', false)
+    .action(async (opts: { handle?: string; peek?: boolean; json?: boolean }) => {
+      const { runInbox } = await import('./oneshot/inbox.js');
+      await runInbox({ handle: opts.handle, peek: opts.peek, json: opts.json });
+    });
+
+  program
+    .command('list')
+    .description('List peers on the chat bus')
+    .option('--all', 'include peers whose shim process is no longer alive', false)
+    .option('--json', 'emit peer list as JSON', false)
+    .action(async (opts: { all?: boolean; json?: boolean }) => {
+      const { runList } = await import('./oneshot/list.js');
+      await runList({ all: opts.all, json: opts.json });
     });
 
   program
