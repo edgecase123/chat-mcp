@@ -16,6 +16,7 @@ import type { Alert } from './panes/AlertLane.js';
 import { MessagesPane } from './panes/MessagesPane.js';
 import { WhoPane } from './panes/WhoPane.js';
 import { Sidebar } from './panes/Sidebar.js';
+import { Palette } from './palette/Palette.js';
 
 export interface AppProps {
   handle: string;
@@ -38,6 +39,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   const [view, setView] = useState<View>({ kind: 'home' });
   const [input, setInput] = useState<{ value: string; cursor: number }>({ value: '', cursor: 0 });
   const [completionIndex, setCompletionIndex] = useState(0);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
   const [watchPeer, setWatchPeer] = useState<string | null>(null);
@@ -399,8 +401,9 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     [doCommand, sendCurrent],
   );
 
-  useInput((_input, key) => {
-    if (key.ctrl && _input === 'c') exit();
+  useInput((raw, key) => {
+    if (key.ctrl && raw === 'c') exit();
+    if (key.ctrl && raw === 'k' && !paletteOpen) setPaletteOpen(true);
   });
 
   const showWatch = watchPeer !== null;
@@ -435,6 +438,20 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
       <Header handle={handle} version={version} status={meStatus} focus={meFocus} />
 
       <AlertLane alerts={alerts} />
+
+      {paletteOpen && (
+        <Palette
+          onClose={() => setPaletteOpen(false)}
+          onSelect={(cmd) => {
+            setPaletteOpen(false);
+            if (cmd.args.length === 0) {
+              doCommand(cmd.name);
+            } else {
+              setInput({ value: cmd.name + ' ', cursor: cmd.name.length + 1 });
+            }
+          }}
+        />
+      )}
 
       {/* Body: sidebar + main pane + optional watch pane */}
       <Box flexGrow={1}>
@@ -493,37 +510,39 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         )}
       </Box>
 
-      {/* Input */}
-      <Box flexDirection="column">
-        {completions.length > 0 && (
-          <Autocomplete completions={completions} selectedIndex={completionIndex} />
-        )}
-        <Box borderStyle="round" borderColor="gray" paddingX={1}>
-          <Input
-            value={input.value}
-            cursor={input.cursor}
-            onChange={(value, cursor) => { setInput({ value, cursor }); setCompletionIndex(0); }}
-            onSubmit={(v) => { handleSubmit(v); setInput({ value: '', cursor: 0 }); }}
-            onTab={() => {
-              // Tab-complete: replace current token with the selected completion + trailing space.
-              const c = completions[completionIndex];
-              if (!c) return;
-              const before = input.value.slice(0, input.cursor);
-              const after = input.value.slice(input.cursor);
-              const tokenStart = Math.max(before.lastIndexOf(' '), before.lastIndexOf('#') - 1) + 1;
-              const nextValue = input.value.slice(0, tokenStart) + c.value + ' ' + after;
-              const nextCursor = tokenStart + c.value.length + 1;
-              setInput({ value: nextValue, cursor: nextCursor });
-              setCompletionIndex(0);
-            }}
-            onEsc={() => {
-              if (completions.length > 0) { setInput({ value: '', cursor: 0 }); setCompletionIndex(0); }
-            }}
-            onUp={() => setCompletionIndex((i) => Math.max(0, i - 1))}
-            onDown={() => setCompletionIndex((i) => Math.min(completions.length - 1, i + 1))}
-          />
+      {/* Input — hidden while palette is open so keys don't dispatch to both handlers */}
+      {!paletteOpen && (
+        <Box flexDirection="column">
+          {completions.length > 0 && (
+            <Autocomplete completions={completions} selectedIndex={completionIndex} />
+          )}
+          <Box borderStyle="round" borderColor="gray" paddingX={1}>
+            <Input
+              value={input.value}
+              cursor={input.cursor}
+              onChange={(value, cursor) => { setInput({ value, cursor }); setCompletionIndex(0); }}
+              onSubmit={(v) => { handleSubmit(v); setInput({ value: '', cursor: 0 }); }}
+              onTab={() => {
+                // Tab-complete: replace current token with the selected completion + trailing space.
+                const c = completions[completionIndex];
+                if (!c) return;
+                const before = input.value.slice(0, input.cursor);
+                const after = input.value.slice(input.cursor);
+                const tokenStart = Math.max(before.lastIndexOf(' '), before.lastIndexOf('#') - 1) + 1;
+                const nextValue = input.value.slice(0, tokenStart) + c.value + ' ' + after;
+                const nextCursor = tokenStart + c.value.length + 1;
+                setInput({ value: nextValue, cursor: nextCursor });
+                setCompletionIndex(0);
+              }}
+              onEsc={() => {
+                if (completions.length > 0) { setInput({ value: '', cursor: 0 }); setCompletionIndex(0); }
+              }}
+              onUp={() => setCompletionIndex((i) => Math.max(0, i - 1))}
+              onDown={() => setCompletionIndex((i) => Math.min(completions.length - 1, i + 1))}
+            />
+          </Box>
         </Box>
-      </Box>
+      )}
 
       {status !== null && (
         <Box paddingX={1}>
