@@ -18,23 +18,24 @@ Rooms, group messaging, room-chat CLI commands (`/enter`, `/who`, `/rooms`), any
 - **Unintrusive.** No open ports, no always-on background process, no firewall prompt at rest.
 - **Cross-vendor.** Any MCP-compatible client (Claude Code, Cursor, ChatGPT / Codex, etc.) must be able to participate.
 - **Easy uninstall.** State lives in one directory (`~/.chat-mcp/`); removing it and the MCP client entries fully uninstalls.
+- **N participants.** No hard cap. The two-Claude/one-user shape is the smallest interesting case, not the ceiling; the same code path serves 2, 10, or 100 peers without changes. See [Scaling](#scaling) for the practical ceiling and where the next bottleneck sits.
 
 ## Architecture
 
 ```
-┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-│  Claude Code #1  │   │ Cursor / Claude 2│   │   User terminal  │
-│ (MCP client)     │   │ (MCP client)     │   │ chat-mcp cli     │
-└────────┬─────────┘   └────────┬─────────┘   └────────┬─────────┘
-         │ stdio                │ stdio                │ (in-process)
-         ▼                      ▼                      ▼
-┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐
-│ chat-mcp shim    │   │ chat-mcp shim    │   │ chat-mcp cli     │
-│ handle = claude1 │   │ handle = claude2 │   │ handle = user    │
-│ fs.watch(notify) │   │ fs.watch(notify) │   │ fs.watch(notify) │
-└────────┬─────────┘   └────────┬─────────┘   └────────┬─────────┘
-         │                      │                      │
-         └──────────────────────┼──────────────────────┘
+┌──────────────────┐   ┌──────────────────┐         ┌──────────────────┐
+│  Claude Code #1  │   │ Cursor / Claude 2│  … N …  │   User terminal  │
+│ (MCP client)     │   │ (MCP client)     │         │ chat-mcp cli     │
+└────────┬─────────┘   └────────┬─────────┘         └────────┬─────────┘
+         │ stdio                │ stdio                      │ (in-process)
+         ▼                      ▼                            ▼
+┌──────────────────┐   ┌──────────────────┐         ┌──────────────────┐
+│ chat-mcp shim    │   │ chat-mcp shim    │  … N …  │ chat-mcp cli     │
+│ handle = claude1 │   │ handle = claude2 │         │ handle = user    │
+│ fs.watch(notify) │   │ fs.watch(notify) │         │ fs.watch(notify) │
+└────────┬─────────┘   └────────┬─────────┘         └────────┬─────────┘
+         │                      │                            │
+         └──────────────────────┼────────────────────────────┘
                                 ▼
                     ┌─────────────────────────┐
                     │  ~/.chat-mcp/           │
@@ -43,7 +44,7 @@ Rooms, group messaging, room-chat CLI commands (`/enter`, `/who`, `/rooms`), any
                     └─────────────────────────┘
 ```
 
-**No shared daemon, no ports.** Every participant is a peer that reads and writes the same SQLite file and watches the same notify file. Agent participants are stdio MCP shims spawned by an MCP client (Claude Code, Cursor, Codex, etc.); the user participant is a terminal process (`chat-mcp cli`) that follows the same protocol against the same files.
+**No shared daemon, no ports.** Every participant is a peer that reads and writes the same SQLite file and watches the same notify file. Agent participants are stdio MCP shims spawned by an MCP client (Claude Code, Cursor, Codex, etc.); the user participant is a terminal process (`chat-mcp cli`) that follows the same protocol against the same files. **The 3-peer diagram is illustrative — N peers is the shape.**
 
 ### Why this shape
 
@@ -149,6 +150,21 @@ fs.watch(notify) fires
 ### Latency budget
 - Sender → recipient shim: **~1–5 ms** (fs event round trip).
 - Recipient shim → model: **instant** if the recipient is currently in `wait_for_message`; otherwise **client-dependent** — Claude Code surfaces `resources/updated` on the next turn boundary, ambient awareness rather than push.
+
+## Scaling
+
+Every peer wakes on every notify, so per-send work is O(N) across the whole bus: one INSERT + one touch + N shims doing a SELECT to see if they're addressed. Each of those SELECTs is a few microseconds against the `ix_messages_to_read` index, so:
+
+| N peers | Per-message overhead | Bottleneck when it matters |
+|---:|---|---|
+| 2–10 | Undetectable (~sub-ms fan-out) | None. Slice-1 target range. |
+| 10–100 | ~1–5 ms fan-out on top of the fs event | SQLite WAL contention starts to show for send-heavy workloads. Consider WAL checkpoint tuning. |
+| 100–500 | ~10–50 ms fan-out; visible but usable | `fs.watch` fan-out becomes the dominant cost on macOS (FSEvents fine; Linux `inotify` fine; Windows `ReadDirectoryChangesW` needs review). |
+| 500+ | Not designed for | Would want a pub/sub broker or moving each recipient's inbox to its own notify file. Out of scope. |
+
+**Slice 1 does not impose a hard cap.** The design permits arbitrary N; if the practical ceiling ever needs to move, the shift is from "everyone watches one notify file" to "per-handle notify files" — a mechanical change to the shim, not the schema or MCP surface.
+
+**Concurrent writers.** SQLite WAL allows one writer + N readers at once. `send` is a ~1 ms transaction, so realistic contention only shows above ~1000 sends/sec bus-wide. Not a slice-1 concern.
 
 ## User CLI (`chat-mcp cli`)
 
