@@ -16,9 +16,13 @@ export function installSend(server: McpServer, ctx: ShimContext): void {
       inputSchema: {
         to: z.string().describe('Handle of the recipient peer'),
         body: z.string().describe('Message body (UTF-8, max 64 KB)'),
+        kind: z
+          .enum(['chat', 'dispatch', 'alert'])
+          .optional()
+          .describe('Coordination kind. "chat" (default) is a normal message. "dispatch" tags this as a task hand-off. "alert" tags it as blocking/high-severity and surfaces it in the recipient CLI\'s alert lane.'),
       },
     },
-    async ({ to, body }) => {
+    async ({ to, body, kind }) => {
       if (Buffer.byteLength(body, 'utf8') > MAX_BODY_BYTES) {
         throw new Error(`Message body exceeds ${MAX_BODY_BYTES}-byte cap`);
       }
@@ -30,7 +34,7 @@ export function installSend(server: McpServer, ctx: ShimContext): void {
         throw new Error(`Unknown peer: ${to}. Call list_agents to see who is registered.`);
       }
       dao.touchLastSeen(ctx.db, ctx.handle);
-      const result = dao.insertMessage(ctx.db, { from: ctx.handle, to, body });
+      const result = dao.insertMessage(ctx.db, { from: ctx.handle, to, body, kind });
       notifyPeer(to, { id: result.id, to, from: ctx.handle, ts: result.sent_at });
       return {
         content: [

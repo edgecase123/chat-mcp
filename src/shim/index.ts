@@ -18,6 +18,7 @@ import { installRoomList } from './tools/room_list.js';
 import { installRoomMembers } from './tools/room_members.js';
 import { installRoomDelete } from './tools/room_delete.js';
 import { installRoomBoot } from './tools/room_boot.js';
+import { installSetStatus } from './tools/set_status.js';
 import { installInboxResource } from './resources/inbox.js';
 import { checkWakeAdapter, prependAdapterWarning, type AdapterStatus } from './adapter-check.js';
 import { dbPath, notifyPathFor } from '../util/paths.js';
@@ -124,6 +125,7 @@ export async function runShim(opts: ShimOptions): Promise<void> {
   installRoomMembers(server, ctx);
   installRoomDelete(server, ctx);
   installRoomBoot(server, ctx);
+  installSetStatus(server, ctx);
   installInboxResource(server, ctx);
 
   const transport = new StdioServerTransport();

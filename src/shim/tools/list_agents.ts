@@ -23,6 +23,9 @@ export function installListAgents(server: McpServer, ctx: ShimContext): void {
         kind: a.kind,
         online: a.online,
         last_seen_at: a.last_seen_at,
+        status: a.status,
+        focus: a.focus,
+        status_updated_at: a.status_updated_at,
       }));
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],

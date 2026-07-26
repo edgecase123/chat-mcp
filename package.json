@@ -21,15 +21,20 @@
     "dev": "tsx src/index.ts",
     "clean": "rm -rf dist",
     "smoke": "npm run build && node scripts/smoke.mjs",
+    "test": "node --test --import tsx",
     "prepare": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "chokidar": "^3.6.0",
-    "commander": "^12.1.0"
+    "commander": "^12.1.0",
+    "ink": "^7.1.1",
+    "react": "^19.2.8"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
+    "@types/react": "^19.2.17",
+    "ink-testing-library": "^4.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }

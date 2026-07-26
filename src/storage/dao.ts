@@ -1,5 +1,8 @@
 import type { Db } from './db.js';
 
+export type AgentStatus = 'idle' | 'thinking' | 'tool' | 'blocked' | 'error' | 'offline';
+export type MessageKind = 'chat' | 'dispatch' | 'alert';
+
 export interface Agent {
   handle: string;
   display_name: string | null;
@@ -10,6 +13,9 @@ export interface Agent {
   metadata: Record<string, unknown>;
   kind: string;
   online: boolean;
+  status: AgentStatus | null;
+  focus: string | null;
+  status_updated_at: number | null;
 }
 
 export interface Message {
@@ -20,6 +26,7 @@ export interface Message {
   sent_at: number;
   delivered_at: number | null;
   read_at: number | null;
+  kind: MessageKind;
 }
 
 interface AgentRow {
@@ -30,6 +37,9 @@ interface AgentRow {
   registered_at: number;
   last_seen_at: number;
   metadata_json: string | null;
+  status: string | null;
+  focus: string | null;
+  status_updated_at: number | null;
 }
 
 interface MessageRow {
@@ -40,6 +50,18 @@ interface MessageRow {
   sent_at: number;
   delivered_at: number | null;
   read_at: number | null;
+  kind: string;
+}
+
+function coerceStatus(raw: string | null): AgentStatus | null {
+  if (!raw) return null;
+  const allowed: AgentStatus[] = ['idle', 'thinking', 'tool', 'blocked', 'error', 'offline'];
+  return (allowed as string[]).includes(raw) ? (raw as AgentStatus) : null;
+}
+
+function coerceKind(raw: string | null): MessageKind {
+  if (raw === 'dispatch' || raw === 'alert') return raw;
+  return 'chat';
 }
 
 function isAlive(pid: number | null): boolean {
@@ -66,7 +88,21 @@ function hydrate(row: AgentRow): Agent {
     metadata,
     kind,
     online: isAlive(row.pid),
+    status: coerceStatus(row.status),
+    focus: row.focus,
+    status_updated_at: row.status_updated_at,
   };
+}
+
+export function setAgentStatus(
+  db: Db,
+  handle: string,
+  status: AgentStatus,
+  focus: string | null,
+): void {
+  db.prepare(
+    `UPDATE agents SET status = ?, focus = ?, status_updated_at = ?, last_seen_at = ? WHERE handle = ?`,
+  ).run(status, focus, Date.now(), Date.now(), handle);
 }
 
 export interface RegisterInput {
@@ -121,6 +157,7 @@ export interface SendInput {
   from: string;
   to: string;
   body: string;
+  kind?: MessageKind;
 }
 
 export interface SendResult {
@@ -130,9 +167,10 @@ export interface SendResult {
 
 export function insertMessage(db: Db, input: SendInput): SendResult {
   const sent_at = Date.now();
+  const kind: MessageKind = input.kind ?? 'chat';
   const info = db.prepare(
-    `INSERT INTO messages (from_handle, to_handle, body, sent_at) VALUES (?, ?, ?, ?)`,
-  ).run(input.from, input.to, input.body, sent_at);
+    `INSERT INTO messages (from_handle, to_handle, body, sent_at, kind) VALUES (?, ?, ?, ?, ?)`,
+  ).run(input.from, input.to, input.body, sent_at, kind);
   return { id: Number(info.lastInsertRowid), sent_at };
 }
 
@@ -190,6 +228,7 @@ function toMessage(row: MessageRow): Message {
     sent_at: row.sent_at,
     delivered_at: row.delivered_at,
     read_at: row.read_at,
+    kind: coerceKind(row.kind),
   };
 }
 
@@ -424,4 +463,51 @@ export function allRoomsUnread(db: Db, handle: string, limit = 50): Message[] {
   }
   // Interleaved by id ascending so the caller sees chronological order.
   return collected.sort((a, b) => a.id - b.id);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Admin: kick + clear
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Remove an agent from the bus. Deletes:
+ *   - the agents row
+ *   - every room_members row for this handle
+ *   - every room_reads row for this handle
+ * Does NOT delete messages the agent authored or received — those become
+ * orphaned references (rendered fine; the sender label just names a peer
+ * that no longer exists). A running shim for the handle will re-register
+ * on its next touch; kick again if that happens.
+ * No-op (returns false) if the handle isn't registered.
+ */
+export function deleteAgent(db: Db, handle: string): boolean {
+  const info = db.prepare('DELETE FROM agents WHERE handle = ?').run(handle);
+  db.prepare('DELETE FROM room_members WHERE handle = ?').run(handle);
+  db.prepare('DELETE FROM room_reads WHERE handle = ?').run(handle);
+  return Number(info.changes) > 0;
+}
+
+/**
+ * Delete all messages between two peers (both directions). Returns the
+ * number of rows deleted.
+ */
+export function deleteDmMessages(db: Db, a: string, b: string): number {
+  const info = db.prepare(
+    `DELETE FROM messages
+     WHERE (from_handle = ? AND to_handle = ?)
+        OR (from_handle = ? AND to_handle = ?)`,
+  ).run(a, b, b, a);
+  return Number(info.changes);
+}
+
+/**
+ * Delete every message posted to a room (including the SYSTEM join banners).
+ * Also resets every member's read watermark to 0 so future messages don't
+ * silently skip past a stale watermark. Returns the number of message rows
+ * deleted.
+ */
+export function deleteRoomMessages(db: Db, room: string): number {
+  const info = db.prepare('DELETE FROM messages WHERE to_handle = ?').run(room);
+  db.prepare('UPDATE room_reads SET last_read_id = 0 WHERE room_name = ?').run(room);
+  return Number(info.changes);
 }

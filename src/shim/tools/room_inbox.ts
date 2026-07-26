@@ -54,6 +54,7 @@ export function installRoomInbox(server: McpServer, ctx: ShimContext): void {
                 from: m.from_handle,
                 body: m.body,
                 sent_at: m.sent_at,
+                kind: m.kind,
               })),
               null,
               2,

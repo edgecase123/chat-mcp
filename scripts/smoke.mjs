@@ -261,6 +261,55 @@ try {
     }
   }
 
+  // ─── Coordination: set_status → dispatch → alert ─────────────
+  // 13. claude1 sets its status; claude2's list_agents sees it.
+  {
+    await c1.callTool({
+      name: 'set_status',
+      arguments: { status: 'tool', focus: 'running the gate' },
+    });
+    await sleep(50);
+    const list = parseJson(await c2.callTool({ name: 'list_agents', arguments: {} }));
+    const claude1 = list.find((a) => a.handle === 'claude1');
+    if (claude1?.status === 'tool' && claude1?.focus === 'running the gate') {
+      pass(13, 'set_status visible via list_agents');
+    } else {
+      fail(13, 'set_status projection', JSON.stringify(claude1));
+    }
+  }
+
+  // 14. Dispatch: kind stamped on message.
+  {
+    await c1.callTool({
+      name: 'send',
+      arguments: { to: 'claude2', body: 'handle #1234', kind: 'dispatch' },
+    });
+    await sleep(50);
+    const inbox = parseJson(await c2.callTool({ name: 'inbox', arguments: {} }));
+    const disp = inbox.find((m) => m.body === 'handle #1234');
+    if (disp?.kind === 'dispatch') {
+      pass(14, 'send with kind=dispatch stamps message');
+    } else {
+      fail(14, 'dispatch kind', JSON.stringify(disp));
+    }
+  }
+
+  // 15. Alert: kind stamped on message; surfaces to recipient inbox.
+  {
+    await c1.callTool({
+      name: 'send',
+      arguments: { to: 'claude2', body: 'GATE RED', kind: 'alert' },
+    });
+    await sleep(50);
+    const inbox = parseJson(await c2.callTool({ name: 'inbox', arguments: {} }));
+    const alert = inbox.find((m) => m.body === 'GATE RED');
+    if (alert?.kind === 'alert') {
+      pass(15, 'send with kind=alert stamps message');
+    } else {
+      fail(15, 'alert kind', JSON.stringify(alert));
+    }
+  }
+
   // ─── room_boot ──────────────────────────────────────────────
   // Setup: claude1 + claude2 join a fresh #kick room.
   {
@@ -268,29 +317,29 @@ try {
     await c2.callTool({ name: 'room_join', arguments: { room: '#kick' } });
     await sleep(50);
 
-    // 13. Non-member cannot boot.
+    // 16. Non-member cannot boot.
     {
       const r = await c1.callTool({ name: 'room_boot', arguments: { room: '#kick', handle: 'ghost' } });
       const msg = r.content?.[0]?.text ?? '';
       if (r.isError && msg.includes('not a member')) {
-        pass(13, 'room_boot rejects target that is not a member');
+        pass(16, 'room_boot rejects target that is not a member');
       } else {
-        fail(13, 'room_boot phantom handle', `isError=${r.isError} text=${msg}`);
+        fail(16, 'room_boot phantom handle', `isError=${r.isError} text=${msg}`);
       }
     }
 
-    // 14. Cannot boot self.
+    // 17. Cannot boot self.
     {
       const r = await c1.callTool({ name: 'room_boot', arguments: { room: '#kick', handle: 'claude1' } });
       const msg = r.content?.[0]?.text ?? '';
       if (r.isError && msg.includes('yourself')) {
-        pass(14, 'room_boot rejects booting yourself');
+        pass(17, 'room_boot rejects booting yourself');
       } else {
-        fail(14, 'room_boot self', `isError=${r.isError} text=${msg}`);
+        fail(17, 'room_boot self', `isError=${r.isError} text=${msg}`);
       }
     }
 
-    // 15. Happy path: claude1 boots claude2.
+    // 18. Happy path: claude1 boots claude2.
     const before = parseJson(await c1.callTool({
       name: 'room_members', arguments: { room: '#kick' },
     }));
@@ -300,26 +349,26 @@ try {
       name: 'room_members', arguments: { room: '#kick' },
     }));
     if (before.includes('claude2') && !after.includes('claude2') && after.includes('claude1')) {
-      pass(15, 'room_boot removes target from room_members');
+      pass(18, 'room_boot removes target from room_members');
     } else {
-      fail(15, 'room_boot happy path',
+      fail(18, 'room_boot happy path',
         `before=${JSON.stringify(before)} after=${JSON.stringify(after)}`);
     }
   }
 
   // ─── room_delete ────────────────────────────────────────────
-  // 16. Non-member cannot delete.
+  // 19. Non-member cannot delete.
   {
     const r = await c2.callTool({ name: 'room_delete', arguments: { room: '#kick' } });
     const msg = r.content?.[0]?.text ?? '';
     if (r.isError && msg.includes('not a member')) {
-      pass(16, 'room_delete rejects non-member caller');
+      pass(19, 'room_delete rejects non-member caller');
     } else {
-      fail(16, 'room_delete by non-member', `isError=${r.isError} text=${msg}`);
+      fail(19, 'room_delete by non-member', `isError=${r.isError} text=${msg}`);
     }
   }
 
-  // 17. Member can delete; room disappears from allRooms.
+  // 20. Member can delete; room disappears from allRooms.
   {
     const roomsBefore = parseJson(await c1.callTool({
       name: 'room_list', arguments: { include_all: true },
@@ -331,9 +380,9 @@ try {
     }));
     const stillThere = roomsAfter.some((r) => r.name === '#kick');
     if (hadKick && !stillThere) {
-      pass(17, 'room_delete removes room from roster');
+      pass(20, 'room_delete removes room from roster');
     } else {
-      fail(17, 'room_delete cleanup',
+      fail(20, 'room_delete cleanup',
         `had=${hadKick} stillThere=${stillThere}`);
     }
   }
