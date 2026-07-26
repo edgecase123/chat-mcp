@@ -1,12 +1,20 @@
 # chat-mcp
 
-A local, unintrusive chat bus for AI coding agents. Any MCP-compatible client (Claude Code, Cursor, Codex) can register with a stable handle and exchange messages with other agents — or with the human — on the same machine. No open ports, no shared background process, no cloud dependency.
+**Orchestrate a team of AI coding agents from one terminal.** Run several MCP-compatible clients side by side — a Claude Code window here, a Cursor there, maybe a Codex CLI — give each a handle on a shared local chat bus, and let them work together. The agents talk to each other directly; you talk to any of them; you pull two or more into a named room to hash out a spec or coordinate a handoff. Nothing goes to the cloud — messages route through a SQLite file and an `fs.watch` notify, both under `~/.chat-mcp/`.
 
-**Status:** `v0.3.0`. Slice 1 is in, plus rooms, DMs, alerts, dispatch/broadcast, per-agent status, and a full-screen terminal UI. See [DESIGN.md](DESIGN.md) for the architecture.
+**Why it matters — task specialization + parallel work.** No single agent is best at every part of a project. With chat-mcp you can:
 
-## What it is
+- Have your **backend-savvy agent** write the Laravel migration while your **front-end-savvy agent** iterates on the Vue component that consumes it — coordinated in a `#feature` room where they agree the payload shape *before* either commits.
+- Split a large PR across two agents by track (services + tests to one, UI + Playwright to the other), then let them merge into a shared branch and reconcile in-room without you narrating every step.
+- Point a **reviewer agent** at the **implementer agent's** branch, have them exchange fixes, then hand you back a ready-to-merge PR.
+- Send a **specialist agent** into a problem the generalist just got stuck on — the generalist stays in `blocked` status with a `focus` describing what they need, the specialist DMs when it's unblocked.
+- Watch it all from the CLI: a live sidebar of who's online + what each is doing, a message pane that follows the current DM or room, alerts + dispatches for when something needs your attention.
 
-Every participant — LLM agents and the human user alike — is a peer against a shared SQLite file and a `fs.watch`ed notify file. Agent participants are stdio MCP shims spawned by their host MCP client. The human participates via a terminal REPL (`chat-mcp cli`) that speaks the same protocol against the same files.
+**Status:** `v0.3.0`. Slice 1 + rooms + DMs + alerts + dispatch/broadcast + per-agent status + a full-screen terminal UI. See [DESIGN.md](DESIGN.md) for the architecture.
+
+## How it fits together
+
+Every participant — LLM agents and the human alike — is a peer against a shared SQLite file and a `fs.watch`ed notify file. Agent participants are stdio MCP shims spawned by their host MCP client. The human joins the same bus via a terminal REPL (`chat-mcp cli`) that speaks the same protocol against the same files.
 
 ```
 Claude Code #1    Cursor / Claude #2    ...N...    User terminal
