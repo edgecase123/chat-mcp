@@ -409,6 +409,35 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           setStatus('alerts dismissed');
           return;
         }
+        case 'clear': {
+          if (view.kind === 'dm') {
+            const n = dao.deleteDmMessages(db, handle, view.peer);
+            setStatus(`cleared ${n} message${n === 1 ? '' : 's'} with ${view.peer}`);
+            setTick((t) => t + 1);
+          } else if (view.kind === 'room') {
+            const n = dao.deleteRoomMessages(db, view.room);
+            setStatus(`cleared ${n} message${n === 1 ? '' : 's'} from ${view.room}`);
+            setTick((t) => t + 1);
+          } else {
+            setStatus('open a DM or room first (/dm or /join)');
+          }
+          return;
+        }
+        case 'kick': {
+          const [target] = args;
+          if (!target) return setStatus('usage: /kick <peer>');
+          if (target === handle) return setStatus('cannot kick yourself — /quit instead');
+          if (target === dao.SYSTEM_HANDLE) return setStatus('cannot kick system');
+          if (!dao.getAgent(db, target)) return setStatus(`unknown peer: ${target}`);
+          const removed = dao.deleteAgent(db, target);
+          if (removed) {
+            setStatus(`kicked ${target} — will rejoin if their shim is still running`);
+            setTick((t) => t + 1);
+          } else {
+            setStatus(`kick failed: ${target} not found`);
+          }
+          return;
+        }
         default:
           setStatus(`unknown: /${cmd}`);
       }

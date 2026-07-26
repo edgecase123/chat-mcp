@@ -22,9 +22,9 @@ test('findCommand resolves by exact name', () => {
 
 test('every existing command from App.tsx doCommand is present', () => {
   const expected = [
-    '/quit', '/exit', '/help', '/back', '/rooms', '/who', '/dm', '/join',
-    '/leave', '/set-status', '/dispatch', '/broadcast', '/alert',
-    '/watch', '/unwatch', '/ack',
+    '/quit', '/exit', '/help', '/keyboard', '/copy', '/back', '/rooms', '/who',
+    '/dm', '/join', '/leave', '/set-status', '/dispatch', '/broadcast',
+    '/alert', '/watch', '/unwatch', '/ack', '/clear', '/kick',
   ];
   for (const name of expected) {
     assert.ok(findCommand(name), `missing ${name}`);

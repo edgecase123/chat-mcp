@@ -435,3 +435,50 @@ export function allRoomsUnread(db: Db, handle: string, limit = 50): Message[] {
   // Interleaved by id ascending so the caller sees chronological order.
   return collected.sort((a, b) => a.id - b.id);
 }
+
+// ─────────────────────────────────────────────────────────────
+// Admin: kick + clear
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Remove an agent from the bus. Deletes:
+ *   - the agents row
+ *   - every room_members row for this handle
+ *   - every room_reads row for this handle
+ * Does NOT delete messages the agent authored or received — those become
+ * orphaned references (rendered fine; the sender label just names a peer
+ * that no longer exists). A running shim for the handle will re-register
+ * on its next touch; kick again if that happens.
+ * No-op (returns false) if the handle isn't registered.
+ */
+export function deleteAgent(db: Db, handle: string): boolean {
+  const info = db.prepare('DELETE FROM agents WHERE handle = ?').run(handle);
+  db.prepare('DELETE FROM room_members WHERE handle = ?').run(handle);
+  db.prepare('DELETE FROM room_reads WHERE handle = ?').run(handle);
+  return info.changes > 0;
+}
+
+/**
+ * Delete all messages between two peers (both directions). Returns the
+ * number of rows deleted.
+ */
+export function deleteDmMessages(db: Db, a: string, b: string): number {
+  const info = db.prepare(
+    `DELETE FROM messages
+     WHERE (from_handle = ? AND to_handle = ?)
+        OR (from_handle = ? AND to_handle = ?)`,
+  ).run(a, b, b, a);
+  return info.changes;
+}
+
+/**
+ * Delete every message posted to a room (including the SYSTEM join banners).
+ * Also resets every member's read watermark to 0 so future messages don't
+ * silently skip past a stale watermark. Returns the number of message rows
+ * deleted.
+ */
+export function deleteRoomMessages(db: Db, room: string): number {
+  const info = db.prepare('DELETE FROM messages WHERE to_handle = ?').run(room);
+  db.prepare('UPDATE room_reads SET last_read_id = 0 WHERE room_name = ?').run(room);
+  return info.changes;
+}

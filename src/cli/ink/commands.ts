@@ -1,11 +1,12 @@
-export type Category = 'conversation' | 'messaging' | 'status' | 'system';
+export type Category = 'conversation' | 'messaging' | 'status' | 'admin' | 'system';
 
-export const CATEGORIES: Category[] = ['conversation', 'messaging', 'status', 'system'];
+export const CATEGORIES: Category[] = ['conversation', 'messaging', 'status', 'admin', 'system'];
 
 export const CATEGORY_LABELS: Record<Category, string> = {
   conversation: 'CONVERSATION',
   messaging: 'MESSAGING',
   status: 'STATUS & OBSERVATION',
+  admin: 'ADMIN (destructive)',
   system: 'SYSTEM',
 };
 
@@ -41,6 +42,9 @@ export const COMMANDS: Command[] = [
   { name: '/who', args: [], description: 'peer table', category: 'status' },
   { name: '/watch', args: [{ name: 'peer', kind: 'peer' }], description: 'mirror another peer\'s traffic', category: 'status' },
   { name: '/unwatch', args: [], description: 'close watch pane', category: 'status' },
+
+  { name: '/clear', args: [], description: 'delete all messages in the current DM or room', category: 'admin' },
+  { name: '/kick', args: [{ name: 'peer', kind: 'peer' }], description: 'remove a peer from the bus (destructive)', category: 'admin' },
 
   { name: '/help', args: [], description: 'open this help', category: 'system' },
   { name: '/keyboard', args: [], description: 'show keyboard shortcuts only', category: 'system' },
