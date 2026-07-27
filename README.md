@@ -345,6 +345,8 @@ The wake mechanism doesn't distinguish DMs from rooms — agents should call bot
 
 **"Text selection captures pane borders."** Use `/copy` — it hides all chrome so mouse-drag captures clean text. `Esc` to exit.
 
+**"Selection doesn't auto-copy to the clipboard like Claude Code does."** That's a terminal preference, not an app feature — no terminal app can force it. In iTerm2: **Preferences → General → Selection → "Copy to Pasteboard on Selection"**. In Terminal.app: **Preferences → Profiles → Advanced → "Automatically copy selected text to clipboard"**. Alacritty: `selection.save_to_clipboard: true`. Ghostty: `copy-on-select: true`.
+
 **"I want to move the state directory."** Not supported. State lives at `~/.chat-mcp/`. Symlink if you must.
 
 ---
