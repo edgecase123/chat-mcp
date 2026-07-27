@@ -25,28 +25,37 @@ const KIND_COLOR: Record<MessageKind, string | undefined> = {
   alert: 'red',
 };
 
-function renderRow(m: Message, meHandle: string): React.ReactElement {
-  return (
-    <Box key={m.id} flexDirection="column">
-      <Text>
-        <Text bold color={m.from_handle === meHandle ? 'cyan' : 'green'}>
-          {m.from_handle}
-        </Text>{' '}
-        <Text dimColor>{timeOf(m.sent_at)}</Text>
-        {KIND_LABEL[m.kind] && (
-          <>
-            {' '}
-            <Text color={KIND_COLOR[m.kind]} bold>
-              [{KIND_LABEL[m.kind]}]
-            </Text>
-          </>
-        )}
-      </Text>
-      <Box paddingLeft={2}>
-        <Markdown body={m.body} baseColor={KIND_COLOR[m.kind]} />
+/** Factory: yields a renderRow closure that knows the body width to wrap
+ *  at. Explicit width on the body Box forces Ink's Text wrap to respect
+ *  the pane's boundary instead of letting long inline-styled runs
+ *  (`<Text backgroundColor="gray">…</Text>` for inline code) overflow
+ *  past the pane border. Ink can't hard-break unbreakable words like
+ *  URLs; those may still visually spill, but well-spaced prose stops
+ *  bleeding into the right border. */
+function makeRenderRow(bodyWidth: number): (m: Message, meHandle: string) => React.ReactElement {
+  return function renderRow(m, meHandle) {
+    return (
+      <Box key={m.id} flexDirection="column">
+        <Text>
+          <Text bold color={m.from_handle === meHandle ? 'cyan' : 'green'}>
+            {m.from_handle}
+          </Text>{' '}
+          <Text dimColor>{timeOf(m.sent_at)}</Text>
+          {KIND_LABEL[m.kind] && (
+            <>
+              {' '}
+              <Text color={KIND_COLOR[m.kind]} bold>
+                [{KIND_LABEL[m.kind]}]
+              </Text>
+            </>
+          )}
+        </Text>
+        <Box paddingLeft={2} width={bodyWidth}>
+          <Markdown body={m.body} baseColor={KIND_COLOR[m.kind]} />
+        </Box>
       </Box>
-    </Box>
-  );
+    );
+  };
 }
 
 interface MessagesPaneProps {
@@ -58,6 +67,7 @@ interface MessagesPaneProps {
 export function MessagesPane({ view, messages, meHandle }: MessagesPaneProps): React.ReactElement {
   const viewportRows = useMessageViewport();
   const contentColumns = Math.max(20, useTerminalColumns() - HORIZONTAL_CHROME);
+  const renderRow = React.useMemo(() => makeRenderRow(contentColumns), [contentColumns]);
   const title =
     view.kind === 'home'
       ? '(select an agent or room)'
