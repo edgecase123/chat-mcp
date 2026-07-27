@@ -50,7 +50,7 @@ function makeRenderRow(bodyWidth: number): (m: Message, meHandle: string) => Rea
             </>
           )}
         </Text>
-        <Box paddingLeft={2} width={bodyWidth}>
+        <Box paddingLeft={2} width={bodyWidth} overflowX="hidden">
           <Markdown body={m.body} baseColor={KIND_COLOR[m.kind]} />
         </Box>
       </Box>
