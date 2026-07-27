@@ -699,7 +699,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     // (2 lines each) plus 3 rows for scroll-indicator/footer.
     const copyViewport = Math.max(3, Math.floor((terminalRows - 3) / 2));
     return (
-      <Box flexDirection="column" width="100%">
+      <Box flexDirection="column" width="100%" height={terminalRows}>
         <CopyPane
           messages={messages}
           viewportRows={copyViewport}
@@ -710,7 +710,14 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   }
 
   return (
-    <Box flexDirection="column" width="100%">
+    // height={terminalRows} pins the whole UI to the terminal height so
+    // the messages pane can't grow/shrink as its content varies. Chrome
+    // siblings (Header/HintBar/Input/AlertLane) all have flexShrink=0
+    // and take intrinsic size; the body Box (flexGrow=1) absorbs the
+    // remaining vertical space, which is what the ScrollableMessageList
+    // fills. No overflow=hidden on the bordered boxes — that clips their
+    // borders under Ink's yoga renderer (regression in 85d447b).
+    <Box flexDirection="column" width="100%" height={terminalRows}>
       <Header handle={handle} version={version} status={meStatus} focus={meFocus} />
 
       <AlertLane alerts={alerts} />
