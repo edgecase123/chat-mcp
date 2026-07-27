@@ -10,12 +10,9 @@ export function resolveHandle(explicit: string | undefined, flagName: string): s
   return value;
 }
 
-/**
- * Format an epoch-ms timestamp as HH:MM:SS for terminal output.
- */
-export function timeOf(ts: number): string {
-  return new Date(ts).toTimeString().slice(0, 8);
-}
+// timeOf lives at src/util/time.ts as stampOf now — kept re-export here
+// for the one-shot CLI callers that import from `./common`.
+export { stampOf as timeOf } from '../util/time.js';
 
 /**
  * Drain stdin to a UTF-8 string. Strips a single trailing newline so

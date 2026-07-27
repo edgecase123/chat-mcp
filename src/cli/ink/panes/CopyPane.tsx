@@ -1,10 +1,7 @@
 import React, { useState } from 'react';
 import { Box, Text, useInput } from 'ink';
 import type { Message } from '../../../storage/dao.js';
-
-function timeOf(ts: number): string {
-  return new Date(ts).toTimeString().slice(0, 8);
-}
+import { stampOf as timeOf } from '../../../util/time.js';
 
 /**
  * Chrome-free view of the current message list, intended for mouse-selection

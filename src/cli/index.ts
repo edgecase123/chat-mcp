@@ -5,6 +5,7 @@ import { NotifyBus, notifyPeer } from '../notify/bus.js';
 import * as dao from '../storage/dao.js';
 import type { Message } from '../storage/dao.js';
 import { assertRoomName } from '../util/naming.js';
+import { stampOf as timeOf } from '../util/time.js';
 import { bold, cyan, dim, green } from './color.js';
 
 export interface CliOptions {
@@ -49,7 +50,9 @@ export async function runCli(opts: CliOptions): Promise<void> {
   rl.setPrompt(promptFor());
   rl.prompt();
 
-  const timeOf = (ts: number): string => new Date(ts).toTimeString().slice(0, 8);
+  // Reuse the shared MM/DD HH:MM:SS formatter — keeps the legacy REPL and
+  // the Ink UI reading the same shape.
+  // (Imported at the top of the file.)
 
   const printMessage = (m: Message, roomContext?: string): void => {
     // Two-line format. For room messages, insert cyan room name between

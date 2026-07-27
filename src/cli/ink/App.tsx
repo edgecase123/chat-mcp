@@ -9,6 +9,7 @@ import type { Db } from '../../storage/db.js';
 import * as dao from '../../storage/dao.js';
 import type { Message, MessageKind, AgentStatus, Agent } from '../../storage/dao.js';
 import { assertRoomName } from '../../util/naming.js';
+import { stampOf as timeOf } from '../../util/time.js';
 import type { View } from './views.js';
 import { Header } from './panes/Header.js';
 import { AlertLane } from './panes/AlertLane.js';
@@ -31,10 +32,6 @@ export interface AppProps {
   db: Db;
   notify: NotifyBus;
   version: string;
-}
-
-function timeOf(ts: number): string {
-  return new Date(ts).toTimeString().slice(0, 8);
 }
 
 /**

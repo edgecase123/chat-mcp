@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { Agent, AgentStatus } from '../../../storage/dao.js';
+import { stampOf as timeOf } from '../../../util/time.js';
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
   idle: 'green',
@@ -10,10 +11,6 @@ const STATUS_COLOR: Record<AgentStatus, string> = {
   error: 'red',
   offline: 'gray',
 };
-
-function timeOf(ts: number): string {
-  return new Date(ts).toTimeString().slice(0, 8);
-}
 
 interface Column {
   key: 'handle' | 'kind' | 'online' | 'status' | 'focus' | 'seen';

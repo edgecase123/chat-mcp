@@ -6,6 +6,7 @@ import { HomeEmptyState, DmEmptyState, RoomEmptyState } from './EmptyState.js';
 import { ScrollableMessageList } from './ScrollableMessageList.js';
 import { Markdown } from '../util/markdown.js';
 import { useMessageViewport, useTerminalColumns } from '../util/viewport.js';
+import { stampOf as timeOf } from '../../../util/time.js';
 
 // Sidebar (30) + borders (~4) + main-pane paddingX (2) + safety (4) = ~40
 // columns of chrome to the left of the message body. Subtract from total
@@ -23,10 +24,6 @@ const KIND_COLOR: Record<MessageKind, string | undefined> = {
   dispatch: 'cyan',
   alert: 'red',
 };
-
-function timeOf(ts: number): string {
-  return new Date(ts).toTimeString().slice(0, 8);
-}
 
 function renderRow(m: Message, meHandle: string): React.ReactElement {
   return (

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
+import { stampOf as timeOf } from '../../../util/time.js';
 
 export interface Alert {
   id: number;
@@ -7,10 +8,6 @@ export interface Alert {
   to: string;
   body: string;
   ts: number;
-}
-
-function timeOf(ts: number): string {
-  return new Date(ts).toTimeString().slice(0, 8);
 }
 
 export function AlertLane({ alerts }: { alerts: Alert[] }): React.ReactElement | null {
