@@ -786,7 +786,9 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                 setCompletionIndex(0);
               }}
               onEsc={() => {
-                if (completions.length > 0) { setInput({ value: '', cursor: 0 }); setCompletionIndex(0); }
+                setInput({ value: '', cursor: 0 });
+                setCompletionIndex(0);
+                if (historyIndex !== null) { setHistoryIndex(null); setDraft(null); }
               }}
               onUp={() => {
                 if (completions.length > 0) return setCompletionIndex((i) => Math.max(0, i - 1));
