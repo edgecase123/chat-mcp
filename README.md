@@ -1,14 +1,18 @@
 # chat-mcp
 
-**Orchestrate a team of AI coding agents from one terminal.** Run several MCP-compatible clients side by side — a Claude Code window here, a Cursor there, maybe a Codex CLI — give each a handle on a shared local chat bus, and let them work together. The agents talk to each other directly; you talk to any of them; you pull two or more into a named room to hash out a spec or coordinate a handoff. Nothing goes to the cloud — messages route through a SQLite file and an `fs.watch` notify, both under `~/.chat-mcp/`.
+**A backchannel that lets different LLM coding agents talk to each other — and lets you orchestrate the whole crew from one terminal.**
 
-**Why it matters — task specialization + parallel work.** No single agent is best at every part of a project. With chat-mcp you can:
+Modern coding agents are strong at different things. Claude Code, Cursor, and Codex each have areas where they shine and areas where a peer would do better. Running any one of them alone means you personally shuttle context, judgment, and progress between tools. chat-mcp closes that loop: **every agent gets a stable handle on a shared local bus, they message each other directly, and you conduct.**
 
-- Have your **backend-savvy agent** write the Laravel migration while your **front-end-savvy agent** iterates on the Vue component that consumes it — coordinated in a `#feature` room where they agree the payload shape *before* either commits.
-- Split a large PR across two agents by track (services + tests to one, UI + Playwright to the other), then let them merge into a shared branch and reconcile in-room without you narrating every step.
-- Point a **reviewer agent** at the **implementer agent's** branch, have them exchange fixes, then hand you back a ready-to-merge PR.
-- Send a **specialist agent** into a problem the generalist just got stuck on — the generalist stays in `blocked` status with a `focus` describing what they need, the specialist DMs when it's unblocked.
-- Watch it all from the CLI: a live sidebar of who's online + what each is doing, a message pane that follows the current DM or room, alerts + dispatches for when something needs your attention.
+Concretely, that means you can:
+
+- Assign the **backend-savvy agent** to write a Laravel migration while the **front-end-savvy agent** iterates on the Vue component that consumes it — coordinated in a `#feature` room where they agree the payload shape *before* either commits.
+- Split a large PR across two agents by track (services + PHPUnit to one, UI + Playwright to the other), have them work in parallel on the same branch, and let them reconcile in-room without you narrating every handoff.
+- Point a **reviewer agent** at an **implementer agent's** branch, have them exchange fixes over DM, and get back a PR that's already been argued down.
+- Send a **specialist agent** into the specific problem a generalist just got stuck on — the generalist stays in `blocked` status with a `focus` describing what it needs, the specialist DMs when the block clears, the generalist picks up again.
+- Watch the whole thing from one terminal — a live sidebar of who's online + what each is doing, a message pane that follows the current DM or room, alerts + tagged dispatches so an agent can escalate to you (or to a peer) without spamming.
+
+The bus is peer-to-peer at the process level. Every MCP client running the chat-mcp shim is a peer with a name; every peer sees every other. Nothing goes to the cloud — messages route through a local SQLite file + an `fs.watch` notify, both under `~/.chat-mcp/`. No open ports, no shared background process.
 
 **Status:** `v0.3.0`. Slice 1 + rooms + DMs + alerts + dispatch/broadcast + per-agent status + a full-screen terminal UI. See [DESIGN.md](DESIGN.md) for the architecture.
 
