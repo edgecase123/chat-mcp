@@ -66,3 +66,30 @@ test('typing "/alert cla" (peer mode) suggests peers only', () => {
   const names = c.map((x) => x.value);
   assert.deepEqual(names, ['claude1']);
 });
+
+test('@-path token returns filesystem completions from cwd', () => {
+  // cwd inside this test suite is the chat-mcp repo root. Every entry
+  // returned should be prefixed with `@` and either a file or dir.
+  const c = getCompletions('@sr', 3, ctx);
+  const values = c.map((x) => x.value);
+  // 'src/' is a real dir here — must appear in the results.
+  assert.ok(values.includes('@src/'), `expected @src/ in ${JSON.stringify(values)}`);
+  // Every entry must be a path (kind:'path') and start with '@'.
+  for (const entry of c) {
+    assert.equal(entry.kind, 'path');
+    assert.ok(entry.value.startsWith('@'));
+  }
+});
+
+test('@-path completions honour a subdirectory prefix', () => {
+  const c = getCompletions('@src/cli/', 9, ctx);
+  const values = c.map((x) => x.value);
+  // 'src/cli/ink/' is a real dir — must be surfaced with trailing slash.
+  assert.ok(values.includes('@src/cli/ink/'), `expected @src/cli/ink/ in ${JSON.stringify(values)}`);
+});
+
+test('@-path completions work anywhere in the input (not just after /)', () => {
+  const c = getCompletions('please look at @sr', 18, ctx);
+  const values = c.map((x) => x.value);
+  assert.ok(values.includes('@src/'));
+});

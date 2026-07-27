@@ -478,6 +478,70 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           setStatus('alerts dismissed');
           return;
         }
+        case 'all-hands': {
+          const [roomArg] = args;
+          if (!roomArg) return setStatus('usage: /all-hands #<room>');
+          try {
+            assertRoomName(roomArg);
+          } catch (e) {
+            return setStatus((e as Error).message);
+          }
+          // Auto-join the caller if they aren't already in the room, so the
+          // instruction lands in a room the caller can actually see.
+          if (!dao.isRoomMember(db, roomArg, handle)) {
+            const joinRes = dao.joinRoom(db, roomArg, handle);
+            if (joinRes.was_new_member && joinRes.system_message) {
+              for (const member of dao.roomMembers(db, roomArg)) {
+                if (member === handle) continue;
+                notifyPeer(member, { id: joinRes.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: joinRes.system_message.sent_at });
+              }
+            }
+          }
+          const targets = dao.listAgents(db, false).filter(
+            (a) => a.handle !== handle && a.handle !== dao.SYSTEM_HANDLE,
+          );
+          if (targets.length === 0) return setStatus('no other peers online to ping');
+          const body = `📢 All hands — please /join ${roomArg} (from ${handle})`;
+          for (const t of targets) {
+            const sent = dao.insertMessage(db, { from: handle, to: t.handle, body, kind: 'alert' });
+            notifyPeer(t.handle, { id: sent.id, to: t.handle, from: handle, ts: sent.sent_at });
+          }
+          setStatus(`📢 all-hands sent to ${targets.length} peer${targets.length === 1 ? '' : 's'} → ${roomArg}`);
+          setTick((t) => t + 1);
+          return;
+        }
+        case 'invite': {
+          const [roomArg, list] = args;
+          if (!roomArg || !list) return setStatus('usage: /invite #<room> <peer1,peer2,...>');
+          try {
+            assertRoomName(roomArg);
+          } catch (e) {
+            return setStatus((e as Error).message);
+          }
+          if (!dao.isRoomMember(db, roomArg, handle)) return setStatus(`not a member of ${roomArg} — /join first`);
+          const invitees = list.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+          if (invitees.length === 0) return setStatus('usage: /invite #<room> <peer1,peer2,...>');
+          let added = 0;
+          const skipped: string[] = [];
+          for (const p of invitees) {
+            if (p === handle) { skipped.push(`${p} (self)`); continue; }
+            if (p === dao.SYSTEM_HANDLE) { skipped.push(`${p} (system)`); continue; }
+            if (!dao.getAgent(db, p)) { skipped.push(`${p} (unknown)`); continue; }
+            if (dao.isRoomMember(db, roomArg, p)) { skipped.push(`${p} (already in)`); continue; }
+            const r = dao.joinRoom(db, roomArg, p);
+            if (r.was_new_member && r.system_message) {
+              for (const member of dao.roomMembers(db, roomArg)) {
+                if (member === handle) continue;
+                notifyPeer(member, { id: r.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: r.system_message.sent_at });
+              }
+            }
+            added += 1;
+          }
+          const skipMsg = skipped.length > 0 ? ` (skipped: ${skipped.join(', ')})` : '';
+          setStatus(`invited ${added} to ${roomArg}${skipMsg}`);
+          setTick((t) => t + 1);
+          return;
+        }
         case 'clear': {
           if (view.kind === 'dm') {
             const n = dao.deleteDmMessages(db, handle, view.peer);
@@ -779,7 +843,13 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                 if (!c) return;
                 const before = input.value.slice(0, input.cursor);
                 const after = input.value.slice(input.cursor);
-                const tokenStart = Math.max(before.lastIndexOf(' '), before.lastIndexOf('#') - 1) + 1;
+                // Token starts at the char AFTER the last space, OR at the
+                // last '#' / '@' if those introduce a room- or path-token.
+                const tokenStart = Math.max(
+                  before.lastIndexOf(' '),
+                  before.lastIndexOf('#') - 1,
+                  before.lastIndexOf('@') - 1,
+                ) + 1;
                 const nextValue = input.value.slice(0, tokenStart) + c.value + ' ' + after;
                 const nextCursor = tokenStart + c.value.length + 1;
                 setInput({ value: nextValue, cursor: nextCursor });

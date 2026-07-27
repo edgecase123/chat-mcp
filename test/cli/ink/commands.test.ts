@@ -25,6 +25,7 @@ test('every existing command from App.tsx doCommand is present', () => {
     '/quit', '/exit', '/help', '/keyboard', '/copy', '/back', '/rooms', '/who',
     '/dm', '/join', '/leave', '/set-status', '/dispatch', '/broadcast',
     '/alert', '/watch', '/unwatch', '/ack', '/clear', '/kick',
+    '/all-hands', '/invite',
   ];
   for (const name of expected) {
     assert.ok(findCommand(name), `missing ${name}`);

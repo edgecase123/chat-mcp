@@ -37,6 +37,8 @@ export const COMMANDS: Command[] = [
   { name: '/broadcast', args: [{ name: '#room', kind: 'room' }, { name: 'text', kind: 'text', variadic: true }], description: 'send tagged [DISPATCH] to room', category: 'messaging' },
   { name: '/alert', args: [{ name: 'target', kind: 'target' }, { name: 'text', kind: 'text', variadic: true }], description: 'urgent — red banner', category: 'messaging' },
   { name: '/ack', args: [], description: 'dismiss visible alerts', category: 'messaging' },
+  { name: '/all-hands', args: [{ name: '#room', kind: 'room' }], description: 'alert every online peer to /join <room>', category: 'messaging' },
+  { name: '/invite', args: [{ name: '#room', kind: 'room' }, { name: 'peer1,peer2,...', kind: 'text' }], description: 'force-add a comma-separated list of peers to a room', category: 'messaging' },
 
   { name: '/set-status', args: [{ name: 'status', kind: 'status' }, { name: 'focus', kind: 'text', variadic: true, optional: true }], description: 'set your status + focus', category: 'status' },
   { name: '/who', args: [], description: 'peer table', category: 'status' },
