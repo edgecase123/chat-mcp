@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Text, useInput } from 'ink';
 
 export interface InputProps {
   value: string;
@@ -118,17 +118,22 @@ export function Input({
   const before = value.slice(0, cursor);
   const atChar = value[cursor];
   const after = atChar === undefined ? '' : value.slice(cursor + 1);
-  return (
-    <Box>
-      <Text color="cyan">{prompt}</Text>
-      <Text>{before}</Text>
-      {atChar === undefined
-        // Past end of buffer — render a solid block so the cursor is visible
-        // in terminals that render `inverse` on a space as empty space.
-        ? <Text color="cyan">█</Text>
-        // On a real char — inverse to overlay the cursor without hiding it.
-        : <Text inverse>{atChar}</Text>}
-      <Text>{after}</Text>
-    </Box>
-  );
+  // Emit as ONE ANSI-styled string, not nested <Text>. Ink's wrap works on
+  // the string content, and nested <Text> children in a Text parent were
+  // being measured as opaque segments — when `before` overflowed and Ink
+  // wrapped it, the cursor `<Text>` stuck to the tail of the first visual
+  // line rather than the tail of the logical string. Embedded ANSI escapes
+  // are transparent to the wrap algorithm.
+  const CYAN = '\x1b[36m';
+  const RESET = '\x1b[39m';
+  const INV = '\x1b[7m';
+  const NOINV = '\x1b[27m';
+  const cursorAnsi = atChar === undefined
+    // Past end of buffer — render a solid block; some terminals collapse
+    // inverse-space to empty space, hiding the cursor.
+    ? `${CYAN}█${RESET}`
+    // On a real char — inverse the char in place.
+    : `${INV}${atChar}${NOINV}`;
+  const line = `${CYAN}${prompt}${RESET}${before}${cursorAnsi}${after}`;
+  return <Text>{line}</Text>;
 }
