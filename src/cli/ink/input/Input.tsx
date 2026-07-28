@@ -116,13 +116,18 @@ export function Input({
   });
 
   const before = value.slice(0, cursor);
-  const at = value[cursor] ?? ' ';
-  const after = value.slice(cursor + 1);
+  const atChar = value[cursor];
+  const after = atChar === undefined ? '' : value.slice(cursor + 1);
   return (
     <Box>
       <Text color="cyan">{prompt}</Text>
       <Text>{before}</Text>
-      <Text inverse>{at}</Text>
+      {atChar === undefined
+        // Past end of buffer — render a solid block so the cursor is visible
+        // in terminals that render `inverse` on a space as empty space.
+        ? <Text color="cyan">█</Text>
+        // On a real char — inverse to overlay the cursor without hiding it.
+        : <Text inverse>{atChar}</Text>}
       <Text>{after}</Text>
     </Box>
   );
