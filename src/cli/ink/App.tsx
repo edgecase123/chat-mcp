@@ -56,6 +56,12 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   const [tick, setTick] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
   const [watchPeer, setWatchPeer] = useState<string | null>(null);
+  // Session-only ephemeral "system" cards that get inlined into the messages
+  // view for a specific room. Keyed by room name; each card is a synthetic
+  // Message with a negative id so it can't collide with a real DB row.
+  // Cleared implicitly when the user leaves the room's key, or replaced
+  // when the same command is re-run.
+  const [roomInlineCards, setRoomInlineCards] = useState<Record<string, Message>>({});
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [draft, setDraft] = useState<{ value: string; cursor: number } | null>(null);
@@ -100,7 +106,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           kind: ((r as { kind: string }).kind ?? 'chat') as MessageKind,
         }));
     }
-    return db
+    const roomMsgs = db
       .prepare(
         `SELECT * FROM messages WHERE to_handle = ? ORDER BY id DESC LIMIT 200`,
       )
@@ -116,8 +122,10 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         read_at: (r as { read_at: number | null }).read_at,
         kind: ((r as { kind: string }).kind ?? 'chat') as MessageKind,
       }));
+    const card = view.kind === 'room' ? roomInlineCards[view.room] : undefined;
+    return card ? [...roomMsgs, card] : roomMsgs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, tick]);
+  }, [view, tick, roomInlineCards]);
 
   // Watched-peer mirror: last 10 messages TO or FROM them.
   const watchMessages = useMemo<Message[]>(() => {
@@ -459,6 +467,31 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           setWatchPeer(null);
           setStatus('unwatched');
           return;
+        case 'room-check': {
+          if (view.kind !== 'room') return setStatus('/room-check only works inside a room (/join #x first)');
+          const members = dao.roomMembers(db, view.room);
+          const others = members.filter((m) => m !== dao.SYSTEM_HANDLE);
+          const body = others.length === 0
+            ? `👥 ${view.room} has no members yet.`
+            : `👥 ${view.room} · ${others.length} member${others.length === 1 ? '' : 's'}: ${others.join(', ')}`;
+          const now = Date.now();
+          const card: Message = {
+            // Negative id keeps it out of the DB id space forever; ScrollableMessageList's
+            // per-id key still works because negative ids are unique enough for
+            // one card per room.
+            id: -now,
+            from_handle: dao.SYSTEM_HANDLE,
+            to_handle: view.room,
+            body,
+            sent_at: now,
+            delivered_at: null,
+            read_at: null,
+            kind: 'chat',
+          };
+          setRoomInlineCards((cards) => ({ ...cards, [view.room]: card }));
+          setTick((t) => t + 1);
+          return;
+        }
         case 'ack': {
           // Dismiss the alert lane by marking every visible alert read (DMs)
           // or advancing the room read watermark past them.

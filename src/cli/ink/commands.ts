@@ -44,6 +44,7 @@ export const COMMANDS: Command[] = [
   { name: '/who', args: [], description: 'peer table', category: 'status' },
   { name: '/watch', args: [{ name: 'peer', kind: 'peer' }], description: 'mirror another peer\'s traffic', category: 'status' },
   { name: '/unwatch', args: [], description: 'close watch pane', category: 'status' },
+  { name: '/room-check', args: [], description: 'inline the current room\'s participant list into the chat view', category: 'status' },
 
   { name: '/clear', args: [], description: 'delete all messages in the current DM or room', category: 'admin' },
   { name: '/kick', args: [{ name: 'peer', kind: 'peer' }], description: 'remove a peer from the bus (destructive)', category: 'admin' },
