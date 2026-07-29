@@ -65,9 +65,10 @@ interface MessagesPaneProps {
   view: View;
   messages: Message[];
   meHandle: string;
+  focused?: boolean;
 }
 
-export function MessagesPane({ view, messages, meHandle }: MessagesPaneProps): React.ReactElement {
+export function MessagesPane({ view, messages, meHandle, focused = true }: MessagesPaneProps): React.ReactElement {
   const viewportRows = useMessageViewport();
   const contentColumns = Math.max(20, useTerminalColumns() - HORIZONTAL_CHROME);
   const renderRow = React.useMemo(() => makeRenderRow(contentColumns), [contentColumns]);
@@ -98,7 +99,7 @@ export function MessagesPane({ view, messages, meHandle }: MessagesPaneProps): R
             meHandle={meHandle}
             viewportRows={viewportRows}
             contentColumns={contentColumns}
-            focused={true}
+            focused={focused}
             renderRow={renderRow}
           />
         )}

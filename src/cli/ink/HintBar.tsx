@@ -12,10 +12,14 @@ const HINTS: Record<View['kind'], string> = {
   keyboard: '/back close · /help full help',
 };
 
-export function HintBar({ view }: { view: View }): React.ReactElement {
+export function HintBar({ view, watchOpen = false, focusedPane = 'main' }: { view: View; watchOpen?: boolean; focusedPane?: 'main' | 'watch' }): React.ReactElement {
+  const base = HINTS[view.kind];
+  const watchHint = watchOpen
+    ? ` · Ctrl-O focus ${focusedPane === 'main' ? 'watch' : 'main'} · /unwatch`
+    : '';
   return (
     <Box paddingX={1} flexShrink={0}>
-      <Text dimColor>{HINTS[view.kind]}</Text>
+      <Text dimColor>{base}{watchHint}</Text>
     </Box>
   );
 }

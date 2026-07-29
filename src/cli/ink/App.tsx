@@ -56,6 +56,10 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   const [tick, setTick] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
   const [watchPeer, setWatchPeer] = useState<string | null>(null);
+  // Which pane receives scroll keys (PgUp/PgDn/Ctrl-P/Ctrl-N/Home/End).
+  // Toggled with Ctrl-O when the watch pane is open. Auto-resets to 'main'
+  // whenever /unwatch runs so the state doesn't strand on a closed pane.
+  const [focusedPane, setFocusedPane] = useState<'main' | 'watch'>('main');
   // Session-only ephemeral "system" cards that get inlined into the messages
   // view for a specific room. Keyed by room name; each card is a synthetic
   // Message with a negative id so it can't collide with a real DB row.
@@ -465,6 +469,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         }
         case 'unwatch':
           setWatchPeer(null);
+          setFocusedPane('main');
           setStatus('unwatched');
           return;
         case 'room-check': {
@@ -662,6 +667,12 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     if (key.ctrl && raw === 'c') exit();
     if (key.ctrl && raw === 'k' && !paletteOpen) return setPaletteOpen(true);
     if (key.ctrl && raw === 'r' && !paletteOpen) return setView({ kind: 'rooms' });
+    // Ctrl-O — cycle scroll focus between main and watch panes. No-op unless
+    // the watch pane is open. Fires regardless of input-buffer content so
+    // the user can move focus while composing a message.
+    if (key.ctrl && raw === 'o' && watchPeer !== null && !paletteOpen) {
+      return setFocusedPane((p) => (p === 'main' ? 'watch' : 'main'));
+    }
 
     // Empty-input hotkeys — must not fire while palette is open.
     if (input.value.length > 0 || paletteOpen) return;
@@ -782,7 +793,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           flexDirection="column"
           flexGrow={1}
           borderStyle="round"
-          borderColor="gray"
+          borderColor={showWatch && focusedPane === 'main' ? 'cyan' : 'gray'}
           paddingX={1}
         >
           {view.kind === 'who' ? (
@@ -810,7 +821,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
               }}
             />
           ) : (
-            <MessagesPane view={view} messages={messages} meHandle={handle} />
+            <MessagesPane view={view} messages={messages} meHandle={handle} focused={!showWatch || focusedPane === 'main'} />
           )}
         </Box>
 
@@ -820,11 +831,11 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             width={34}
             flexShrink={0}
             borderStyle="round"
-            borderColor="magenta"
+            borderColor={focusedPane === 'watch' ? 'magentaBright' : 'magenta'}
             paddingX={1}
           >
             <Text bold color="magenta">
-              👁  WATCH: {watchPeer}
+              👁  WATCH: {watchPeer}{focusedPane === 'watch' ? ' ⟵' : ''}
             </Text>
             <Text dimColor>{'─'.repeat(30)}</Text>
             {watchMessages.length === 0 ? (
@@ -835,8 +846,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                 meHandle={handle}
                 viewportRows={messageViewport}
                 contentColumns={30}
-                focused={showWatch}
-                requireShift={true}
+                focused={focusedPane === 'watch'}
                 renderRow={(m) => (
                   <Box key={m.id} flexDirection="column">
                     <Text>
@@ -856,7 +866,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         )}
       </Box>
 
-      <HintBar view={view} />
+      <HintBar view={view} watchOpen={showWatch} focusedPane={focusedPane} />
 
       {/* Input — hidden while palette is open so keys don't dispatch to both handlers */}
       {!paletteOpen && (
