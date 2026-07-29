@@ -14,7 +14,7 @@ Concretely, that means you can:
 
 The bus is peer-to-peer at the process level. Every MCP client running the chat-mcp shim is a peer with a name; every peer sees every other. Nothing goes to the cloud — messages route through a local SQLite file + an `fs.watch` notify, both under `~/.chat-mcp/`. No open ports, no shared background process.
 
-**Status:** `v0.3.0`. Slice 1 + rooms + DMs + alerts + dispatch/broadcast + per-agent status + a full-screen terminal UI. See [DESIGN.md](DESIGN.md) for the architecture.
+**Status:** `v0.3.1`. Slice 1 + rooms + DMs + alerts + dispatch/broadcast + per-agent status + a full-screen terminal UI. Developed and tested end-to-end only against **Claude Code** — other MCP clients (Cursor, Codex, Gemini CLI) can register handles and call every `chat.*` tool, but do not currently have an "idle wake" primitive equivalent to Claude Code's `Monitor`. See [Client support](#client-support) for what that means in practice. Full architecture: [DESIGN.md](DESIGN.md).
 
 ## How it fits together
 
@@ -100,7 +100,7 @@ The shim writes new-mail notifications to `~/.chat-mcp/notify/<handle>` — but 
 npx -y github:edgecase123/chat-mcp install <framework> --handle <HANDLE>
 ```
 
-Currently supported: **`claude-code`**. Cursor / Codex / Gemini CLI adapters are planned. `chat-mcp list-adapters` prints the current set.
+Currently supported: **`claude-code`** only. Cursor, Codex, and Gemini CLI can register on the bus and their agents can call every `chat.*` tool, but they do not expose a way for an external file event to poke an idle inference loop the way Claude Code's `Monitor` does — so no wake adapter ships for them today. See [Client support](#client-support) below. `chat-mcp list-adapters` prints the current set.
 
 **Claude Code adapter** — run from the project directory:
 
@@ -332,6 +332,23 @@ When someone joins a room they aren't already in, the bus posts a system announc
 Unread tracking is a per-member high-watermark (last-read message id), not per-message read receipts. Each member reads independently; `room_inbox` returns unread + advances the watermark.
 
 The wake mechanism doesn't distinguish DMs from rooms — agents should call both `inbox` and `room_inbox` on each wake (or wire them into a single handler).
+
+---
+
+## Client support
+
+chat-mcp has been developed and validated end-to-end only against **Claude Code**. Every other MCP client is best-effort: agents there can register a handle and use every `chat.*` tool, but the ambient "an idle agent wakes up when a message arrives" behavior depends on a client primitive that Claude Code exposes and the others don't.
+
+| Client | Register + `chat.*` tools | Idle wake on incoming message |
+|---|---|---|
+| Claude Code | ✅ | ✅ via bundled `install claude-code` adapter — `Monitor` runs `fs.watch` on the notify file inside the warm session and pokes the model directly. |
+| Cursor | ✅ (untested end-to-end) | ⚠️ No idle-wake primitive. The agent picks up new messages on its next turn — i.e. when the human next types into the sidebar chat — via `chat.inbox` if instructed to poll each turn. Autonomous inter-agent chat while the human is away is not supported. Investigated hacks (`entr` + `cursor-agent -p` cold-starts, `tmux send-keys` into an interactive session, a VS Code extension) were deliberately deferred as too fragile or too expensive. |
+| Codex CLI | ✅ (untested end-to-end) | ⚠️ Same as Cursor — no documented external-poke API. Same pull-on-every-turn fallback applies. |
+| Gemini CLI | ✅ (untested end-to-end) | ⚠️ Same. |
+
+**Recommended fallback for non-Claude clients:** add a pull-on-every-turn line to the agent hint (`CLAUDE.md` / `.cursorrules` / equivalent) — *"at the start of every turn, call `chat.inbox` and `chat.room_inbox`"*. The agent will discover messages whenever the human next interacts with it. Lower bandwidth than Claude Code's warm-wake, but correct.
+
+If you're using chat-mcp against any client besides Claude Code and hit a rough edge, please open an issue — the surface is well-defined but the non-Claude paths have not seen production use.
 
 ---
 
