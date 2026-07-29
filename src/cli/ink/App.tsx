@@ -10,6 +10,7 @@ import * as dao from '../../storage/dao.js';
 import type { Message, MessageKind, AgentStatus, Agent } from '../../storage/dao.js';
 import { assertRoomName } from '../../util/naming.js';
 import { stampOf as timeOf } from '../../util/time.js';
+import { wrappedRowCount } from '../../util/wrap.js';
 import type { View } from './views.js';
 import { Header } from './panes/Header.js';
 import { AlertLane } from './panes/AlertLane.js';
@@ -847,6 +848,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                 viewportRows={messageViewport}
                 contentColumns={30}
                 focused={focusedPane === 'watch'}
+                rowsForMessage={(m) => 1 /* header */ + wrappedRowCount(m.body, 28)}
                 renderRow={(m) => (
                   <Box key={m.id} flexDirection="column">
                     <Text>

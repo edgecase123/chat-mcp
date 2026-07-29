@@ -7,15 +7,22 @@ export interface ScrollableMessageListProps {
   meHandle: string;
   /** Row budget for the visible slice — walked backward from the anchor. */
   viewportRows: number;
-  /** Approximate content width for wrap-row estimation (terminal columns
-   *  minus sidebar + borders + padding). Used only to estimate how many
-   *  rows a message body will wrap to. */
+  /** Approximate content width for the fallback char-count row estimate.
+   *  When `rowsForMessage` is provided, this is unused for row estimation
+   *  and only carried for backward compatibility. */
   contentColumns: number;
   /** When true, this list receives PgUp/PgDn/Home/End */
   focused?: boolean;
   /** Optional shift modifier — true means "only fire on Shift-Pg*" (used
    *  for the watch pane so it doesn't collide with the primary list) */
   requireShift?: boolean;
+  /** Optional caller-supplied row estimator. Prefer this — the pane's
+   *  internal char-count estimator under-counts because real wrap only
+   *  breaks at whitespace, so a long message renders taller than
+   *  `ceil(length / cols)` suggests. Callers that own their wrap logic
+   *  (MessagesPane, watch pane) should pass a closure that uses the
+   *  same wrap width they render with. */
+  rowsForMessage?: (m: Message) => number;
   renderRow: (m: Message, meHandle: string) => React.ReactElement;
 }
 
@@ -56,6 +63,7 @@ export function ScrollableMessageList({
   contentColumns,
   focused = true,
   requireShift = false,
+  rowsForMessage,
   renderRow,
 }: ScrollableMessageListProps): React.ReactElement {
   // On mount (and on remount via `key` from the parent when the chat target
@@ -85,7 +93,7 @@ export function ScrollableMessageList({
   let usedRows = 0;
   while (start > 0) {
     const m = messages[start - 1]!;
-    const rows = estimateMessageRows(m.body, contentColumns);
+    const rows = rowsForMessage ? rowsForMessage(m) : estimateMessageRows(m.body, contentColumns);
     if (usedRows + rows > viewportRows && start !== end) break;
     usedRows += rows;
     start -= 1;

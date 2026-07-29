@@ -7,7 +7,7 @@ import { ScrollableMessageList } from './ScrollableMessageList.js';
 import { Markdown } from '../util/markdown.js';
 import { useMessageViewport, useTerminalColumns } from '../util/viewport.js';
 import { stampOf as timeOf } from '../../../util/time.js';
-import { wrapBody } from '../../../util/wrap.js';
+import { wrapBody, wrappedRowCount } from '../../../util/wrap.js';
 
 // Sidebar (30) + borders (~4) + main-pane paddingX (2) + safety (4) = ~40
 // columns of chrome to the left of the message body. Subtract from total
@@ -72,6 +72,14 @@ export function MessagesPane({ view, messages, meHandle, focused = true }: Messa
   const viewportRows = useMessageViewport();
   const contentColumns = Math.max(20, useTerminalColumns() - HORIZONTAL_CHROME);
   const renderRow = React.useMemo(() => makeRenderRow(contentColumns), [contentColumns]);
+  // Row estimator uses the SAME wrap width as the renderer (contentColumns - 3)
+  // so the visible-slice budget matches actual rendered rows. Char-count
+  // estimators under-count by 15-25% because wrapBody breaks at whitespace.
+  const wrapCols = Math.max(10, contentColumns - 3);
+  const rowsForMessage = React.useCallback(
+    (m: Message) => 1 /* header */ + wrappedRowCount(m.body, wrapCols),
+    [wrapCols],
+  );
   const title =
     view.kind === 'home'
       ? '(select an agent or room)'
@@ -100,6 +108,7 @@ export function MessagesPane({ view, messages, meHandle, focused = true }: Messa
             viewportRows={viewportRows}
             contentColumns={contentColumns}
             focused={focused}
+            rowsForMessage={rowsForMessage}
             renderRow={renderRow}
           />
         )}

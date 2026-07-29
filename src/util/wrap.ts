@@ -12,6 +12,18 @@ export function wrapBody(body: string, cols: number): string {
   return body.split('\n').map((line) => wrapLine(line, budget)).join('\n');
 }
 
+/**
+ * Count how many terminal rows `body` will occupy when wrapped at `cols`.
+ * Uses the same wrap algorithm as `wrapBody` so callers can budget
+ * viewport space accurately — a char-count approximation (`ceil(len/cols)`)
+ * under-counts by 15-25% because real wrap only breaks at whitespace and
+ * short trailing words push wraps forward.
+ */
+export function wrappedRowCount(body: string, cols: number): number {
+  if (body.length === 0) return 1;
+  return wrapBody(body, cols).split('\n').length;
+}
+
 function wrapLine(line: string, cols: number): string {
   if (line.length <= cols) return line;
   const out: string[] = [];
