@@ -70,6 +70,13 @@ export function Input({
       }
       return onChange(value, Math.min(value.length, cursor + 1));
     }
+    // Readline convention for word-nav: Opt-Left in Terminal.app + iTerm2's
+    // default profile sends ESC-b (not ESC-[1;3D), so key.leftArrow is never
+    // set — it arrives as `key.meta + raw === 'b'`. Same for Opt-Right → M-f.
+    // Handle both aliases so the shortcut works without the user having to
+    // change their terminal's Option-key encoding.
+    if (key.meta && raw === 'b') return onChange(value, prevWordBoundary(value, cursor));
+    if (key.meta && raw === 'f') return onChange(value, nextWordBoundary(value, cursor));
 
     // Cursor-to-line-start / -line-end. Ctrl-A / Ctrl-E is readline convention,
     // but some terminals (screen, tmux with default-a config, or emulators with
