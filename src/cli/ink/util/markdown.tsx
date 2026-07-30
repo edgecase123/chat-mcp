@@ -192,9 +192,14 @@ export function tokenize(input: string): Token[] {
 
 /** Render a table token as monospaced padded rows: header (bold) + a
  *  dim divider line + body rows. Column widths auto-fit to the widest
- *  cell so short cells align. Bounded at 40 chars/col to keep long
- *  free-text cells from stretching the whole pane. */
-function renderTable(t: { kind: 'table'; header: string[]; rows: string[][] }, key: number): React.ReactElement {
+ *  cell so short cells align, then are compressed proportionally if the
+ *  natural total would overflow `maxWidth`. Bounded at 40 chars/col to
+ *  keep long free-text cells from stretching the whole pane. */
+function renderTable(
+  t: { kind: 'table'; header: string[]; rows: string[][] },
+  key: number,
+  maxWidth: number,
+): React.ReactElement {
   const cols = t.header.length;
   const allRows: string[][] = [t.header, ...t.rows.map((r) => {
     const padded = r.slice(0, cols);
@@ -208,8 +213,29 @@ function renderTable(t: { kind: 'table'; header: string[]; rows: string[][] }, k
       widths[c] = Math.min(40, Math.max(widths[c]!, cell.length));
     }
   }
+  // Compress if natural width exceeds pane. Separators between cells are
+  // ' │ ' (3 chars), so total = sum(widths) + 3*(cols-1). Shrink the widest
+  // column by 1 until we fit, flooring each at 1. In tight budgets that
+  // makes cells single-char + ellipsis-truncated, which is ugly but
+  // preferred over bleeding past the pane border.
+  const SEP = 3;
+  const separators = SEP * Math.max(0, cols - 1);
+  const cellBudget = Math.max(cols, maxWidth - separators);
+  let sum = widths.reduce((s, w) => s + w, 0);
+  while (sum > cellBudget) {
+    let widest = 0;
+    for (let c = 1; c < cols; c++) if (widths[c]! > widths[widest]!) widest = c;
+    if (widths[widest]! <= 1) break;
+    widths[widest] = widths[widest]! - 1;
+    sum -= 1;
+  }
   function fmtCell(cell: string, w: number): string {
-    if (cell.length > w) return cell.slice(0, w - 1) + '…';
+    if (cell.length > w) {
+      // At w=1 the ellipsis alone eats the whole cell. Below w=1 we can't
+      // render anything meaningful. Above, keep w-1 chars + one ellipsis.
+      if (w <= 1) return w === 1 ? '…' : '';
+      return cell.slice(0, w - 1) + '…';
+    }
     return cell + ' '.repeat(w - cell.length);
   }
   const divider = widths.map((w) => '─'.repeat(w)).join(' ─ ');
@@ -225,7 +251,7 @@ function renderTable(t: { kind: 'table'; header: string[]; rows: string[][] }, k
   );
 }
 
-export function Markdown({ body, baseColor }: { body: string; baseColor?: string }): React.ReactElement {
+export function Markdown({ body, baseColor, maxWidth = 80 }: { body: string; baseColor?: string; maxWidth?: number }): React.ReactElement {
   const tokens = tokenize(body);
   return (
     <Text color={baseColor}>
@@ -237,7 +263,7 @@ export function Markdown({ body, baseColor }: { body: string; baseColor?: string
           case 'code':       return <Text key={idx} backgroundColor="gray"> {t.value} </Text>;
           case 'code-block': return <Text key={idx} dimColor>{'\n'}{t.value}{'\n'}</Text>;
           case 'link':       return <Text key={idx} color="cyan" underline>{t.label} <Text dimColor>({t.url})</Text></Text>;
-          case 'table':      return renderTable(t, idx);
+          case 'table':      return renderTable(t, idx, maxWidth);
         }
       })}
     </Text>

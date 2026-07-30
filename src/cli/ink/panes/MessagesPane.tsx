@@ -26,7 +26,9 @@ const KIND_COLOR: Record<MessageKind, string | undefined> = {
  *  Ink's Text-wrap-inside-a-Box chain — that chain wraps correctly in
  *  headless renders but has failed to constrain long lines in some live
  *  terminals, causing text to bleed past the pane border. Hard-breaks
- *  tokens longer than the column budget so nothing overflows. */
+ *  tokens longer than the column budget so nothing overflows.
+ *  Markdown gets the same wrapCols budget so its table renderer can
+ *  squish oversized tables instead of drawing them at natural width. */
 function makeRenderRow(bodyWidth: number): (m: Message, meHandle: string) => React.ReactElement {
   // paddingLeft=2 eats 2 cols on the left; leave one for safety on the right.
   const wrapCols = Math.max(10, bodyWidth - 3);
@@ -49,7 +51,7 @@ function makeRenderRow(bodyWidth: number): (m: Message, meHandle: string) => Rea
           )}
         </Text>
         <Box paddingLeft={2}>
-          <Markdown body={wrapped} baseColor={KIND_COLOR[m.kind]} />
+          <Markdown body={wrapped} baseColor={KIND_COLOR[m.kind]} maxWidth={wrapCols} />
         </Box>
       </Box>
     );
@@ -92,7 +94,7 @@ export function MessagesPane({ view, messages, meHandle, focused = true, content
       <Text bold color="cyan">
         {title}
       </Text>
-      <Text dimColor>{'─'.repeat(50)}</Text>
+      <Text dimColor>{'─'.repeat(Math.max(10, contentColumns))}</Text>
       <Box flexDirection="column" flexGrow={1}>
         {messages.length === 0 ? (
           view.kind === 'home' ? <HomeEmptyState /> :

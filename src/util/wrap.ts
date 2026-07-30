@@ -9,7 +9,15 @@
  */
 export function wrapBody(body: string, cols: number): string {
   const budget = Math.max(1, Math.floor(cols));
-  return body.split('\n').map((line) => wrapLine(line, budget)).join('\n');
+  return body.split('\n').map((line) => {
+    // Preserve markdown table rows verbatim so the Markdown tokenizer can
+    // recognize them — wrapping at whitespace would split rows mid-line and
+    // break the pipe count. Table row: starts + ends with `|`. Includes
+    // separator rows like `|---|---|`. Table renderer compresses widths
+    // downstream to fit the pane, so leaving these lines long is safe.
+    if (/^\s*\|.*\|\s*$/.test(line)) return line;
+    return wrapLine(line, budget);
+  }).join('\n');
 }
 
 /**
