@@ -26,7 +26,7 @@ import { Sidebar } from './panes/Sidebar.js';
 import { Palette } from './palette/Palette.js';
 import { HintBar } from './HintBar.js';
 import { Markdown } from './util/markdown.js';
-import { useMessageViewport, useTerminalRows } from './util/viewport.js';
+import { useMessageViewport, useTerminalRows, useTerminalColumns } from './util/viewport.js';
 
 export interface AppProps {
   handle: string;
@@ -72,6 +72,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   const [draft, setDraft] = useState<{ value: string; cursor: number } | null>(null);
   const messageViewport = useMessageViewport();
   const terminalRows = useTerminalRows();
+  const terminalColumns = useTerminalColumns();
 
   useEffect(() => {
     const bump = (): void => setTick((t) => t + 1);
@@ -707,6 +708,15 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   });
 
   const showWatch = watchPeer !== null;
+  // Message pane's body-column budget. Left chrome: sidebar (30) + main-pane
+  // border (2) + paddingX (2) + body paddingLeft (2) = 36. Right chrome:
+  // main-pane border+paddingX (2) + safety (2) = 4. Watch pane, when open,
+  // eats another 34 cols on the right. Floor at 20 so a tiny terminal still
+  // renders SOMETHING readable.
+  const messageContentColumns = Math.max(
+    20,
+    terminalColumns - 36 - 4 - (showWatch ? 34 : 0),
+  );
   const meStatus = useMemo(() => {
     const me = dao.getAgent(db, handle);
     return me?.status ?? null;
@@ -822,7 +832,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
               }}
             />
           ) : (
-            <MessagesPane view={view} messages={messages} meHandle={handle} focused={!showWatch || focusedPane === 'main'} />
+            <MessagesPane view={view} messages={messages} meHandle={handle} focused={!showWatch || focusedPane === 'main'} contentColumns={messageContentColumns} />
           )}
         </Box>
 
