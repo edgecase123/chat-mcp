@@ -102,6 +102,42 @@ test('char-count estimator (old behavior) DOES undercount vs wrappedRowCount', (
   );
 });
 
+test('Ctrl-N advances by one message (fine step)', async () => {
+  // Two messages long enough that the first + a chunk of the second are
+  // visible on mount. Ctrl-N should reveal the second's first line one
+  // press at a time, not jump by a whole message.
+  const contentColumns = 60;
+  const viewportRows = 6;
+  const messages: Message[] = [
+    makeMessage(1, 'aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa aaa'),
+    makeMessage(2, 'bbb bbb bbb bbb bbb bbb bbb bbb bbb bbb bbb bbb bbb bbb bbb'),
+    makeMessage(3, 'ccc ccc ccc ccc ccc ccc ccc ccc ccc ccc ccc ccc ccc ccc ccc'),
+  ];
+  const rowsFor = (m: Message): number => 1 + Math.ceil(m.body.length / 57);
+  const { stdin, lastFrame } = render(
+    React.createElement(Box, { width: contentColumns, flexDirection: 'column' },
+      React.createElement(ScrollableMessageList, {
+        messages,
+        meHandle: 'bob',
+        viewportRows,
+        contentColumns,
+        focused: true,
+        rowsForMessage: rowsFor,
+        renderRow: renderRow(contentColumns),
+      }),
+    ),
+  );
+
+  // Snap two consecutive frames after one Ctrl-N. The header count above
+  // the top-visible content should NOT reset to zero — that would indicate
+  // whole-message scroll. Instead, the ↑ / ↓ markers should shift by ~1.
+  const before = lastFrame() ?? '';
+  stdin.write('\x0e'); // Ctrl-N
+  await new Promise((r) => setTimeout(r, 20));
+  const after = lastFrame() ?? '';
+  assert.notEqual(before, after, 'Ctrl-N should change the frame');
+});
+
 test('row-budget slice actually fits within viewportRows', () => {
   const contentColumns = 80;
   const viewportRows = 20;

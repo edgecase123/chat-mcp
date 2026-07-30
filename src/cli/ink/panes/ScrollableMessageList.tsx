@@ -11,26 +11,22 @@ export interface ScrollableMessageListProps {
    *  When `rowsForMessage` is provided, this is unused for row estimation
    *  and only carried for backward compatibility. */
   contentColumns: number;
-  /** When true, this list receives PgUp/PgDn/Home/End */
+  /** When true, this list receives PgUp/PgDn/Home/End/Ctrl-P/Ctrl-N. */
   focused?: boolean;
-  /** Optional shift modifier — true means "only fire on Shift-Pg*" (used
-   *  for the watch pane so it doesn't collide with the primary list) */
+  /** Optional shift modifier — true means "only fire on Shift-Pg*". Kept
+   *  for backward-compat; new callers manage per-pane focus via `focused`. */
   requireShift?: boolean;
-  /** Optional caller-supplied row estimator. Prefer this — the pane's
-   *  internal char-count estimator under-counts because real wrap only
-   *  breaks at whitespace, so a long message renders taller than
-   *  `ceil(length / cols)` suggests. Callers that own their wrap logic
-   *  (MessagesPane, watch pane) should pass a closure that uses the
-   *  same wrap width they render with. */
+  /** Caller-supplied row estimator. Prefer this — the internal char-count
+   *  fallback under-counts because real wrap only breaks at whitespace, so
+   *  a long message renders taller than `ceil(length / cols)` suggests. */
   rowsForMessage?: (m: Message) => number;
   renderRow: (m: Message, meHandle: string) => React.ReactElement;
 }
 
 /**
- * Estimate the terminal rows one rendered message will occupy at a given
- * content width. Header line (sender + timestamp) is 1 row; body wraps
- * per its \n splits and character length. Cheap approximation — good
- * enough to slice a viewport without measuring the actual layout.
+ * Fallback row estimator when `rowsForMessage` isn't supplied. Cheap
+ * approximation; MessagesPane + the watch pane bypass this by passing
+ * their exact wrap-width-aware estimator.
  */
 function estimateMessageRows(body: string, cols: number): number {
   const width = Math.max(20, cols);
@@ -46,15 +42,17 @@ function estimateMessageRows(body: string, cols: number): number {
  * Message list with row-budget-aware scrolling + auto-follow at bottom.
  *
  * `scrollOffset` counts messages back from the newest. `viewportRows` is a
- * ROW budget: we walk the messages array backward from the anchor,
- * estimating rendered rows per message, and stop when adding another
- * would exceed the budget. That prevents a small handful of long
- * (multi-line body) messages from saturating the pane while leaving
- * shorter messages inaccessible via PgUp.
+ * ROW budget: we walk backward from the anchor, estimating rendered rows
+ * per message, and stop when adding another would overflow the budget.
+ * The anchor message is always fully visible — we don't try to clip
+ * partial messages because Ink's overflow-hidden mis-renders nested Box
+ * children (single-Text with \n clips fine; nested Box children scramble).
  *
- * scrollOffset === 0 means pinned to newest; auto-follow re-arms when
- * the user reaches it. When scrolled back, incoming messages don't
- * shift the view — the `↓ N newer` indicator surfaces the delta.
+ * Scroll units:
+ * - Ctrl-P / Ctrl-N — one message back / forward (fine control)
+ * - PgUp / PgDn — one page (viewport-worth of messages, whatever fits)
+ * - Home — oldest loaded message
+ * - End — pinned to newest (auto-follow re-arms)
  */
 export function ScrollableMessageList({
   messages,
@@ -68,8 +66,7 @@ export function ScrollableMessageList({
 }: ScrollableMessageListProps): React.ReactElement {
   // On mount (and on remount via `key` from the parent when the chat target
   // changes), anchor at the OLDEST message so the user reads forward
-  // instead of hunting backward. `messages.length - 1` covers every message;
-  // clamped below to 0 in the auto-follow re-arm.
+  // instead of hunting backward.
   const [scrollOffset, setScrollOffset] = useState<number>(() =>
     Math.max(0, messages.length - 1),
   );
@@ -85,9 +82,7 @@ export function ScrollableMessageList({
     }
   }, [messages.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Compute the visible slice by walking BACKWARD from the anchor
-  // and adding messages until we exceed the row budget. Guarantees the
-  // anchor message is fully visible at the bottom of the pane.
+  // Compute the visible slice by walking BACKWARD from the anchor.
   const end = messages.length - scrollOffset;
   let start = end;
   let usedRows = 0;
@@ -100,26 +95,20 @@ export function ScrollableMessageList({
   }
   const visible = messages.slice(start, end);
 
-  // Scroll step: one page. We can't compute this precisely without also
-  // estimating "how many messages sit above the current window", so
-  // approximate one page as the number of messages currently visible.
-  // Never step below 1 (single-message advance if only 1 fits).
-  const step = Math.max(1, visible.length);
+  // Page step: how many messages fit in the current viewport.
+  const pageStep = Math.max(1, visible.length);
+  const maxOffset = Math.max(0, messages.length - 1);
 
   useInput((raw, key) => {
     if (!focused) return;
     if (requireShift && !key.shift) return;
-    // PgUp / PgDn / Home / End when the terminal delivers them.
-    // Macbook users without a dedicated PgUp/PgDn/Home/End key need Fn-arrow,
-    // which is easy to forget — so Ctrl-P (previous / older) and Ctrl-N
-    // (next / newer) also scroll.
-    if (key.pageUp || (key.ctrl && raw === 'p')) {
-      return setScrollOffset((o) => Math.min(Math.max(0, messages.length - 1), o + step));
-    }
-    if (key.pageDown || (key.ctrl && raw === 'n')) {
-      return setScrollOffset((o) => Math.max(0, o - step));
-    }
-    if (key.home) return setScrollOffset(Math.max(0, messages.length - 1));
+    // Ctrl-P / Ctrl-N — one message back / forward.
+    if (key.ctrl && raw === 'p') return setScrollOffset((o) => Math.min(maxOffset, o + 1));
+    if (key.ctrl && raw === 'n') return setScrollOffset((o) => Math.max(0, o - 1));
+    // PgUp / PgDn — one page (whatever fits in the viewport).
+    if (key.pageUp) return setScrollOffset((o) => Math.min(maxOffset, o + pageStep));
+    if (key.pageDown) return setScrollOffset((o) => Math.max(0, o - pageStep));
+    if (key.home) return setScrollOffset(maxOffset);
     if (key.end) return setScrollOffset(0);
   });
 
