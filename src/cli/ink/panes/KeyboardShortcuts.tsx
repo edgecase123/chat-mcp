@@ -10,6 +10,8 @@ export function KeyboardShortcuts(): React.ReactElement {
   return (
     <Box flexDirection="column">
       <Text bold color="magenta">KEYBOARD</Text>
+      <Text>  <Text color="cyan" bold>Enter</Text>    send message / run command</Text>
+      <Text>  <Text color="cyan" bold>Shift-Enter</Text> insert newline (also Opt-Enter, Ctrl-J — Shift-Enter requires terminal that reports modifiers)</Text>
       <Text>  <Text color="cyan" bold>Ctrl-K</Text>   command palette</Text>
       <Text>  <Text color="cyan" bold>Tab</Text>      complete peer/room in current arg</Text>
       <Text>  <Text color="cyan" bold>↑↓</Text>       navigate autocomplete / palette</Text>

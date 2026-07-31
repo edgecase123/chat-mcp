@@ -52,6 +52,26 @@ export function Input({
   emptyBufferHotkeys,
 }: InputProps): React.ReactElement {
   useInput((raw, key) => {
+    // Newline insertion (multi-line message compose). Enter alone still
+    // submits, but several modifier combinations insert a literal '\n':
+    //   - Shift-Enter — reported by terminals that speak the Kitty keyboard
+    //     protocol or iTerm2's "Report modifiers using CSI u" mode.
+    //     Ink surfaces this as key.return + key.shift.
+    //   - Opt/Alt-Enter — most terminals send ESC + CR, which Ink parses
+    //     as key.return + key.meta. Universal fallback for Shift-Enter on
+    //     terminals that don't distinguish it.
+    //   - Ctrl-J — LF (\n) instead of Enter's CR. In Ink 7 this arrives
+    //     as raw === '\n' with key.name === 'enter' (NOT key.ctrl+j), so
+    //     we match on the raw character directly. Also lets a pasted
+    //     literal newline insert instead of submitting.
+    // These checks MUST come before the plain `key.return` submit branch.
+    const isNewlineChord =
+      (key.return && (key.shift || key.meta)) ||
+      raw === '\n';
+    if (isNewlineChord) {
+      const next = value.slice(0, cursor) + '\n' + value.slice(cursor);
+      return onChange(next, cursor + 1);
+    }
     if (key.return) return onSubmit(value);
     if (key.tab) return onTab?.();
     if (key.escape) return onEsc?.();
