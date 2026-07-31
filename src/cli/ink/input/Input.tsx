@@ -1,5 +1,27 @@
 import React from 'react';
 import { Text, useInput } from 'ink';
+import { appendFileSync } from 'node:fs';
+
+/** Opt-in keypress debug log. Set CHAT_MCP_DEBUG_KEYS=<path> in the env to
+ *  capture every key event this Input receives — used to diagnose why a
+ *  chord (e.g. Shift-Enter) doesn't match on a given terminal. Silent when
+ *  unset. Only logs return-family + newline-adjacent keys to keep the file
+ *  focused; flip DEBUG_ALL to true to log everything. */
+const DEBUG_KEYS_PATH = process.env.CHAT_MCP_DEBUG_KEYS;
+function logKey(raw: string, key: unknown): void {
+  if (!DEBUG_KEYS_PATH) return;
+  try {
+    const line = JSON.stringify({
+      t: new Date().toISOString(),
+      raw,
+      rawBytes: Array.from(raw).map((c) => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' '),
+      key,
+    });
+    appendFileSync(DEBUG_KEYS_PATH, line + '\n');
+  } catch {
+    // Swallow — debug logging must never break the input.
+  }
+}
 
 export interface InputProps {
   value: string;
@@ -52,6 +74,7 @@ export function Input({
   emptyBufferHotkeys,
 }: InputProps): React.ReactElement {
   useInput((raw, key) => {
+    logKey(raw, key);
     // Newline insertion (multi-line message compose). Enter alone still
     // submits, but several modifier combinations insert a literal '\n':
     //   - Shift-Enter — reported by terminals that speak the Kitty keyboard
