@@ -270,6 +270,21 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
       const parts = line.slice(1).trim().split(/\s+/);
       const cmd = parts[0] ?? '';
       const args = parts.slice(1);
+      /** Extract the free-text body starting AFTER `argsBefore` whitespace-
+       *  separated tokens, preserving internal whitespace (including \n
+       *  from Shift-Enter). `args.slice(N).join(' ')` collapses newlines
+       *  to spaces because parts was split on /\s+/. */
+      const bodyAfter = (argsBefore: number): string => {
+        let s = line.slice(1).replace(/^\s+/, '');
+        const skip = 1 /* cmd itself */ + argsBefore;
+        for (let i = 0; i < skip; i++) {
+          const wsIdx = s.search(/\s/);
+          if (wsIdx < 0) return '';
+          s = s.slice(wsIdx).replace(/^\s+/, '');
+        }
+        // Strip trailing whitespace but keep internal \n.
+        return s.replace(/\s+$/, '');
+      };
       switch (cmd) {
         case 'quit':
         case 'exit':
@@ -419,7 +434,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           const [to, ...rest] = args;
           if (!to || rest.length === 0) return setStatus('usage: /dispatch <peer> <text...>');
           if (!dao.getAgent(db, to)) return setStatus(`unknown peer: ${to}`);
-          sendTo({ kind: 'dm', peer: to }, rest.join(' '), 'dispatch');
+          sendTo({ kind: 'dm', peer: to }, bodyAfter(1), 'dispatch');
           setStatus(`dispatched → ${to}`);
           return;
         }
@@ -434,14 +449,14 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           if (!dao.isRoomMember(db, room, handle)) {
             return setStatus(`not a member of ${room} — /join first`);
           }
-          sendTo({ kind: 'room', room }, rest.join(' '), 'dispatch');
+          sendTo({ kind: 'room', room }, bodyAfter(1), 'dispatch');
           setStatus(`broadcast → ${room}`);
           return;
         }
         case 'alert': {
           const [target, ...rest] = args;
           if (!target || rest.length === 0) return setStatus('usage: /alert <peer|#room> <text...>');
-          const body = rest.join(' ');
+          const body = bodyAfter(1);
           if (target.startsWith('#')) {
             try {
               assertRoomName(target);
