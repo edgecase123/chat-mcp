@@ -7,6 +7,27 @@
  * chain — that chain works in headless renders but has failed in some
  * live-terminal setups where content bleeds past the pane border.
  */
+/**
+ * Some senders (agents that build messages from JSON-stringified templates,
+ * or copy-paste from escaped source) deliver bodies with literal `\n`
+ * two-char sequences instead of real newline bytes. The message then
+ * renders as one long line with visible `\n` markers. Detect + rehydrate:
+ * if the body contains ANY `\n` escape and NO real newlines, treat the
+ * escapes as newlines. Also handles `\r\n` and `\t` while we're here.
+ * Bodies that mix real newlines with literal `\n` are left alone — that
+ * ambiguity is likely intentional (e.g. discussing the `\n` character in
+ * a code snippet).
+ */
+export function rehydrateEscapedNewlines(body: string): string {
+  if (body.includes('\n')) return body;
+  if (!body.includes('\\n') && !body.includes('\\t') && !body.includes('\\r')) return body;
+  return body
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\n')
+    .replace(/\\t/g, '\t');
+}
+
 export function wrapBody(body: string, cols: number): string {
   const budget = Math.max(1, Math.floor(cols));
   return body.split('\n').map((line) => {

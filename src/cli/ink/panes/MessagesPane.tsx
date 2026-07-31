@@ -7,7 +7,7 @@ import { ScrollableMessageList } from './ScrollableMessageList.js';
 import { Markdown } from '../util/markdown.js';
 import { useMessageViewport } from '../util/viewport.js';
 import { stampOf as timeOf } from '../../../util/time.js';
-import { wrapBody, wrappedRowCount } from '../../../util/wrap.js';
+import { wrapBody, wrappedRowCount, rehydrateEscapedNewlines } from '../../../util/wrap.js';
 
 const KIND_LABEL: Record<MessageKind, string | null> = {
   chat: null,
@@ -33,7 +33,10 @@ function makeRenderRow(bodyWidth: number): (m: Message, meHandle: string) => Rea
   // paddingLeft=2 eats 2 cols on the left; leave one for safety on the right.
   const wrapCols = Math.max(10, bodyWidth - 3);
   return function renderRow(m, meHandle) {
-    const wrapped = wrapBody(m.body, wrapCols);
+    // Rehydrate literal `\n` two-char sequences BEFORE wrap — otherwise the
+    // wrap would treat the whole body as one line and Markdown would render
+    // visible `\n` markers instead of line breaks.
+    const wrapped = wrapBody(rehydrateEscapedNewlines(m.body), wrapCols);
     return (
       <Box key={m.id} flexDirection="column">
         <Text>
@@ -78,7 +81,7 @@ export function MessagesPane({ view, messages, meHandle, focused = true, content
   // estimators under-count by 15-25% because wrapBody breaks at whitespace.
   const wrapCols = Math.max(10, contentColumns - 3);
   const rowsForMessage = React.useCallback(
-    (m: Message) => 1 /* header */ + wrappedRowCount(m.body, wrapCols),
+    (m: Message) => 1 /* header */ + wrappedRowCount(rehydrateEscapedNewlines(m.body), wrapCols),
     [wrapCols],
   );
   const title =
