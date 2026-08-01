@@ -152,7 +152,7 @@ Three flavors:
 npx -y github:edgecase123/chat-mcp web --handle lee
 ```
 
-Launches a foreground localhost HTTP server on a random free port, prints the URL, and auto-opens the default browser. Serves a modern chat UI with:
+Launches a foreground localhost HTTP server on **port 3737** (or a random free port if 3737 is taken), prints the URL in a big banner, writes it to `~/.chat-mcp/web-url` so you can `open $(cat ~/.chat-mcp/web-url)`, and auto-opens the default browser. Serves a modern chat UI with:
 
 - Sidebar of peers + joined rooms + discoverable rooms
 - Message pane with native browser scroll, real-time updates via SSE, server-side markdown rendering (bold, italic, code, code blocks, links, tables)

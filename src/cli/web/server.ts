@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, writeFile, unlink, mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -11,7 +12,12 @@ import type { MessageKind } from '../../storage/dao.js';
 import { assertRoomName } from '../../util/naming.js';
 import { renderBodyToHtml } from './render.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.4.1';
+
+/** Well-known path where the currently-running server writes its URL so
+ *  scripts + follow-up shell commands can find it without scraping stdout.
+ *  Example use: `open $(cat ~/.chat-mcp/web-url)` */
+const WEB_URL_FILE = join(homedir(), '.chat-mcp', 'web-url');
 
 /** Where the static web assets live at runtime. Ships alongside the compiled
  *  server; we assume `dist/cli/web/server.js` and `web/` are siblings under
@@ -80,19 +86,37 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
     }
   });
 
-  const port = opts.port ?? 0;
-  await new Promise<void>((resolveListen) => {
-    server.listen(port, '127.0.0.1', () => resolveListen());
-  });
-  const addr = server.address();
-  const actualPort = typeof addr === 'object' && addr ? addr.port : port;
+  // Port selection: if --port was passed, honor it verbatim (fail if
+  // taken). Otherwise try our preferred stable port first — that gives the
+  // user a memorable, bookmarkable URL and lets a browser tab reconnect
+  // after a restart. Fall back to an OS-assigned free port only if the
+  // preferred port is taken (e.g. another chat-mcp web is already running).
+  const PREFERRED_PORT = 3737;
+  const actualPort = await listenWithFallback(server, opts.port, PREFERRED_PORT);
   const url = `http://127.0.0.1:${actualPort}/`;
 
-  console.log(`chat-mcp web v${VERSION}`);
-  console.log(`  handle:  ${handle}`);
-  console.log(`  serving: ${url}`);
-  console.log(`  bound:   127.0.0.1 (localhost only)`);
-  console.log(`  press Ctrl-C to stop`);
+  const banner = [
+    '',
+    '  ╔════════════════════════════════════════════╗',
+    `  ║  chat-mcp web  ·  ${handle.padEnd(22)}    ║`,
+    '  ╠════════════════════════════════════════════╣',
+    `  ║  ${url.padEnd(40)}  ║`,
+    '  ╚════════════════════════════════════════════╝',
+    '',
+    `  bound:  127.0.0.1 (localhost only)`,
+    `  stop:   Ctrl-C`,
+    actualPort !== PREFERRED_PORT && !opts.port
+      ? `  note:   preferred port ${PREFERRED_PORT} was taken — using ${actualPort} instead`
+      : null,
+    '',
+  ].filter((l) => l !== null).join('\n');
+  console.log(banner);
+
+  // Write URL to a well-known path so external scripts can find it.
+  try {
+    await mkdir(dirname(WEB_URL_FILE), { recursive: true });
+    await writeFile(WEB_URL_FILE, url + '\n');
+  } catch { /* best-effort */ }
 
   if (opts.open !== false) {
     openBrowser(url);
@@ -139,6 +163,7 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
     server.close();
     void notify.close();
     try { db.close(); } catch { /* best-effort */ }
+    void unlink(WEB_URL_FILE).catch(() => { /* already gone */ });
     process.exit(code);
   };
   process.on('SIGINT', () => shutdown(130));
@@ -388,6 +413,35 @@ function hydrateForClient(m: dao.Message): dao.Message & { body_html: string } {
 }
 
 // ── Browser launcher ─────────────────────────────────────────────────────
+
+/** Try to listen on the user's --port if given, else on the preferred stable
+ *  port, else on any OS-assigned free port. Returns the port actually bound. */
+async function listenWithFallback(
+  server: ReturnType<typeof createServer>,
+  explicitPort: number | undefined,
+  preferredPort: number,
+): Promise<number> {
+  const tryListen = (port: number): Promise<number> =>
+    new Promise((resolve, reject) => {
+      const onError = (err: NodeJS.ErrnoException): void => {
+        server.removeListener('error', onError);
+        reject(err);
+      };
+      server.once('error', onError);
+      server.listen(port, '127.0.0.1', () => {
+        server.removeListener('error', onError);
+        const addr = server.address();
+        resolve(typeof addr === 'object' && addr ? addr.port : port);
+      });
+    });
+
+  if (explicitPort !== undefined) return tryListen(explicitPort);
+  try { return await tryListen(preferredPort); }
+  catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err;
+    return tryListen(0);
+  }
+}
 
 function openBrowser(url: string): void {
   const cmd = process.platform === 'darwin' ? 'open'
