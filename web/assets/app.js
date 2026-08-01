@@ -216,13 +216,15 @@ function renderMessages() {
 }
 
 function renderPaneHeader() {
+  el.composerInput.disabled = false;
+  el.composerSend.disabled = false;
   if (!state.currentTarget) {
     el.paneTitle.textContent = 'select a peer or room';
-    el.paneMeta.textContent = '';
-    el.composerInput.disabled = true;
-    el.composerSend.disabled = true;
+    el.paneMeta.textContent = 'type /help for commands';
+    el.composerInput.placeholder = 'Type /dm <peer> or /join #room to get started. /help for commands.';
     return;
   }
+  el.composerInput.placeholder = 'Type a message. Shift-Enter for newline.';
   if (state.currentTarget.startsWith('#')) {
     el.paneTitle.textContent = state.currentTarget;
     const room = state.rooms.find((r) => r.name === state.currentTarget);
@@ -232,8 +234,6 @@ function renderPaneHeader() {
     const peer = state.peers.find((p) => p.handle === state.currentTarget);
     el.paneMeta.textContent = peer ? (peer.online ? 'online' : 'offline') : '';
   }
-  el.composerInput.disabled = false;
-  el.composerSend.disabled = false;
   el.composerInput.focus();
 }
 
@@ -264,6 +264,103 @@ async function refresh() {
   }
 }
 
+// ── Slash commands ───────────────────────────────────────────────────────
+
+/** Small transient toast for command output. Sits over the message pane
+ *  and fades after ~2.5s. Preferred over alert() for anything non-blocking. */
+function toast(msg, kind = 'info') {
+  let el = document.getElementById('toast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'toast';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.className = `toast is-${kind}`;
+  el.classList.add('is-visible');
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('is-visible'), 2500);
+}
+
+const HELP_TEXT = [
+  '/dm <peer>      — open a DM',
+  '/join <#room>   — join a room (auto-creates)',
+  '/leave          — leave the current room',
+  '/back           — return to no-target home',
+  '/who            — list peers',
+  '/rooms          — list rooms you belong to',
+  '/whoami         — show your own handle',
+  '/help           — this list',
+].join('\n');
+
+/** Returns true if the input was consumed as a command (do not send).
+ *  Returns false to fall through to normal message send. */
+async function tryDispatchSlashCommand(input) {
+  if (!input.startsWith('/')) return false;
+  const parts = input.slice(1).trim().split(/\s+/);
+  const cmd = parts[0];
+  const args = parts.slice(1);
+  switch (cmd) {
+    case 'dm': {
+      const peer = args[0];
+      if (!peer) { toast('usage: /dm <peer>', 'warn'); return true; }
+      if (!state.peers.find((p) => p.handle === peer)) {
+        toast(`unknown peer: ${peer}`, 'warn'); return true;
+      }
+      await selectTarget(peer);
+      return true;
+    }
+    case 'join': {
+      const room = args[0];
+      if (!room || !room.startsWith('#')) { toast('usage: /join #room', 'warn'); return true; }
+      try {
+        await joinRoom(room);
+        await fetchWhoami();
+        await selectTarget(room);
+      } catch (e) { toast(`join failed: ${e.message}`, 'error'); }
+      return true;
+    }
+    case 'leave': {
+      if (!state.currentTarget || !state.currentTarget.startsWith('#')) {
+        toast('not in a room', 'warn'); return true;
+      }
+      try {
+        await api('/api/rooms/leave', { method: 'POST', body: JSON.stringify({ room: state.currentTarget }) });
+        state.currentTarget = null;
+        await fetchWhoami();
+        renderSidebar(); renderPaneHeader(); renderMessages();
+      } catch (e) { toast(`leave failed: ${e.message}`, 'error'); }
+      return true;
+    }
+    case 'back': {
+      state.currentTarget = null;
+      renderSidebar(); renderPaneHeader(); renderMessages();
+      return true;
+    }
+    case 'who': {
+      toast(state.peers.map((p) => `${p.online ? '●' : '·'} ${p.handle}`).join('\n') || '(no peers)', 'info');
+      return true;
+    }
+    case 'rooms': {
+      const j = state.rooms.map((r) => `▸ ${r.name}`).join('\n');
+      const d = state.discoverRooms.map((r) => `+ ${r.name}`).join('\n');
+      toast([j || '(no joined rooms)', d && '— discover —', d].filter(Boolean).join('\n'), 'info');
+      return true;
+    }
+    case 'whoami': {
+      toast(`${state.handle} · v${state.version}`, 'info');
+      return true;
+    }
+    case 'help': {
+      toast(HELP_TEXT, 'info');
+      return true;
+    }
+    default:
+      toast(`unknown command: /${cmd}   (try /help)`, 'warn');
+      return true;
+  }
+}
+
 // ── Composer ─────────────────────────────────────────────────────────────
 
 el.composerInput.addEventListener('input', () => {
@@ -282,16 +379,28 @@ el.composerInput.addEventListener('keydown', (ev) => {
 el.composer.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const body = el.composerInput.value.trim();
-  if (!body || !state.currentTarget) return;
+  if (!body) return;
   el.composerSend.disabled = true;
   try {
+    // Slash commands dispatch client-side without hitting sendMessage.
+    // They work regardless of whether a target is selected — /dm and /join
+    // in particular are how you get INTO a target.
+    if (await tryDispatchSlashCommand(body)) {
+      el.composerInput.value = '';
+      el.composerInput.style.height = 'auto';
+      return;
+    }
+    if (!state.currentTarget) {
+      toast('select a peer or room first (/dm <peer> or /join #room)', 'warn');
+      return;
+    }
     await sendMessage(state.currentTarget, body);
     el.composerInput.value = '';
     el.composerInput.style.height = 'auto';
     await refresh();
   } catch (e) {
     console.error('send failed', e);
-    alert(`Send failed: ${e.message}`);
+    toast(`send failed: ${e.message}`, 'error');
   } finally {
     el.composerSend.disabled = false;
     el.composerInput.focus();
