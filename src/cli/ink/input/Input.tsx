@@ -140,8 +140,13 @@ export function Input({
 
     if (key.backspace || key.delete) {
       // Notes: on macOS the Delete key sends key.backspace; fn-Delete (forward)
-      // sends key.delete. Opt-Backspace sends key.meta + key.backspace.
-      if (key.meta && key.backspace) {
+      // sends key.delete. Opt-Backspace normally sends key.meta + key.backspace,
+      // BUT iTerm2 with "Report modifiers using CSI u" enabled delivers it as
+      // key.ctrl + key.backspace (verified 2026-08-01 in a keypress log; Opt-
+      // arrows stay meta+arrow through the same encoding — an iTerm2 quirk).
+      // Ctrl-Backspace is also the conventional word-delete chord in most
+      // editors, so accepting both spellings covers native + CSI-u users.
+      if ((key.meta || key.ctrl) && key.backspace) {
         const start = prevWordBoundary(value, cursor);
         return onChange(value.slice(0, start) + value.slice(cursor), start);
       }
