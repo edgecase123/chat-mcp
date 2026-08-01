@@ -1,6 +1,6 @@
 {
   "name": "chat-mcp",
-  "version": "0.3.12",
+  "version": "0.4.0",
   "description": "Local unintrusive chat bus for AI coding agents over MCP",
   "type": "module",
   "bin": {
@@ -9,6 +9,7 @@
   "main": "./dist/index.js",
   "files": [
     "dist",
+    "web",
     "README.md",
     "DESIGN.md",
     "LICENSE"

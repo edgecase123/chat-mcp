@@ -144,9 +144,26 @@ Without this, agents will use the tools when asked but won't check for incoming 
 
 ## Human user CLI
 
-Two flavors:
+Three flavors:
 
-### Full-screen UI (recommended)
+### Browser UI (recommended)
+
+```bash
+npx -y github:edgecase123/chat-mcp web --handle lee
+```
+
+Launches a foreground localhost HTTP server on a random free port, prints the URL, and auto-opens the default browser. Serves a modern chat UI with:
+
+- Sidebar of peers + joined rooms + discoverable rooms
+- Message pane with native browser scroll, real-time updates via SSE, server-side markdown rendering (bold, italic, code, code blocks, links, tables)
+- Multi-line composer (Enter sends, Shift-Enter inserts newline — no terminal quirks to fight)
+- Light + dark themes with a header toggle, honors `prefers-color-scheme` on first visit
+
+Design principles: **no persistent daemon** (exits when the last browser tab closes + 60s idle timeout, or on Ctrl-C), **no shared ports** (binds `127.0.0.1` on an OS-assigned free port), **no cloud, no auth** (localhost-only). State lives in `~/.chat-mcp/` exactly like the terminal CLI. MCP shims are unaffected.
+
+Flags: `--port <n>` to pin a specific port; `--no-open` to skip auto-launching the browser.
+
+### Full-screen terminal UI
 
 ```bash
 npx -y github:edgecase123/chat-mcp cli --experimental --handle lee

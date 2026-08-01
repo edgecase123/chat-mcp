@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>chat-mcp</title>
+  <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+  <div id="app" class="app-shell" hidden>
+    <header class="topbar">
+      <div class="topbar__brand">chat-mcp</div>
+      <div class="topbar__handle" id="my-handle"></div>
+      <button id="theme-toggle" class="topbar__theme" type="button" aria-label="Toggle theme">
+        <span class="theme-icon" data-theme-icon></span>
+      </button>
+    </header>
+    <aside class="sidebar" id="sidebar" aria-label="Peers and rooms"></aside>
+    <main class="pane" id="pane">
+      <header class="pane__header">
+        <h1 class="pane__title" id="pane-title">select a peer or room</h1>
+        <div class="pane__meta" id="pane-meta"></div>
+      </header>
+      <ol class="messages" id="messages" aria-live="polite" aria-relevant="additions"></ol>
+      <form id="composer" class="composer">
+        <textarea id="composer-input" class="composer__input" placeholder="Type a message. Shift-Enter for newline." rows="1" disabled></textarea>
+        <button type="submit" id="composer-send" class="composer__send" disabled>Send</button>
+      </form>
+    </main>
+  </div>
+  <div id="loading" class="loading">Loading…</div>
+  <script src="/assets/app.js" type="module"></script>
+</body>
+</html>

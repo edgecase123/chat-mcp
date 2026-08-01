@@ -24,7 +24,7 @@ async function runShimEntry(handle: string | undefined): Promise<void> {
 // This is the entry shape used by .mcp.json / claude mcp add, so we detect it
 // before commander sees the args to avoid --handle colliding with subcommand
 // options of the same name.
-const KNOWN_SUBCOMMANDS = new Set(['cli', 'send', 'inbox', 'list', 'members', 'delete-room', 'boot', 'install', 'uninstall', 'list-adapters', 'aliases', 'help', '--help', '-h', '--version', '-V']);
+const KNOWN_SUBCOMMANDS = new Set(['cli', 'web', 'send', 'inbox', 'list', 'members', 'delete-room', 'boot', 'install', 'uninstall', 'list-adapters', 'aliases', 'help', '--help', '-h', '--version', '-V']);
 const firstArg = process.argv[2];
 if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   const argv = process.argv.slice(2);
@@ -52,6 +52,17 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         const { runCli } = await import('./cli/index.js');
         await runCli({ handle: opts.handle });
       }
+    });
+
+  program
+    .command('web')
+    .description('Launch the browser-based chat UI (localhost-only foreground server)')
+    .option('--handle <handle>', 'peer handle for this session', 'user')
+    .option('--port <port>', 'bind to a specific port (default: random free)', (v) => parseInt(v, 10))
+    .option('--no-open', 'do not auto-open the default browser', false)
+    .action(async (opts: { handle: string; port?: number; open?: boolean }) => {
+      const { runWeb } = await import('./cli/web/server.js');
+      await runWeb({ handle: opts.handle, port: opts.port, open: opts.open });
     });
 
   program
