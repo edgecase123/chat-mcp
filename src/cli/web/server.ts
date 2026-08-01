@@ -12,7 +12,7 @@ import type { MessageKind } from '../../storage/dao.js';
 import { assertRoomName } from '../../util/naming.js';
 import { renderBodyToHtml } from './render.js';
 
-const VERSION = '0.4.2';
+const VERSION = '0.4.3';
 
 /** Well-known path where the currently-running server writes its URL so
  *  scripts + follow-up shell commands can find it without scraping stdout.

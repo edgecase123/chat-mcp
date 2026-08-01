@@ -303,6 +303,9 @@ html, body {
   padding-left: 4px;
   word-wrap: break-word;
   overflow-wrap: break-word;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1.55;
 }
 .message__body p { margin: 4px 0; }
 .message__body code.inline {
@@ -310,7 +313,7 @@ html, body {
   background: var(--bg-inset);
   padding: 1px 5px;
   border-radius: 3px;
-  font-size: 12.5px;
+  font-size: 14px;
 }
 .message__body pre {
   background: var(--bg-inset);
@@ -321,7 +324,7 @@ html, body {
 }
 .message__body pre code {
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 14px;
   background: none;
   padding: 0;
 }
@@ -386,9 +389,9 @@ html, body {
   border-radius: var(--radius);
   background: var(--bg);
   color: var(--fg);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1.55;
   outline: none;
   transition: border-color 120ms, box-shadow 120ms;
 }
