@@ -60,6 +60,14 @@
 
 * { box-sizing: border-box; }
 
+/* Honor the `hidden` HTML attribute even when the element also has a CSS
+ * `display` rule with higher specificity than the user-agent default.
+ * Without this, `.app-shell` (display: grid) and `.loading` (display: grid)
+ * override `[hidden] { display: none }` from the UA sheet, so setting
+ * `el.hidden = true` in JS silently no-ops and the loading overlay stays
+ * pinned over the app. */
+[hidden] { display: none !important; }
+
 html, body {
   height: 100%;
   margin: 0;
