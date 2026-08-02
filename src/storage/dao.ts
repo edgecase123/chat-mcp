@@ -16,6 +16,9 @@ export interface Agent {
   status: AgentStatus | null;
   focus: string | null;
   status_updated_at: number | null;
+  context_used: number | null;
+  context_total: number | null;
+  context_reported_at: number | null;
 }
 
 export interface Message {
@@ -40,6 +43,9 @@ interface AgentRow {
   status: string | null;
   focus: string | null;
   status_updated_at: number | null;
+  context_used: number | null;
+  context_total: number | null;
+  context_reported_at: number | null;
 }
 
 interface MessageRow {
@@ -91,6 +97,9 @@ function hydrate(row: AgentRow): Agent {
     status: coerceStatus(row.status),
     focus: row.focus,
     status_updated_at: row.status_updated_at,
+    context_used: row.context_used,
+    context_total: row.context_total,
+    context_reported_at: row.context_reported_at,
   };
 }
 
@@ -103,6 +112,13 @@ export function setAgentStatus(
   db.prepare(
     `UPDATE agents SET status = ?, focus = ?, status_updated_at = ?, last_seen_at = ? WHERE handle = ?`,
   ).run(status, focus, Date.now(), Date.now(), handle);
+}
+
+export function setAgentContext(db: Db, handle: string, used: number, total: number): void {
+  const now = Date.now();
+  db.prepare(
+    `UPDATE agents SET context_used = ?, context_total = ?, context_reported_at = ?, last_seen_at = ? WHERE handle = ?`,
+  ).run(used, total, now, now, handle);
 }
 
 export interface RegisterInput {

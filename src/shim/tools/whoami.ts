@@ -28,10 +28,16 @@ export function installWhoami(server: McpServer, ctx: ShimContext): void {
           framework: ctx.adapterStatus.framework,
           ...(ctx.adapterStatus.hint ? { hint: ctx.adapterStatus.hint } : {}),
         },
+        context_used: me.context_used,
+        context_total: me.context_total,
+        context_reported_at: me.context_reported_at,
         online_peers: peers.map((a) => ({
           handle: a.handle,
           display_name: a.display_name,
           kind: a.kind,
+          context_used: a.context_used,
+          context_total: a.context_total,
+          context_reported_at: a.context_reported_at,
         })),
       };
       return {
