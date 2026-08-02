@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { Agent, AgentStatus } from '../../../storage/dao.js';
+import { renderGauge } from '../util/gauge-render.js';
 import { stampOf as timeOf } from '../../../util/time.js';
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
@@ -13,7 +14,7 @@ const STATUS_COLOR: Record<AgentStatus, string> = {
 };
 
 interface Column {
-  key: 'handle' | 'kind' | 'online' | 'status' | 'focus' | 'seen';
+  key: 'handle' | 'kind' | 'online' | 'status' | 'ctx' | 'focus' | 'seen';
   label: string;
   width: number;
 }
@@ -23,7 +24,8 @@ const WHO_COLUMNS: Column[] = [
   { key: 'kind', label: 'KIND', width: 8 },
   { key: 'online', label: 'ONLINE', width: 8 },
   { key: 'status', label: 'STATUS', width: 10 },
-  { key: 'focus', label: 'FOCUS', width: 30 },
+  { key: 'ctx', label: 'CTX', width: 8 },
+  { key: 'focus', label: 'FOCUS', width: 26 },
   { key: 'seen', label: 'SEEN', width: 10 },
 ];
 
@@ -62,6 +64,7 @@ export function WhoPane({ peers, meHandle }: WhoPaneProps): React.ReactElement {
         peers.map((p) => {
           const s = p.status;
           const dotColor = !p.online ? 'gray' : s ? STATUS_COLOR[s] : 'green';
+          const gauge = renderGauge(p);
           return (
             <Box key={p.handle}>
               <Box width={WHO_COLUMNS[0]!.width}>
@@ -77,8 +80,11 @@ export function WhoPane({ peers, meHandle }: WhoPaneProps): React.ReactElement {
               <Text color={s ? STATUS_COLOR[s] : undefined}>
                 {pad(s ?? '—', WHO_COLUMNS[3]!.width)}
               </Text>
-              <Text>{pad(p.focus ?? '—', WHO_COLUMNS[4]!.width)}</Text>
-              <Text dimColor>{pad(timeOf(p.last_seen_at), WHO_COLUMNS[5]!.width)}</Text>
+              <Text color={gauge.color} bold={gauge.bold} dimColor={gauge.dim}>
+                {pad(gauge.label, WHO_COLUMNS[4]!.width)}
+              </Text>
+              <Text>{pad(p.focus ?? '—', WHO_COLUMNS[5]!.width)}</Text>
+              <Text dimColor>{pad(timeOf(p.last_seen_at), WHO_COLUMNS[6]!.width)}</Text>
             </Box>
           );
         })

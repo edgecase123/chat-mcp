@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { Agent, AgentStatus, Room } from '../../../storage/dao.js';
+import { renderGauge } from '../util/gauge-render.js';
 import type { View } from '../views.js';
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
@@ -60,6 +61,7 @@ export function Sidebar({
           const unread = dmUnreadByPeer.get(p.handle) ?? 0;
           const s = p.status;
           const dotColor = !p.online ? 'gray' : s ? STATUS_COLOR[s] : 'green';
+          const gauge = renderGauge(p);
           const prefix = jumpPrefix(jumpN++);
           return (
             <Box key={p.handle} flexDirection="column">
@@ -74,6 +76,14 @@ export function Sidebar({
                   <>
                     {' '}
                     <Text dimColor>[{s}]</Text>
+                  </>
+                )}
+                {gauge.reported && (
+                  <>
+                    {' '}
+                    <Text color={gauge.color} bold={gauge.bold} dimColor={gauge.dim}>
+                      {gauge.label}
+                    </Text>
                   </>
                 )}
                 {unread > 0 && <Text color="yellow"> ({unread})</Text>}
