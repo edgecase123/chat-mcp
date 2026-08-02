@@ -61,12 +61,13 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   // Toggled with Ctrl-O when the watch pane is open. Auto-resets to 'main'
   // whenever /unwatch runs so the state doesn't strand on a closed pane.
   const [focusedPane, setFocusedPane] = useState<'main' | 'watch'>('main');
-  // Session-only ephemeral "system" cards that get inlined into the messages
-  // view for a specific room. Keyed by room name; each card is a synthetic
-  // Message with a negative id so it can't collide with a real DB row.
-  // Cleared implicitly when the user leaves the room's key, or replaced
-  // when the same command is re-run.
-  const [roomInlineCards, setRoomInlineCards] = useState<Record<string, Message>>({});
+  // Session-only ephemeral "system" card inlined into the messages view
+  // for the room where /room-check was last run. Synthetic Message with a
+  // negative id so it can't collide with a real DB row, never persisted or
+  // notified out. Cleared as soon as the user navigates to any other view
+  // (see the useEffect below), so /leave + /join or a room-switch and back
+  // drops the previous output.
+  const [roomInlineCard, setRoomInlineCard] = useState<{ room: string; card: Message } | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [draft, setDraft] = useState<{ value: string; cursor: number } | null>(null);
@@ -82,6 +83,17 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Drop the /room-check inline card the moment the user leaves its room —
+  // switching to another room, a DM, home, or /leave + /join. The card is
+  // supposed to be transient; without this it would persist in React state
+  // and reappear on re-entry.
+  useEffect(() => {
+    if (!roomInlineCard) return;
+    if (view.kind !== 'room' || view.room !== roomInlineCard.room) {
+      setRoomInlineCard(null);
+    }
+  }, [view, roomInlineCard]);
 
   const rooms = useMemo(() => dao.myRooms(db, handle), [db, handle, tick]);
   const peers = useMemo<Agent[]>(
@@ -128,10 +140,11 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         read_at: (r as { read_at: number | null }).read_at,
         kind: ((r as { kind: string }).kind ?? 'chat') as MessageKind,
       }));
-    const card = view.kind === 'room' ? roomInlineCards[view.room] : undefined;
+    const card =
+      view.kind === 'room' && roomInlineCard?.room === view.room ? roomInlineCard.card : undefined;
     return card ? [...roomMsgs, card] : roomMsgs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, tick, roomInlineCards]);
+  }, [view, tick, roomInlineCard]);
 
   // Watched-peer mirror: last 10 messages TO or FROM them.
   const watchMessages = useMemo<Message[]>(() => {
@@ -510,7 +523,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             read_at: null,
             kind: 'chat',
           };
-          setRoomInlineCards((cards) => ({ ...cards, [view.room]: card }));
+          setRoomInlineCard({ room: view.room, card });
           setTick((t) => t + 1);
           return;
         }
