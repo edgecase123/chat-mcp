@@ -24,7 +24,7 @@ async function runShimEntry(handle: string | undefined): Promise<void> {
 // This is the entry shape used by .mcp.json / claude mcp add, so we detect it
 // before commander sees the args to avoid --handle colliding with subcommand
 // options of the same name.
-const KNOWN_SUBCOMMANDS = new Set(['cli', 'web', 'send', 'inbox', 'list', 'members', 'delete-room', 'boot', 'install', 'uninstall', 'list-adapters', 'aliases', 'help', '--help', '-h', '--version', '-V']);
+const KNOWN_SUBCOMMANDS = new Set(['cli', 'web', 'send', 'inbox', 'list', 'members', 'delete-room', 'boot', 'install', 'uninstall', 'list-adapters', 'aliases', 'report-context', 'help', '--help', '-h', '--version', '-V']);
 const firstArg = process.argv[2];
 if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   const argv = process.argv.slice(2);
@@ -175,6 +175,20 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .action(async () => {
       const { SHELL_ALIASES } = await import('./shell/aliases.js');
       process.stdout.write(SHELL_ALIASES);
+    });
+
+  program
+    .command('report-context')
+    .description(
+      'Push a context-window gauge report for a handle (used by adapter hooks + shell scripts to reach the same DB path as the report_context MCP tool)',
+    )
+    .requiredOption('--handle <handle>', 'agent handle whose gauge to update')
+    .requiredOption('--used <n>', 'tokens currently consumed', (v) => parseInt(v, 10))
+    .requiredOption('--total <n>', "total context-window size for this agent's model", (v) => parseInt(v, 10))
+    .option('--json', 'emit the transition payload as JSON', false)
+    .action(async (opts: { handle: string; used: number; total: number; json?: boolean }) => {
+      const { runReportContext } = await import('./oneshot/report_context.js');
+      await runReportContext(opts);
     });
 
   await program.parseAsync(process.argv).catch((err: unknown) => {

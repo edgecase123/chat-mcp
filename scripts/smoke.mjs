@@ -559,6 +559,67 @@ try {
     }
   }
 
+  // ─── context gauge (slice 3 — CLI subcommand) ───────────────
+  // 31. `chat-mcp report-context` CLI writes the same DB path and fires
+  //     the same warnings as the MCP tool. Shells out to prove the whole
+  //     wire (commander parsing → oneshot → dao → notify) is intact.
+  {
+    // Reset via the CLI itself.
+    await new Promise((resolve, reject) => {
+      const p = spawn('node', [
+        ENTRY, 'report-context',
+        '--handle', 'claude1',
+        '--used', '100000',
+        '--total', '1000000',
+        '--json',
+      ], { env });
+      p.on('exit', (code) => code === 0 ? resolve() : reject(new Error(`reset exited ${code}`)));
+    });
+    // Now push to 78% via CLI — should fire the 70% DM to claude1.
+    const cliOut = await new Promise((resolve, reject) => {
+      const p = spawn('node', [
+        ENTRY, 'report-context',
+        '--handle', 'claude1',
+        '--used', '780000',
+        '--total', '1000000',
+        '--json',
+      ], { env });
+      let out = '';
+      p.stdout.on('data', (d) => { out += d.toString(); });
+      p.on('exit', (code) => code === 0 ? resolve(out) : reject(new Error(`CLI exited ${code}: ${out}`)));
+    });
+    const cliJson = JSON.parse(cliOut.trim());
+    await sleep(50);
+    // Verify the DM landed in claude1's inbox and DB gauge updated.
+    const dm = parseJson(await c1.callTool({ name: 'inbox', arguments: {} }));
+    const soft = dm.find((m) => m.from === 'system' && m.body.includes('🟡'));
+    if (cliJson.fired === 70 && cliJson.percent === 78 && soft) {
+      pass(31, 'CLI report-context fires warnings + writes DB');
+    } else {
+      fail(31, 'CLI report-context',
+        `fired=${cliJson.fired} percent=${cliJson.percent} dm=${!!soft}`);
+    }
+  }
+
+  // 32. CLI rejects unknown handle rather than silently no-op.
+  {
+    const res = await new Promise((resolve) => {
+      const p = spawn('node', [
+        ENTRY, 'report-context',
+        '--handle', 'nobody',
+        '--used', '100', '--total', '1000',
+      ], { env });
+      let err = '';
+      p.stderr.on('data', (d) => { err += d.toString(); });
+      p.on('exit', (code) => resolve({ code, err }));
+    });
+    if (res.code !== 0 && res.err.includes('Unknown handle')) {
+      pass(32, 'CLI rejects unknown handle');
+    } else {
+      fail(32, 'CLI unknown handle', `code=${res.code} err=${res.err.slice(0, 200)}`);
+    }
+  }
+
 } finally {
   if (cli) await cli.close();
   if (c1) await c1.close().catch(() => {});
