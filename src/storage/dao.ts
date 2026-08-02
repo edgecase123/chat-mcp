@@ -19,6 +19,7 @@ export interface Agent {
   context_used: number | null;
   context_total: number | null;
   context_reported_at: number | null;
+  context_warned_threshold: number | null;
 }
 
 export interface Message {
@@ -46,6 +47,7 @@ interface AgentRow {
   context_used: number | null;
   context_total: number | null;
   context_reported_at: number | null;
+  context_warned_threshold: number | null;
 }
 
 interface MessageRow {
@@ -100,6 +102,7 @@ function hydrate(row: AgentRow): Agent {
     context_used: row.context_used,
     context_total: row.context_total,
     context_reported_at: row.context_reported_at,
+    context_warned_threshold: row.context_warned_threshold,
   };
 }
 
@@ -119,6 +122,12 @@ export function setAgentContext(db: Db, handle: string, used: number, total: num
   db.prepare(
     `UPDATE agents SET context_used = ?, context_total = ?, context_reported_at = ?, last_seen_at = ? WHERE handle = ?`,
   ).run(used, total, now, now, handle);
+}
+
+export function setAgentContextWarned(db: Db, handle: string, threshold: number | null): void {
+  db.prepare(
+    `UPDATE agents SET context_warned_threshold = ? WHERE handle = ?`,
+  ).run(threshold, handle);
 }
 
 export interface RegisterInput {
