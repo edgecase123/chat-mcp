@@ -65,11 +65,11 @@ export function ScrollableMessageList({
   renderRow,
 }: ScrollableMessageListProps): React.ReactElement {
   // On mount (and on remount via `key` from the parent when the chat target
-  // changes), anchor at the OLDEST message so the user reads forward
-  // instead of hunting backward.
-  const [scrollOffset, setScrollOffset] = useState<number>(() =>
-    Math.max(0, messages.length - 1),
-  );
+  // changes), anchor at the NEWEST message so the user sees the latest
+  // activity immediately. Terminal REPLs and chat clients pin to bottom for
+  // the same reason: most recent = most relevant, older context is a
+  // scroll-back away (PgUp / Home).
+  const [scrollOffset, setScrollOffset] = useState<number>(() => 0);
   const prevLenRef = useRef(messages.length);
 
   // When new messages arrive AND we're scrolled back, grow the offset by
