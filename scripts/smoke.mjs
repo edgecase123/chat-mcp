@@ -431,6 +431,134 @@ try {
     }
   }
 
+  // ─── context gauge (slice 2 — thresholds + hysteresis) ──────
+  // Setup: both peers join #gauge so the room-post warnings have a target.
+  {
+    await c1.callTool({ name: 'room_join', arguments: { room: '#gauge' } });
+    await c2.callTool({ name: 'room_join', arguments: { room: '#gauge' } });
+    await sleep(50);
+    // Drain any join announcements so later inbox reads are clean.
+    await c1.callTool({ name: 'room_inbox', arguments: { room: '#gauge' } });
+    await c2.callTool({ name: 'room_inbox', arguments: { room: '#gauge' } });
+    await c1.callTool({ name: 'inbox', arguments: {} });
+  }
+
+  // 24. Cross 70% up → soft warning DM to reporter only (no room post).
+  {
+    // Reset warned state via a low report first (below 65% resets from any).
+    await c1.callTool({ name: 'report_context', arguments: { used: 100000, total: 1000000 } });
+    const r = parseJson(await c1.callTool({
+      name: 'report_context', arguments: { used: 720000, total: 1000000 },
+    }));
+    await sleep(50);
+    const dm = parseJson(await c1.callTool({ name: 'inbox', arguments: {} }));
+    const soft = dm.find((m) => m.from === 'system' && m.body.includes('🟡'));
+    const roomMsgs = parseJson(await c1.callTool({
+      name: 'room_inbox', arguments: { room: '#gauge' },
+    }));
+    const roomWarn = roomMsgs.find((m) => m.from === 'system' && m.body.includes('🟡'));
+    if (r.fired === 70 && soft && !roomWarn && r.notified.dm === 1) {
+      pass(24, 'crossing 70% fires DM only');
+    } else {
+      fail(24, '70% band',
+        `fired=${r.fired} dm=${!!soft} room=${!!roomWarn} notified=${JSON.stringify(r.notified)}`);
+    }
+  }
+
+  // 25. Cross 85% up → room post visible to co-agent, no fresh DM.
+  {
+    const r = parseJson(await c1.callTool({
+      name: 'report_context', arguments: { used: 870000, total: 1000000 },
+    }));
+    await sleep(50);
+    const roomMsgs = parseJson(await c2.callTool({
+      name: 'room_inbox', arguments: { room: '#gauge' },
+    }));
+    const orange = roomMsgs.find((m) => m.from === 'system' && m.body.includes('🟠') && m.body.includes('claude1'));
+    if (r.fired === 85 && orange && orange.kind === 'chat') {
+      pass(25, 'crossing 85% posts orange room warning');
+    } else {
+      fail(25, '85% band',
+        `fired=${r.fired} orange=${!!orange} kind=${orange?.kind}`);
+    }
+  }
+
+  // 26. Cross 95% up → room post with kind='alert'.
+  {
+    const r = parseJson(await c1.callTool({
+      name: 'report_context', arguments: { used: 970000, total: 1000000 },
+    }));
+    await sleep(50);
+    const roomMsgs = parseJson(await c2.callTool({
+      name: 'room_inbox', arguments: { room: '#gauge' },
+    }));
+    const red = roomMsgs.find((m) => m.from === 'system' && m.body.includes('🔴'));
+    if (r.fired === 95 && red && red.kind === 'alert') {
+      pass(26, 'crossing 95% posts red alert-kind room warning');
+    } else {
+      fail(26, '95% band',
+        `fired=${r.fired} red=${!!red} kind=${red?.kind}`);
+    }
+  }
+
+  // 27. Sitting inside a band on repeat report does not re-fire.
+  {
+    const r = parseJson(await c1.callTool({
+      name: 'report_context', arguments: { used: 975000, total: 1000000 },
+    }));
+    if (r.fired === null && r.warned === 95) {
+      pass(27, 'repeat report inside band does not re-fire');
+    } else {
+      fail(27, 'no-op re-report', `fired=${r.fired} warned=${r.warned}`);
+    }
+  }
+
+  // 28. Dropping below hysteresis step-downs one band without firing.
+  {
+    // 95→85: drop below 90 puts us at warned=85, no fire.
+    const step1 = parseJson(await c1.callTool({
+      name: 'report_context', arguments: { used: 880000, total: 1000000 },
+    }));
+    // 85→70: drop below 80 puts us at warned=70, no fire.
+    const step2 = parseJson(await c1.callTool({
+      name: 'report_context', arguments: { used: 780000, total: 1000000 },
+    }));
+    if (step1.fired === null && step1.warned === 85
+        && step2.fired === null && step2.warned === 70) {
+      pass(28, 'hysteresis down-shifts silently one band at a time');
+    } else {
+      fail(28, 'hysteresis step-down',
+        `s1(fired=${step1.fired} warned=${step1.warned}) s2(fired=${step2.fired} warned=${step2.warned})`);
+    }
+  }
+
+  // 29. Re-crossing a band that was down-shifted re-fires.
+  {
+    // Currently warned=70, at 78%. Push back over 85 → 85 re-fires.
+    const r = parseJson(await c1.callTool({
+      name: 'report_context', arguments: { used: 870000, total: 1000000 },
+    }));
+    if (r.fired === 85 && r.warned === 85) {
+      pass(29, 're-crossing a band re-fires its warning');
+    } else {
+      fail(29, 're-fire on re-cross', `fired=${r.fired} warned=${r.warned}`);
+    }
+  }
+
+  // 30. Straight jump from clean to critical fires ONLY 95 (highest crossed).
+  {
+    // Reset to clean.
+    await c1.callTool({ name: 'report_context', arguments: { used: 50000, total: 1000000 } });
+    const r = parseJson(await c1.callTool({
+      name: 'report_context', arguments: { used: 960000, total: 1000000 },
+    }));
+    if (r.fired === 95 && r.warned === 95) {
+      pass(30, 'jump to critical fires only the highest band crossed');
+    } else {
+      fail(30, 'jump to 95', `fired=${r.fired} warned=${r.warned}`);
+    }
+  }
+
 } finally {
   if (cli) await cli.close();
   if (c1) await c1.close().catch(() => {});
