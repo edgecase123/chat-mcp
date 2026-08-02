@@ -7,7 +7,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -617,6 +617,97 @@ try {
       pass(32, 'CLI rejects unknown handle');
     } else {
       fail(32, 'CLI unknown handle', `code=${res.code} err=${res.err.slice(0, 200)}`);
+    }
+  }
+
+  // ─── context gauge (slice 3b — claude-code-context installer) ───
+  // Fully isolated: a per-test sub-tempdir standing in for the user's
+  // project root, so the install writes to <sub>/.claude/settings.local.json
+  // and never touches ~/.claude/.
+  const INSTALL_CWD = mkdtempSync(join(tmpdir(), 'chat-mcp-smoke-install-'));
+
+  async function runCli(args, extraEnv = {}) {
+    return new Promise((resolve) => {
+      const p = spawn('node', [ENTRY, ...args], { env: { ...env, ...extraEnv } });
+      let out = '', err = '';
+      p.stdout.on('data', (d) => { out += d.toString(); });
+      p.stderr.on('data', (d) => { err += d.toString(); });
+      p.on('exit', (code) => resolve({ code, out, err }));
+    });
+  }
+
+  // 33. install claude-code-context writes hook script + settings entry.
+  {
+    const r = await runCli([
+      'install', 'claude-code-context',
+      '--handle', 'test-peer',
+      '--context-total', '1000000',
+      '--scope', 'local',
+      '--cwd', INSTALL_CWD,
+      '--force',
+    ]);
+    const scriptPath = join(TMP, 'adapters', 'claude-code-context-test-peer.sh');
+    const settingsPath = join(INSTALL_CWD, '.claude', 'settings.local.json');
+    const scriptOK = existsSync(scriptPath) && (statSync(scriptPath).mode & 0o111) !== 0;
+    let settingsOK = false;
+    if (existsSync(settingsPath)) {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      const groups = settings.hooks?.PreToolUse ?? [];
+      settingsOK = groups.some((g) =>
+        (g.hooks ?? []).some((h) =>
+          h.statusMessage === 'chat-mcp adapter: claude-code-context (test-peer)'
+          && h.command === scriptPath
+        )
+      );
+    }
+    if (r.code === 0 && scriptOK && settingsOK) {
+      pass(33, 'claude-code-context install writes hook script + settings entry');
+    } else {
+      fail(33, 'claude-code-context install',
+        `code=${r.code} script=${scriptOK} settings=${settingsOK} err=${r.err.slice(0, 200)}`);
+    }
+  }
+
+  // 34. install without --context-total is rejected loudly.
+  {
+    const r = await runCli([
+      'install', 'claude-code-context',
+      '--handle', 'test-peer',
+      '--scope', 'local',
+      '--cwd', INSTALL_CWD,
+      '--force',
+    ]);
+    if (r.code !== 0 && r.err.includes('--context-total')) {
+      pass(34, 'install rejects missing --context-total');
+    } else {
+      fail(34, 'install missing total', `code=${r.code} err=${r.err.slice(0, 200)}`);
+    }
+  }
+
+  // 35. uninstall removes hook + drops settings entry.
+  {
+    const r = await runCli([
+      'uninstall', 'claude-code-context',
+      '--handle', 'test-peer',
+      '--scope', 'local',
+      '--cwd', INSTALL_CWD,
+    ]);
+    const scriptPath = join(TMP, 'adapters', 'claude-code-context-test-peer.sh');
+    const settingsPath = join(INSTALL_CWD, '.claude', 'settings.local.json');
+    const scriptGone = !existsSync(scriptPath);
+    // Settings file may be deleted entirely (if it becomes {}) — that's fine.
+    let settingsGone = !existsSync(settingsPath);
+    if (!settingsGone) {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+      settingsGone = !(settings.hooks?.PreToolUse ?? []).some((g) =>
+        (g.hooks ?? []).some((h) => h.statusMessage === 'chat-mcp adapter: claude-code-context (test-peer)')
+      );
+    }
+    if (r.code === 0 && scriptGone && settingsGone) {
+      pass(35, 'claude-code-context uninstall cleans script + settings entry');
+    } else {
+      fail(35, 'claude-code-context uninstall',
+        `code=${r.code} scriptGone=${scriptGone} settingsGone=${settingsGone}`);
     }
   }
 
