@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { AgentStatus } from '../../../storage/dao.js';
+import { renderGauge } from '../util/gauge-render.js';
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
   idle: 'green',
@@ -16,9 +17,19 @@ export interface HeaderProps {
   version: string;
   status: AgentStatus | null;
   focus: string | null;
+  contextUsed: number | null;
+  contextTotal: number | null;
 }
 
-export function Header({ handle, version, status, focus }: HeaderProps): React.ReactElement {
+export function Header({
+  handle,
+  version,
+  status,
+  focus,
+  contextUsed,
+  contextTotal,
+}: HeaderProps): React.ReactElement {
+  const gauge = renderGauge({ context_used: contextUsed, context_total: contextTotal });
   return (
     <Box borderStyle="round" borderColor="gray" paddingX={1} flexShrink={0}>
       <Text>
@@ -34,6 +45,13 @@ export function Header({ handle, version, status, focus }: HeaderProps): React.R
                 <Text dimColor>({focus})</Text>
               </>
             )}
+          </>
+        )}{gauge.reported && (
+          <>
+            {' '}· <Text dimColor>ctx</Text>{' '}
+            <Text color={gauge.color} bold={gauge.bold} dimColor={gauge.dim}>
+              {gauge.label}
+            </Text>
           </>
         )}{' '}
         <Text dimColor>· /help · Ctrl-C</Text>

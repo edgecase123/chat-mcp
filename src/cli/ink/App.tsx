@@ -755,6 +755,16 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     return me?.focus ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick]);
+  const meContextUsed = useMemo(() => {
+    const me = dao.getAgent(db, handle);
+    return me?.context_used ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick]);
+  const meContextTotal = useMemo(() => {
+    const me = dao.getAgent(db, handle);
+    return me?.context_total ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick]);
 
   const allRoomsList = useMemo(() => dao.allRooms(db), [db, tick]);
   const discoverRooms = useMemo(
@@ -798,7 +808,14 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     // fills. No overflow=hidden on the bordered boxes — that clips their
     // borders under Ink's yoga renderer (regression in 85d447b).
     <Box flexDirection="column" width="100%" height={terminalRows}>
-      <Header handle={handle} version={version} status={meStatus} focus={meFocus} />
+      <Header
+        handle={handle}
+        version={version}
+        status={meStatus}
+        focus={meFocus}
+        contextUsed={meContextUsed}
+        contextTotal={meContextTotal}
+      />
 
       <AlertLane alerts={alerts} />
 
