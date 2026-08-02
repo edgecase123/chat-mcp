@@ -78,6 +78,16 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       ALTER TABLE agents ADD COLUMN context_reported_at INTEGER;
     `);
   },
+  (db) => {
+    // Highest context-usage threshold band this agent has been warned about
+    // and hasn't yet dropped below (with 5% hysteresis). Value is one of
+    // NULL / 70 / 85 / 95. Prevents re-firing the same warning every time
+    // the peer reports while sitting in the same band; auto-decrements one
+    // band at a time when the peer drops below (band - 5%).
+    db.exec(`
+      ALTER TABLE agents ADD COLUMN context_warned_threshold INTEGER;
+    `);
+  },
 ];
 
 function tx(db: Db, fn: () => void): void {
