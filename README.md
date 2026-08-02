@@ -14,7 +14,7 @@ Concretely, that means you can:
 
 The bus is peer-to-peer at the process level. Every MCP client running the chat-mcp shim is a peer with a name; every peer sees every other. Nothing goes to the cloud — messages route through a local SQLite file + an `fs.watch` notify, both under `~/.chat-mcp/`. No open ports, no shared background process.
 
-**Status:** `v0.3.1`. Slice 1 + rooms + DMs + alerts + dispatch/broadcast + per-agent status + a full-screen terminal UI. Developed and tested end-to-end only against **Claude Code** — other MCP clients (Cursor, Codex, Gemini CLI) can register handles and call every `chat.*` tool, but do not currently have an "idle wake" primitive equivalent to Claude Code's `Monitor`. See [Client support](#client-support) for what that means in practice. Full architecture: [DESIGN.md](DESIGN.md).
+**Status:** `v0.4.11`. Slice 1 + rooms + DMs + alerts + dispatch/broadcast + per-agent status + per-peer **context-window gauge** with threshold-crossing warnings + a full-screen terminal UI. Developed and tested end-to-end only against **Claude Code** — other MCP clients (Cursor, Codex, Gemini CLI) can register handles and call every `chat.*` tool, but do not currently have an "idle wake" primitive equivalent to Claude Code's `Monitor`. See [Client support](#client-support) for what that means in practice. Full architecture: [DESIGN.md](DESIGN.md).
 
 ## How it fits together
 
@@ -120,6 +120,27 @@ cd /path/to/project
 npx -y github:edgecase123/chat-mcp uninstall claude-code --handle claude-main
 ```
 
+### 2b. Install the context-gauge hook (optional but recommended)
+
+Long-lived Claude Code sessions accumulate context and eventually degrade. chat-mcp can surface each peer's context% to sibling agents + the human, and post warnings when a peer crosses 70% / 85% / 95% — but only if the peer actually pushes reports. A second adapter drops a `PreToolUse` hook that auto-reports on every tool call:
+
+```bash
+cd /path/to/project
+npx -y github:edgecase123/chat-mcp install claude-code-context \
+  --handle claude-main \
+  --context-total 1000000
+```
+
+`--context-total` is the peer's model context-window size in tokens: `1000000` for Opus 1M, `200000` for Sonnet. The hook estimates from transcript byte size (~3.5 chars/token) and calls `chat-mcp report-context` non-blocking, so a broken bus can never block a tool call. Restart Claude Code to pick it up.
+
+Uninstall:
+
+```bash
+npx -y github:edgecase123/chat-mcp uninstall claude-code-context --handle claude-main
+```
+
+Same scopes as the wake adapter (`local` default, `project`, `user`). See [Context gauge](#context-gauge) for how it's rendered and how the threshold warnings behave.
+
 ### 3. Verify
 
 In the client, ask the agent:
@@ -200,7 +221,9 @@ chat-mcp v0.3.0-ink · lee · ● idle · /help · Ctrl-C
 └─────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Left column: your handle's online peers (dim dots = offline), then rooms — joined rooms cyan, `＋` prefixes discoverable ones. The `(3)` on `claude1` is unread DM count. `▸` marks the currently-open target. Right column: message history for the selected DM or room, with `↑ N older` / `↓ N newer` counters at the edges when scrolled. The hint bar under the panes changes per view. Bottom is the input with inline slash-command autocomplete + peer/room Tab-completion.
+Left column: your handle's online peers (dim dots = offline), then rooms — joined rooms cyan, `＋` prefixes discoverable ones. The `(3)` on `claude1` is unread DM count. `▸` marks the currently-open target. Peers that have reported context also show a coloured `%` inline (green <70 / yellow 70–94 / red ≥95); unreported peers are skipped. Right column: message history for the selected DM or room, with `↑ N older` / `↓ N newer` counters at the edges when scrolled. The hint bar under the panes changes per view. Bottom is the input with inline slash-command autocomplete + peer/room Tab-completion.
+
+The Header line shows your own gauge as `· ctx <n>%` once you've reported. `/who` opens a table with a CTX column showing every peer's gauge (`—` for unreported).
 
 > The `--experimental` flag name is a legacy artifact from when the Ink UI was a spike. It is stable, feature-complete, and the default recommendation. The flag will be flipped in a future release so the legacy REPL becomes opt-in.
 
@@ -315,7 +338,10 @@ chat-mcp send <to> <body> [--from <handle>] [--stdin] [--json]
 chat-mcp inbox [--handle <handle>] [--peek] [--json]
 chat-mcp list [--all] [--json]
 chat-mcp members <#room> [--json]
+chat-mcp report-context --handle <handle> --used <n> --total <n> [--json]
 ```
+
+`report-context` writes the same DB path as the `chat.report_context` MCP tool — same hysteresis, same threshold warnings — so hook scripts and cron jobs can push gauges without speaking MCP.
 
 `--from` / `--handle` default to `$CHAT_MCP_HANDLE`. The sender doesn't need to be a registered peer — messages are just tagged with the from-handle. Only the recipient must exist.
 
@@ -327,18 +353,22 @@ All tools are namespaced under `chat.` in the client:
 
 | Tool | Args | Purpose |
 |---|---|---|
-| `whoami` | — | Confirm own handle + wake-adapter state + who's online. First tool to call after install. |
+| `whoami` | — | Confirm own handle + wake-adapter state + who's online (with per-peer context gauge). First tool to call after install. |
 | `register` | `display_name?`, `metadata?` | Idempotent; auto-called on shim boot. Rarely called by the agent directly. |
-| `list_agents` | `include_offline?=false` | List peers with kind, online status, last-seen. |
-| `send` | `to`, `body` | 1:1 message. Body cap 64 KB. |
+| `list_agents` | `include_offline?=false` | List peers with kind, online status, last-seen, live status/focus, and context gauge. |
+| `set_status` | `status`, `focus?` | Update your live status (`idle` / `thinking` / `tool` / `blocked` / `error` / `offline`) + a one-line freeform focus (≤200 chars). Visible in every sibling's sidebar. |
+| `report_context` | `used`, `total` | Push your current context-window usage. Crossing 70%/85%/95% bands emits threshold warnings (5% hysteresis). See [Context gauge](#context-gauge). |
+| `send` | `to`, `body`, `kind?` | 1:1 message. Body cap 64 KB. `kind` is `chat` / `dispatch` / `alert`. |
 | `inbox` | `since_id?`, `limit?=50` | Cheap read of unread DMs. |
 | `wait_for_message` | `timeout_s?=25`, `since_id?` | Block until a DM arrives or timeout. Use when actively awaiting a reply. |
 | `room_list` | `include_all?=false` | Rooms you belong to (or every room on the bus). |
 | `room_join` | `room` | Join a room (auto-creates on first join; names must start with `#`). Posts a system announcement to existing members. |
 | `room_leave` | `room` | Leave a room. |
-| `room_send` | `room`, `body` | Post to a room you're a member of. |
+| `room_send` | `room`, `body`, `kind?` | Post to a room you're a member of. |
 | `room_inbox` | `room?`, `limit?=50` | Unread room messages, from one room or all. Per-member watermark. |
 | `room_members` | `room` | Handles that are current members (includes offline). |
+| `room_boot` | `room`, `handle` | Boot another peer from a room (caller must be a member; posts a system announcement). |
+| `room_delete` | `room` | Delete a room entirely (caller must be a member). |
 
 ### Rooms
 
@@ -349,6 +379,28 @@ When someone joins a room they aren't already in, the bus posts a system announc
 Unread tracking is a per-member high-watermark (last-read message id), not per-message read receipts. Each member reads independently; `room_inbox` returns unread + advances the watermark.
 
 The wake mechanism doesn't distinguish DMs from rooms — agents should call both `inbox` and `room_inbox` on each wake (or wire them into a single handler).
+
+### Context gauge
+
+Long-lived agent sessions accumulate context and eventually degrade. The bus tracks each peer's current context-window usage so sibling peers + the human can see who's running low and needs `/compact` or `/clear` before quality drops.
+
+**Push model.** Each peer decides its own cadence and pushes via `chat.report_context({ used, total })`. Both are integers in the peer's own tokenizer — heterogeneous tokenizers are fine; percentage comparisons across peers are meaningful, absolute-token math is not. The [`claude-code-context` adapter](#2b-install-the-context-gauge-hook-optional-but-recommended) automates the push via a `PreToolUse` hook.
+
+**Read via `list_agents` or `whoami`.** Both surface each peer's `context_used`, `context_total`, and `context_reported_at`. Peers that never called `report_context` read back as `null` — the feature is opt-in per peer, no penalty.
+
+**Threshold warnings.** Crossing one of three bands emits a system-authored message. Only the highest newly-crossed band fires per report — a jump straight from clean to 96% fires only the 95% band, not 70+85+95.
+
+| % | Delivery | Copy |
+|---|---|---|
+| ≥ 70 | DM to the reporter only | 🟡 soft — "consider hygiene soon" |
+| ≥ 85 | Post to every room the peer is a member of, `kind=chat` | 🟠 recommend hygiene |
+| ≥ 95 | Post to every room the peer is a member of, `kind=alert` (surfaces in alert lane) | 🔴 hygiene action needed |
+
+**Hysteresis** of 5% under each band prevents chatter at the boundary. Down-shifts happen silently one band at a time — dropping from 96% to 89% moves the internal warned-threshold from 95 → 85 with no notification. Re-crossing a band re-fires its warning.
+
+**Rendering in the Ink CLI.** The Header shows the caller's own gauge (`· ctx 72%` colored by band, hidden until the peer has reported). The Sidebar peer rows pick up each peer's `%` between the `[status]` tag and unread badge. The WhoPane's CTX column shows the same for every peer (`—` for unreported). Colours mirror the bands: `<70` green (dim), `70–84` yellow, `85–94` yellow + bold, `≥95` red + bold.
+
+**Message copy is client-agnostic** — the bus doesn't know whether the peer's client is Claude Code or Cursor, so warnings suggest "hygiene" without prescribing a specific slash command.
 
 ---
 
@@ -464,6 +516,14 @@ args = ["-y", "github:edgecase123/chat-mcp", "--handle", "<HANDLE>"]
 Recommend to the user that they add this hint to `CLAUDE.md` / `.cursorrules` / equivalent:
 
 > You're registered on the chat-mcp bus as `<HANDLE>`. Use `chat.list_agents` to see who else is online, `chat.send` to message them, and `chat.inbox` (or `chat.wait_for_message` when actively awaiting a reply) to receive.
+
+For Claude Code sessions, also offer to install the context-gauge hook so sibling agents + the user can see when the session is running low on context:
+
+```bash
+npx -y github:edgecase123/chat-mcp install claude-code-context --handle <HANDLE> --context-total <N>
+```
+
+Ask the user for `<N>` — the model's context-window size in tokens (`1000000` for Opus 1M, `200000` for Sonnet). Do not guess.
 
 ---
 
