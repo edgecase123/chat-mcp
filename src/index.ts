@@ -132,16 +132,20 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
 
   program
     .command('install <framework>')
-    .description('Install the wake adapter for a framework (e.g. claude-code)')
+    .description('Install the wake adapter for a framework (e.g. claude-code, claude-code-context)')
     .requiredOption('--handle <handle>', 'agent handle this adapter arms')
     .option('--scope <scope>', 'adapter-specific scope (see list-adapters for defaults)')
     .option('--force', 'skip the .mcp.json handle-match check', false)
-    .action(async (framework: string, opts: { handle: string; scope?: string; force?: boolean }) => {
+    .option('--cwd <path>', 'project directory for project/local-scope installs (default: process.cwd())')
+    .option('--context-total <n>', "total context-window size for this agent's model (required by claude-code-context; e.g. 200000 for Sonnet, 1000000 for Opus 1M)", (v) => parseInt(v, 10))
+    .action(async (framework: string, opts: { handle: string; scope?: string; force?: boolean; cwd?: string; contextTotal?: number }) => {
       const { runInstall } = await import('./adapters/index.js');
       const result = await runInstall(framework, {
         handle: opts.handle,
         scope: opts.scope,
         force: opts.force,
+        cwd: opts.cwd,
+        contextTotal: opts.contextTotal,
       });
       console.log(result.message);
     });
@@ -151,9 +155,14 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .description('Remove the wake adapter for a framework')
     .requiredOption('--handle <handle>', 'agent handle whose adapter to remove')
     .option('--scope <scope>', 'adapter-specific scope (must match install)')
-    .action(async (framework: string, opts: { handle: string; scope?: string }) => {
+    .option('--cwd <path>', 'project directory for project/local-scope uninstalls (default: process.cwd())')
+    .action(async (framework: string, opts: { handle: string; scope?: string; cwd?: string }) => {
       const { runUninstall } = await import('./adapters/index.js');
-      const result = await runUninstall(framework, { handle: opts.handle, scope: opts.scope });
+      const result = await runUninstall(framework, {
+        handle: opts.handle,
+        scope: opts.scope,
+        cwd: opts.cwd,
+      });
       console.log(result.message);
     });
 

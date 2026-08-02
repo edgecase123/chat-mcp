@@ -1,7 +1,8 @@
 import { claudeCodeAdapter } from './claude-code.js';
+import { claudeCodeContextAdapter } from './claude-code-context.js';
 import type { Adapter, AdapterInstallOptions, AdapterResult } from './types.js';
 
-const REGISTRY: readonly Adapter[] = [claudeCodeAdapter];
+const REGISTRY: readonly Adapter[] = [claudeCodeAdapter, claudeCodeContextAdapter];
 
 export function listAdapters(): readonly Adapter[] {
   return REGISTRY;
