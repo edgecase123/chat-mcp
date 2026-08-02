@@ -66,6 +66,18 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       ALTER TABLE agents ADD COLUMN status_updated_at INTEGER;
     `);
   },
+  (db) => {
+    // Per-agent context-window gauge (tokens_used / tokens_total, both in the
+    // agent's own tokenizer). Reported by the peer via chat.report_context —
+    // used by sibling agents and the human to see who's running low and
+    // needs /compact or /clear. Nullable so agents that never report just
+    // read back as an unknown gauge.
+    db.exec(`
+      ALTER TABLE agents ADD COLUMN context_used INTEGER;
+      ALTER TABLE agents ADD COLUMN context_total INTEGER;
+      ALTER TABLE agents ADD COLUMN context_reported_at INTEGER;
+    `);
+  },
 ];
 
 function tx(db: Db, fn: () => void): void {

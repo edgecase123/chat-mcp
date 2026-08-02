@@ -387,6 +387,50 @@ try {
     }
   }
 
+  // ─── context gauge (slice 1) ────────────────────────────────
+  // 21. report_context writes → list_agents surfaces used/total.
+  {
+    await c1.callTool({
+      name: 'report_context',
+      arguments: { used: 137000, total: 1000000 },
+    });
+    await sleep(50);
+    const list = parseJson(await c2.callTool({ name: 'list_agents', arguments: {} }));
+    const claude1 = list.find((a) => a.handle === 'claude1');
+    if (claude1?.context_used === 137000 && claude1?.context_total === 1000000
+        && typeof claude1?.context_reported_at === 'number') {
+      pass(21, 'report_context surfaces via list_agents');
+    } else {
+      fail(21, 'report_context projection', JSON.stringify(claude1));
+    }
+  }
+
+  // 22. report_context rejects used > total.
+  {
+    const r = await c1.callTool({
+      name: 'report_context',
+      arguments: { used: 2000000, total: 1000000 },
+    });
+    const msg = r.content?.[0]?.text ?? '';
+    if (r.isError && msg.includes('must not exceed')) {
+      pass(22, 'report_context rejects used > total');
+    } else {
+      fail(22, 'report_context bounds check', `isError=${r.isError} text=${msg}`);
+    }
+  }
+
+  // 23. Unreported peers surface as null gauge.
+  {
+    const me = parseJson(await c2.callTool({ name: 'whoami', arguments: {} }));
+    if (me.context_used === null && me.context_total === null
+        && me.context_reported_at === null) {
+      pass(23, 'unreported gauge reads back as null');
+    } else {
+      fail(23, 'unreported null gauge',
+        `used=${me.context_used} total=${me.context_total} at=${me.context_reported_at}`);
+    }
+  }
+
 } finally {
   if (cli) await cli.close();
   if (c1) await c1.close().catch(() => {});
