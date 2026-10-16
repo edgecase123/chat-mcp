@@ -270,7 +270,7 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
     dao.advanceRoomRead(ctx.db, room, ctx.handle, sent.id);
     for (const member of dao.roomMembers(ctx.db, room)) {
       if (member === ctx.handle) continue;
-      notifyPeer(member, { id: sent.id, to: room, from: ctx.handle, ts: sent.sent_at });
+      notifyPeer(member, { id: sent.id, to: room, from: ctx.handle, ts: sent.sent_at, body: bodyText, kind });
     }
     respondJson(res, { id: sent.id, sent_at: sent.sent_at });
   } else {
@@ -279,7 +279,7 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
       return respondJson(res, { error: `unknown peer: ${peer}` }, 404);
     }
     const sent = dao.insertMessage(ctx.db, { from: ctx.handle, to: peer, body: bodyText, kind });
-    notifyPeer(peer, { id: sent.id, to: peer, from: ctx.handle, ts: sent.sent_at });
+    notifyPeer(peer, { id: sent.id, to: peer, from: ctx.handle, ts: sent.sent_at, body: bodyText, kind });
     respondJson(res, { id: sent.id, sent_at: sent.sent_at });
   }
 }

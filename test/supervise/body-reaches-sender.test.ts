@@ -1,46 +1,112 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
- * 🛑 A SOURCE assertion, and it exists because a behavioural test missed this.
+ * 🛑 THIS TEST IS SCOPED TO THE SURFACE, NOT TO A FIX, AND THAT IS THE POINT.
  *
- * `test/supervise/fallback.test.ts` proves `notifyPeer` FORWARDS a body it is
- * given. It cannot prove the real send paths GIVE one — it calls notifyPeer
- * directly. lee caught exactly that gap: the socket carried a body in every
- * test and no production caller passed it, so every real wake took the
- * "no body, go read your inbox" branch.
+ * Its first version listed the three files the fix had touched. claude1
+ * reviewing PR 34: *"its `PATHS` lists the THREE FILES THE FIX TOUCHED.
+ * Scoped to the fix, not the surface, so it can only confirm what you already
+ * changed."* **24 of 28 `notifyPeer` calls were dropping the body and the test
+ * could not see any of them**, including an `App.tsx` all-hands that sent
+ * `kind: 'alert'` with the body one line above.
  *
- * ⚠️ This is a text assertion, not a behavioural one. It pins the regression
- * without a database fixture; it does not prove the value is correct.
+ * So it now walks every source file. A call that cannot pass a body must be
+ * named in ALLOWED below with a reason, which makes each omission a decision
+ * rather than an oversight.
  */
-const PATHS = [
-  'src/shim/tools/send.ts',
-  'src/shim/tools/room_send.ts',
-  'src/oneshot/send.ts',
-];
 
-test('every real chat send path hands the body to notifyPeer', () => {
-  const missing: string[] = [];
+/**
+ * Calls with genuinely no message text in scope.
+ *
+ * ⚠️ Each line is a claim about what is reachable at that call site. If one
+ * gains a body, delete its entry rather than widening this list.
+ */
+const ALLOWED = new Map<string, string>([
+  // Room-boot fan-outs hold only the system message's id and timestamp — the
+  // text itself is never loaded into scope at the call site.
+  ['src/cli/index.ts:306', 'boot fan-out: only sysId and now are in scope'],
+  ['src/oneshot/boot.ts:42', 'boot fan-out: only sysId and now are in scope'],
+  ['src/shim/tools/room_boot.ts:48', 'boot fan-out: only sysId and now are in scope'],
+  // `id: 0` is the "no specific message" marker: a presence ping with no text
+  // to carry at all.
+  ['src/cli/ink/App.tsx:343', 'presence ping, id 0, there is no message'],
+  ['src/cli/ink/App.tsx:357', 'presence ping, id 0, there is no message'],
+]);
 
-  for (const rel of PATHS) {
-    const source = readFileSync(new URL(`../../${rel}`, import.meta.url), 'utf8');
-    const calls = [...source.matchAll(/notifyPeer\([^;]*?\);/gs)].map((m) => m[0]!);
+function sources(dir: string, acc: string[] = []): string[] {
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
 
-    assert.ok(calls.length > 0, `${rel} no longer calls notifyPeer — check this test`);
+    if (statSync(full).isDirectory()) sources(full, acc);
+    else if (/\.tsx?$/.test(entry)) acc.push(full);
+  }
 
-    for (const call of calls) {
-      // A chat send always has the text in scope. If a call here stops
-      // passing it, every woken agent pays an inbox tool call again.
-      if (!/\bbody\b/.test(call)) missing.push(`${rel} drops BODY: ${call.replace(/\s+/g, ' ')}`);
+  return acc;
+}
 
-      // `kind` only exists on the two paths that accept it. oneshot/send has
-      // no kind parameter, so requiring it there would be a false failure.
-      if (/shim\/tools\/(room_)?send\.ts/.test(rel) && !/\bkind\b/.test(call)) {
-        missing.push(`${rel} drops KIND: ${call.replace(/\s+/g, ' ')}`);
-      }
+const ROOT = new URL('../../', import.meta.url).pathname;
+
+function dropSites(): string[] {
+  const dropped: string[] = [];
+
+  for (const file of sources(join(ROOT, 'src'))) {
+    const rel = file.slice(ROOT.length);
+
+    // bus.ts defines the envelope; socket.ts only mentions notifyPeer in prose.
+    if (rel.endsWith('notify/bus.ts') || rel.endsWith('supervise/socket.ts')) continue;
+
+    const source = readFileSync(file, 'utf8');
+
+    for (const m of source.matchAll(/notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs)) {
+      if (/\bbody\b/.test(m[0])) continue;
+
+      const line = source.slice(0, m.index).split('\n').length;
+      dropped.push(`${rel}:${line}`);
     }
   }
 
-  assert.deepEqual(missing, [], `these sends drop the body:\n${missing.join('\n')}`);
+  return dropped;
+}
+
+test('every notifyPeer call either carries the body or is a named exception', () => {
+  const unexplained = dropSites().filter((site) => !ALLOWED.has(site));
+
+  assert.deepEqual(
+    unexplained,
+    [],
+    `these wakes drop the message body with no justification:\n  ${unexplained.join('\n  ')}\n`
+      + 'A woken agent then pays a tool round-trip calling inbox before it can act.',
+  );
+});
+
+test('the exception list has no stale entries', () => {
+  // An ALLOWED entry for a call that now passes a body is a lie that makes the
+  // list look considered when it is not.
+  const dropping = new Set(dropSites());
+  const stale = [...ALLOWED.keys()].filter((site) => !dropping.has(site));
+
+  assert.deepEqual(stale, [], `these exceptions are no longer needed: ${stale.join(', ')}`);
+});
+
+test('the scan actually finds calls — a zero-hit scan would pass vacuously', () => {
+  // The first version of this test could not see 24 real droppers. A scan that
+  // silently matches nothing is the same failure with a different cause.
+  const total = dropSites().length + ALLOWED.size;
+
+  assert.ok(total >= 5, `expected to find notifyPeer calls, found ${total}`);
+});
+
+test('the two shim chat sends also carry the kind, so an alert is not flattened', () => {
+  for (const rel of ['src/shim/tools/send.ts', 'src/shim/tools/room_send.ts']) {
+    const source = readFileSync(join(ROOT, rel), 'utf8');
+    const calls = [...source.matchAll(/notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs)].map((m) => m[0]);
+
+    assert.ok(calls.length > 0, `${rel} no longer calls notifyPeer`);
+    for (const call of calls) {
+      assert.match(call, /\bkind\b/, `${rel} drops kind: ${call.replace(/\s+/g, ' ')}`);
+    }
+  }
 });
