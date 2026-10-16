@@ -36,7 +36,7 @@ export interface WakeEnvelope {
 
 export interface WakeAck {
   readonly ok: boolean;
-  readonly queued?: 'sent' | 'queued' | 'duplicate';
+  readonly queued?: 'sent' | 'queued' | 'duplicate' | 'held';
   readonly error?: string;
 }
 

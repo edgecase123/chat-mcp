@@ -2,6 +2,7 @@ import type { AgentChild, SpawnOptions } from './child.js';
 import { spawnClaude } from './child.js';
 import { TurnQueue } from './turn-queue.js';
 import { WakeListener, type WakeAck, type WakeEnvelope } from './socket.js';
+import { RateLimitGate } from './rate-limit.js';
 
 /**
  * The supervisor: it owns the loop the harness used to own.
@@ -12,6 +13,14 @@ import { WakeListener, type WakeAck, type WakeEnvelope } from './socket.js';
  */
 export interface SupervisorOptions extends SpawnOptions {
   readonly handle: string;
+  /**
+   * Refuse to dispatch at or above this window utilization, 0..1.
+   *
+   * 🛑 On a subscription `total_cost_usd` is notional — the real currency is
+   * the usage window, and `overageStatus: "rejected"` means a full window
+   * REFUSES requests rather than billing for them. Running out stops work.
+   */
+  readonly utilizationCeiling?: number;
   /** Injected so the supervisor is testable without spawning or spending. */
   readonly spawnChild?: (opts: SpawnOptions) => AgentChild;
   readonly log?: (line: string) => void;
@@ -21,6 +30,10 @@ export interface Supervisor {
   readonly socketPath: string;
   /** Prompts accepted but not yet written to the child. */
   readonly queueDepth: number;
+  /** Messages accepted but WITHHELD because the usage window is too full. */
+  readonly heldDepth: number;
+  /** One line of window utilization, never dollars. */
+  rateLimits(): string;
   stop(): Promise<void>;
 }
 
@@ -56,6 +69,16 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   const spawnFn = opts.spawnChild ?? spawnClaude;
 
   const child = spawnFn(opts);
+  const gate = new RateLimitGate(opts.utilizationCeiling ?? 0.9);
+
+  /**
+   * Accepted but not dispatched, because the window was too full.
+   *
+   * 🛑 HELD, NOT DROPPED. Refusing to spend a turn must not lose the message —
+   * that would trade a cost problem for a correctness one. These are released
+   * the moment a rate-limit event says there is room.
+   */
+  const held: { text: string; messageIds: number[] }[] = [];
 
   const queue = new TurnQueue({
     send: (prompt) => {
@@ -64,11 +87,24 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     },
   });
 
+  const releaseHeld = (): void => {
+    if (held.length === 0 || !gate.verdict().allow) return;
+
+    log(`window has room again; releasing ${held.length} held message(s)`);
+
+    for (const h of held.splice(0, held.length)) queue.offer(h);
+  };
+
   child.onEvent((event) => {
     queue.onEvent(event);
 
+    if (gate.observe(event)) {
+      log(gate.describe());
+      releaseHeld();
+    }
+
     if (event.type === 'result') {
-      log(`← turn complete; ${queue.depth} queued`);
+      log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
     }
   });
 
@@ -83,13 +119,24 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   });
 
   const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
-    const queued = queue.offer({
+    const prompt = {
       text: formatPrompt(envelope),
       messageIds: envelope.id > 0 ? [envelope.id] : [],
-    });
+    };
+
+    const verdict = gate.verdict();
+
+    if (!verdict.allow) {
+      held.push(prompt);
+      log(`HELD: ${verdict.reason}`);
+
+      // The sender learns the message is safe but waiting, and why. A file
+      // write could never say either.
+      return { ok: true, queued: 'held', error: verdict.reason };
+    }
 
     // The ack tells the SENDER what happened, which a file write never could.
-    return { ok: true, queued };
+    return { ok: true, queued: queue.offer(prompt) };
   });
 
   log(`supervisor listening for [${opts.handle}] at ${listener.socketPath}`);
@@ -98,6 +145,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     socketPath: listener.socketPath,
     get queueDepth(): number {
       return queue.depth;
+    },
+    get heldDepth(): number {
+      return held.length;
+    },
+    rateLimits(): string {
+      return gate.describe();
     },
     async stop(): Promise<void> {
       await listener.close();
