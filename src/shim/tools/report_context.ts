@@ -58,6 +58,7 @@ export function installReportContext(server: McpServer, ctx: ShimContext): void 
             from: dao.SYSTEM_HANDLE,
             ts: result.sent_at,
             body,
+            kind: 'chat',
           });
           notified.dm = 1;
         } else {
@@ -79,6 +80,7 @@ export function installReportContext(server: McpServer, ctx: ShimContext): void 
                 from: dao.SYSTEM_HANDLE,
                 ts: result.sent_at,
                 body,
+                kind,
               });
             }
             notified.rooms.push(room.name);

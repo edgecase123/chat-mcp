@@ -50,6 +50,7 @@ export function installRoomBoot(server: McpServer, ctx: ShimContext): void {
           to: room,
           from: dao.SYSTEM_HANDLE,
           ts: now,
+          body,
         });
       }
 

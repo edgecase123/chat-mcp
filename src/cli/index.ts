@@ -303,7 +303,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
     const remaining = dao.roomMembers(db, roomName);
     for (const member of remaining) {
       if (member === opts.handle) continue;
-      notifyPeer(member, { id: sysId, to: roomName, from: dao.SYSTEM_HANDLE, ts: now });
+      notifyPeer(member, { id: sysId, to: roomName, from: dao.SYSTEM_HANDLE, ts: now, body });
     }
     console.log(dim(`  booted ${target} from ${roomName}`));
   };
