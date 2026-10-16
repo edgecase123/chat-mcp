@@ -12,13 +12,19 @@ const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
 import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
 
 /** A fake child. No process, no model, no money. */
-function fakeChild(): { child: AgentChild; sent: string[]; finishTurn: () => void } {
+function fakeChild(): {
+  child: AgentChild;
+  sent: string[];
+  finishTurn: () => void;
+  emitEvent: (e: Record<string, unknown>) => void;
+} {
   const sent: string[] = [];
   let emit: ((e: Record<string, unknown>) => void) | undefined;
 
   return {
     sent,
     finishTurn: () => emit?.({ type: 'result' }),
+    emitEvent: (e: Record<string, unknown>) => emit?.(e),
     child: {
       send: (t) => sent.push(t),
       onEvent: (cb) => {
@@ -171,4 +177,101 @@ test('an alert with NO body still escalates AND still says to read the inbox', (
   assert.match(p, /🚨 ALERT — BLOCKING/);
   assert.match(p, /read your inbox/);
   assert.match(p, /in #gate/);
+});
+
+/** The live payload, at a chosen utilization. */
+const rl = (five: number, status = 'allowed') => ({
+  type: 'rate_limit_event',
+  rate_limit_info: {
+    status,
+    overageStatus: 'rejected',
+    unifiedWindows: { five_hour: { utilization: five, resetsAt: 1 }, seven_day: { utilization: 0.1, resetsAt: 2 } },
+  },
+});
+
+test('the gate is WIRED, not just built: a full window HOLDS the message', async () => {
+  // 🛑 This test exists because RateLimitGate was dead code — 11 tests proving
+  // it worked and no caller. Same failure lee caught earlier in this session
+  // with the socket body, repeated hours later.
+  const f = fakeChild();
+  const s = await startSupervisor({
+    handle: 'gated',
+    spawnChild: () => f.child,
+    log: () => undefined,
+    utilizationCeiling: 0.9,
+  });
+
+  try {
+    await deliverToSupervisor('gated', env(1, 'first'));
+    f.finishTurn();
+    assert.equal(f.sent.length, 1);
+
+    // The CLI reports the window is full.
+    f.emitEvent(rl(0.95));
+
+    const ack = await deliverToSupervisor('gated', env(2, 'second'));
+
+    assert.equal(ack?.queued, 'held', 'a full window must HOLD, not dispatch');
+    assert.match(ack?.error ?? '', /five_hour window at 95%/);
+    assert.match(ack?.error ?? '', /overage is REJECTED/);
+    assert.equal(f.sent.length, 1, 'nothing may be written while held');
+    assert.equal(s.heldDepth, 1);
+  } finally {
+    await s.stop();
+  }
+});
+
+test('a held message is RELEASED when the window reports room, never dropped', async () => {
+  const f = fakeChild();
+  const s = await startSupervisor({
+    handle: 'release',
+    spawnChild: () => f.child,
+    log: () => undefined,
+    utilizationCeiling: 0.9,
+  });
+
+  try {
+    f.emitEvent(rl(0.95));
+    await deliverToSupervisor('release', env(1, 'withheld'));
+    assert.equal(s.heldDepth, 1);
+    assert.equal(f.sent.length, 0);
+
+    // Refusing to spend a turn must not LOSE the message.
+    f.emitEvent(rl(0.10));
+
+    assert.equal(s.heldDepth, 0, 'the held message was dropped rather than released');
+    assert.equal(f.sent.length, 1);
+    assert.match(f.sent[0]!, /withheld/);
+  } finally {
+    await s.stop();
+  }
+});
+
+test('a non-allowed status holds even at zero utilization', async () => {
+  const f = fakeChild();
+  const s = await startSupervisor({ handle: 'blocked', spawnChild: () => f.child, log: () => undefined });
+
+  try {
+    f.emitEvent(rl(0.01, 'blocked'));
+
+    assert.equal((await deliverToSupervisor('blocked', env(1, 'x')))?.queued, 'held');
+  } finally {
+    await s.stop();
+  }
+});
+
+test('rateLimits() reports utilization and never a dollar figure', async () => {
+  const f = fakeChild();
+  const s = await startSupervisor({ handle: 'report', spawnChild: () => f.child, log: () => undefined });
+
+  try {
+    assert.match(s.rateLimits(), /not yet observed/);
+
+    f.emitEvent(rl(0.52));
+
+    assert.match(s.rateLimits(), /five_hour 52%/);
+    assert.ok(!s.rateLimits().includes('$'));
+  } finally {
+    await s.stop();
+  }
 });
