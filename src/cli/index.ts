@@ -347,6 +347,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
           to: name,
           from: dao.SYSTEM_HANDLE,
           ts: result.system_message.sent_at,
+          body: result.system_message.body,
         });
       }
     }
@@ -377,7 +378,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
         return;
       }
       const sent = dao.insertMessage(db, { from: opts.handle, to: mode.dmTarget, body: text });
-      notifyPeer(mode.dmTarget, { id: sent.id, to: mode.dmTarget, from: opts.handle, ts: sent.sent_at });
+      notifyPeer(mode.dmTarget, { id: sent.id, to: mode.dmTarget, from: opts.handle, ts: sent.sent_at, body: text });
       process.stdout.write(`${dim(`          → sent ${timeOf(sent.sent_at)}`)}\n`);
       return;
     }
@@ -393,7 +394,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
       const members = dao.roomMembers(db, roomName);
       for (const member of members) {
         if (member === opts.handle) continue;
-        notifyPeer(member, { id: sent.id, to: roomName, from: opts.handle, ts: sent.sent_at });
+        notifyPeer(member, { id: sent.id, to: roomName, from: opts.handle, ts: sent.sent_at, body: text });
       }
       process.stdout.write(`${dim(`          → sent ${timeOf(sent.sent_at)}`)}\n`);
       return;

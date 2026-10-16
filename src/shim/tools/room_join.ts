@@ -30,6 +30,7 @@ export function installRoomJoin(server: McpServer, ctx: ShimContext): void {
             to: room,
             from: dao.SYSTEM_HANDLE,
             ts: result.system_message.sent_at,
+            body: result.system_message.body,
           });
         }
       }
