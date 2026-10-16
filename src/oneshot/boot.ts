@@ -39,7 +39,7 @@ export async function runBoot(opts: BootOpts): Promise<void> {
     const remaining = dao.roomMembers(db, opts.room);
     for (const member of remaining) {
       if (member === caller) continue;
-      notifyPeer(member, { id: sysId, to: opts.room, from: dao.SYSTEM_HANDLE, ts: now });
+      notifyPeer(member, { id: sysId, to: opts.room, from: dao.SYSTEM_HANDLE, ts: now, body });
     }
 
     if (opts.json) {

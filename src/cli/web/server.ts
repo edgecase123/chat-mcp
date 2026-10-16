@@ -293,7 +293,7 @@ async function handleRoomJoin(req: IncomingMessage, res: ServerResponse, ctx: Ro
   if (result.was_new_member && result.system_message) {
     for (const member of dao.roomMembers(ctx.db, body.room)) {
       if (member === ctx.handle) continue;
-      notifyPeer(member, { id: result.system_message.id, to: body.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at });
+      notifyPeer(member, { id: result.system_message.id, to: body.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });
     }
   }
   respondJson(res, { ok: true, was_new_member: result.was_new_member });

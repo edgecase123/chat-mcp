@@ -63,6 +63,7 @@ export async function runReportContext(opts: ReportContextOpts): Promise<void> {
           from: dao.SYSTEM_HANDLE,
           ts: result.sent_at,
           body,
+          kind: 'chat',
         });
         notified.dm = 1;
       } else {
@@ -81,6 +82,7 @@ export async function runReportContext(opts: ReportContextOpts): Promise<void> {
               from: dao.SYSTEM_HANDLE,
               ts: result.sent_at,
               body,
+              kind,
             });
           }
           notified.rooms.push(room.name);

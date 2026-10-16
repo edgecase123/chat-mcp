@@ -25,11 +25,16 @@ import { join } from 'node:path';
  * gains a body, delete its entry rather than widening this list.
  */
 const ALLOWED = new Map<string, string>([
-  // Room-boot fan-outs hold only the system message's id and timestamp — the
-  // text itself is never loaded into scope at the call site.
-  ['src/cli/index.ts:306', 'boot fan-out: only sysId and now are in scope'],
-  ['src/oneshot/boot.ts:42', 'boot fan-out: only sysId and now are in scope'],
-  ['src/shim/tools/room_boot.ts:48', 'boot fan-out: only sysId and now are in scope'],
+  // 🛑 THREE BOOT ENTRIES WERE REMOVED FROM HERE, AND THEY WERE FALSE.
+  // They claimed "only sysId and now are in scope". claude1 reviewing PR 34
+  // found `const body` nine to twelve lines above each call —
+  // cli/index.ts:294, oneshot/boot.ts:33, room_boot.ts:39. The justification
+  // was written from a three-line window and generalised. All three now pass a
+  // body.
+  //
+  // ⚠️ An entry here is a CLAIM about what is reachable. Verify by reading the
+  // enclosing function, not the lines next to the call.
+  //
   // `id: 0` is the "no specific message" marker: a presence ping with no text
   // to carry at all.
   ['src/cli/ink/App.tsx:343', 'presence ping, id 0, there is no message'],
@@ -61,7 +66,11 @@ function dropSites(): string[] {
     const source = readFileSync(file, 'utf8');
 
     for (const m of source.matchAll(/notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs)) {
-      if (/\bbody\b/.test(m[0])) continue;
+      // 🛑 A PROPERTY, not a token. `/\bbody\b/` matched `to: body.room` in
+      // web/server.ts, so a room-join wake carrying no message read as
+      // compliant. claude1 found the exception list was false; tightening this
+      // found a false PASS as well.
+      if (/(?:^|[{,\s])body\s*[,:}]/.test(m[0])) continue;
 
       const line = source.slice(0, m.index).split('\n').length;
       dropped.push(`${rel}:${line}`);
@@ -91,22 +100,88 @@ test('the exception list has no stale entries', () => {
   assert.deepEqual(stale, [], `these exceptions are no longer needed: ${stale.join(', ')}`);
 });
 
-test('the scan actually finds calls — a zero-hit scan would pass vacuously', () => {
-  // The first version of this test could not see 24 real droppers. A scan that
-  // silently matches nothing is the same failure with a different cause.
-  const total = dropSites().length + ALLOWED.size;
+test('the scan sees EVERY notifyPeer call — a regex blind spot would hide droppers', () => {
+  // 🛑 This replaces an `assert.ok(total >= 5)` that tracked nothing real and
+  // broke the moment the number of droppers fell. Both claude1 and I named the
+  // same weakness: the structured regex handles one level of nesting, so a
+  // call wrapping a deeper expression would be invisible — and invisible
+  // droppers are exactly what this file exists to stop.
+  //
+  // So count occurrences the dumb way and the structured way, and require
+  // agreement. A blind spot makes them diverge.
+  let occurrences = 0;
+  let matched = 0;
 
-  assert.ok(total >= 5, `expected to find notifyPeer calls, found ${total}`);
+  for (const file of sources(join(ROOT, 'src'))) {
+    const rel = file.slice(ROOT.length);
+
+    if (rel.endsWith('notify/bus.ts') || rel.endsWith('supervise/socket.ts')) continue;
+
+    const source = readFileSync(file, 'utf8');
+    occurrences += [...source.matchAll(/notifyPeer\(/g)].length;
+    matched += [...source.matchAll(/notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs)].length;
+  }
+
+  assert.ok(occurrences > 20, `expected to find the call sites, found ${occurrences}`);
+  assert.equal(
+    matched,
+    occurrences,
+    `the structured regex matched ${matched} of ${occurrences} calls — `
+      + 'the unmatched ones are invisible to every other test in this file',
+  );
 });
 
-test('the two shim chat sends also carry the kind, so an alert is not flattened', () => {
-  for (const rel of ['src/shim/tools/send.ts', 'src/shim/tools/room_send.ts']) {
-    const source = readFileSync(join(ROOT, rel), 'utf8');
-    const calls = [...source.matchAll(/notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs)].map((m) => m[0]);
+/**
+ * Calls that carry a body but legitimately no `kind`.
+ *
+ * ⚠️ `body` does NOT imply `kind`. Fifteen calls pass a body with no kind and
+ * are correct: room joins and boots are system notices with no caller-chosen
+ * kind, and the CLI's own `send` accepts no kind parameter at all.
+ *
+ * So the guard is defined by the SURFACE — every file where a `kind` is handed
+ * to `insertMessage` must forward it — rather than by the files a fix touched,
+ * which is what claude1 rejected in the previous version of this test.
+ */
+const KIND_EXEMPT = new Map<string, string>([
+  ['src/cli/web/server.ts:296', 'room-join system notice; the kind nearby belongs to the DM handler above'],
+  ['src/cli/ink/App.tsx:376', 'room-join system notice, no caller kind'],
+  ['src/cli/ink/App.tsx:415', 'room-join system notice, no caller kind'],
+  ['src/cli/ink/App.tsx:563', 'room-join system notice, no caller kind'],
+  ['src/cli/ink/App.tsx:602', 'room-join system notice, no caller kind'],
+  ['src/cli/ink/App.tsx:729', 'room-join system notice, no caller kind'],
+  ['src/cli/ink/App.tsx:874', 'room-join system notice, no caller kind'],
+  ['src/cli/ink/App.tsx:343', 'presence ping, id 0'],
+  ['src/cli/ink/App.tsx:357', 'presence ping, id 0'],
+]);
 
-    assert.ok(calls.length > 0, `${rel} no longer calls notifyPeer`);
-    for (const call of calls) {
-      assert.match(call, /\bkind\b/, `${rel} drops kind: ${call.replace(/\s+/g, ' ')}`);
+test('every file that hands a kind to insertMessage forwards it on the wake', () => {
+  const unexplained: string[] = [];
+
+  for (const file of sources(join(ROOT, 'src'))) {
+    const rel = file.slice(ROOT.length);
+
+    if (rel.endsWith('notify/bus.ts') || rel.endsWith('supervise/socket.ts')) continue;
+
+    const source = readFileSync(file, 'utf8');
+    const handsAKind = [...source.matchAll(/insertMessage\([^;]*?\)/gs)].some((m) =>
+      /(?:^|[{,\s])kind\s*[,:}]/.test(m[0]),
+    );
+
+    if (!handsAKind) continue;
+
+    for (const m of source.matchAll(/notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs)) {
+      if (/(?:^|[{,\s])kind\s*[,:}]/.test(m[0])) continue;
+
+      const site = `${rel}:${source.slice(0, m.index).split('\n').length}`;
+
+      if (!KIND_EXEMPT.has(site)) unexplained.push(site);
     }
   }
+
+  assert.deepEqual(
+    unexplained,
+    [],
+    `these wakes drop the kind with no justification:\n  ${unexplained.join('\n  ')}\n`
+      + 'An alert then arrives as ordinary chat.',
+  );
 });
