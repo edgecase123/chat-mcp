@@ -32,7 +32,7 @@ export interface RateLimitSnapshot {
 }
 
 export type GateVerdict =
-  | { readonly allow: true; readonly reason: 'unknown' | 'within-budget' }
+  | { readonly allow: true; readonly reason: 'unknown' | 'unmetered' | 'within-budget' }
   | { readonly allow: false; readonly reason: string; readonly resetsAt?: number };
 
 /** Pull a snapshot out of a raw stream-json event, or null if it is not one. */
@@ -69,8 +69,19 @@ export class RateLimitGate {
 
   /**
    * @param ceiling refuse to dispatch at or above this utilization, 0..1
+   * @param metered whether the driver ever reports usage at all. When false
+   *   the gate is explicitly UNMETERED and says so, instead of answering
+   *   `unknown` forever — which reads as "not yet" and means "never".
    */
-  constructor(private readonly ceiling = 0.9) {}
+  constructor(
+    private readonly ceiling = 0.9,
+    private readonly metered = true,
+  ) {}
+
+  /** True when the driver meters but nothing has arrived yet. */
+  get awaitingFirstReport(): boolean {
+    return this.metered && this.snapshot === null;
+  }
 
   /**
    * Take a NORMALISED snapshot from a driver.
@@ -100,6 +111,11 @@ export class RateLimitGate {
   verdict(): GateVerdict {
     const snap = this.snapshot;
 
+    // 🛑 'unmetered' and 'unknown' are DIFFERENT and used to be the same
+    // answer. 'unknown' is the first turn, before any report. 'unmetered' is
+    // forever, and the supervisor announces it at startup.
+    if (!this.metered) return { allow: true, reason: 'unmetered' };
+
     if (!snap) return { allow: true, reason: 'unknown' };
 
     if (snap.status !== 'allowed') {
@@ -123,6 +139,10 @@ export class RateLimitGate {
   /** One line for a human, in utilization and never in dollars. */
   describe(): string {
     const snap = this.snapshot;
+
+    if (!this.metered) {
+      return 'rate limits: UNMETERED — this driver reports none, so NOTHING bounds dispatch';
+    }
 
     if (!snap) return 'rate limits: not yet observed';
 
