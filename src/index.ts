@@ -9,7 +9,19 @@ process.on('warning', (w) => {
   console.error(w.stack ?? `${w.name}: ${w.message}`);
 });
 
+import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
+import { KNOWN_SUBCOMMANDS } from './util/subcommands.js';
+
+function packageVersion(): string {
+  try {
+    const raw = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+
+    return (JSON.parse(raw) as { version?: string }).version ?? '0.0.0-unknown';
+  } catch {
+    return '0.0.0-unknown';
+  }
+}
 
 async function runShimEntry(handle: string | undefined): Promise<void> {
   if (!handle) {
@@ -24,7 +36,7 @@ async function runShimEntry(handle: string | undefined): Promise<void> {
 // This is the entry shape used by .mcp.json / claude mcp add, so we detect it
 // before commander sees the args to avoid --handle colliding with subcommand
 // options of the same name.
-const KNOWN_SUBCOMMANDS = new Set(['cli', 'web', 'send', 'inbox', 'list', 'members', 'delete-room', 'boot', 'install', 'uninstall', 'list-adapters', 'aliases', 'report-context', 'help', '--help', '-h', '--version', '-V']);
+
 const firstArg = process.argv[2];
 if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   const argv = process.argv.slice(2);
@@ -37,7 +49,15 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   program
     .name('chat-mcp')
     .description('Local unintrusive chat bus for AI coding agents over MCP')
-    .version('0.3.0');
+    // 🛑 READ, NEVER HARDCODED. This said '0.3.0' while package.json said
+    // '0.4.11', so `chat-mcp --version` had been lying for several releases —
+    // which defeats the whole point of bumping the version to prove a new
+    // build is the one running.
+    //
+    // `../package.json` resolves correctly from BOTH `src/index.ts` under tsx
+    // and `dist/index.js` after a build, because both sit one level below the
+    // package root.
+    .version(packageVersion());
 
   program
     .command('cli')
@@ -184,6 +204,33 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .action(async () => {
       const { SHELL_ALIASES } = await import('./shell/aliases.js');
       process.stdout.write(SHELL_ALIASES);
+    });
+
+  program
+    .command('supervise <handle>')
+    .description('Run a supervisor that owns the agent CLI and feeds it arriving messages (chat-mcp#33)')
+    .option('--model <model>', 'model for the supervised child')
+    .option('--binary <path>', 'path to the agent CLI', 'claude')
+    .option('--cwd <dir>', 'working directory for the child')
+    .option('--resume <sessionId>', 'resume an existing session')
+    .option('--permission-mode <mode>', 'permission mode for the child', 'plan')
+    .option('--permission-prompts <target>', 'who answers prompts: host | none', 'none')
+    .action(async (handle: string, o: Record<string, string>) => {
+      const { startSupervisor } = await import('./supervise/index.js');
+      const sup = await startSupervisor({
+        handle,
+        model: o.model,
+        binary: o.binary,
+        cwd: o.cwd,
+        resumeSessionId: o.resume,
+        permissionMode: o.permissionMode,
+        permissionPrompts: o.permissionPrompts === 'host' ? 'host' : 'none',
+      });
+      const shutdown = (): void => {
+        void sup.stop().then(() => process.exit(0));
+      };
+      process.on('SIGINT', shutdown);
+      process.on('SIGTERM', shutdown);
     });
 
   program

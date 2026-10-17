@@ -250,7 +250,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           return;
         }
         const sent = dao.insertMessage(db, { from: handle, to: target.peer, body, kind });
-        notifyPeer(target.peer, { id: sent.id, to: target.peer, from: handle, ts: sent.sent_at });
+        notifyPeer(target.peer, { id: sent.id, to: target.peer, from: handle, ts: sent.sent_at, body, kind });
       } else {
         if (!dao.isRoomMember(db, target.room, handle)) {
           setStatus(`not a member of ${target.room}`);
@@ -260,7 +260,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         dao.advanceRoomRead(db, target.room, handle, sent.id);
         for (const member of dao.roomMembers(db, target.room)) {
           if (member === handle) continue;
-          notifyPeer(member, { id: sent.id, to: target.room, from: handle, ts: sent.sent_at });
+          notifyPeer(member, { id: sent.id, to: target.room, from: handle, ts: sent.sent_at, body, kind });
         }
       }
       setTick((t) => t + 1);
@@ -378,6 +378,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                   to: roomArg,
                   from: dao.SYSTEM_HANDLE,
                   ts: result.system_message.sent_at,
+                  body: result.system_message.body,
                 });
               }
             }
@@ -416,6 +417,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                 to: name,
                 from: dao.SYSTEM_HANDLE,
                 ts: result.system_message.sent_at,
+                body: result.system_message.body,
               });
             }
           }
@@ -558,7 +560,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             if (joinRes.was_new_member && joinRes.system_message) {
               for (const member of dao.roomMembers(db, roomArg)) {
                 if (member === handle) continue;
-                notifyPeer(member, { id: joinRes.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: joinRes.system_message.sent_at });
+                notifyPeer(member, { id: joinRes.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: joinRes.system_message.sent_at, body: joinRes.system_message.body });
               }
             }
           }
@@ -569,7 +571,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           const body = `📢 All hands — please /join ${roomArg} (from ${handle})`;
           for (const t of targets) {
             const sent = dao.insertMessage(db, { from: handle, to: t.handle, body, kind: 'alert' });
-            notifyPeer(t.handle, { id: sent.id, to: t.handle, from: handle, ts: sent.sent_at });
+            notifyPeer(t.handle, { id: sent.id, to: t.handle, from: handle, ts: sent.sent_at, body, kind: 'alert' });
           }
           setStatus(`📢 all-hands sent to ${targets.length} peer${targets.length === 1 ? '' : 's'} → ${roomArg}`);
           setTick((t) => t + 1);
@@ -597,7 +599,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             if (r.was_new_member && r.system_message) {
               for (const member of dao.roomMembers(db, roomArg)) {
                 if (member === handle) continue;
-                notifyPeer(member, { id: r.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: r.system_message.sent_at });
+                notifyPeer(member, { id: r.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: r.system_message.sent_at, body: r.system_message.body });
               }
             }
             added += 1;
@@ -724,7 +726,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         if (result.was_new_member && result.system_message) {
           for (const member of dao.roomMembers(db, t.room)) {
             if (member === handle) continue;
-            notifyPeer(member, { id: result.system_message.id, to: t.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at });
+            notifyPeer(member, { id: result.system_message.id, to: t.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });
           }
         }
         setView({ kind: 'room', room: t.room });
@@ -869,7 +871,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                 if (result.was_new_member && result.system_message) {
                   for (const member of dao.roomMembers(db, room)) {
                     if (member === handle) continue;
-                    notifyPeer(member, { id: result.system_message.id, to: room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at });
+                    notifyPeer(member, { id: result.system_message.id, to: room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });
                   }
                 }
                 setView({ kind: 'room', room });
