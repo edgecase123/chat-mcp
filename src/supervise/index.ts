@@ -69,7 +69,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   const spawnFn = opts.spawnChild ?? spawnClaude;
 
   const child = spawnFn(opts);
-  const gate = new RateLimitGate(opts.utilizationCeiling ?? 0.9);
+  const gate = new RateLimitGate(opts.utilizationCeiling ?? 0.9, child.reportsUsage);
 
   /**
    * Accepted but not dispatched, because the window was too full.
@@ -141,6 +141,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   });
 
   log(`supervisor listening for [${opts.handle}] at ${listener.socketPath}`);
+
+  // 🛑 A PRODUCTION CALLER FOR describe(), WHICH PREVIOUSLY HAD NONE — it was
+  // reachable only from tests, the same dead-code shape the gate itself had
+  // one commit earlier. Logged at startup so an UNMETERED driver announces
+  // itself before it dispatches anything, rather than never.
+  log(gate.describe());
 
   return {
     socketPath: listener.socketPath,

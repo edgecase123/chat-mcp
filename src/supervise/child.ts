@@ -10,6 +10,23 @@ import { parseRateLimitEvent, type RateLimitSnapshot } from './rate-limit.js';
  * so this ships in `src/`.
  */
 export interface AgentChild {
+  /**
+   * Whether this driver ever calls `onUsage`.
+   *
+   * 🛑 DECLARED, NOT INFERRED FROM SILENCE. The gate used to answer
+   * `{allow: true, reason: 'unknown'}` whenever no snapshot had arrived — so a
+   * driver whose CLI reports no limits got `unknown` FOREVER and dispatched
+   * with no ceiling at all. **The Cursor driver this seam exists to enable is
+   * exactly that driver.** Found by claude1 reviewing PR 34.
+   *
+   * `false` is allowed and is not a bug. It must be SAID, and the supervisor
+   * says it out loud at startup, because an unmetered dispatcher is a choice
+   * and not an accident. factory#3 already states the rule: a ceiling must
+   * behave sanely when it cannot measure — refuse, or run unmetered, and say
+   * which.
+   */
+  readonly reportsUsage: boolean;
+
   /** Write one user message. Caller must not send another until the turn ends. */
   send(text: string): void;
 
@@ -173,6 +190,8 @@ export function spawnClaude(opts: SpawnOptions = {}): AgentChild {
   child.stdout.on('data', feed);
 
   return {
+    // Claude Code emits `rate_limit_event` unprompted, so this driver meters.
+    reportsUsage: true,
     send(text: string): void {
       // The documented streaming-input shape: one JSON user message per line.
       const message = {

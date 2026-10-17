@@ -36,6 +36,7 @@ function fakeChild(): {
       if (e.type === 'result') endTurn?.();
     },
     child: {
+      reportsUsage: true,
       send: (t) => sent.push(t),
       onTurnEnd: (cb) => {
         endTurn = cb;
@@ -320,4 +321,73 @@ test('the CLAUDE mapping itself: only `result` ends a turn, and usage is routed'
   routeClaudeEvent({}, on);
   routeClaudeEvent({ type: undefined }, on);
   assert.equal(ends, 1, 'a malformed event must not end a turn');
+});
+
+test('a driver that reports NO usage is UNMETERED and says so, not "unknown" forever', async () => {
+  // 🛑 Found by claude1 on PR 34. The gate answered `unknown` whenever no
+  // snapshot had arrived, so a driver whose CLI reports no limits dispatched
+  // with NO CEILING and nothing ever said so. The Cursor driver this seam
+  // exists to enable is exactly that driver.
+  const sent: string[] = [];
+  const lines: string[] = [];
+  let endTurn: (() => void) | undefined;
+
+  const s = await startSupervisor({
+    handle: 'unmetered',
+    log: (l) => lines.push(l),
+    spawnChild: () => ({
+      reportsUsage: false,
+      send: (t) => sent.push(t),
+      onTurnEnd: (cb) => {
+        endTurn = cb;
+      },
+      onUsage: () => undefined,
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      kill: () => undefined,
+    }),
+  });
+
+  try {
+    // It still dispatches — unmetered is a CHOICE, not a refusal.
+    assert.equal((await deliverToSupervisor('unmetered', env(1, 'x')))?.queued, 'sent');
+
+    // But it ANNOUNCED itself at startup, before dispatching anything.
+    assert.ok(
+      lines.some((l) => /UNMETERED/.test(l)),
+      `startup never said it was unmetered: ${lines.join(' | ')}`,
+    );
+    assert.ok(lines.some((l) => /NOTHING bounds dispatch/.test(l)));
+    assert.ok(!lines.some((l) => /not yet observed/.test(l)), '"not yet" means never here');
+    endTurn?.();
+  } finally {
+    await s.stop();
+  }
+});
+
+test('a METERED driver says "not yet observed" at startup, which is a different thing', async () => {
+  const f = fakeChild();
+  const lines: string[] = [];
+  const s = await startSupervisor({ handle: 'metered', spawnChild: () => f.child, log: (l) => lines.push(l) });
+
+  try {
+    assert.ok(lines.some((l) => /not yet observed/.test(l)));
+    assert.ok(!lines.some((l) => /UNMETERED/.test(l)));
+  } finally {
+    await s.stop();
+  }
+});
+
+test('describe() HAS a production caller now — startup logs it', async () => {
+  // It was reachable only from tests, the same dead-code shape the gate itself
+  // had one commit earlier.
+  const f = fakeChild();
+  const lines: string[] = [];
+  const s = await startSupervisor({ handle: 'logged', spawnChild: () => f.child, log: (l) => lines.push(l) });
+
+  try {
+    assert.ok(lines.some((l) => /^rate limits:/.test(l)), 'startup must report the gate state');
+  } finally {
+    await s.stop();
+  }
 });
