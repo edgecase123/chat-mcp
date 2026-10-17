@@ -95,17 +95,18 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     for (const h of held.splice(0, held.length)) queue.offer(h);
   };
 
-  child.onEvent((event) => {
-    queue.onEvent(event);
+  // 🛑 SEMANTIC CALLBACKS ONLY. Nothing here knows Claude Code's event shapes —
+  // the driver maps its own. That is what makes a Cursor or other CLI driver a
+  // new file rather than a change to the queue and the gate.
+  child.onTurnEnd(() => {
+    queue.turnEnded();
+    log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
+  });
 
-    if (gate.observe(event)) {
-      log(gate.describe());
-      releaseHeld();
-    }
-
-    if (event.type === 'result') {
-      log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
-    }
+  child.onUsage((snapshot) => {
+    gate.update(snapshot);
+    log(gate.describe());
+    releaseHeld();
   });
 
   child.onExit((code, signal) => {

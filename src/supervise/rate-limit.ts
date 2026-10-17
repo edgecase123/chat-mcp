@@ -72,12 +72,16 @@ export class RateLimitGate {
    */
   constructor(private readonly ceiling = 0.9) {}
 
-  observe(event: Record<string, unknown>): RateLimitSnapshot | null {
-    const parsed = parseRateLimitEvent(event);
-
-    if (parsed) this.snapshot = parsed;
-
-    return parsed;
+  /**
+   * Take a NORMALISED snapshot from a driver.
+   *
+   * 🛑 Parsing moved into the driver on purpose. This used to accept a raw
+   * event and test `type === 'rate_limit_event'`, which is Claude Code's
+   * shape. A CLI reporting limits any other way could not be understood, and
+   * one reporting none at all would silently look identical to one at 0%.
+   */
+  update(snapshot: RateLimitSnapshot): void {
+    this.snapshot = snapshot;
   }
 
   get latest(): RateLimitSnapshot | null {

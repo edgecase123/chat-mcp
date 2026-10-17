@@ -2,6 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { RateLimitGate, parseRateLimitEvent } from '../../src/supervise/rate-limit.js';
 
+/** What a driver does: parse its own shape, hand over a normalised snapshot. */
+const feed = (g: RateLimitGate, event: Record<string, unknown>): void => {
+  const snap = parseRateLimitEvent(event);
+
+  if (snap) g.update(snap);
+};
+
 /** The exact payload observed from a live run on 2026-10-16. */
 const LIVE = {
   type: 'rate_limit_event',
@@ -57,14 +64,14 @@ test('BEFORE any event the gate allows, and reports UNKNOWN not within-budget', 
 
 test('at the live 52% it allows, and says within-budget', () => {
   const g = new RateLimitGate();
-  g.observe(LIVE);
+  feed(g, LIVE);
 
   assert.deepEqual(g.verdict(), { allow: true, reason: 'within-budget' });
 });
 
 test('at or above the ceiling it REFUSES and names the window', () => {
   const g = new RateLimitGate(0.9);
-  g.observe(at(0.9));
+  feed(g, at(0.9));
 
   const v = g.verdict();
   assert.equal(v.allow, false);
@@ -74,7 +81,7 @@ test('at or above the ceiling it REFUSES and names the window', () => {
 
 test('the refusal says overage is REJECTED, because that is why it matters', () => {
   const g = new RateLimitGate(0.5);
-  g.observe(at(0.6));
+  feed(g, at(0.6));
 
   const v = g.verdict();
   assert.equal(v.allow, false);
@@ -83,7 +90,7 @@ test('the refusal says overage is REJECTED, because that is why it matters', () 
 
 test('with overage AVAILABLE the refusal drops that clause', () => {
   const g = new RateLimitGate(0.5);
-  g.observe(at(0.6, 0.1, 'allowed', 'allowed'));
+  feed(g, at(0.6, 0.1, 'allowed', 'allowed'));
 
   assert.ok(!/overage is REJECTED/.test((g.verdict() as { reason: string }).reason));
 });
@@ -91,7 +98,7 @@ test('with overage AVAILABLE the refusal drops that clause', () => {
 test('the SEVEN-DAY window blocks even when five-hour is idle', () => {
   // The slow window is the one that is easy to forget.
   const g = new RateLimitGate(0.9);
-  g.observe(at(0.01, 0.95));
+  feed(g, at(0.01, 0.95));
 
   const v = g.verdict();
   assert.equal(v.allow, false);
@@ -100,7 +107,7 @@ test('the SEVEN-DAY window blocks even when five-hour is idle', () => {
 
 test('a non-allowed status refuses regardless of utilization', () => {
   const g = new RateLimitGate(0.9);
-  g.observe(at(0.01, 0.01, 'blocked'));
+  feed(g, at(0.01, 0.01, 'blocked'));
 
   const v = g.verdict();
   assert.equal(v.allow, false);
@@ -112,7 +119,7 @@ test('describe() reports UTILIZATION and never a dollar figure', () => {
 
   assert.match(g.describe(), /not yet observed/);
 
-  g.observe(LIVE);
+  feed(g, LIVE);
   const d = g.describe();
 
   assert.match(d, /five_hour 52%/);
@@ -123,9 +130,9 @@ test('describe() reports UTILIZATION and never a dollar figure', () => {
 
 test('a later event replaces the earlier snapshot', () => {
   const g = new RateLimitGate(0.9);
-  g.observe(at(0.95));
+  feed(g, at(0.95));
   assert.equal(g.verdict().allow, false);
 
-  g.observe(at(0.10));
+  feed(g, at(0.10));
   assert.equal(g.verdict().allow, true);
 });

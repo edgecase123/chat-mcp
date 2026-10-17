@@ -7,9 +7,11 @@ import { join } from 'node:path';
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-sup-'));
 
 const { startSupervisor, formatPrompt } = await import('../../src/supervise/index.js');
-const { claudeArgs, createLineParser } = await import('../../src/supervise/child.js');
+const { claudeArgs, createLineParser, routeClaudeEvent } = await import('../../src/supervise/child.js');
 const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
 import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
+import type { RateLimitSnapshot } from '../../src/supervise/rate-limit.js';
+const { parseRateLimitEvent } = await import('../../src/supervise/rate-limit.js');
 
 /** A fake child. No process, no model, no money. */
 function fakeChild(): {
@@ -19,17 +21,29 @@ function fakeChild(): {
   emitEvent: (e: Record<string, unknown>) => void;
 } {
   const sent: string[] = [];
-  let emit: ((e: Record<string, unknown>) => void) | undefined;
+  let endTurn: (() => void) | undefined;
+  let usage: ((s: RateLimitSnapshot) => void) | undefined;
 
   return {
     sent,
-    finishTurn: () => emit?.({ type: 'result' }),
-    emitEvent: (e: Record<string, unknown>) => emit?.(e),
+    finishTurn: () => endTurn?.(),
+    // A fake driver parses the Claude shape exactly as the real one does, so
+    // the test fixture stays the payload a live run actually emitted.
+    emitEvent: (e: Record<string, unknown>) => {
+      const snap = parseRateLimitEvent(e);
+
+      if (snap) usage?.(snap);
+      if (e.type === 'result') endTurn?.();
+    },
     child: {
       send: (t) => sent.push(t),
-      onEvent: (cb) => {
-        emit = cb;
+      onTurnEnd: (cb) => {
+        endTurn = cb;
       },
+      onUsage: (cb) => {
+        usage = cb;
+      },
+      onEvent: () => undefined,
       onExit: () => undefined,
       kill: () => undefined,
     },
@@ -274,4 +288,36 @@ test('rateLimits() reports utilization and never a dollar figure', async () => {
   } finally {
     await s.stop();
   }
+});
+
+test('the CLAUDE mapping itself: only `result` ends a turn, and usage is routed', () => {
+  // 🛑 This exists because a control that DELETED the mapping from spawnClaude
+  // broke nothing — every other supervisor test drives a fake child that
+  // signals turn-end directly, so the fake bypassed the only Claude-specific
+  // logic in the system.
+  let ends = 0;
+  const seen: number[] = [];
+  const on = {
+    turnEnd: () => {
+      ends++;
+    },
+    usage: (s: RateLimitSnapshot) => seen.push(s.windows.five_hour!.utilization),
+  };
+
+  for (const type of ['system', 'assistant', 'user', 'tool_use', 'stream_event']) {
+    routeClaudeEvent({ type }, on);
+  }
+
+  assert.equal(ends, 0, 'assistant text must NOT end a turn — that is what merges turns');
+
+  routeClaudeEvent(rl(0.52), on);
+  assert.deepEqual(seen, [0.52], 'a rate_limit_event must reach the gate');
+  assert.equal(ends, 0, 'a rate_limit_event arrives mid-turn and must not end it');
+
+  routeClaudeEvent({ type: 'result' }, on);
+  assert.equal(ends, 1);
+
+  routeClaudeEvent({}, on);
+  routeClaudeEvent({ type: undefined }, on);
+  assert.equal(ends, 1, 'a malformed event must not end a turn');
 });
