@@ -35,43 +35,40 @@ test('the queued prompt is released by the result event', () => {
 
   queue.offer(p('one', 1));
   queue.offer(p('two', 2));
-  queue.onEvent({ type: 'result' });
+  queue.turnEnded();
 
   assert.deepEqual(sent.map((s) => s.text), ['one', 'two']);
   assert.equal(queue.depth, 0);
 });
 
-test('only `result` ends a turn — assistant text does NOT', () => {
+test('the queue knows NO event shape — only the driver may end a turn', () => {
+  // 🛑 This replaces two tests that fed `{type:'assistant'}` and `{}` in.
+  // The queue no longer accepts events at all, which is the fix: it used to
+  // sniff `type === 'result'`, so a Cursor driver — whose ACP returns a
+  // `stopReason` on a JSON-RPC response — would never have ended a turn and
+  // the supervisor would have hung after one message.
   const { sent, queue } = recorder();
 
   queue.offer(p('one', 1));
   queue.offer(p('two', 2));
 
-  for (const type of ['system', 'assistant', 'user', 'tool_use', 'stream_event']) {
-    queue.onEvent({ type });
-  }
-
-  // Treating text as completion is what merges turns.
+  assert.equal(
+    'onEvent' in (queue as unknown as Record<string, unknown>),
+    false,
+    'the queue must not take raw driver events',
+  );
   assert.deepEqual(sent.map((s) => s.text), ['one']);
-  assert.equal(queue.currentState, 'inTurn');
-});
 
-test('a malformed event with no type is ignored rather than ending the turn', () => {
-  const { sent, queue } = recorder();
+  queue.turnEnded();
 
-  queue.offer(p('one', 1));
-  queue.onEvent({});
-  queue.onEvent({ type: undefined });
-
-  assert.deepEqual(sent.map((s) => s.text), ['one']);
-  assert.equal(queue.currentState, 'inTurn');
+  assert.deepEqual(sent.map((s) => s.text), ['one', 'two']);
 });
 
 test('the same bus message offered twice is dropped', () => {
   const { sent, queue } = recorder();
 
   queue.offer(p('one', 7));
-  queue.onEvent({ type: 'result' });
+  queue.turnEnded();
 
   // The notify file fires on every write, so the bus is re-read and message 7
   // comes back. Without de-duplication the agent is asked twice.
@@ -83,7 +80,7 @@ test('a partially-overlapping batch still sends, carrying only the new ids', () 
   const { sent, queue } = recorder();
 
   queue.offer(p('first', 1));
-  queue.onEvent({ type: 'result' });
+  queue.turnEnded();
 
   assert.equal(queue.offer(p('1 and 2', 1, 2)), 'sent');
   assert.deepEqual(sent.map((s) => s.text), ['first', '1 and 2']);
@@ -94,7 +91,7 @@ test('a prompt carrying no message ids is never deduplicated', () => {
 
   // The bootstrap prompt has no bus message behind it.
   assert.equal(queue.offer(p('boot')), 'sent');
-  queue.onEvent({ type: 'result' });
+  queue.turnEnded();
   assert.equal(queue.offer(p('boot')), 'sent');
   assert.equal(sent.length, 2);
 });
@@ -117,7 +114,7 @@ test('a result with an empty queue leaves it idle, not stuck', () => {
   const { queue } = recorder();
 
   queue.offer(p('one', 1));
-  queue.onEvent({ type: 'result' });
+  queue.turnEnded();
 
   assert.equal(queue.currentState, 'idle');
   assert.equal(queue.offer(p('two', 2)), 'sent');

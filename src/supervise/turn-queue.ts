@@ -76,15 +76,16 @@ export class TurnQueue {
   }
 
   /**
-   * Feed one parsed stream-json event from the child.
+   * The driver says the turn ended. Release whatever is queued.
    *
-   * 🛑 `result` is the ONLY terminal signal. An `assistant` event with no
-   * following `result` is a turn still in flight — treating text as
-   * completion is what merges turns.
+   * 🛑 NO EVENT SHAPE IS KNOWN HERE, DELIBERATELY. This used to sniff
+   * `event.type === 'result'`, which is Claude Code's terminal event and
+   * nobody else's. Cursor's ACP returns a `stopReason` on a JSON-RPC
+   * response, so a Cursor driver would never have ended a turn and the
+   * supervisor would have hung after the first message. **The driver decides
+   * what completion looks like; this only reacts to it.**
    */
-  onEvent(event: { type?: unknown }): void {
-    if (event?.type !== 'result') return;
-
+  turnEnded(): void {
     this.state = 'idle';
 
     const next = this.pending.shift();
