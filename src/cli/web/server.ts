@@ -424,6 +424,14 @@ async function handleAnswerApproval(
       from: ctx.handle,
       ts: Date.now(),
       body: `approval ${id} ${decision}: ${request.requested}`,
+      // 🛑 TYPED, so the supervisor runs the re-dispatch template instead of
+      // reading the sentence above as a chat message.
+      approval: {
+        approvalId: id,
+        decision,
+        requested: request.requested,
+        sessionId: request.sessionId,
+      },
     });
   }
 

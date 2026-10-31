@@ -27,6 +27,18 @@ export interface NotifyEnvelope {
    */
   body?: string;
   /**
+   * An operator's answer to a permission request.
+   *
+   * Carried so a supervisor can act on it directly. Without it the answer
+   * reaches the agent as a sentence and the re-dispatch template never runs.
+   */
+  approval?: {
+    approvalId: number;
+    decision: 'approve' | 'deny';
+    requested: string;
+    sessionId: string | null;
+  };
+  /**
    * The coordination kind the sender chose: `chat`, `dispatch` or `alert`.
    *
    * 🛑 DROPPING THIS IS A CORRECTNESS BUG, NOT MISSING POLISH. This repo's
@@ -75,6 +87,7 @@ export function notifyPeer(handle: string, envelope?: NotifyEnvelope): void {
         ts: envelope?.ts ?? Date.now(),
         body: envelope?.body,
         kind: envelope?.kind,
+        approval: envelope?.approval,
       }),
     )
     .catch(() => undefined);

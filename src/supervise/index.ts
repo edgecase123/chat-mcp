@@ -5,7 +5,14 @@ import { WakeListener, type WakeAck, type WakeEnvelope } from './socket.js';
 import { RateLimitGate } from './rate-limit.js';
 import { openDb } from '../storage/db.js';
 import * as dao from '../storage/dao.js';
-import { DEFAULT_ALLOWED, availableBuiltins, childHandleFor, type ChildGrant } from './grant.js';
+import {
+  DEFAULT_ALLOWED,
+  DEFAULT_EXTRA_DIRS,
+  availableBuiltins,
+  childHandleFor,
+  type ChildGrant,
+} from './grant.js';
+import { allowlistWith } from './allowlist.js';
 import { writeClaudeMcpConfig } from './drivers/claude.js';
 
 /**
@@ -35,6 +42,14 @@ export interface SupervisorOptions extends SpawnOptions {
 
   /** Allowlist override. Default `DEFAULT_ALLOWED` — lee's narrow list. */
   readonly allowedTools?: readonly string[];
+
+  /**
+   * Directories the child may touch beyond its cwd. Default
+   * `DEFAULT_EXTRA_DIRS`.
+   *
+   * 🛑 THIS, NOT THE ALLOWLIST, IS WHAT CONTAINS THE AGENT. Measured.
+   */
+  readonly extraDirs?: readonly string[];
 
   /**
    * Which agent CLI to drive. Default `claude`.
@@ -109,6 +124,7 @@ function buildGrant(opts: SupervisorOptions): ChildGrant | undefined {
     configPath: writeClaudeMcpConfig(handle),
     allowed,
     available: availableBuiltins(allowed),
+    extraDirs: opts.extraDirs ?? DEFAULT_EXTRA_DIRS,
   };
 }
 
@@ -176,6 +192,15 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * rest of its session, so an unrecorded denial is an agent that has given
    * up silently.
    */
+  /**
+   * Commands the operator has granted this supervisor, cumulative.
+   *
+   * ⚠️ ADDITIVE. A grant that replaced the list would revoke everything the
+   * agent already had, mid-task, and the symptom would be a second denial for
+   * something that worked a minute earlier.
+   */
+  const grantedCommands: string[] = [];
+
   let childSession: string | null = null;
   child.onSession((id) => {
     childSession = id;
@@ -220,9 +245,35 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     for (const p of unsent) log(`  UNSENT ids=[${p.messageIds.join(',')}]`);
   });
 
+  /**
+   * 🛑 THE THIRD LINK, AND IT WAS DEAD WHILE TWO GUARDS SAID THE PATH WAS
+   * WHOLE. `driver.redispatchPrompt` was declared on the registry and never
+   * read: an operator's Approve woke the supervisor, `formatPrompt` rendered
+   * it as an ordinary chat line, and the template measured at 3 of 3 never
+   * ran. Found by claude1, who also noted the guard covering links 1 and 2
+   * made the gap LOOK closed.
+   *
+   * A denied child will not retry, so a grant means a NEW invocation: the
+   * child is replaced, resuming its session, with the one command added.
+   */
+  const applyAnswer = (answer: NonNullable<WakeEnvelope['approval']>): string => {
+    if (answer.decision === 'deny') {
+      return `[chat-mcp] your request for \`${answer.requested}\` was DENIED by the operator. Do not retry it; carry on with what does not need it.`;
+    }
+
+    grantedCommands.push(answer.requested);
+    log(`APPROVED: ${answer.requested} — re-dispatching with the session resumed`);
+
+    return driver.redispatchPrompt({
+      grantedCommand: answer.requested,
+      followUp: 'Then carry on with the task you were on.',
+    });
+  };
+
   const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
+    // An answer is not a chat message and must not be rendered as one.
     const prompt = {
-      text: formatPrompt(envelope),
+      text: envelope.approval ? applyAnswer(envelope.approval) : formatPrompt(envelope),
       messageIds: envelope.id > 0 ? [envelope.id] : [],
     };
 

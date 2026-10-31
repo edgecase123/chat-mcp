@@ -23,6 +23,24 @@ import { ensureSocketDir, socketPathFor } from '../util/paths.js';
  * whose delivery fails is still in the database and is picked up on catch-up.
  */
 
+/**
+ * An operator's answer to a permission request.
+ *
+ * 🛑 A TYPED FIELD, NOT A PARSED BODY STRING. The answer arrives on the same
+ * wake path as a chat message, and without this the supervisor renders it as
+ * prose and the re-dispatch template — the one measured at 3 of 3 — never
+ * runs. Found by claude1: the dead-link guard covered two of three links and
+ * therefore read as "the path is whole".
+ */
+export interface ApprovalAnswer {
+  readonly approvalId: number;
+  readonly decision: 'approve' | 'deny';
+  /** The command, VERBATIM, as the operator saw and approved it. */
+  readonly requested: string;
+  /** The child session to resume, so a grant is not a restart. */
+  readonly sessionId: string | null;
+}
+
 export interface WakeEnvelope {
   readonly id: number;
   readonly to: string;
@@ -32,6 +50,14 @@ export interface WakeEnvelope {
   readonly body?: string;
   /** `chat` | `dispatch` | `alert`. An alert must not arrive as chat. */
   readonly kind?: string;
+
+  /**
+   * An operator's answer to a permission request. Absent for a chat wake.
+   *
+   * 🛑 TYPED, NOT PARSED OUT OF `body`. Without it the answer reaches the
+   * agent as a sentence and the re-dispatch template never runs.
+   */
+  readonly approval?: ApprovalAnswer;
 }
 
 export interface WakeAck {

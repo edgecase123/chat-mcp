@@ -5,7 +5,7 @@ import {
   missingClauses,
   redispatchPrompt,
 } from '../../src/supervise/drivers/claude-redispatch.js';
-import { DEFAULT_ALLOWLIST, EDIT_SCOPES, allowlistWith } from '../../src/supervise/allowlist.js';
+import { DEFAULT_ALLOWLIST, EXTRA_DIRS, allowlistWith } from '../../src/supervise/allowlist.js';
 
 /**
  * 🛑 A VAGUE RE-DISPATCH PROMPT FAILS BY REFUSING, WHICH LOOKS LIKE A STUBBORN
@@ -76,26 +76,20 @@ test('the template refuses to build without a granted command', () => {
 });
 
 /**
- * ⚠️ `Write(<glob>)` IS SILENTLY IGNORED — the CLI said so itself:
- * *"Write(...) is not matched by file permission checks — only Edit(path)
- * rules are … Edit rules cover all file-editing tools."* A path-scoped Write
- * rule looks like containment and is not.
+ * 🛑 THE SCOPES AND THE DIRECTORIES ARE BOTH REQUIRED, measured 2026-10-31.
+ * A bare `Write`/`Edit` reaches any path; a scope outside the reachable
+ * directories reaches none.
  */
-test('every path-scoped rule uses Edit, never Write', () => {
-  for (const scope of EDIT_SCOPES) {
-    assert.match(scope, /^Edit\(/, `path scoping must be Edit(...), got: ${scope}`);
-  }
+test('the extra directories are absolute paths, never flags or globs', () => {
+  assert.ok(EXTRA_DIRS.length > 0, 'no directories at all, so this test proves nothing');
 
-  const pathScopedWrites = DEFAULT_ALLOWLIST.filter((t) => /^Write\(/.test(t));
-  assert.deepEqual(pathScopedWrites, [], 'a Write(<glob>) rule is silently ignored');
+  for (const dir of EXTRA_DIRS) {
+    assert.ok(dir.startsWith('/'), `not an absolute path: ${dir}`);
+    assert.ok(!dir.includes('*'), `a glob, not a directory: ${dir}`);
+    assert.ok(!dir.startsWith('-'), `that is a flag, not a directory: ${dir}`);
+  }
 });
 
-/**
- * ⚠️ THIS TEST USED TO REQUIRE BARE `Write` AND `Edit`, WHICH IS THE BUG IT
- * SHOULD HAVE CAUGHT. It encoded "lee asked for Write and Edit" literally,
- * and a bare entry allows the tool against ANY path, making every
- * `Edit(<glob>)` scope decorative. What lee asked for is the CAPABILITY.
- */
 test('the allowlist grants what lee asked for, and excludes what he excluded', () => {
   const joined = DEFAULT_ALLOWLIST.join(' ');
 

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, basename, isAbsolute } from 'node:path';
 import { claudeArgs, writeClaudeMcpConfig } from '../../src/supervise/drivers/claude.js';
 import { DEFAULT_ALLOWED, availableBuiltins, builtinsFrom } from '../../src/supervise/grant.js';
+import { EXTRA_DIRS } from '../../src/supervise/allowlist.js';
 
 /**
  * 🛑 A SUPERVISED AGENT THAT CANNOT ACT IS A DOORBELL, NOT A BUS.
@@ -38,6 +39,7 @@ const grant = {
   configPath: '/tmp/x.json',
   allowed: DEFAULT_ALLOWED,
   available: availableBuiltins(DEFAULT_ALLOWED),
+  extraDirs: ['/Users/leejenkins/playground'],
 };
 
 test('without a grant the child gets NONE of the four flags', () => {
@@ -115,19 +117,64 @@ test('every built-in the allowlist implies is available, and Write/Edit are avai
 });
 
 /**
- * 🚨 THE SECURITY REGRESSION TEST. A bare entry allows the tool against ANY
- * path and makes every scope below it decorative.
+ * 🚨 CONTAINMENT NEEDS BOTH HALVES, AND EACH HALF ALONE WAS TRIED AND FAILED.
+ *
+ * Measured 2026-10-31, cwd held constant at `~/dev/chat-mcp2`:
+ *
+ *   bare `Write`,`Edit` + --add-dir      -> edited /tmp. ANY path.
+ *   `Edit(<glob>)` + --add-dir           -> edited ~/playground, DENIED /tmp
+ *
+ * The rules say WHICH PATHS. The directories make those paths reachable at
+ * all. An earlier reading blamed the cwd alone and was comparing two runs
+ * that differed in two variables.
  */
-test('no file-editing tool is allowlisted BARE — only under an Edit(<glob>) scope', () => {
+test('no file-editing tool is allowlisted BARE — a bare entry reaches any path', () => {
   for (const bare of ['Write', 'Edit']) {
-    assert.ok(
-      !DEFAULT_ALLOWED.includes(bare),
-      `a bare '${bare}' allows any path and makes EDIT_SCOPES decorative`,
-    );
+    assert.ok(!DEFAULT_ALLOWED.includes(bare), `a bare '${bare}' edited /tmp when measured`);
   }
+});
 
+test('the allowlist carries Edit scopes, or nothing can edit at all', () => {
   const scopes = DEFAULT_ALLOWED.filter((t) => t.startsWith('Edit('));
-  assert.ok(scopes.length > 0, 'there are no scopes at all, so this test proves nothing');
+
+  assert.ok(scopes.length > 0, 'file editing was asked for and no scope grants it');
+});
+
+/**
+ * 🛑 THE TWO HALVES MUST NAME THE SAME DIRECTORIES. A scope for a directory
+ * that is not reachable is denied; a reachable directory with no scope is
+ * denied too. Either mismatch looks like "the agent cannot edit" with no clue
+ * which half is wrong.
+ */
+test('every Edit scope has a matching reachable directory, and vice versa', () => {
+  const scoped = DEFAULT_ALLOWED.filter((t) => t.startsWith('Edit(')).map((t) =>
+    t.slice('Edit('.length, -'/**)'.length),
+  );
+
+  assert.deepEqual([...scoped].sort(), [...EXTRA_DIRS].sort());
+});
+
+/**
+ * 🛑 THE DIRECTORIES ARE PATHS, NOT A FLAG. Claude Code spells this
+ * `--add-dir`; Cursor will spell it differently or not at all. A driver that
+ * ignores them yields a NARROWER agent, never a wider one.
+ */
+test('the grant carries directories and the driver renders the flag', () => {
+  const args = claudeArgs({ grant });
+  const idx = args.indexOf('--add-dir');
+
+  assert.notEqual(idx, -1, 'the driver never renders the directories');
+  assert.equal(args[idx + 1], '/Users/leejenkins/playground');
+
+  for (const dir of grant.extraDirs) {
+    assert.ok(!dir.startsWith('-'), `a flag leaked into the path list: ${dir}`);
+  }
+});
+
+test('a grant with no extra directories passes no --add-dir at all', () => {
+  const args = claudeArgs({ grant: { ...grant, extraDirs: [] } });
+
+  assert.ok(!args.includes('--add-dir'), 'an empty list emitted a valueless flag');
 });
 
 test('Bash is available, because the allowlist scopes Bash commands', () => {

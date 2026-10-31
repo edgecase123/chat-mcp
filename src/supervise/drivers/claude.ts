@@ -80,6 +80,15 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
       '--allowedTools',
       opts.grant.allowed.join(','),
     );
+
+    // 🛑 WHERE the child may write, which the allowlist does NOT control.
+    // Measured 2026-10-31: the same `Edit(<glob>)` allowlist entry is denied
+    // under one cwd and permitted under another, because file writes are
+    // confined to the working directory. This flag is the only thing that
+    // widens it. Claude Code's spelling; another driver uses its own.
+    if (opts.grant.extraDirs.length > 0) {
+      args.push('--add-dir', ...opts.grant.extraDirs);
+    }
   }
 
   return args;

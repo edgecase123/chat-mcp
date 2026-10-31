@@ -129,3 +129,50 @@ test('the driver actually CALLS denialFromClaude — not just imports it', async
 
   assert.ok(src.includes('denialFromClaude(event)'), 'the detector is imported and never called');
 });
+
+/**
+ * 🛑 THE THIRD LINK, WHICH THE FIRST VERSION OF THIS FILE DID NOT GUARD.
+ *
+ * Guarding links 1 and 2 and not 3 is WORSE than guarding none, because the
+ * file reads as "the path is whole". `driver.redispatchPrompt` was declared
+ * on the registry and never read: an Approve woke the supervisor,
+ * `formatPrompt` rendered it as an ordinary chat line, and the template
+ * measured at 3 of 3 never ran. Found by claude1 reviewing PR 34.
+ */
+test('the supervisor actually CALLS redispatchPrompt — not just registers it', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
+
+  assert.ok(
+    src.includes('driver.redispatchPrompt('),
+    'the re-dispatch template is registered and never run',
+  );
+});
+
+/**
+ * 🛑 AN ANSWER MUST NOT BE RENDERED AS A CHAT MESSAGE. That is precisely the
+ * failure: `formatPrompt` is the chat renderer, and routing an approval
+ * through it loses the three clauses the child needs.
+ */
+test('an approval answer bypasses formatPrompt', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
+
+  assert.ok(
+    /envelope\.approval\s*\?\s*applyAnswer\(/.test(src),
+    'an answer still goes through the chat renderer',
+  );
+});
+
+/**
+ * ⚠️ EVERY LINK NEEDS A GUARD OR THE SET OF GUARDS IS THE LIE. Enumerated so
+ * adding a fourth link without a guard is visible rather than invisible.
+ */
+test('every link in the approval chain has a guard in this file', async () => {
+  const { readFileSync } = await import('node:fs');
+  const self = readFileSync(new URL('./producer.test.ts', import.meta.url), 'utf8');
+
+  for (const link of ['denialFromClaude(event)', 'dao.insertApproval(', 'driver.redispatchPrompt(']) {
+    assert.ok(self.includes(link), `no guard asserts the call to ${link}`);
+  }
+});

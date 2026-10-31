@@ -25,13 +25,6 @@ import { join } from 'node:path';
  * gains a body, delete its entry rather than widening this list.
  */
 const ALLOWED = new Map<string, string>([
-  // 🛑 THREE BOOT ENTRIES WERE REMOVED FROM HERE, AND THEY WERE FALSE.
-  // They claimed "only sysId and now are in scope". claude1 reviewing PR 34
-  // found `const body` nine to twelve lines above each call. All three now
-  // pass a body.
-  //
-  // ⚠️ An entry here is a CLAIM about what is reachable. Verify by reading the
-  // enclosing function, not the lines next to the call.
   [
     'src/cli/ink/App.tsx :: notifyPeer(member, { id: 0, to: member, from: dao.SYSTEM_HANDLE, ts: Date.now() });',
     'presence ping, id 0, there is no message',
@@ -69,7 +62,17 @@ const ROOT = new URL('../../', import.meta.url).pathname;
  * invalidate the claim.
  */
 function siteKey(rel: string, call: string): string {
-  return `${rel} :: ${call.replace(/\s+/g, ' ').trim()}`;
+  // ⚠️ COMMENTS ARE STRIPPED FIRST. Without this the key tracked PROSE: adding
+  // an explanatory comment inside the call changed its identity and the
+  // exemption read as a new violation. An exception is a claim about the
+  // CODE, so editing a comment must not invalidate it.
+  const code = call
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return `${rel} :: ${code}`;
 }
 
 function dropSites(): string[] {
@@ -210,8 +213,8 @@ const KIND_EXEMPT = new Map<string, string>([
     'room-join system notice, no caller kind',
   ],
   [
-    'src/cli/web/server.ts :: notifyPeer(request.supervisorHandle, { id, to: request.supervisorHandle, from: ctx.handle, ts: Date.now(), body: `approval ${id} ${decision}: ${request.requested}`, });',
-    'approval answer; no caller kind exists, the body carries the decision',
+    'src/cli/web/server.ts :: notifyPeer(request.supervisorHandle, { id, to: request.supervisorHandle, from: ctx.handle, ts: Date.now(), body: `approval ${id} ${decision}: ${request.requested}`, approval: { approvalId: id, decision, requested: request.requested, sessionId: request.sessionId, }, });',
+    'approval answer; no caller kind exists, the body and the typed field carry it',
   ],
 ]);
 

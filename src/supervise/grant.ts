@@ -1,4 +1,4 @@
-import { AVAILABLE_BUILTINS, DEFAULT_ALLOWLIST } from './allowlist.js';
+import { AVAILABLE_BUILTINS, DEFAULT_ALLOWLIST, EXTRA_DIRS } from './allowlist.js';
 
 /**
  * What a supervised child is allowed to be and to do.
@@ -46,6 +46,16 @@ export interface ChildGrant {
    * never here.
    */
   readonly available: readonly string[];
+
+  /**
+   * Directories the child may touch beyond its working directory.
+   *
+   * 🛑 PATHS, NOT A FLAG. Claude Code spells this `--add-dir`; Cursor will
+   * spell it something else or not at all. The driver renders it, and a
+   * driver whose CLI has no equivalent simply ignores it — which is a
+   * NARROWER agent, never a wider one.
+   */
+  readonly extraDirs: readonly string[];
 }
 
 /**
@@ -67,6 +77,9 @@ export function builtinsFrom(allowed: readonly string[]): string[] {
 
 /** The default grant's tool surface: lee's narrow allowlist. */
 export const DEFAULT_ALLOWED = DEFAULT_ALLOWLIST;
+
+/** Directories a default grant may reach beyond the child's cwd. */
+export const DEFAULT_EXTRA_DIRS = EXTRA_DIRS;
 
 /**
  * Which built-ins must EXIST for this allowlist to mean anything.

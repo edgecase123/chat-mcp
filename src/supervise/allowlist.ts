@@ -10,21 +10,49 @@
  */
 
 /**
- * Directories the agent may edit files in.
+ * Directories a supervised agent may touch, beyond its working directory.
  *
- * 🛑 `Edit(<glob>)`, NEVER `Write(<glob>)`. The CLI states the rule itself:
+ * 🛑 THESE FEED `--add-dir`, NOT THE ALLOWLIST, AND THAT CORRECTION COST A
+ * MEASUREMENT. They were `Edit(<glob>)` entries in `--allowedTools`, which
+ * looked like path scoping and is not: Claude Code confines file writes to
+ * the WORKING DIRECTORY, and an allowlist glob outside it grants nothing.
  *
- *   "Write(/Users/leejenkins/context/**) is not matched by file permission
- *    checks — only Edit(path) rules are. Use Edit(...) instead (Edit rules
- *    cover all file-editing tools)."
+ * Measured 2026-10-31, same file, same allowlist, only the cwd differing:
  *
- * A path-scoped `Write` rule looks like containment and does nothing.
+ *   cwd = chat-mcp2, Edit(/…/playground/**) allowlisted  -> DENIED
+ *       "path is outside the allowed working directories"
+ *   cwd = playground                                     -> EDITED
+ *
+ * ⚠️ SO THE OLD SCOPES PROMISED ACCESS THEY COULD NOT GIVE. The containment
+ * was real and came from somewhere else. claude1 called the claim a
+ * hypothesis; the positive control is what exposed it.
+ *
+ * ⚠️ AND THE FIRST ATTEMPT TO MEASURE IT WAS VACUOUS — the run died on a
+ * missing MCP config, the file was unchanged, and that nearly read as
+ * "contained". A run that never started proves nothing.
  */
-export const EDIT_SCOPES = [
-  'Edit(/Users/leejenkins/dev/leagues2/**)',
-  'Edit(/Users/leejenkins/dev/chat-mcp2/**)',
-  'Edit(/Users/leejenkins/playground/**)',
+export const EXTRA_DIRS = [
+  '/Users/leejenkins/dev/leagues2',
+  '/Users/leejenkins/dev/chat-mcp2',
+  '/Users/leejenkins/playground',
 ] as const;
+
+/**
+ * The same directories as allowlist rules. BOTH are required.
+ *
+ * 🛑 NEITHER ALONE CONTAINS THE AGENT, and that cost two wrong conclusions.
+ * Measured 2026-10-31 with the cwd held constant at `~/dev/chat-mcp2`:
+ *
+ *   bare `Write`,`Edit`            -> edited /tmp. ANY path. add-dir irrelevant.
+ *   `Edit(<glob>)` + --add-dir     -> edited ~/playground, DENIED /tmp
+ *
+ * ⚠️ AN EARLIER READING BLAMED THE CWD ALONE. It compared two runs differing
+ * in TWO variables — the cwd and the allowlist — and attributed the whole
+ * effect to the first. claude1 called it a hypothesis and was right.
+ *
+ * The rules say WHICH PATHS. `EXTRA_DIRS` makes those paths reachable at all.
+ */
+export const EDIT_SCOPES = EXTRA_DIRS.map((dir) => `Edit(${dir}/**)`);
 
 /**
  * The narrow starting set.
@@ -39,17 +67,19 @@ export const DEFAULT_ALLOWLIST = [
   'Glob',
   'Grep',
 
-  // 🛑 NO BARE `Write` OR `Edit` HERE, AND THAT IS THE WHOLE POINT OF
-  // EDIT_SCOPES. A bare entry allows the tool against ANY path, which made
-  // the scopes below decorative — a supervised agent could edit any file on
-  // the machine. Found by claude1 reviewing PR 34.
+  // 🛑 SCOPED, NEVER BARE, AND THIS WAS PROVEN THE EXPENSIVE WAY.
   //
-  // ⚠️ IT COMPOUNDED WITH THE PERMISSION MODE. `acceptEdits` was justified by
-  // a comment claiming no Edit tool existed to accept, which stopped being
-  // true the moment Write and Edit were added. Two findings, one outcome.
+  // A bare `Write` or `Edit` allows the tool against ANY path — measured, it
+  // edited `/tmp` with `--add-dir` naming three unrelated directories. The
+  // directory list does not constrain a bare entry at all.
   //
-  // The CLI states that `Edit(<glob>)` governs every file-editing tool, so
-  // these three cover Write as well.
+  // ⚠️ IT ALSO COMPOUNDED WITH THE PERMISSION MODE: `acceptEdits` was
+  // justified by a comment claiming no Edit tool existed to accept, which
+  // stopped being true the moment Write and Edit were added. Found by
+  // claude1; I then "fixed" it by going bare and reopened the hole.
+  //
+  // These cover Write too — the CLI states `Edit(path)` rules govern every
+  // file-editing tool.
   ...EDIT_SCOPES,
 
   // Inspect and record work, but never publish it.
