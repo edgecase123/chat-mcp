@@ -41,16 +41,18 @@ if (!process.env.CHAT_MCP_LIVE) {
 const HANDLE = `e2e-${process.pid}`;
 
 /**
- * 🛑 THE TASK MUST BE DENIED WITH A NAME, or the run cannot test a grant.
+ * 🛑 THE TASK MUST BE DENIABLE AND THEN GRANTABLE. `rm` is the first of
+ * those and not the second.
  *
- * Measured: `rm` names itself — *"What required approval: rm in '/path' was
- * blocked."* — but only when NO `Edit(<glob>)` scope covers the target,
- * because those rules govern every file-editing tool. A `git push` refusal
- * gives a prose reason instead, which is unnameable and can only be denied.
+ * 🚨 `rm` CANNOT BE GRANTED BY THE ALLOWLIST AT ALL — measured on run 8.
+ * Approval 14 granted `Bash(rm <path>)`; approval 16 asked for that exact
+ * string, bare, and was refused anyway with *"Claude Code may only remove
+ * files from the allowed working directories"* — naming a directory the
+ * path was already inside. A separate rule governs `rm` and no
+ * `--allowedTools` entry reaches it, so the old task looped forever.
  *
- * So the allowlist here deliberately has no Edit scope. The directory is
- * still reachable, which is what makes the denial about the COMMAND rather
- * than the location.
+ * `touch` is deniable for the ordinary reason — Bash exists as a built-in
+ * but is not allowlisted here — and carries no rule of its own.
  */
 const MODE = process.env.E2E_MODE ?? 'nameable';
 const WAIT_MS = Number(process.env.APPROVAL_WAIT_SECONDS ?? 300) * 1000;
@@ -58,7 +60,7 @@ const WAIT_MS = Number(process.env.APPROVAL_WAIT_SECONDS ?? 300) * 1000;
 /**
  * A scratch GIT repository, registered as this agent's project.
  *
- * 🛑 THE TASK HAS TO NEED A COMMAND THE ALLOWLIST CANNOT COVER, and the first
+ * 🛑 THE TASK HAS TO NEED A TOOL THE ALLOWLIST DOES NOT NAME, and the first
  * version of this script got that wrong. It asked the agent to delete a file
  * inside its own scope — but `Edit(<glob>)` rules govern every file-editing
  * tool, so the agent simply did it and no approval was ever needed. The run
@@ -71,6 +73,9 @@ const WAIT_MS = Number(process.env.APPROVAL_WAIT_SECONDS ?? 300) * 1000;
 const root = mkdtempSync(join(tmpdir(), 'chat-mcp-e2e-'));
 const workdir = join(root, 'work');
 const remote = join(root, 'remote.git');
+
+/** What the agent must create. Its existence is the verdict for `nameable`. */
+const created = join(workdir, 'created-by-agent.txt');
 
 const git = (args, cwd) => execFileSync('git', args, { cwd, stdio: 'pipe' });
 
@@ -142,7 +147,7 @@ try {
     ts: Date.now(),
     body:
       MODE === 'nameable'
-        ? `Please delete the file ${join(workdir, 'README.md')} using the shell, with rm. ` +
+        ? `Please create an empty file at ${created} using the shell, with touch. ` +
           `If you are blocked, say so and stop — do not work around it.`
         : `Please run \`git push -u origin main\` in ${workdir}. ` +
           `If you are blocked, say so and stop — do not work around it.`,
@@ -190,17 +195,19 @@ try {
 
   // The check differs by mode, and the TARGET is the only honest answer in
   // both: asking the agent whether it succeeded asks the thing under test.
-  const succeeded = MODE === 'nameable' ? () => !existsSync(join(workdir, 'README.md')) : pushed;
+  const succeeded = MODE === 'nameable' ? () => existsSync(created) : pushed;
 
-  if (request.requested == null) {
-    record('an UNNAMED request offers Deny only, and nothing happened', !succeeded());
+  // 🛑 `grant`, NOT `requested`. `answerApproval` throws only when there is
+  // nothing to allowlist, and run 8 approved a card whose prose was null.
+  if (request.grant == null) {
+    record('an UNGRANTABLE request offers Deny only, and nothing happened', !succeeded());
   } else if (decision !== 'approve') {
     record('nothing happened after a DENY', !succeeded());
   } else {
     // ── 4. The grant must REACH the child, which is the bug that shipped ──
     const done = await until(succeeded, 180_000, 'the approved command to run');
 
-    record('the approved command actually RAN', done, done ? 'target is gone' : 'target still there');
+    record('the approved command actually RAN', done, done ? 'target exists' : 'target still missing');
   }
 } finally {
   await sup.stop();
