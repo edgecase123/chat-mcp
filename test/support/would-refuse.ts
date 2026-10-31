@@ -147,31 +147,30 @@ export function classify(
   const grants = allowed.map((a) => normalise(a));
 
   /**
-   * 🛑 FIRST, BECAUSE AN EXACT SET MEASUREMENT BEATS A CONTAINMENT GUESS.
+   * 🛑 EVERY EXACT-SET BRANCH COMES BEFORE THE CONTAINMENT BRANCH.
    *
-   * A `permitted` record names one entry and matches by containment, so it
-   * asserts that entry is sufficient. This record names the whole set and
-   * matches exactly. When both describe the same command and the query IS
-   * that set, the outcome actually measured under it has to win — otherwise
-   * the corpus answers `permitted` for a command it watched fail.
+   * `permitted` names ONE entry and matches by containment, so it only ever
+   * asserts that entry is sufficient — an inference. `refused` and
+   * `refused_under_grant` name the WHOLE set and match it exactly — a
+   * measurement. When both describe the same command and the query IS that
+   * set, the thing actually watched under it has to win, or the corpus
+   * answers `permitted` for a command it saw fail.
+   *
+   * 🛑 THIS APPLIES TO BOTH, AND FOR ONE COMMIT IT APPLIED TO ONE. The rule
+   * arrived with `refused_under_grant` and was not carried to `refused`
+   * beside it, which matches on `sameSet` identically. Found by claude1, and
+   * it is the fourth one-fix-two-sites instance of the day.
+   *
+   * ⚠️ It was LATENT, not live: 0 such pairs across 25 combinations in the
+   * fixture, because all five recorded refusals ran under the probe
+   * allowlist and it holds no granted entry. A probe denied TWICE is the path
+   * to live — its second refusal is recorded with the first grant present.
    */
   for (const r of corpus) {
     if (r.outcome !== 'refused_under_grant' || normalise(r.attempted) !== want) continue;
     if (sameSet(r.allowlist.map((a) => normalise(a)), grants)) {
       return { kind: 'refused_under_grant', record: r };
     }
-  }
-
-  // 🛑 A MEASURED SUCCESS NEEDS ITS ALLOWLIST ENTRY PRESENT. The same tool
-  // was refused on approval 23 and permitted on approval 25; the command was
-  // identical and only the allowlist differed. Keying on the command alone
-  // would certify the exact defect that cost c7973ee.
-  for (const r of corpus) {
-    // ⚠️ THE STORED KEY NEEDS NORMALISING TOO. A capture harness writes the
-    // run's real scratch path, so comparing it raw against a normalised query
-    // never matches. I fixed the allowlist comparison and missed this one.
-    if (r.outcome !== 'permitted' || normalise(r.attempted) !== want) continue;
-    if (grants.includes(normalise(r.allowlistEntry))) return { kind: 'permitted', record: r };
   }
 
   // 🛑 A REFUSAL IS ONLY A REFUSAL UNDER THE SAME ALLOWLIST. claude1 on PR
@@ -192,6 +191,18 @@ export function classify(
     if (r.allowlist === null) continue;
 
     if (sameSet(r.allowlist.map((a) => normalise(a)), grants)) return { kind: 'refused', record: r };
+  }
+
+  // 🛑 A MEASURED SUCCESS NEEDS ITS ALLOWLIST ENTRY PRESENT. The same tool
+  // was refused on approval 23 and permitted on approval 25; the command was
+  // identical and only the allowlist differed. Keying on the command alone
+  // would certify the exact defect that cost c7973ee.
+  for (const r of corpus) {
+    // ⚠️ THE STORED KEY NEEDS NORMALISING TOO. A capture harness writes the
+    // run's real scratch path, so comparing it raw against a normalised query
+    // never matches. I fixed the allowlist comparison and missed this one.
+    if (r.outcome !== 'permitted' || normalise(r.attempted) !== want) continue;
+    if (grants.includes(normalise(r.allowlistEntry))) return { kind: 'permitted', record: r };
   }
 
   return {
