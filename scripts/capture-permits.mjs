@@ -22,7 +22,7 @@
  * two-variable run is how three wrong conclusions were drawn in one evening.
  */
 
-import { mkdtempSync, rmSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, existsSync, writeFileSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -79,6 +79,11 @@ function probesFor(root, work, handle) {
   const sentinel = `permit-ok-${process.pid}`;
   const firstHalf = join(work, 'compound-a.txt');
   const secondHalf = join(work, 'compound-b.txt');
+
+  // ⚠️ `probesFor('', '', 'x')` builds the ROSTER with dummy arguments, and
+  // `realpathSync('')` throws. The roster only needs labels.
+  const symlinked = join(work, 'canonical.txt');
+  const realpath = work ? join(realpathSync(work), 'canonical.txt') : symlinked;
 
   return [
     {
@@ -149,6 +154,64 @@ function probesFor(root, work, handle) {
       note: () =>
         `halves present: a=${existsSync(firstHalf)} b=${existsSync(secondHalf)}`,
     },
+    {
+      /**
+       * 🛑 DOES THE CLI CANONICALISE A PATH BEFORE MATCHING IT?
+       *
+       * Every path-bearing permit in the corpus names a spelling the child
+       * never typed — 6 of 6, measured 2026-10-31. It is structural:
+       * `grantFor()` canonicalises, and a probe's path comes from
+       * `mkdtempSync`, which returns the `/var` symlink. So the pair can
+       * never agree and no re-run of the other probes can settle it.
+       *
+       * If the CLI canonicalises, the stored entry IS the one that matched
+       * and all six records are sound. If it matches the string as typed,
+       * they name the wrong entry. Nothing measured so far separates those.
+       *
+       * 🛑 SO THIS PROBE IS PRE-GRANTED, AND ONLY WITH THE REALPATH FORM.
+       * The command names the symlink. One variable.
+       *
+       * 🛑 `moved` ALONE CANNOT ANSWER IT. THE APPROVAL COUNT IS THE
+       * DISCRIMINATOR. If the CLI matches as typed, the child is denied, this
+       * harness approves, every spelling is added, and the retry SUCCEEDS — so
+       * both answers end with the target moved.
+       *
+       *   moved, 0 approvals   the pre-granted realpath alone sufficed
+       *                        -> the CLI canonicalises, the six records stand
+       *   moved, >0 approvals  it only worked after the harness widened
+       *                        -> the CLI matched as typed
+       *   not moved, >0        approved and still failed, a real
+       *                        refused_under_grant row
+       *   not moved, 0         THE CHILD NEVER TRIED. No information.
+       *
+       * 🛑 THE LAST ROW IS WHY A PRE-GRANTED PROBE NEEDS ITS OWN GUARD.
+       * Every other probe is denied first, so an approval row proves the
+       * attempt. This one has no such row, and `grantedEntries` is
+       * pre-populated — so an unguarded `!worked` would FILE a
+       * `refused_under_grant` for a command that was never run. claude1 found
+       * the missing outcome; the fabricated row is what it would have caused.
+       *
+       * ⚠️ IT DOES NOT GO THROUGH `applyAnswer`. A pre-granted probe is never
+       * denied, so the relay is not exercised and this measures the CLI's
+       * matching alone. That is the right trade for this question and it must
+       * not be read later as proof the relay works for a single-form grant.
+       * claude1's caveat, and the evidence string carries it.
+       */
+      label: 'the grant names the realpath and the command names the symlink',
+      command: `touch ${symlinked}`,
+      preGranted: `Bash(touch ${realpath})`,
+      caveat:
+        'PRE-GRANTED, so `applyAnswer` was never reached. It measures the ' +
+        "CLI's path matching, NOT the relay.",
+      moved: () => existsSync(symlinked),
+      // 🛑 THE DISCRIMINATOR, PRINTED. Without it the run says
+      // `target moved: false` and nothing else, which is the unsupported read
+      // this probe exists to replace.
+      note: ({ approvals }) =>
+        approvals.length === 0
+          ? 'approvals: 0 — a move means the realpath form ALONE sufficed, so the CLI canonicalises; no move means the child never tried'
+          : `approvals: ${approvals.length} — an approval was NEEDED, so the CLI matched the path AS TYPED`,
+    },
   ];
 }
 
@@ -175,10 +238,28 @@ const observations = [];
 // the command did not work.
 const withheld = [];
 
+/**
+ * 🛑 APPROVED, AND THE TARGET DID NOT MOVE. lee ruled on 2026-10-31 that
+ * this gets its own corpus outcome, so it is no longer observation-only.
+ *
+ * 🛑 IT IS NOT A REFUSAL. The child was ALLOWED. Filing it as `refused`
+ * would make `classify()` answer "no, not under that grant" to a question
+ * whose measured answer is "yes, and it did nothing".
+ */
+const underGrant = [];
+
 const PROBE_LABELS = probesFor('', '', 'x').map((p) => p.label);
 
 if (LIST_ONLY) {
-  for (const [i, label] of PROBE_LABELS.entries()) console.log(`${i + 1}. ${label}`);
+  // 🛑 THE ALLOWLIST SIZE IS PART OF THE ROSTER. A probe measured under a
+  // different starting set is a different experiment, and a roster that hides
+  // that reads as seven runs of one setup.
+  for (const [i, probe] of probesFor('', '', 'x').entries()) {
+    const size = (probe.preGranted ? [...BASE_ALLOWLIST, probe.preGranted] : BASE_ALLOWLIST).length;
+
+    console.log(`${i + 1}. ${probe.label}`);
+    console.log(`   starts with ${size} allowed tool(s)${probe.preGranted ? ', PRE-GRANTED' : ''}`);
+  }
 
   console.log(`\n${PROBE_LABELS.length} probe(s), and the run iterates every one of them.`);
   process.exit(0);
@@ -213,10 +294,17 @@ for (const index of PROBE_LABELS.keys()) {
   console.log(`\n── probe ${index + 1}: ${probe.label}`);
   console.log(`   ${probe.command}`);
 
+  // 🛑 THE STARTING SET IS PER-PROBE. A pre-granted probe holds its one
+  // entry from spawn, which is the only way to ask what a SINGLE form does —
+  // the approval path adds every spelling.
+  const startingAllowlist = probe.preGranted
+    ? [...BASE_ALLOWLIST, probe.preGranted]
+    : BASE_ALLOWLIST;
+
   const sup = await startSupervisor({
     handle,
     extraDirs: [root],
-    allowedTools: BASE_ALLOWLIST,
+    allowedTools: startingAllowlist,
     log: () => undefined,
   });
 
@@ -237,7 +325,10 @@ for (const index of PROBE_LABELS.keys()) {
     // 🛑 ACCUMULATED, NOT REPLACED. This was `[...BASE_ALLOWLIST, row.grant]`,
     // so a probe answering two approvals kept the second grant and silently
     // dropped the first. The set is what a record is keyed on.
-    const grantedEntries = [];
+    // ⚠️ A PRE-GRANTED ENTRY COUNTS AS A GRANT. It was in force when the
+    // command ran, which is exactly what a record is keyed on, so the
+    // one-grant rule and the refused-under-grant rule both apply unchanged.
+    const grantedEntries = probe.preGranted ? [probe.preGranted] : [];
 
     while (Date.now() < deadline && !probe.moved()) {
       await sleep(2000);
@@ -260,7 +351,7 @@ for (const index of PROBE_LABELS.keys()) {
 
     console.log(`   target moved: ${worked}`);
 
-    const note = probe.note ? probe.note() : null;
+    const note = probe.note ? probe.note({ approvals: [...answered] }) : null;
 
     if (note) console.log(`   ${note}`);
 
@@ -303,6 +394,80 @@ for (const index of PROBE_LABELS.keys()) {
       console.log(`   PERMIT WITHHELD: the target moved under ${grantedEntries.length} grants, and a record names one`);
     }
 
+    /**
+     * 🛑 A PRE-GRANTED PROBE IS ANSWERED BY ITS FIRST DENIAL, NOT BY WHERE
+     * IT ENDS UP.
+     *
+     * The answer loop approves whatever it finds, so a pre-granted entry that
+     * does NOT match gets rescued: the denial is approved, every spelling is
+     * added, the retry succeeds. The run then ends with the target moved and
+     * two grants, so the only line printed is `PERMIT WITHHELD` — a
+     * bookkeeping decision standing where the finding should be.
+     *
+     * 🛑 BUT A DENIAL UNDER A KNOWN SET IS A COMPLETE MEASUREMENT. At that
+     * moment the child held exactly BASE plus the pre-granted entry, and it
+     * was refused. A later widening cannot unmake that. So the record is
+     * keyed on the PRE-GRANTED set, never the widened one.
+     *
+     * Without this the most informative outcome of the whole run reaches the
+     * observation log and nothing else. claude1 found it; the row it files is
+     * the first the corpus has ever held for this outcome.
+     */
+    if (probe.preGranted && answered.size > 0) {
+      console.log(
+        '   ANSWERED: an approval was NEEDED, so the pre-granted entry alone did not match',
+      );
+
+      underGrant.push({
+        outcome: 'refused_under_grant',
+        probe: probe.label,
+        approvalIds: [...answered],
+        attempted: probe.command,
+        // 🛑 THE PRE-GRANTED SET, NOT `grantedEntries`. The latter has
+        // collected whatever the rescue added, which is a different question.
+        allowlist: [...BASE_ALLOWLIST, probe.preGranted],
+        evidence:
+          `${new Date().toISOString().slice(0, 10)}: ${probe.label} — refused while holding ` +
+          `exactly the pre-granted entry, so that entry alone does not match this command.` +
+          `${worked ? ' A later widening then made it succeed, which does not unmake the refusal.' : ''}` +
+          `${probe.caveat ? ` ${probe.caveat}` : ''}` +
+          ' HISTORICAL: the scratch directory is deleted when this run ends.',
+      });
+    }
+
+    /**
+     * 🛑 A RECORD NEEDS EVIDENCE THE COMMAND WAS ATTEMPTED, and an approval
+     * row is the only evidence this harness has. A denial exists because the
+     * child tried.
+     *
+     * For every probe but one, `grantedEntries` is non-empty only after an
+     * approval, so this changes nothing. A PRE-GRANTED probe starts with an
+     * entry already, and without this guard a target that never moved because
+     * the child never ran anything would be filed as "approved and it failed".
+     */
+    if (!worked && answered.size === 0) {
+      console.log('   NO INFORMATION: nothing was denied and nothing moved — the command was never attempted');
+    }
+
+    if (!worked && answered.size > 0 && grantedEntries.length > 0 && !probe.preGranted) {
+      underGrant.push({
+        outcome: 'refused_under_grant',
+        probe: probe.label,
+        // ⚠️ PLURAL, unlike the permit records' single `approvalId`. A probe
+        // can answer more than one approval before its target is checked.
+        approvalIds: [...answered],
+        attempted: probe.command,
+        allowlist: [...BASE_ALLOWLIST, ...grantedEntries],
+        evidence:
+          `${new Date().toISOString().slice(0, 10)}: ${probe.label} — approved under ` +
+          `${grantedEntries.length} grant(s) and the target did not move.` +
+          `${note ? ` ${note}.` : ''}${probe.caveat ? ` ${probe.caveat}` : ''}` +
+          ' HISTORICAL: the scratch directory is deleted when this run ends.',
+      });
+
+      console.log(`   REFUSED UNDER GRANT: approved, and the target did not move`);
+    }
+
     if (worked && grantedEntries.length === 1) {
       captured.push({
         outcome: 'permitted',
@@ -315,7 +480,8 @@ for (const index of PROBE_LABELS.keys()) {
         allowlistEntry: grantedEntries[0],
         evidence:
           `${new Date().toISOString().slice(0, 10)}: ${probe.label} — the target moved after ` +
-          `the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.`,
+          `the grant was added.${probe.caveat ? ` ${probe.caveat}` : ''}` +
+          ' HISTORICAL: the scratch directory is deleted when this run ends.',
       });
     }
   } finally {
@@ -344,6 +510,12 @@ for (const c of captured) console.log(`  ${c.allowlistEntry}`);
 // rebuild silently discarded a record earlier today.
 writeFileSync(join(ROOT, 'test', 'fixtures', 'captured-permits.pending.json'), `${JSON.stringify(captured, null, 2)}\n`);
 console.log('\nwrote test/fixtures/captured-permits.pending.json');
+
+writeFileSync(
+  join(ROOT, 'test', 'fixtures', 'captured-refused-under-grant.pending.json'),
+  `${JSON.stringify(underGrant, null, 2)}\n`,
+);
+console.log(`wrote test/fixtures/captured-refused-under-grant.pending.json — ${underGrant.length} record(s)`);
 
 mkdirSync(join(ROOT, 'measurements'), { recursive: true });
 

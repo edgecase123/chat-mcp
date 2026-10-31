@@ -18,6 +18,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/storage/db.ts';
 import { normalise } from '../test/support/would-refuse.ts';
+import { carryOver } from '../test/support/carry-over.ts';
 
 const FIXTURE = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -68,42 +69,69 @@ for (const r of rows) {
 
 const refused = [...best.values()];
 
-// 🛑 PERMITS ARE CARRIED OVER, NOT DERIVED. A success is not in the approvals
-// table — the proof is an observed side effect, and the existing record states
-// its evidence and that the evidence is historical.
-const existing = JSON.parse(readFileSync(FIXTURE, 'utf8')).filter((r) => r.outcome === 'permitted');
-
 /**
- * 🛑 AND PENDING PERMITS ARE MERGED, NOT LEFT TO ROT. `capture-permits.mjs`
- * writes beside the fixture so it cannot corrupt it, and for one commit
- * nothing read that file — four permits that cost real money bought the
+ * 🛑 THE OTHER TWO OUTCOMES ARE CARRIED OVER, NOT DERIVED. Neither is in
+ * the approvals table. A permit's proof is an observed side effect, and a
+ * `refused_under_grant`'s proof is the ABSENCE of one after an approval, so
+ * both state their evidence and state that it is historical.
+ *
+ * 🛑 AND A PENDING FILE IS MERGED, NOT LEFT TO ROT. For one commit nothing
+ * read the permits file — four permits that cost real money bought the
  * instrument nothing, and the reported coverage counted them anyway. Found by
  * claude1 on PR 43. Same shape as the dedup slip: the measurement happened
  * and the corpus missed it.
+ *
+ * The merge itself is `test/support/carry-over.ts`, extracted and tested
+ * because the third outcome made this a second copy of the one step that has
+ * already discarded a paid-for measurement twice.
  */
-const PENDING = join(dirname(fileURLToPath(import.meta.url)), '..', 'test', 'fixtures', 'captured-permits.pending.json');
+const pendingPath = (name) =>
+  join(dirname(fileURLToPath(import.meta.url)), '..', 'test', 'fixtures', name);
 
-const pending = existsSync(PENDING) ? JSON.parse(readFileSync(PENDING, 'utf8')) : [];
-const byEntry = new Map();
+const PENDING_PERMITS = pendingPath('captured-permits.pending.json');
+const PENDING_UNDER_GRANT = pendingPath('captured-refused-under-grant.pending.json');
 
-for (const r of [...existing, ...pending]) {
-  if (r && r.outcome === 'permitted') byEntry.set(`${r.attempted}|${r.allowlistEntry}`, r);
-}
+const readRows = (file) => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : []);
 
-const permits = [...byEntry.values()];
+const fixture = JSON.parse(readFileSync(FIXTURE, 'utf8'));
+const pendingPermits = readRows(PENDING_PERMITS);
+const pendingUnderGrant = readRows(PENDING_UNDER_GRANT);
 
-writeFileSync(FIXTURE, `${JSON.stringify([...refused, ...permits], null, 2)}\n`);
+const permits = carryOver({
+  outcome: 'permitted',
+  keyOf: (r) => `${r.attempted}|${r.allowlistEntry}`,
+  existing: fixture,
+  pending: pendingPermits,
+});
+
+// ⚠️ SORTED, BECAUSE `sameSet` IS ORDER-INSENSITIVE. Keying on the written
+// order would file one measurement twice under two spellings of one set.
+const underGrant = carryOver({
+  outcome: 'refused_under_grant',
+  keyOf: (r) => `${r.attempted}|${[...r.allowlist].sort().join('\u0000')}`,
+  existing: fixture,
+  pending: pendingUnderGrant,
+});
+
+writeFileSync(FIXTURE, `${JSON.stringify([...refused, ...underGrant, ...permits], null, 2)}\n`);
 
 const recorded = refused.filter((r) => r.allowlist !== null);
+const total = refused.length + underGrant.length + permits.length;
 
-console.log(`wrote ${refused.length + permits.length} records`);
+console.log(`wrote ${total} records`);
 console.log(`  refusals with a recorded allowlist : ${recorded.length}`);
+console.log(`  refused UNDER a grant              : ${underGrant.length}`);
 console.log(`  measured permits                   : ${permits.length}`);
 console.log(`  records present but SILENT         : ${refused.length - recorded.length}`);
-console.log(`\nreal coverage is ${recorded.length + permits.length}, not ${refused.length + permits.length}.`);
+console.log(`\nreal coverage is ${recorded.length + underGrant.length + permits.length}, not ${total}.`);
 
 // 🛑 CONSUMED, so a merged file cannot be merged twice or read as still waiting.
-if (pending.length > 0) {
-  rmSync(PENDING, { force: true });
-  console.log(`\nmerged ${pending.length} pending permit(s) and removed the pending file.`);
+for (const [file, rows, label] of [
+  [PENDING_PERMITS, pendingPermits, 'permit'],
+  [PENDING_UNDER_GRANT, pendingUnderGrant, 'refused-under-grant'],
+]) {
+  if (rows.length === 0) continue;
+
+  rmSync(file, { force: true });
+  console.log(`merged ${rows.length} pending ${label} record(s) and removed the pending file.`);
 }

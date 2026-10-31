@@ -36,6 +36,38 @@ export interface RefusedRecord {
   readonly refusal: string;
 }
 
+/**
+ * 🛑 APPROVED, AND THE TARGET STILL DID NOT MOVE.
+ *
+ * The third outcome, ruled by lee on 2026-10-31. A probe given exactly what
+ * it asked for that still achieved nothing is the measurement #42 exists to
+ * make, and the corpus had no word for it.
+ *
+ * 🛑 IT IS NOT `refused`. A refusal says the child was denied. This says
+ * the child was ALLOWED and failed anyway, so filing it as `refused` would
+ * answer "no, not under that grant" to a question whose measured answer is
+ * "yes, and it did not work".
+ */
+export interface RefusedUnderGrantRecord {
+  readonly outcome: 'refused_under_grant';
+  /**
+   * ⚠️ PLURAL. A probe can answer more than one approval before its target
+   * is checked, and the existing records' singular `approvalId` is why a
+   * two-grant run cannot be told from a one-grant run in anything already
+   * written.
+   */
+  readonly approvalIds: readonly number[];
+  readonly attempted: string;
+  /**
+   * 🛑 NEVER NULL. This record's whole claim is "under THIS set", so a row
+   * that does not carry its set says nothing at all. The `refused` branch has
+   * to tolerate null because rows predate the column; this outcome does not
+   * exist before it.
+   */
+  readonly allowlist: readonly string[];
+  readonly evidence: string;
+}
+
 export interface PermittedRecord {
   readonly outcome: 'permitted';
   readonly approvalId: number;
@@ -46,17 +78,27 @@ export interface PermittedRecord {
 
 export type Verdict =
   | { readonly kind: 'refused'; readonly record: RefusedRecord }
+  | { readonly kind: 'refused_under_grant'; readonly record: RefusedUnderGrantRecord }
   | { readonly kind: 'permitted'; readonly record: PermittedRecord }
   | { readonly kind: 'unknown'; readonly reason: string };
+
+export type CorpusRecord = RefusedRecord | RefusedUnderGrantRecord | PermittedRecord;
 
 // ⚠️ RESOLVED FROM THIS MODULE, NOT THE CWD. A relative path made the corpus
 // load only when the suite ran from the package root.
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'captured-refusals.json');
 
-const CORPUS: (RefusedRecord | PermittedRecord)[] = JSON.parse(readFileSync(FIXTURE, 'utf8'));
+const CORPUS: CorpusRecord[] = JSON.parse(readFileSync(FIXTURE, 'utf8'));
 
-export const corpusSize = (): { refused: number; permitted: number } => ({
+// 🛑 EVERY OUTCOME IS COUNTED. A third outcome absent from here could grow
+// to any size without the number anyone reads changing.
+export const corpusSize = (): {
+  refused: number;
+  refusedUnderGrant: number;
+  permitted: number;
+} => ({
   refused: CORPUS.filter((r) => r.outcome === 'refused').length,
+  refusedUnderGrant: CORPUS.filter((r) => r.outcome === 'refused_under_grant').length,
   permitted: CORPUS.filter((r) => r.outcome === 'permitted').length,
 });
 
@@ -84,7 +126,17 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
   return left.every((v, i) => v === right[i]);
 }
 
-export function classify(attempted: string, allowed: readonly string[]): Verdict {
+/**
+ * `corpus` exists so the three-outcome precedence can be proven against
+ * records written here rather than against whatever the fixture happens to
+ * hold. The corpus holds no `refused_under_grant` yet, and a branch only
+ * reachable once a live run has spent money is a branch nothing checks.
+ */
+export function classify(
+  attempted: string,
+  allowed: readonly string[],
+  corpus: readonly CorpusRecord[] = CORPUS,
+): Verdict {
   const want = normalise(attempted);
 
   // 🛑 BOTH SIDES, OR NEITHER MATCHES. Normalising only the query left every
@@ -94,16 +146,31 @@ export function classify(attempted: string, allowed: readonly string[]): Verdict
   // PR 43, one commit after the same shape in the dedup.
   const grants = allowed.map((a) => normalise(a));
 
-  // 🛑 A MEASURED SUCCESS NEEDS ITS ALLOWLIST ENTRY PRESENT. The same tool
-  // was refused on approval 23 and permitted on approval 25; the command was
-  // identical and only the allowlist differed. Keying on the command alone
-  // would certify the exact defect that cost c7973ee.
-  for (const r of CORPUS) {
-    // ⚠️ THE STORED KEY NEEDS NORMALISING TOO. A capture harness writes the
-    // run's real scratch path, so comparing it raw against a normalised query
-    // never matches. I fixed the allowlist comparison and missed this one.
-    if (r.outcome !== 'permitted' || normalise(r.attempted) !== want) continue;
-    if (grants.includes(normalise(r.allowlistEntry))) return { kind: 'permitted', record: r };
+  /**
+   * 🛑 EVERY EXACT-SET BRANCH COMES BEFORE THE CONTAINMENT BRANCH.
+   *
+   * `permitted` names ONE entry and matches by containment, so it only ever
+   * asserts that entry is sufficient — an inference. `refused` and
+   * `refused_under_grant` name the WHOLE set and match it exactly — a
+   * measurement. When both describe the same command and the query IS that
+   * set, the thing actually watched under it has to win, or the corpus
+   * answers `permitted` for a command it saw fail.
+   *
+   * 🛑 THIS APPLIES TO BOTH, AND FOR ONE COMMIT IT APPLIED TO ONE. The rule
+   * arrived with `refused_under_grant` and was not carried to `refused`
+   * beside it, which matches on `sameSet` identically. Found by claude1, and
+   * it is the fourth one-fix-two-sites instance of the day.
+   *
+   * ⚠️ It was LATENT, not live: 0 such pairs across 25 combinations in the
+   * fixture, because all five recorded refusals ran under the probe
+   * allowlist and it holds no granted entry. A probe denied TWICE is the path
+   * to live — its second refusal is recorded with the first grant present.
+   */
+  for (const r of corpus) {
+    if (r.outcome !== 'refused_under_grant' || normalise(r.attempted) !== want) continue;
+    if (sameSet(r.allowlist.map((a) => normalise(a)), grants)) {
+      return { kind: 'refused_under_grant', record: r };
+    }
   }
 
   // 🛑 A REFUSAL IS ONLY A REFUSAL UNDER THE SAME ALLOWLIST. claude1 on PR
@@ -112,7 +179,7 @@ export function classify(attempted: string, allowed: readonly string[]): Verdict
   // working. A record whose allowlist was never recorded can only answer for
   // "nothing granted", which is why the N-of-N test passes an empty one —
   // that is the single case those rows are evidence for, not a fiction.
-  for (const r of CORPUS) {
+  for (const r of corpus) {
     if (r.outcome !== 'refused' || normalise(r.attempted) !== want) continue;
 
     // 🛑 A NULL ALLOWLIST IS NOT AN EMPTY ONE. Reading it as `[]` made a row
@@ -124,6 +191,18 @@ export function classify(attempted: string, allowed: readonly string[]): Verdict
     if (r.allowlist === null) continue;
 
     if (sameSet(r.allowlist.map((a) => normalise(a)), grants)) return { kind: 'refused', record: r };
+  }
+
+  // 🛑 A MEASURED SUCCESS NEEDS ITS ALLOWLIST ENTRY PRESENT. The same tool
+  // was refused on approval 23 and permitted on approval 25; the command was
+  // identical and only the allowlist differed. Keying on the command alone
+  // would certify the exact defect that cost c7973ee.
+  for (const r of corpus) {
+    // ⚠️ THE STORED KEY NEEDS NORMALISING TOO. A capture harness writes the
+    // run's real scratch path, so comparing it raw against a normalised query
+    // never matches. I fixed the allowlist comparison and missed this one.
+    if (r.outcome !== 'permitted' || normalise(r.attempted) !== want) continue;
+    if (grants.includes(normalise(r.allowlistEntry))) return { kind: 'permitted', record: r };
   }
 
   return {
