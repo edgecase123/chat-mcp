@@ -13,7 +13,7 @@
  * It prints real coverage, because that number is what the fixture is worth.
  */
 
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/storage/db.ts';
@@ -71,7 +71,26 @@ const refused = [...best.values()];
 // 🛑 PERMITS ARE CARRIED OVER, NOT DERIVED. A success is not in the approvals
 // table — the proof is an observed side effect, and the existing record states
 // its evidence and that the evidence is historical.
-const permits = JSON.parse(readFileSync(FIXTURE, 'utf8')).filter((r) => r.outcome === 'permitted');
+const existing = JSON.parse(readFileSync(FIXTURE, 'utf8')).filter((r) => r.outcome === 'permitted');
+
+/**
+ * 🛑 AND PENDING PERMITS ARE MERGED, NOT LEFT TO ROT. `capture-permits.mjs`
+ * writes beside the fixture so it cannot corrupt it, and for one commit
+ * nothing read that file — four permits that cost real money bought the
+ * instrument nothing, and the reported coverage counted them anyway. Found by
+ * claude1 on PR 43. Same shape as the dedup slip: the measurement happened
+ * and the corpus missed it.
+ */
+const PENDING = join(dirname(fileURLToPath(import.meta.url)), '..', 'test', 'fixtures', 'captured-permits.pending.json');
+
+const pending = existsSync(PENDING) ? JSON.parse(readFileSync(PENDING, 'utf8')) : [];
+const byEntry = new Map();
+
+for (const r of [...existing, ...pending]) {
+  if (r && r.outcome === 'permitted') byEntry.set(`${r.attempted}|${r.allowlistEntry}`, r);
+}
+
+const permits = [...byEntry.values()];
 
 writeFileSync(FIXTURE, `${JSON.stringify([...refused, ...permits], null, 2)}\n`);
 
@@ -82,3 +101,9 @@ console.log(`  refusals with a recorded allowlist : ${recorded.length}`);
 console.log(`  measured permits                   : ${permits.length}`);
 console.log(`  records present but SILENT         : ${refused.length - recorded.length}`);
 console.log(`\nreal coverage is ${recorded.length + permits.length}, not ${refused.length + permits.length}.`);
+
+// 🛑 CONSUMED, so a merged file cannot be merged twice or read as still waiting.
+if (pending.length > 0) {
+  rmSync(PENDING, { force: true });
+  console.log(`\nmerged ${pending.length} pending permit(s) and removed the pending file.`);
+}

@@ -122,5 +122,8 @@ test('the corpus still holds both outcomes, so neither branch is dead', () => {
   const { refused, permitted } = corpusSize();
 
   assert.ok(refused >= 10, `only ${refused} refusals`);
-  assert.equal(permitted, 1, `expected the single measured success, got ${permitted}`);
+
+  // ⚠️ AT LEAST ONE, NOT EXACTLY ONE. Pinning the count made a GROWING corpus
+  // fail the suite, which is the opposite of the incentive this needs.
+  assert.ok(permitted >= 1, `no measured success at all, got ${permitted}`);
 });

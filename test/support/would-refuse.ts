@@ -87,13 +87,23 @@ function sameSet(a: readonly string[], b: readonly string[]): boolean {
 export function classify(attempted: string, allowed: readonly string[]): Verdict {
   const want = normalise(attempted);
 
+  // 🛑 BOTH SIDES, OR NEITHER MATCHES. Normalising only the query left every
+  // permit record unreachable: the stored key held a run's real scratch path
+  // and the query had been collapsed to the captured spelling. The corpus
+  // held five permits and the model could reach one. Found by claude1 on
+  // PR 43, one commit after the same shape in the dedup.
+  const grants = allowed.map((a) => normalise(a));
+
   // 🛑 A MEASURED SUCCESS NEEDS ITS ALLOWLIST ENTRY PRESENT. The same tool
   // was refused on approval 23 and permitted on approval 25; the command was
   // identical and only the allowlist differed. Keying on the command alone
   // would certify the exact defect that cost c7973ee.
   for (const r of CORPUS) {
-    if (r.outcome !== 'permitted' || r.attempted !== want) continue;
-    if (allowed.includes(r.allowlistEntry)) return { kind: 'permitted', record: r };
+    // ⚠️ THE STORED KEY NEEDS NORMALISING TOO. A capture harness writes the
+    // run's real scratch path, so comparing it raw against a normalised query
+    // never matches. I fixed the allowlist comparison and missed this one.
+    if (r.outcome !== 'permitted' || normalise(r.attempted) !== want) continue;
+    if (grants.includes(normalise(r.allowlistEntry))) return { kind: 'permitted', record: r };
   }
 
   // 🛑 A REFUSAL IS ONLY A REFUSAL UNDER THE SAME ALLOWLIST. claude1 on PR
@@ -103,7 +113,7 @@ export function classify(attempted: string, allowed: readonly string[]): Verdict
   // "nothing granted", which is why the N-of-N test passes an empty one —
   // that is the single case those rows are evidence for, not a fiction.
   for (const r of CORPUS) {
-    if (r.outcome !== 'refused' || r.attempted !== want) continue;
+    if (r.outcome !== 'refused' || normalise(r.attempted) !== want) continue;
 
     // 🛑 A NULL ALLOWLIST IS NOT AN EMPTY ONE. Reading it as `[]` made a row
     // that recorded nothing return a positive `refused` for the "nothing
@@ -113,14 +123,14 @@ export function classify(attempted: string, allowed: readonly string[]): Verdict
     // Found by claude1 on PR 43, after I had claimed to have removed it.
     if (r.allowlist === null) continue;
 
-    if (sameSet(r.allowlist, allowed)) return { kind: 'refused', record: r };
+    if (sameSet(r.allowlist.map((a) => normalise(a)), grants)) return { kind: 'refused', record: r };
   }
 
   return {
     kind: 'unknown',
     reason:
       `nothing in the corpus records attempting ${JSON.stringify(want)} under this ` +
-      `allowlist (${allowed.length} entries). Capture it from a live run rather ` +
+      `allowlist (${grants.length} entries). Capture it from a live run rather ` +
       'than assuming it is allowed.',
   };
 }
