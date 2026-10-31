@@ -88,6 +88,36 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       ALTER TABLE agents ADD COLUMN context_warned_threshold INTEGER;
     `);
   },
+  (db) => {
+    // Permission requests a supervised agent is blocked on.
+    //
+    // 🛑 THE SUPERVISOR AND THE WEB SERVER ARE SEPARATE PROCESSES. They
+    // already share this database, so it is the channel — the supervisor
+    // writes a row and nudges the notify bus, and the browser tab re-fetches
+    // over the SSE stream it already has.
+    //
+    // `requested` is the command VERBATIM. It is what the operator approves
+    // and what then goes into the allowlist, so a paraphrase would grant
+    // something the child never asked for.
+    db.exec(`
+      CREATE TABLE approvals (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        -- The child that was refused, for the operator to read.
+        agent_handle      TEXT NOT NULL,
+        -- 🛑 WHO TO WAKE WITH THE ANSWER. A first cut nudged the WEB USER's
+        -- own handle, which wakes nobody who can act. The guard test on
+        -- bodyless wakes is what surfaced it.
+        supervisor_handle TEXT NOT NULL,
+        requested    TEXT NOT NULL,
+        reason       TEXT NOT NULL,
+        session_id   TEXT,
+        created_at   INTEGER NOT NULL,
+        answered_at  INTEGER,
+        decision     TEXT
+      );
+      CREATE INDEX ix_approvals_pending ON approvals(answered_at, id);
+    `);
+  },
 ];
 
 function tx(db: Db, fn: () => void): void {

@@ -22,6 +22,10 @@
         <h1 class="pane__title" id="pane-title">select a peer or room</h1>
         <div class="pane__meta" id="pane-meta"></div>
       </header>
+      <!-- Pending permission requests. Above the message list on purpose:
+           a supervised agent is STOPPED until one of these is answered, so it
+           outranks anything being said. -->
+      <section class="approvals" id="approvals" aria-live="assertive" aria-label="Pending approvals" hidden></section>
       <ol class="messages" id="messages" aria-live="polite" aria-relevant="additions"></ol>
       <form id="composer" class="composer">
         <textarea id="composer-input" class="composer__input" placeholder="Type a message. Shift-Enter for newline." rows="1" disabled></textarea>

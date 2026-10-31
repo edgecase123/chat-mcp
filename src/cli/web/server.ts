@@ -186,6 +186,9 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContex
   if (path === '/api/messages' && req.method === 'POST') return handlePostMessage(req, res, ctx);
   if (path === '/api/rooms/join' && req.method === 'POST') return handleRoomJoin(req, res, ctx);
   if (path === '/api/rooms/leave' && req.method === 'POST') return handleRoomLeave(req, res, ctx);
+  if (path === '/api/approvals' && req.method === 'GET') return handleGetApprovals(res, ctx);
+  if (path === '/api/approvals/answer' && req.method === 'POST')
+    return handleAnswerApproval(req, res, ctx);
   if (path === '/api/events') return handleSseStream(req, res, ctx);
 
   // Static assets
@@ -304,6 +307,72 @@ async function handleRoomLeave(req: IncomingMessage, res: ServerResponse, ctx: R
   if (!body.room) return respondJson(res, { error: 'room required' }, 400);
   const ok = dao.leaveRoom(ctx.db, body.room, ctx.handle);
   respondJson(res, { ok });
+}
+
+/**
+ * What a supervised agent is blocked on.
+ *
+ * 🛑 THE COMMAND GOES OUT VERBATIM. The operator is approving one specific
+ * string, and that same string is what the supervisor then allowlists. The UI
+ * must be able to show exactly what will run.
+ */
+function handleGetApprovals(res: ServerResponse, ctx: RouteContext): void {
+  respondJson(res, { approvals: dao.pendingApprovals(ctx.db) });
+}
+
+/**
+ * Record an approve or a deny.
+ *
+ * 🛑 409 ON AN ALREADY-ANSWERED REQUEST, NOT 200. Two browser tabs are the
+ * normal case, and a silent success on the second click would tell the
+ * operator they had granted something that was in fact already denied.
+ */
+async function handleAnswerApproval(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as { id?: unknown; decision?: unknown };
+  const id = typeof body.id === 'number' ? body.id : NaN;
+  const decision = body.decision;
+
+  if (!Number.isInteger(id)) return respondJson(res, { error: 'id must be an integer' }, 400);
+  if (decision !== 'approve' && decision !== 'deny') {
+    return respondJson(res, { error: "decision must be 'approve' or 'deny'" }, 400);
+  }
+
+  const request = dao.getApproval(ctx.db, id);
+  const answered = dao.answerApproval(ctx.db, id, decision);
+
+  if (!answered) {
+    const existing = dao.getApproval(ctx.db, id);
+
+    return respondJson(
+      res,
+      existing
+        ? { error: 'already answered', decision: existing.decision }
+        : { error: 'no such approval' },
+      existing ? 409 : 404,
+    );
+  }
+
+  // 🛑 WAKE THE SUPERVISOR, NOT OURSELVES. A first cut passed `ctx.handle` —
+  // the WEB USER's handle — which wakes nobody who can act on the answer. The
+  // bodyless-wake guard test is what surfaced it.
+  //
+  // The decision rides in the body so the supervisor can act without a
+  // database read, which is the whole reason envelopes carry a body.
+  if (request) {
+    notifyPeer(request.supervisorHandle, {
+      id,
+      to: request.supervisorHandle,
+      from: ctx.handle,
+      ts: Date.now(),
+      body: `approval ${id} ${decision}: ${request.requested}`,
+    });
+  }
+
+  respondJson(res, { ok: true, id, decision });
 }
 
 function handleSseStream(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {

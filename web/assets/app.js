@@ -14,6 +14,7 @@ const state = {
   discoverRooms: [],
   currentTarget: null, // e.g. "#poker" or "@alice"
   messages: [],
+  approvals: [],
   theme: null, // set below
 };
 
@@ -25,6 +26,7 @@ const el = {
   paneTitle: document.getElementById('pane-title'),
   paneMeta: document.getElementById('pane-meta'),
   messages: document.getElementById('messages'),
+  approvals: document.getElementById('approvals'),
   composer: document.getElementById('composer'),
   composerInput: document.getElementById('composer-input'),
   composerSend: document.getElementById('composer-send'),
@@ -255,12 +257,83 @@ async function selectTarget(target) {
 async function refresh() {
   try {
     await fetchWhoami();
+    await fetchApprovals();
     if (state.currentTarget) await fetchMessages(state.currentTarget);
     renderSidebar();
     renderPaneHeader();
+    renderApprovals();
     renderMessages();
   } catch (e) {
     console.error('refresh failed', e);
+  }
+}
+
+
+// ── Approvals ────────────────────────────────────────────────────────────
+
+/**
+ * A supervised agent is STOPPED until one of these is answered. A denied
+ * child is told not to retry for the rest of its session, so an unanswered
+ * request is not a delay — it is an agent that has given up partway through.
+ */
+async function fetchApprovals() {
+  try {
+    const data = await api('/api/approvals');
+    state.approvals = data.approvals ?? [];
+  } catch (e) {
+    // A failed fetch must not blank the list and make a blocked agent look
+    // unblocked. Keep whatever was last known.
+    console.error('approvals fetch failed', e);
+  }
+}
+
+async function answerApproval(id, decision) {
+  try {
+    await api('/api/approvals/answer', {
+      method: 'POST',
+      body: JSON.stringify({ id, decision }),
+    });
+    toast(decision === 'approve' ? 'Approved' : 'Denied', decision === 'approve' ? 'info' : 'warn');
+  } catch (e) {
+    // 🛑 A 409 means another tab answered first. Say so rather than failing
+    // silently — the operator must not believe they granted something that
+    // was in fact already denied.
+    toast(`Not recorded: ${e.message}`, 'warn');
+  }
+
+  await refresh();
+}
+
+function renderApprovals() {
+  const root = el.approvals;
+  if (!root) return;
+
+  root.replaceChildren();
+
+  if (state.approvals.length === 0) {
+    root.hidden = true;
+    return;
+  }
+
+  root.hidden = false;
+
+  for (const a of state.approvals) {
+    const approve = h('button', { class: 'approval__btn approval__btn--yes', type: 'button' }, ['Approve']);
+    const deny = h('button', { class: 'approval__btn approval__btn--no', type: 'button' }, ['Deny']);
+
+    approve.addEventListener('click', () => answerApproval(a.id, 'approve'));
+    deny.addEventListener('click', () => answerApproval(a.id, 'deny'));
+
+    root.appendChild(
+      h('article', { class: 'approval' }, [
+        h('div', { class: 'approval__who' }, [`${a.agentHandle} is blocked`]),
+        // 🛑 VERBATIM, in a <code> block. The operator is approving this exact
+        // string and it is what gets allowlisted.
+        h('code', { class: 'approval__cmd' }, [a.requested]),
+        h('div', { class: 'approval__reason' }, [a.reason]),
+        h('div', { class: 'approval__actions' }, [approve, deny]),
+      ]),
+    );
   }
 }
 
@@ -430,8 +503,16 @@ async function boot() {
   }
   el.loading.hidden = true;
   el.app.hidden = false;
+
+  // 🛑 BOOT DOES NOT CALL refresh(), SO EVERY NEW VIEW MUST BE LISTED HERE
+  // TOO. The approvals card was added to refresh() only, which meant a
+  // blocked agent was invisible until some unrelated wake event arrived. No
+  // unit test could see it; opening the page did.
+  await fetchApprovals();
+
   renderSidebar();
   renderPaneHeader();
+  renderApprovals();
   renderMessages();
   connectSse();
 }

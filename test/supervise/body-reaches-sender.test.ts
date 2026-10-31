@@ -143,7 +143,14 @@ test('the scan sees EVERY notifyPeer call — a regex blind spot would hide drop
  * which is what claude1 rejected in the previous version of this test.
  */
 const KIND_EXEMPT = new Map<string, string>([
-  ['src/cli/web/server.ts:296', 'room-join system notice; the kind nearby belongs to the DM handler above'],
+  // ⚠️ THESE KEYS ARE LINE NUMBERS, so ANY insertion above a call site
+  // invalidates its entry and the failure reads as a new violation. Adding the
+  // approvals handler moved 296 to 299. Worth keying on something stabler, but
+  // that is a change to the guard and not to this list.
+  ['src/cli/web/server.ts:299', 'room-join system notice; the kind nearby belongs to the DM handler above'],
+  // An approval decision is not a chat `kind` — there is no chat/dispatch/alert
+  // to forward. The body carries the decision instead.
+  ['src/cli/web/server.ts:366', 'approval answer; no caller kind exists'],
   ['src/cli/ink/App.tsx:376', 'room-join system notice, no caller kind'],
   ['src/cli/ink/App.tsx:415', 'room-join system notice, no caller kind'],
   ['src/cli/ink/App.tsx:563', 'room-join system notice, no caller kind'],
