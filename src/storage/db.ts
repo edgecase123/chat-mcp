@@ -158,6 +158,22 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       CREATE INDEX ix_approvals_pending ON approvals(answered_at, id);
     `);
   },
+  (db) => {
+    // The allowlist entry that grants exactly the refused invocation.
+    //
+    // 🛑 A SECOND COLUMN, NOT A REUSE OF `requested`. The CLI's refusal names
+    // the command in PROSE — "rm in '/path/README.md'" — and
+    // `--allowedTools` does not speak that. Measured live: lee approved the
+    // prose, it went into the allowlist, granted nothing, and the child was
+    // denied again with a second card.
+    //
+    // ⚠️ A SEPARATE MIGRATION because editing an earlier one never reaches a
+    // database that already ran it. That mistake is migration 8's whole
+    // reason for existing.
+    db.exec(`
+      ALTER TABLE approvals ADD COLUMN grant_entry TEXT;
+    `);
+  },
 ];
 
 function tx(db: Db, fn: () => void): void {

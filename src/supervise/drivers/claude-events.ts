@@ -76,6 +76,39 @@ function contentText(content: unknown): string | null {
  * treating it as one would relay noise to lee and hold a turn that was never
  * blocked.
  */
+/**
+ * The last tool call seen, by id, so a denial can name the EXACT invocation.
+ *
+ * ⚠️ MODULE STATE, bounded. Only the ids still awaiting a result are kept,
+ * and each is deleted the moment it is paired — a long session must not grow
+ * a map of every call it ever made.
+ */
+const pendingCalls = new Map<string, { tool: string; invocation: string }>();
+
+/** Record a tool call so a later denial can be paired to it. */
+export function rememberClaudeToolUse(event: Record<string, unknown>): void {
+  if (event.type !== 'assistant') return;
+
+  const parts = (event.message as { content?: unknown } | undefined)?.content;
+  if (!Array.isArray(parts)) return;
+
+  for (const part of parts) {
+    if (!part || typeof part !== 'object') continue;
+    if ((part as { type?: unknown }).type !== 'tool_use') continue;
+
+    const { id, name, input } = part as { id?: string; name?: string; input?: unknown };
+    if (!id || !name) continue;
+
+    // Bash carries `command`; other tools are identified by name alone.
+    const command =
+      input && typeof input === 'object' && typeof (input as { command?: unknown }).command === 'string'
+        ? (input as { command: string }).command
+        : null;
+
+    pendingCalls.set(id, { tool: name, invocation: command ?? name });
+  }
+}
+
 export function denialFromClaude(event: Record<string, unknown> | null | undefined): Denial | null {
   if (!event || event.type !== 'user') return null;
 
@@ -91,7 +124,18 @@ export function denialFromClaude(event: Record<string, unknown> | null | undefin
     const text = contentText((part as { content?: unknown }).content);
     if (!text || !text.startsWith(DENIAL_PREFIX)) continue;
 
-    return { requested: REQUEST_CLAUSE.exec(text)?.[1] ?? null, raw: text };
+    const id = (part as { tool_use_id?: unknown }).tool_use_id;
+    const call = typeof id === 'string' ? pendingCalls.get(id) : undefined;
+
+    // Paired and consumed: the map holds only calls still awaiting a result.
+    if (typeof id === 'string') pendingCalls.delete(id);
+
+    return {
+      requested: REQUEST_CLAUSE.exec(text)?.[1] ?? null,
+      raw: text,
+      tool: call?.tool ?? null,
+      invocation: call?.invocation ?? null,
+    };
   }
 
   return null;

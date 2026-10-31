@@ -667,6 +667,15 @@ export interface Approval {
    * as a real request. A null request may be DENIED but never APPROVED.
    */
   readonly requested: string | null;
+  /**
+   * The allowlist entry that grants exactly this invocation.
+   *
+   * 🛑 NOT THE SAME STRING AS `requested`. That is prose for a human; this
+   * is what `--allowedTools` understands. NULL when the pairing failed, and
+   * an approval without one cannot widen anything.
+   */
+  readonly grant: string | null;
+
   /** The whole denial text, so the UI can quote the reason rather than retell it. */
   readonly reason: string;
   /** The child session to `--resume`, or null when it is not known. */
@@ -680,6 +689,7 @@ export interface ApprovalInput {
   agentHandle: string;
   supervisorHandle: string;
   requested: string | null;
+  grant?: string | null;
   reason: string;
   sessionId?: string | null;
 }
@@ -689,6 +699,7 @@ interface ApprovalRow {
   agent_handle: string;
   supervisor_handle: string;
   requested: string | null;
+  grant_entry: string | null;
   reason: string;
   session_id: string | null;
   created_at: number;
@@ -702,6 +713,7 @@ function toApproval(row: ApprovalRow): Approval {
     agentHandle: row.agent_handle,
     supervisorHandle: row.supervisor_handle,
     requested: row.requested,
+    grant: row.grant_entry,
     reason: row.reason,
     sessionId: row.session_id,
     createdAt: row.created_at,
@@ -713,13 +725,14 @@ function toApproval(row: ApprovalRow): Approval {
 export function insertApproval(db: Db, input: ApprovalInput): number {
   const result = db
     .prepare(
-      `INSERT INTO approvals (agent_handle, supervisor_handle, requested, reason, session_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO approvals (agent_handle, supervisor_handle, requested, grant_entry, reason, session_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.agentHandle,
       input.supervisorHandle,
       input.requested ?? null,
+      input.grant ?? null,
       input.reason,
       input.sessionId ?? null,
       Date.now(),
@@ -773,8 +786,8 @@ export function getApproval(db: Db, id: number): Approval | null {
 export class UnnameableApprovalError extends Error {
   constructor(readonly id: number) {
     super(
-      `approval ${id} cannot be approved: the CLI did not name a command, so there is ` +
-        'nothing to grant. It can be denied.',
+      `approval ${id} cannot be approved: no allowlist entry could be derived from the ` +
+        'refusal, so approving it would permit nothing. It can be denied.',
     );
     this.name = 'UnnameableApprovalError';
   }
@@ -787,7 +800,10 @@ export function answerApproval(db: Db, id: number, decision: 'approve' | 'deny')
   // "no such approval" would have been reported as "cannot be approved".
   const existing = decision === 'approve' ? getApproval(db, id) : null;
 
-  if (existing && existing.requested == null) {
+  // 🛑 THE TEST IS `grant`, NOT `requested`. A row can name a command in
+  // prose and still carry no allowlist entry — approving that permits
+  // nothing and the agent is denied again, which is the loop lee hit.
+  if (existing && existing.grant == null) {
     throw new UnnameableApprovalError(id);
   }
 

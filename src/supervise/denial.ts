@@ -20,4 +20,32 @@ export interface Denial {
 
   /** The whole message, so a relay can quote the reason instead of summarising. */
   readonly raw: string;
+
+  /**
+   * The tool that was refused, e.g. `Bash`.
+   *
+   * 🛑 FROM THE TOOL CALL, NOT THE PROSE. `requested` is what a human reads;
+   * this is what the allowlist needs. They are different languages, and
+   * feeding the prose into `--allowedTools` grants nothing — measured live:
+   * lee approved `rm in '/path/README.md'`, the child was denied again, and
+   * a second card appeared.
+   */
+  readonly tool: string | null;
+
+  /** The exact invocation, e.g. the full Bash command line. */
+  readonly invocation: string | null;
+}
+
+/**
+ * The allowlist entry that grants exactly this invocation and nothing else.
+ *
+ * 🛑 EXACT, NOT A PREFIX — lee's decision, 2026-10-31. `Bash(rm:*)` would
+ * grant every `rm` for the rest of the session, which is broader than the
+ * card said. Measured: an exact entry is honoured, with a control proving
+ * the allowlist is what decided.
+ */
+export function grantFor(denial: Denial): string | null {
+  if (!denial.tool || !denial.invocation) return null;
+
+  return `${denial.tool}(${denial.invocation})`;
 }

@@ -530,3 +530,15 @@ html, body {
   font-style: italic;
   opacity: 0.85;
 }
+
+/* What Approve actually permits. Separate from the CLI's prose above it,
+   because the two differ and conflating them is how an operator approves
+   one thing and grants another. */
+.approval__grant {
+  padding: 0.3rem 0.5rem;
+  border-radius: 3px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg, rgba(127, 127, 127, 0.1));
+  overflow-wrap: anywhere;
+}

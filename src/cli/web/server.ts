@@ -442,6 +442,7 @@ async function handleAnswerApproval(
         approvalId: id,
         decision,
         requested: request.requested ?? '',
+        grant: request.grant,
         sessionId: request.sessionId,
       },
     });

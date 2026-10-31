@@ -176,11 +176,38 @@ test('an approval answer bypasses formatPrompt', async () => {
  * ⚠️ EVERY LINK NEEDS A GUARD OR THE SET OF GUARDS IS THE LIE. Enumerated so
  * adding a fourth link without a guard is visible rather than invisible.
  */
+/**
+ * 🚨 THE DEAD-LINK SHAPE, FOR THE THIRD TIME. My pairing tests call
+ * `rememberClaudeToolUse` DIRECTLY, so deleting the driver's call to it left
+ * all 15 of them green while no real denial could ever carry an invocation.
+ * Caught by a negative control, not by the tests.
+ */
+test('the DRIVER feeds every event to the recorder, before checking for a denial', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(
+    new URL('../../src/supervise/drivers/claude.ts', import.meta.url),
+    'utf8',
+  );
+
+  const router = src.slice(src.indexOf('export function routeClaudeEvent'));
+
+  assert.ok(router.includes('rememberClaudeToolUse(event)'), 'the recorder is never called');
+  assert.ok(
+    router.indexOf('rememberClaudeToolUse(event)') < router.indexOf('denialFromClaude(event)'),
+    'the recorder runs AFTER the denial check, so the pairing is always empty',
+  );
+});
+
 test('every link in the approval chain has a guard in this file', async () => {
   const { readFileSync } = await import('node:fs');
   const self = readFileSync(new URL('./producer.test.ts', import.meta.url), 'utf8');
 
-  for (const link of ['denialFromClaude(event)', 'dao.insertApproval(', 'driver.redispatchPrompt(']) {
+  for (const link of [
+    'rememberClaudeToolUse(event)',
+    'denialFromClaude(event)',
+    'dao.insertApproval(',
+    'driver.redispatchPrompt(',
+  ]) {
     assert.ok(self.includes(link), `no guard asserts the call to ${link}`);
   }
 });
@@ -242,4 +269,110 @@ test('the real git-push denial parses to NULL, not to a placeholder', async () =
 
   assert.ok(denial, 'the denial itself is not recognised');
   assert.equal(denial?.requested, null, 'a prose reason was mistaken for a command');
+});
+
+/**
+ * 🚨 THE PAIRING THAT MAKES A GRANT POSSIBLE, measured from a real run.
+ *
+ * The refusal names the command in PROSE. The EXACT invocation is in the
+ * `tool_use` event that preceded it, matched by `tool_use_id`. Without the
+ * pairing, the prose goes into `--allowedTools`, grants nothing, and the
+ * agent is denied again — which is what happened on lee's machine.
+ */
+test('a denial is paired to the exact invocation that caused it', async () => {
+  const { denialFromClaude, rememberClaudeToolUse } = await import(
+    '../../src/supervise/drivers/claude-events.js'
+  );
+  const { grantFor } = await import('../../src/supervise/denial.js');
+
+  rememberClaudeToolUse({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'rm -f a.txt' } }],
+    },
+  });
+
+  const denial = denialFromClaude({
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'toolu_1',
+          content:
+            "Permission for this tool use was denied. What required approval: rm in '/x/a.txt' was blocked.",
+        },
+      ],
+    },
+  });
+
+  assert.equal(denial?.requested, "rm in '/x/a.txt'", 'the prose is for the human');
+  assert.equal(denial?.invocation, 'rm -f a.txt', 'the exact command is for the allowlist');
+  assert.equal(grantFor(denial!), 'Bash(rm -f a.txt)');
+});
+
+/**
+ * 🛑 AN UNPAIRED DENIAL YIELDS NO GRANT, never a guess. Approving a guess
+ * permits something the child never asked for.
+ */
+test('a denial with no matching tool call yields no grant', async () => {
+  const { denialFromClaude } = await import('../../src/supervise/drivers/claude-events.js');
+  const { grantFor } = await import('../../src/supervise/denial.js');
+
+  const denial = denialFromClaude({
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'toolu_never_seen',
+          content: 'Permission for this tool use was denied. What required approval: x was blocked.',
+        },
+      ],
+    },
+  });
+
+  assert.ok(denial, 'the denial itself must still be recognised');
+  assert.equal(denial?.invocation, null);
+  assert.equal(grantFor(denial!), null);
+});
+
+/**
+ * ⚠️ THE MAP MUST NOT GROW FOREVER. A long session makes thousands of tool
+ * calls; only those still awaiting a result may be held.
+ */
+test('a paired call is consumed, so the pending map does not grow', async () => {
+  const { denialFromClaude, rememberClaudeToolUse } = await import(
+    '../../src/supervise/drivers/claude-events.js'
+  );
+
+  const use = {
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'toolu_2', name: 'Bash', input: { command: 'rm -f b.txt' } }],
+    },
+  };
+  const deny = {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'toolu_2',
+          content: 'Permission for this tool use was denied. What required approval: y was blocked.',
+        },
+      ],
+    },
+  };
+
+  rememberClaudeToolUse(use);
+  assert.equal(denialFromClaude(deny)?.invocation, 'rm -f b.txt');
+
+  // Second time: the entry is gone, so no stale invocation is attached.
+  assert.equal(denialFromClaude(deny)?.invocation, null, 'the pairing was not consumed');
 });

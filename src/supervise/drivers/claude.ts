@@ -5,7 +5,7 @@ import type { AgentChild, SpawnOptions } from '../child.js';
 import { createLineParser } from '../child.js';
 import { type RateLimitSnapshot } from '../rate-limit.js';
 import { parseClaudeRateLimit } from './claude-events.js';
-import { denialFromClaude } from './claude-events.js';
+import { denialFromClaude, rememberClaudeToolUse } from './claude-events.js';
 import type { Denial } from '../denial.js';
 import { ensureMcpConfigDir, mcpConfigPathFor } from '../../util/paths.js';
 
@@ -232,6 +232,10 @@ export function routeClaudeEvent(
   // imported and never called, `insertApproval` had no caller, and the whole
   // relay started one step after the break — which is exactly how the live
   // test passed while the feature did not exist. Found by claude1.
+  // 🛑 BEFORE the denial check. The call arrives in an earlier event than
+  // its refusal, so the recorder must see every assistant event first.
+  rememberClaudeToolUse(event);
+
   const denial = denialFromClaude(event);
   if (denial && on.denial) on.denial(denial);
 

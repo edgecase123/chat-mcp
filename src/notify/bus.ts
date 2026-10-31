@@ -35,6 +35,7 @@ export interface NotifyEnvelope {
     approvalId: number;
     decision: 'approve' | 'deny';
     requested: string;
+    grant: string | null;
     sessionId: string | null;
   };
   /**

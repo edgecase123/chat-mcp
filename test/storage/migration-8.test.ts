@@ -27,7 +27,8 @@ function existingDb(): DatabaseSync {
   dao.insertApproval(db, {
     agentHandle: 'claude2-agent',
     supervisorHandle: 'claude2',
-    requested: 'Bash(rm:*)',
+    requested: "rm in '/tmp/old.txt'",
+    grant: 'Bash(rm -f /tmp/old.txt)',
     reason: 'historic row',
     sessionId: 'old',
   });
@@ -43,6 +44,7 @@ test('an UNNAMED request can be stored, which is what the constraint blocked', (
       agentHandle: 'claude2-agent',
       supervisorHandle: 'claude2',
       requested: null,
+      grant: null,
       reason: 'a git-push refusal names no command',
       sessionId: null,
     }),
@@ -54,7 +56,7 @@ test('rows written before the rebuild survive it', () => {
   const historic = dao.pendingApprovals(db).find((a) => a.reason === 'historic row');
 
   assert.ok(historic, 'the rebuild dropped existing rows');
-  assert.equal(historic?.requested, 'Bash(rm:*)');
+  assert.equal(historic?.requested, "rm in '/tmp/old.txt'");
 });
 
 test('the rebuilt table still refuses two answers', () => {
