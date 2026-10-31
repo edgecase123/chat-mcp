@@ -40,7 +40,21 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
     // 🛑 `plan` DENIES every tool, measured on chat-mcp#33 — a child in plan
     // mode wakes, understands it is on the bus, tries to answer and is
     // refused. So a working child needs a mode that permits an allowlisted
-    // tool, and `acceptEdits` is the one proven to.
+    // tool.
+    //
+    // 🚨 `acceptEdits` WAS THAT MODE AND IT DID NOT ENFORCE THE ALLOWLIST.
+    // Measured 2026-10-31, cwd and allowlist held constant, only the mode
+    // changing:
+    //
+    //   acceptEdits + allowlist WITHOUT Bash  -> the rm RAN
+    //   manual      + allowlist WITHOUT Bash  -> the rm was DENIED
+    //
+    // It auto-approves inside the allowed directories and never consults
+    // the list, so lee's narrow allowlist was decorative and the approval
+    // path could never fire — nothing was ever blocked.
+    //
+    // `manual` enforces it, and an allowlisted MCP tool still works:
+    // measured, a `mcp__chat__send` landed on the bus under both modes.
     //
     // ⚠️ AN EARLIER VERSION OF THIS COMMENT SAID acceptEdits "widens nothing,
     // because `--tools ''` means there is no Edit tool to accept". THAT
@@ -50,7 +64,7 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
     // Found by claude1 reviewing PR 34.
     //
     // An explicit --permission-mode always wins over both defaults.
-    opts.permissionMode ?? (opts.grant ? 'acceptEdits' : 'plan'),
+    opts.permissionMode ?? (opts.grant ? 'manual' : 'plan'),
     '--permission-prompts',
     opts.permissionPrompts ?? 'none',
   ];

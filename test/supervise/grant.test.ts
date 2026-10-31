@@ -215,10 +215,31 @@ test('the allowlist the child receives is the one it was given, verbatim', () =>
  * measured on chat-mcp#33 — the child woke, understood it was on the bus,
  * tried to answer and was refused. The flags are useless without this.
  */
-test('a child with a grant does not default to the mode that denies everything', () => {
+/**
+ * 🚨 "NOT plan" WAS TOO WEAK, AND acceptEdits PASSED IT WHILE BREAKING THE
+ * ALLOWLIST. Measured 2026-10-31, cwd and allowlist held constant:
+ *
+ *   acceptEdits + allowlist WITHOUT Bash  -> the rm RAN
+ *   manual      + allowlist WITHOUT Bash  -> the rm was DENIED
+ *
+ * `acceptEdits` auto-approves inside the allowed directories and never
+ * consults the list, so lee's narrow allowlist was decorative and nothing
+ * was ever blocked — which is why the approval path could not fire. The mode
+ * is NAMED here so a revert is visible rather than silent.
+ */
+test('a child with a grant defaults to manual, the mode that enforces the allowlist', () => {
   const args = claudeArgs({ grant });
 
-  assert.notEqual(args[args.indexOf('--permission-mode') + 1], 'plan');
+  assert.equal(args[args.indexOf('--permission-mode') + 1], 'manual');
+});
+
+test('an allowlisted MCP tool is still permitted under that mode', () => {
+  // Measured live: `mcp__chat__send` landed on the bus under BOTH modes, so
+  // manual does not mute the child. Recorded as the reason the switch is safe.
+  assert.ok(
+    DEFAULT_ALLOWED.some((t) => t.startsWith('mcp__chat__')),
+    'the child has no bus tool at all, so the mode choice is moot',
+  );
 });
 
 test('a child with no grant still defaults to plan', () => {
