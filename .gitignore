@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.log
+measurements/
 .DS_Store
 .env
 .idea/

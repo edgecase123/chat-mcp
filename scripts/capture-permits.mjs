@@ -25,7 +25,8 @@
 import { mkdtempSync, rmSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { startSupervisor } from '../src/supervise/index.ts';
 import { deliverToSupervisor } from '../src/supervise/socket.ts';
 import { answerAndNotify } from '../src/supervise/answer.ts';
@@ -42,6 +43,11 @@ if (!LIST_ONLY && !process.env.CHAT_MCP_LIVE) {
   console.error('Set CHAT_MCP_LIVE=1 to opt in.');
   process.exit(2);
 }
+
+// ⚠️ RESOLVED FROM THIS MODULE, NOT THE CWD. `would-refuse.ts` carries the
+// same note for the same reason: a relative path only works when the run
+// happens to start at the package root. Both writes below were relative.
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const BASE_ALLOWLIST = ['Read', 'Glob', 'Grep', 'mcp__chat__send', 'mcp__chat__room_send'];
 const SETTLE_MS = Number(process.env.PERMIT_SETTLE_SECONDS ?? 90) * 1000;
@@ -222,7 +228,10 @@ for (const index of PROBE_LABELS.keys()) {
 
     const answered = new Set();
     const deadline = Date.now() + SETTLE_MS;
-    let grantedAllowlist = null;
+    // 🛑 ACCUMULATED, NOT REPLACED. This was `[...BASE_ALLOWLIST, row.grant]`,
+    // so a probe answering two approvals kept the second grant and silently
+    // dropped the first. The set is what a record is keyed on.
+    const grantedEntries = [];
 
     while (Date.now() < deadline && !probe.moved()) {
       await sleep(2000);
@@ -235,7 +244,9 @@ for (const index of PROBE_LABELS.keys()) {
 
         console.log(`   approval ${row.id}: ${outcome.kind}  grant=${row.grant ?? '(none)'}`);
 
-        if (outcome.kind === 'answered' && row.grant) grantedAllowlist = [...BASE_ALLOWLIST, row.grant];
+        if (outcome.kind === 'answered' && row.grant && !grantedEntries.includes(row.grant)) {
+          grantedEntries.push(row.grant);
+        }
       }
     }
 
@@ -251,19 +262,27 @@ for (const index of PROBE_LABELS.keys()) {
       probe: probe.label,
       attempted: probe.command,
       approvals: [...answered],
-      grant: grantedAllowlist?.[grantedAllowlist.length - 1] ?? null,
+      // 🛑 THE FULL SET, NOT THE LAST ENTRY. `classify()`'s refused branch
+      // keys on `sameSet(r.allowlist, grants)`, so the one field a
+      // `refused_under_grant` record would depend on was the one this threw
+      // away. claude1 on this PR.
+      allowlist: grantedEntries.length > 0 ? [...BASE_ALLOWLIST, ...grantedEntries] : null,
+      grants: grantedEntries,
       targetMoved: worked,
       note,
       at: new Date().toISOString(),
     });
 
-    if (worked && grantedAllowlist) {
+    if (worked && grantedEntries.length > 0) {
       captured.push({
         outcome: 'permitted',
         probe: probe.label,
         approvalId: [...answered].pop() ?? null,
         attempted: probe.command,
-        allowlistEntry: grantedAllowlist[grantedAllowlist.length - 1],
+        // ⚠️ STILL A SINGLE ENTRY. `classify()`'s permitted branch asks
+        // `grants.includes(normalise(r.allowlistEntry))`, so widening this to
+        // a set would break the half that already works.
+        allowlistEntry: grantedEntries[grantedEntries.length - 1],
         evidence:
           `${new Date().toISOString().slice(0, 10)}: ${probe.label} — the target moved after ` +
           `the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.`,
@@ -288,12 +307,12 @@ for (const c of captured) console.log(`  ${c.allowlistEntry}`);
 // 🛑 WRITTEN BESIDE THE FIXTURE, NOT INTO IT. Merging is `rebuild-corpus.mjs`
 // work, and a harness that edits the fixture directly is how an inline
 // rebuild silently discarded a record earlier today.
-writeFileSync('test/fixtures/captured-permits.pending.json', `${JSON.stringify(captured, null, 2)}\n`);
+writeFileSync(join(ROOT, 'test', 'fixtures', 'captured-permits.pending.json'), `${JSON.stringify(captured, null, 2)}\n`);
 console.log('\nwrote test/fixtures/captured-permits.pending.json');
 
-mkdirSync('measurements', { recursive: true });
+mkdirSync(join(ROOT, 'measurements'), { recursive: true });
 
-const log = `measurements/permit-run-${process.pid}.json`;
+const log = join(ROOT, 'measurements', `permit-run-${process.pid}.json`);
 
 writeFileSync(log, `${JSON.stringify(observations, null, 2)}\n`);
 console.log(`wrote ${log} — ${observations.length} observation(s), permits and non-permits alike`);
