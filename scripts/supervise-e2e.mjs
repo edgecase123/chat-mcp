@@ -23,7 +23,7 @@
  *   6  the command finally runs                     <- the grant REACHED it
  */
 
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -74,8 +74,18 @@ const root = mkdtempSync(join(tmpdir(), 'chat-mcp-e2e-'));
 const workdir = join(root, 'work');
 const remote = join(root, 'remote.git');
 
-/** What the agent must create. Its existence is the verdict for `nameable`. */
-const created = join(workdir, 'created-by-agent.txt');
+/**
+ * The sentinel the agent must publish with `set_status`.
+ *
+ * 🛑 NOT A FILE. `rm` and `touch` BOTH proved that Claude Code refuses a
+ * filesystem mutation by a rule no `--allowedTools` entry overrides — and
+ * both refusals named a directory the target already sat inside. Runs 8
+ * and 11.
+ *
+ * `set_status` is denied for the ordinary reason, that this allowlist does
+ * not name it, and its effect lands in a row anyone can read.
+ */
+const SENTINEL = `e2e-ok-${process.pid}`;
 
 const git = (args, cwd) => execFileSync('git', args, { cwd, stdio: 'pipe' });
 
@@ -100,6 +110,18 @@ const pushed = () => {
 };
 
 const db = openDb();
+
+/**
+ * Did the status land? The agents row is the only honest answer.
+ *
+ * Either field counts: the point is that the tool CALL reached the server,
+ * not which argument the agent chose to carry the sentinel.
+ */
+const published = () => {
+  const agent = dao.getAgent(db, `${HANDLE}-agent`);
+
+  return `${agent?.focus ?? ''} ${agent?.status ?? ''}`.includes(SENTINEL);
+};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function until(pred, timeoutMs, label) {
@@ -147,7 +169,7 @@ try {
     ts: Date.now(),
     body:
       MODE === 'nameable'
-        ? `Please create an empty file at ${created} using the shell, with touch. ` +
+        ? `Please call set_status with focus set to exactly "${SENTINEL}". ` +
           `If you are blocked, say so and stop — do not work around it.`
         : `Please run \`git push -u origin main\` in ${workdir}. ` +
           `If you are blocked, say so and stop — do not work around it.`,
@@ -195,7 +217,7 @@ try {
 
   // The check differs by mode, and the TARGET is the only honest answer in
   // both: asking the agent whether it succeeded asks the thing under test.
-  const succeeded = MODE === 'nameable' ? () => existsSync(created) : pushed;
+  const succeeded = MODE === 'nameable' ? published : pushed;
 
   // 🛑 `grant`, NOT `requested`. `answerApproval` throws only when there is
   // nothing to allowlist, and run 8 approved a card whose prose was null.
@@ -207,7 +229,7 @@ try {
     // ── 4. The grant must REACH the child, which is the bug that shipped ──
     const done = await until(succeeded, 180_000, 'the approved command to run');
 
-    record('the approved command actually RAN', done, done ? 'target exists' : 'target still missing');
+    record('the approved command actually RAN', done, done ? 'the target moved' : 'the target never moved');
   }
 } finally {
   await sup.stop();
