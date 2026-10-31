@@ -57,6 +57,21 @@ function probesFor(root, work, handle) {
 
   return [
     {
+      /**
+       * 🛑 THE PROBE THAT CHECKS A CLAIM I MADE AND BUILT ON. After run 8 I
+       * concluded `rm` cannot be granted by any allowlist entry, and the e2e
+       * task was changed away from the filesystem because of it. Run 8
+       * predates BOTH the path-spelling fix (6cca826) and the prose fix
+       * (468f5dc), so the grant it was refused under was malformed.
+       *
+       * `touch` was measured as grantable here, which already contradicts
+       * the general form of that claim.
+       */
+      label: 'remove a file inside the allowed directory',
+      command: `rm ${join(work, 'README.md')}`,
+      moved: () => !existsSync(join(work, 'README.md')),
+    },
+    {
       label: 'touch a file inside the allowed directory',
       command: `touch ${made}`,
       moved: () => existsSync(made),
@@ -85,8 +100,9 @@ function probesFor(root, work, handle) {
 }
 
 const captured = [];
+const PROBE_LABELS = probesFor('', '', 'x').map((p) => p.label);
 
-for (const index of [0, 1, 2]) {
+for (const index of [0, 1, 2, 3]) {
   const handle = `perm-${process.pid}-${index}`;
   const root = mkdtempSync(join(tmpdir(), 'chat-mcp-e2e-'));
   const work = join(root, 'work');
@@ -148,6 +164,7 @@ for (const index of [0, 1, 2]) {
     if (worked && grantedAllowlist) {
       captured.push({
         outcome: 'permitted',
+        probe: probe.label,
         approvalId: [...answered].pop() ?? null,
         attempted: probe.command,
         allowlistEntry: grantedAllowlist[grantedAllowlist.length - 1],
@@ -162,7 +179,13 @@ for (const index of [0, 1, 2]) {
   }
 }
 
-console.log(`\n${captured.length} permit(s) captured, 0 clicks needed.`);
+// 🛑 ONE RESULT PER PROBE, NAMED. `captured.length > 0` exits 0 on 1 of 4,
+// which certifies a run that mostly failed. claude1 on PR 43.
+const missing = PROBE_LABELS.filter((l) => !captured.some((c) => c.probe === l));
+
+console.log(`\n${captured.length} of ${PROBE_LABELS.length} probe(s) produced a permit, 0 clicks needed.`);
+
+for (const m of missing) console.log(`  NO PERMIT: ${m}`);
 
 for (const c of captured) console.log(`  ${c.allowlistEntry}`);
 
@@ -172,4 +195,4 @@ for (const c of captured) console.log(`  ${c.allowlistEntry}`);
 writeFileSync('test/fixtures/captured-permits.pending.json', `${JSON.stringify(captured, null, 2)}\n`);
 console.log('\nwrote test/fixtures/captured-permits.pending.json');
 
-process.exit(captured.length > 0 ? 0 : 1);
+process.exit(missing.length === 0 ? 0 : 1);
