@@ -25,23 +25,45 @@
 import { mkdtempSync, rmSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { startSupervisor } from '../src/supervise/index.ts';
 import { deliverToSupervisor } from '../src/supervise/socket.ts';
 import { answerAndNotify } from '../src/supervise/answer.ts';
 import { openDb } from '../src/storage/db.ts';
 import * as dao from '../src/storage/dao.ts';
 
-if (!process.env.CHAT_MCP_LIVE) {
+// 🛑 `--list` IS THE ONLY FREE WAY TO SEE WHAT THIS RUN WOULD MEASURE.
+// The loop derives its indices from the probe list, and nothing else can show
+// that the two agree without spawning an agent and spending money.
+const LIST_ONLY = process.argv.includes('--list');
+
+if (!LIST_ONLY && !process.env.CHAT_MCP_LIVE) {
   console.error('Refusing to run: this spawns a real agent CLI and spends money.');
   console.error('Set CHAT_MCP_LIVE=1 to opt in.');
   process.exit(2);
 }
 
+// ⚠️ RESOLVED FROM THIS MODULE, NOT THE CWD. `would-refuse.ts` carries the
+// same note for the same reason: a relative path only works when the run
+// happens to start at the package root. Both writes below were relative.
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
 const BASE_ALLOWLIST = ['Read', 'Glob', 'Grep', 'mcp__chat__send', 'mcp__chat__room_send'];
 const SETTLE_MS = Number(process.env.PERMIT_SETTLE_SECONDS ?? 90) * 1000;
 const db = openDb();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 🛑 ONE READER FOR BOTH TAG PROBES. Copying the seven lines is the
+// one-fix-two-sites shape that landed three times in one day: a later fix to
+// the swallowed-error branch would reach one probe and not the other.
+function hasTag(work, name) {
+  try {
+    return execFileSync('git', ['-C', work, 'tag', '-l', name]).toString().includes(name);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Every probe needs an OBSERVABLE target.
@@ -53,7 +75,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function probesFor(root, work, handle) {
   const made = join(work, 'made.txt');
   const tag = `permit-${process.pid}`;
+  const cdTag = `permit-cd-${process.pid}`;
   const sentinel = `permit-ok-${process.pid}`;
+  const firstHalf = join(work, 'compound-a.txt');
+  const secondHalf = join(work, 'compound-b.txt');
 
   return [
     {
@@ -79,13 +104,7 @@ function probesFor(root, work, handle) {
     {
       label: 'create a git tag in the scratch repo',
       command: `git -C ${work} tag ${tag}`,
-      moved: () => {
-        try {
-          return execFileSync('git', ['-C', work, 'tag', '-l', tag]).toString().includes(tag);
-        } catch {
-          return false;
-        }
-      },
+      moved: () => hasTag(work, tag),
     },
     {
       label: 'publish a status over MCP',
@@ -96,13 +115,79 @@ function probesFor(root, work, handle) {
         return `${a?.focus ?? ''} ${a?.status ?? ''}`.includes(sentinel);
       },
     },
+    {
+      /**
+       * 🛑 THE `cd && git` GATE CLASS, WHICH NOTHING HAS EVER REACHED.
+       * Approval 43 granted `git -C <work> tag <name>` and the tag resolved,
+       * so the git half is measured. It carried no `cd`, so it says nothing
+       * about the guard that fires when a command changes directory first.
+       *
+       * Same observable target as probe 3 ON PURPOSE. The tag either resolves
+       * or it does not, and `cd` is then the only variable between them.
+       */
+      label: 'change directory and then create a git tag',
+      command: `cd ${work} && git tag ${cdTag}`,
+      moved: () => hasTag(work, cdTag),
+    },
+    {
+      /**
+       * 🛑 THE MULTIPLE-OPERATIONS GATE CLASS. The corpus holds a
+       * compound REFUSAL and no compound permit, so `c12c81d` is recorded as
+       * a defect and the shape is unmeasured under a well-formed grant.
+       *
+       * Both halves are `touch`, which approval 42 already measured as
+       * grantable on its own. The separator is therefore the only variable.
+       */
+      label: 'two operations in one command, separated by a semicolon',
+      command: `touch ${firstHalf}; touch ${secondHalf}`,
+      moved: () => existsSync(firstHalf) && existsSync(secondHalf),
+      /**
+       * ⚠️ A HALF-RUN COMPOUND IS NOT A REFUSED COMPOUND, and `moved: false`
+       * alone cannot tell them apart. Six of six defects were "the string we
+       * sent was wrong", so the run must say which halves landed.
+       */
+      note: () =>
+        `halves present: a=${existsSync(firstHalf)} b=${existsSync(secondHalf)}`,
+    },
   ];
 }
 
 const captured = [];
+
+/**
+ * 🛑 EVERY PROBE'S OUTCOME, INCLUDING THE ONES THAT BOUGHT NO PERMIT.
+ *
+ * `captured` holds permits only, so an APPROVED grant whose target did not
+ * move used to exist in console scrollback and nowhere else. That is the
+ * measurement #42 is for — a refusal that survived a well-formed grant — and
+ * it was the row the harness discarded. claude1 found it on this PR.
+ *
+ * 🛑 NOT A CORPUS RECORD, AND NOT UNDER `test/fixtures/`. Writing one would
+ * need a third outcome alongside `refused` and `permitted`, and filing it as
+ * `refused` would make `classify()` answer `refused` for a command under a
+ * grant. That shape is lee's call, so this file only preserves the evidence
+ * until the ruling lands. Nothing reads it.
+ */
+const observations = [];
+
+// 🛑 A PERMIT THE HARNESS REFUSED TO CLAIM IS NOT A FAILED PROBE, and the
+// summary has to say which it was. Both exit 1, and only one of them means
+// the command did not work.
+const withheld = [];
+
 const PROBE_LABELS = probesFor('', '', 'x').map((p) => p.label);
 
-for (const index of [0, 1, 2, 3]) {
+if (LIST_ONLY) {
+  for (const [i, label] of PROBE_LABELS.entries()) console.log(`${i + 1}. ${label}`);
+
+  console.log(`\n${PROBE_LABELS.length} probe(s), and the run iterates every one of them.`);
+  process.exit(0);
+}
+
+// 🛑 DERIVED, NEVER A LITERAL. A hardcoded [0, 1, 2, 3] leaves a fifth probe
+// unrun, and the run then prints `NO PERMIT` for it. That reads as a measured
+// refusal when nothing was attempted at all.
+for (const index of PROBE_LABELS.keys()) {
   const handle = `perm-${process.pid}-${index}`;
   const root = mkdtempSync(join(tmpdir(), 'chat-mcp-e2e-'));
   const work = join(root, 'work');
@@ -114,7 +199,16 @@ for (const index of [0, 1, 2, 3]) {
   execFileSync('git', ['-C', work, 'add', '-A']);
   execFileSync('git', ['-C', work, 'commit', '-q', '-m', 'initial']);
 
-  const probe = probesFor(root, work, handle)[index];
+  const probes = probesFor(root, work, handle);
+
+  // ⚠️ TWO CALLS, ONE ASSUMED LENGTH. `PROBE_LABELS` is built from a
+  // throwaway call with dummy arguments. Nothing makes the roster depend on
+  // those arguments today, and nothing stops it either. claude1 on this PR.
+  if (probes.length !== PROBE_LABELS.length) {
+    throw new Error(`roster is ${PROBE_LABELS.length} probe(s), this call built ${probes.length}`);
+  }
+
+  const probe = probes[index];
 
   console.log(`\n── probe ${index + 1}: ${probe.label}`);
   console.log(`   ${probe.command}`);
@@ -140,7 +234,10 @@ for (const index of [0, 1, 2, 3]) {
 
     const answered = new Set();
     const deadline = Date.now() + SETTLE_MS;
-    let grantedAllowlist = null;
+    // 🛑 ACCUMULATED, NOT REPLACED. This was `[...BASE_ALLOWLIST, row.grant]`,
+    // so a probe answering two approvals kept the second grant and silently
+    // dropped the first. The set is what a record is keyed on.
+    const grantedEntries = [];
 
     while (Date.now() < deadline && !probe.moved()) {
       await sleep(2000);
@@ -153,7 +250,9 @@ for (const index of [0, 1, 2, 3]) {
 
         console.log(`   approval ${row.id}: ${outcome.kind}  grant=${row.grant ?? '(none)'}`);
 
-        if (outcome.kind === 'answered' && row.grant) grantedAllowlist = [...BASE_ALLOWLIST, row.grant];
+        if (outcome.kind === 'answered' && row.grant && !grantedEntries.includes(row.grant)) {
+          grantedEntries.push(row.grant);
+        }
       }
     }
 
@@ -161,13 +260,59 @@ for (const index of [0, 1, 2, 3]) {
 
     console.log(`   target moved: ${worked}`);
 
-    if (worked && grantedAllowlist) {
+    const note = probe.note ? probe.note() : null;
+
+    if (note) console.log(`   ${note}`);
+
+    observations.push({
+      probe: probe.label,
+      attempted: probe.command,
+      approvals: [...answered],
+      // 🛑 THE FULL SET, NOT THE LAST ENTRY. `classify()`'s refused branch
+      // keys on `sameSet(r.allowlist, grants)`, so the one field a
+      // `refused_under_grant` record would depend on was the one this threw
+      // away. claude1 on this PR.
+      allowlist: grantedEntries.length > 0 ? [...BASE_ALLOWLIST, ...grantedEntries] : null,
+      grants: grantedEntries,
+      targetMoved: worked,
+      note,
+      at: new Date().toISOString(),
+    });
+
+    /**
+     * 🛑 EXACTLY ONE GRANT, OR NO PERMIT RECORD.
+     *
+     * `classify()`'s permitted branch is a CONTAINMENT test:
+     * `grants.includes(normalise(r.allowlistEntry))`. So a record naming one
+     * entry asserts that THAT entry is sufficient. If the target only moved
+     * because two grants were present, that over-claims in the permissive
+     * direction, and a later query holding the second entry alone would be
+     * told `permitted`.
+     *
+     * A compound command is the shape that draws a second denial, so this is
+     * live for probes 5 and 6 rather than theoretical. `c12c81d` is in the
+     * corpus because a reworded compound retry was blocked again.
+     *
+     * The multi-grant case goes to the observation file with its full
+     * `grants` array instead. Widening the field is NOT the fix: the
+     * permitted branch would have to require every entry, which is a
+     * `classify()` change and so part of lee's ruling. claude1 on this PR.
+     */
+    if (worked && grantedEntries.length > 1) {
+      withheld.push({ probe: probe.label, grants: grantedEntries.length });
+      console.log(`   PERMIT WITHHELD: the target moved under ${grantedEntries.length} grants, and a record names one`);
+    }
+
+    if (worked && grantedEntries.length === 1) {
       captured.push({
         outcome: 'permitted',
         probe: probe.label,
         approvalId: [...answered].pop() ?? null,
         attempted: probe.command,
-        allowlistEntry: grantedAllowlist[grantedAllowlist.length - 1],
+        // ⚠️ STILL A SINGLE ENTRY. `classify()`'s permitted branch asks
+        // `grants.includes(normalise(r.allowlistEntry))`, so widening this to
+        // a set would break the half that already works.
+        allowlistEntry: grantedEntries[0],
         evidence:
           `${new Date().toISOString().slice(0, 10)}: ${probe.label} — the target moved after ` +
           `the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.`,
@@ -185,14 +330,26 @@ const missing = PROBE_LABELS.filter((l) => !captured.some((c) => c.probe === l))
 
 console.log(`\n${captured.length} of ${PROBE_LABELS.length} probe(s) produced a permit, 0 clicks needed.`);
 
-for (const m of missing) console.log(`  NO PERMIT: ${m}`);
+for (const m of missing) {
+  const w = withheld.find((x) => x.probe === m);
+
+  if (w) console.log(`  PERMIT WITHHELD: ${m} — worked under ${w.grants} grants, see the observation log`);
+  else console.log(`  NO PERMIT: ${m}`);
+}
 
 for (const c of captured) console.log(`  ${c.allowlistEntry}`);
 
 // 🛑 WRITTEN BESIDE THE FIXTURE, NOT INTO IT. Merging is `rebuild-corpus.mjs`
 // work, and a harness that edits the fixture directly is how an inline
 // rebuild silently discarded a record earlier today.
-writeFileSync('test/fixtures/captured-permits.pending.json', `${JSON.stringify(captured, null, 2)}\n`);
+writeFileSync(join(ROOT, 'test', 'fixtures', 'captured-permits.pending.json'), `${JSON.stringify(captured, null, 2)}\n`);
 console.log('\nwrote test/fixtures/captured-permits.pending.json');
+
+mkdirSync(join(ROOT, 'measurements'), { recursive: true });
+
+const log = join(ROOT, 'measurements', `permit-run-${process.pid}.json`);
+
+writeFileSync(log, `${JSON.stringify(observations, null, 2)}\n`);
+console.log(`wrote ${log} — ${observations.length} observation(s), permits and non-permits alike`);
 
 process.exit(missing.length === 0 ? 0 : 1);
