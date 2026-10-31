@@ -41,18 +41,23 @@ if (!process.env.CHAT_MCP_LIVE) {
 const HANDLE = `e2e-${process.pid}`;
 
 /**
- * 🛑 THE TASK MUST BE DENIABLE AND THEN GRANTABLE. `rm` is the first of
- * those and not the second.
+ * 🛑 THE TASK MUST BE DENIABLE AND THEN GRANTABLE.
  *
- * 🚨 `rm` CANNOT BE GRANTED BY THE ALLOWLIST AT ALL — measured on run 8.
- * Approval 14 granted `Bash(rm <path>)`; approval 16 asked for that exact
- * string, bare, and was refused anyway with *"Claude Code may only remove
- * files from the allowed working directories"* — naming a directory the
- * path was already inside. A separate rule governs `rm` and no
- * `--allowedTools` entry reaches it, so the old task looped forever.
+ * 🚨 CORRECTED 2026-10-31. THIS COMMENT CLAIMED `rm` COULD NEVER BE GRANTED,
+ * AND THAT WAS WRONG. `capture-permits.mjs` approval 41 granted
+ * `Bash(rm <path>)` and the file was gone. `touch` and `git tag` were
+ * measured grantable in the same run, 4 of 4.
  *
- * `touch` is deniable for the ordinary reason — Bash exists as a built-in
- * but is not allowlisted here — and carries no rule of its own.
+ * The run-8 evidence was real and the conclusion was not: that run predates
+ * both the path-spelling fix (6cca826) and the prose fix (468f5dc), so the
+ * grant it was refused under was malformed. A refusal caused by our own
+ * broken grant was read as a property of the CLI.
+ *
+ * ⚠️ The refusal even named a directory the path was already inside, which
+ * should have been the tell rather than the quote.
+ *
+ * `set_status` stays the task because it is measured and cheap, NOT because
+ * the filesystem is off limits.
  */
 const MODE = process.env.E2E_MODE ?? 'nameable';
 
