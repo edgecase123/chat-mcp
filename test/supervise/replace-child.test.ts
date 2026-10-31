@@ -510,7 +510,7 @@ function attemptedCommand(prompt: string): string | null {
 
 test('the replacement child is sent something it could actually run', async () => {
   const { grantFor, grantVariants } = await import('../../src/supervise/denial.js');
-  const { wouldRefuse } = await import('../support/would-refuse.js');
+  const { classify } = await import('../support/would-refuse.js');
 
   const children: FakeChild[] = [];
   const handle = `rc-${process.pid}-usable`;
@@ -547,13 +547,19 @@ test('the replacement child is sent something it could actually run', async () =
 
     assert.ok(attempted, `the prompt names no command to attempt: ${prompt}`);
 
-    const refusal = wouldRefuse(attempted, children[1]?.opts.grant?.allowed ?? []);
+    const verdict = classify(attempted, children[1]?.opts.grant?.allowed ?? []);
 
+    // 🛑 `permitted` ONLY — `unknown` must fail here. claude1's point on PR
+    // 43: the corpus records refusals plus one measured success, so the
+    // absence of a refusal is not evidence the grant works. Treating unknown
+    // as good is what let five wrong answers read as green.
     assert.equal(
-      refusal,
-      null,
-      `a real child would refuse this: attempted ${JSON.stringify(attempted)} — ` +
-        `${refusal?.refusal} (first seen on approval ${refusal?.firstSeenApprovalId})`,
+      verdict.kind,
+      'permitted',
+      `the replacement child got a grant no run has shown to work: ` +
+        `attempted ${JSON.stringify(attempted)} -> ${verdict.kind}. ` +
+        (verdict.kind === 'refused' ? verdict.record.refusal : '') +
+        (verdict.kind === 'unknown' ? verdict.reason : ''),
     );
   } finally {
     await sup.stop();

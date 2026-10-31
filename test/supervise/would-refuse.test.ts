@@ -1,102 +1,99 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { classify, corpusSize } from '../support/would-refuse.js';
+import type { RefusedRecord } from '../support/would-refuse.js';
 
 /**
- * 🛑 THIS IS AN INSTRUMENT, AND AN INSTRUMENT MUST BE SHOWN TO DETECT.
+ * 🛑 THE FIRST VERSION OF THIS FILE PASSED WHILE THE MODEL ANSWERED 5 OF 7
+ * CAPTURES WRONGLY. It probed three inputs against a seven-record corpus and
+ * never printed that denominator, so it certified three branches and read as
+ * certifying the model. claude1 found it on PR 43.
  *
- * The suite stayed green through six separate "we sent the child something it
- * cannot use" bugs. Asserting harder on the sent string did not help, because
- * the assertion was always written after the answer was known.
- *
- * So each test below names a REAL defect, by its commit, and the test fails
- * if the instrument cannot see it. Refusal text is REPLAYED from
- * `test/fixtures/captured-refusals.json`, captured live on runs 6-14 — lee's
- * ruling, 2026-10-31: *"replay the captured refusal text"*.
+ * The first test below is the one that would have caught it: it checks EVERY
+ * record and names the count.
  */
 
-test('an MCP tool granted as Tool(Tool) is refused — the c7973ee defect', async () => {
-  const { wouldRefuse } = await import('../support/would-refuse.js');
+const CORPUS = JSON.parse(readFileSync('test/fixtures/captured-refusals.json', 'utf8')) as {
+  outcome: string;
+  approvalId: number;
+  attempted: string;
+}[];
 
-  const refusal = wouldRefuse('mcp__chat__set_status', [
-    'mcp__chat__set_status(mcp__chat__set_status)',
-  ]);
+test('EVERY refused capture classifies as refused — N of N, with the count named', () => {
+  const refused = CORPUS.filter((r) => r.outcome === 'refused');
 
-  assert.ok(refusal, 'the instrument cannot see the defect that cost runs 12 and 13');
-  assert.match(refusal.refusal, /haven't granted it yet/);
+  assert.ok(refused.length >= 10, `the corpus shrank to ${refused.length} refusals`);
+
+  const wrong: string[] = [];
+
+  for (const r of refused) {
+    // ⚠️ AN EMPTY ALLOWLIST, DELIBERATELY. Passing the attempted string as an
+    // entry accidentally grants an MCP tool, and the model then correctly
+    // reports approval 23 as permitted — approval 25 measured exactly that.
+    // The question here is whether a refusal is still a refusal when nothing
+    // has been granted.
+    const v = classify(r.attempted, []);
+
+    if (v.kind !== 'refused') wrong.push(`approval ${r.approvalId} -> ${v.kind}: ${r.attempted}`);
+  }
+
+  assert.deepEqual(
+    wrong,
+    [],
+    `${wrong.length} of ${refused.length} captured refusals are answered wrongly:\n  ${wrong.join('\n  ')}`,
+  );
 });
 
-test('the same tool granted BARE is permitted', async () => {
-  const { wouldRefuse } = await import('../support/would-refuse.js');
+test('the one measured success classifies as permitted, and names its evidence', () => {
+  const v = classify('mcp__chat__set_status', ['mcp__chat__set_status']);
 
-  assert.equal(wouldRefuse('mcp__chat__set_status', ['mcp__chat__set_status']), null);
+  assert.equal(v.kind, 'permitted');
+
+  const evidence = v.kind === 'permitted' ? v.record.evidence : '';
+
+  assert.match(evidence, /e2e-ok-62471/, 'the evidence does not name the sentinel');
+
+  // 🛑 IT MUST SAY IT IS HISTORICAL. Building the fixture by re-reading the
+  // live row produced "became MISSING": that row is transient and had already
+  // been cleared when the agent deregistered. A capture that reads as
+  // re-verifiable invites someone to re-run the query and conclude it was
+  // never true.
+  assert.match(evidence, /HISTORICAL/, 'the evidence implies it can be re-read');
 });
 
-test('prose in place of a command is refused — the 468f5dc defect', async () => {
-  const { wouldRefuse } = await import('../support/would-refuse.js');
+test('the SAME command with a Tool(Tool) allowlist is refused — the c7973ee defect', () => {
+  const v = classify('mcp__chat__set_status', ['mcp__chat__set_status(mcp__chat__set_status)']);
 
-  // What the prompt actually told the child to attempt on run 10.
-  const refusal = wouldRefuse("touch in '/tmp/e2e/work/created-by-agent.txt'", [
+  assert.equal(v.kind, 'refused', 'Tool(Tool) was certified as working, which is the run-12 bug');
+  assert.match((v as { record: RefusedRecord }).record.refusal, /haven't granted it yet/);
+});
+
+test('a compound command is refused even when the whole line is allowlisted', () => {
+  const attempted = 'rm /tmp/e2e/work/README.md; echo "exit=$?"; ls -la /tmp/e2e/work';
+  const v = classify(attempted, [`Bash(${attempted})`]);
+
+  assert.equal(v.kind, 'refused', 'the compound case that cost c12c81d was certified as working');
+});
+
+test('an unrecognised command is UNKNOWN, never permitted', () => {
+  const v = classify('echo hello', ['Bash(echo hello)']);
+
+  assert.equal(v.kind, 'unknown');
+  assert.match(v.kind === 'unknown' ? v.reason : '', /Capture it from a live run/);
+});
+
+test('prose where a command belonged is UNKNOWN — the 468f5dc defect still fails', () => {
+  const v = classify("touch in '/tmp/e2e/work/created-by-agent.txt'", [
     'Bash(touch /tmp/e2e/work/created-by-agent.txt)',
   ]);
 
-  assert.ok(refusal, 'prose passed as a command, which is the run-10 bug');
-  assert.match(refusal.refusal, /was blocked|requires approval/);
+  assert.notEqual(v.kind, 'permitted', 'prose was certified as runnable');
 });
 
-test('a Bash command absent from the allowlist is refused', async () => {
-  const { wouldRefuse } = await import('../support/would-refuse.js');
+test('the corpus still holds both outcomes, so neither branch is dead', () => {
+  const { refused, permitted } = corpusSize();
 
-  const refusal = wouldRefuse('git -C /tmp/e2e/work push -u origin main', ['Bash(git status)']);
-
-  assert.ok(refusal);
-  assert.match(refusal.refusal, /requires approval/);
-});
-
-test('a Bash command present in the allowlist is permitted', async () => {
-  const { wouldRefuse } = await import('../support/would-refuse.js');
-
-  assert.equal(wouldRefuse('touch /tmp/e2e/f', ['Bash(touch /tmp/e2e/f)']), null);
-});
-
-/**
- * ⚠️ THE FIXTURE IS THE POINT, SO GUARD THAT IT IS REALLY BEING READ. A rule
- * set that quietly stopped consulting the captures would still pass every
- * test above with hand-written strings.
- */
-test('every refusal returned is a VERBATIM capture, never a hand-written string', async () => {
-  const { wouldRefuse } = await import('../support/would-refuse.js');
-  const { readFileSync } = await import('node:fs');
-
-  const captures = JSON.parse(readFileSync('test/fixtures/captured-refusals.json', 'utf8'));
-  const known = new Set(captures.map((c: { refusal: string }) => c.refusal));
-
-  assert.ok(known.size >= 6, `the corpus shrank to ${known.size} shapes`);
-
-  for (const attempted of [
-    'mcp__chat__set_status',
-    "touch in '/tmp/e2e/work/created-by-agent.txt'",
-    'git -C /tmp/e2e/work push -u origin main',
-  ]) {
-    const r = wouldRefuse(attempted, ['mcp__chat__set_status(mcp__chat__set_status)']);
-    if (r) assert.ok(known.has(r.refusal), `invented a refusal for: ${attempted}`);
-  }
-});
-
-/**
- * ⚠️ VERBATIM, BUT THE MOST RELEVANT VERBATIM ONE. The first control run
- * replayed approval 10's wording — which names `mcp__chat__list_agents` —
- * for an attempt on `mcp__chat__set_status`. The text was a true capture and
- * the failure message pointed at the wrong tool.
- *
- * Still no editing of captured text. Only the CHOICE between captures of the
- * same shape changes.
- */
-test('among captures of one shape, the one naming the attempted tool wins', async () => {
-  const { wouldRefuse } = await import('../support/would-refuse.js');
-
-  const refusal = wouldRefuse('mcp__chat__set_status', ['mcp__chat__set_status(x)']);
-
-  assert.ok(refusal);
-  assert.match(refusal.refusal, /mcp__chat__set_status/);
-  assert.doesNotMatch(refusal.refusal, /list_agents/);
+  assert.ok(refused >= 10, `only ${refused} refusals`);
+  assert.equal(permitted, 1, `expected the single measured success, got ${permitted}`);
 });

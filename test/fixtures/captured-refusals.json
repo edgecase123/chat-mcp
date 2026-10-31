@@ -1,37 +1,81 @@
 [
   {
-    "firstSeenApprovalId": 8,
-    "grant": "Bash(rm /tmp/e2e/work/README.md && ls -la /tmp/e2e/work/)",
+    "outcome": "refused",
+    "approvalId": 8,
+    "attempted": "rm /tmp/e2e/work/README.md && ls -la /tmp/e2e/work/",
     "refusal": "rm in '/tmp/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/tmp/e2e'."
   },
   {
-    "firstSeenApprovalId": 10,
-    "grant": "mcp__chat__list_agents(mcp__chat__list_agents)",
+    "outcome": "refused",
+    "approvalId": 10,
+    "attempted": "mcp__chat__list_agents",
     "refusal": "Claude requested permissions to use mcp__chat__list_agents, but you haven't granted it yet."
   },
   {
-    "firstSeenApprovalId": 15,
-    "grant": "Bash(rm /tmp/e2e/work/README.md; echo \"exit=$?\"; ls -la /tmp/e2e/work)",
+    "outcome": "refused",
+    "approvalId": 11,
+    "attempted": "rm /tmp/e2e/work/README.md && ls -la /tmp/e2e/work",
+    "refusal": "rm in '/tmp/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/tmp/e2e'."
+  },
+  {
+    "outcome": "refused",
+    "approvalId": 14,
+    "attempted": "rm /tmp/e2e/work/README.md && echo \"removed\" && ls -la /tmp/e2e/work",
+    "refusal": "rm in '/tmp/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/tmp/e2e'."
+  },
+  {
+    "outcome": "refused",
+    "approvalId": 15,
+    "attempted": "rm /tmp/e2e/work/README.md; echo \"exit=$?\"; ls -la /tmp/e2e/work",
     "refusal": "This Bash command contains multiple operations. The following parts require approval: rm /tmp/e2e/work/README.md, echo \"exit=$?\""
   },
   {
-    "firstSeenApprovalId": 19,
-    "grant": "Bash(touch /tmp/e2e/work/created-by-agent.txt && ls -l /tmp/e2e/work/created-by-agent.txt)",
+    "outcome": "refused",
+    "approvalId": 16,
+    "attempted": "rm /tmp/e2e/work/README.md",
+    "refusal": "rm in '/tmp/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/tmp/e2e'."
+  },
+  {
+    "outcome": "refused",
+    "approvalId": 17,
+    "attempted": "mkdir -p /tmp/e2e/work && touch /tmp/e2e/work/created-by-agent.txt && ls -l /tmp/e2e/work/created-by-agent.txt",
+    "refusal": "This Bash command contains multiple operations. The following parts require approval: mkdir -p /tmp/e2e/work, touch /tmp/e2e/work/created-by-agent.txt"
+  },
+  {
+    "outcome": "refused",
+    "approvalId": 19,
+    "attempted": "touch /tmp/e2e/work/created-by-agent.txt && ls -l /tmp/e2e/work/created-by-agent.txt",
     "refusal": "touch in '/tmp/e2e/work/created-by-agent.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/tmp/e2e'."
   },
   {
-    "firstSeenApprovalId": 23,
-    "grant": "mcp__chat__set_status(mcp__chat__set_status)",
+    "outcome": "refused",
+    "approvalId": 23,
+    "attempted": "mcp__chat__set_status",
     "refusal": "Claude requested permissions to use mcp__chat__set_status, but you haven't granted it yet."
   },
   {
-    "firstSeenApprovalId": 26,
-    "grant": "Bash(cd /tmp/e2e/work && git status && git log --oneline -5 && git remote -v)",
+    "outcome": "refused",
+    "approvalId": 26,
+    "attempted": "cd /tmp/e2e/work && git status && git log --oneline -5 && git remote -v",
     "refusal": "This command changes directory before running a version-control command, which can pick up untrusted hooks or repository configuration from the target directory. Approve only if you trust it."
   },
   {
-    "firstSeenApprovalId": 27,
-    "grant": "Bash(git -C /tmp/e2e/work push -u origin main)",
+    "outcome": "refused",
+    "approvalId": 27,
+    "attempted": "git -C /tmp/e2e/work push -u origin main",
     "refusal": "This command requires approval"
+  },
+  {
+    "outcome": "refused",
+    "approvalId": 31,
+    "attempted": "git -C /tmp/e2e/work status --short --branch; git -C /tmp/e2e/work log --oneline -5; git -C /tmp/e2e/work remote -v",
+    "refusal": "This Bash command contains multiple operations. The following parts require approval: git -C /tmp/e2e/work status --short --branch, git -C /tmp/e2e/work log --oneline -5, git -C /tmp/e2e/work remote -v"
+  },
+  {
+    "outcome": "permitted",
+    "approvalId": 25,
+    "attempted": "mcp__chat__set_status",
+    "allowlistEntry": "mcp__chat__set_status",
+    "evidence": "run 13, 2026-10-31: after lee approved approval 25, agents.focus for e2e-62471-agent read e2e-ok-62471, so the child really used the tool. HISTORICAL \u2014 that row is transient and was cleared when the agent deregistered, so this is not re-readable. The run-13 log and ~/context/main-dev/claude2-run7-findings.md hold it."
   }
 ]
