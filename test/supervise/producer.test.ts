@@ -553,16 +553,42 @@ test('a path with no existing ancestor is left exactly as written', async () => 
  * `invocation` for a non-Bash tool fails here instead of in a live run.
  */
 test('a non-Bash grant unwraps to the TOOL NAME, never a path or a glob', async () => {
-  const { grantFor, commandFromGrant } = await import('../../src/supervise/denial.js');
+  const { commandFromGrant } = await import('../../src/supervise/denial.js');
 
-  const grant = grantFor({
+  // 🛑 BOTH SHAPES, because run 12 changed which one a tool grant takes. The
+  // claim that matters is the same either way: the prompt gets a name, never
+  // a path or a glob.
+  assert.equal(commandFromGrant('mcp__chat__set_status'), 'mcp__chat__set_status');
+  assert.equal(
+    commandFromGrant('mcp__chat__set_status(mcp__chat__set_status)'),
+    'mcp__chat__set_status',
+  );
+  assert.equal(commandFromGrant('   '), null, 'an empty entry must not become a command');
+});
+
+/**
+ * 🚨 `mcp__chat__set_status(mcp__chat__set_status)` GRANTS NOTHING.
+ *
+ * Measured on run 12: approvals 23 and 24 were byte-identical — same grant,
+ * same refusal — so approving the first and adding it to --allowedTools left
+ * the child asking for the same permission again.
+ *
+ * An MCP tool has no rule content. The allowlist entry is the bare tool
+ * name; the parenthesised form is for Bash commands and Edit globs. The
+ * earlier claim that this shape had "round-tripped twice" confused an
+ * APPROVAL being accepted with the grant actually working.
+ */
+test('a tool with no rule content grants the BARE NAME, not Tool(Tool)', async () => {
+  const { grantFor, grantVariants } = await import('../../src/supervise/denial.js');
+
+  const denial = {
     requested: null,
     raw: 'denied',
     tool: 'mcp__chat__set_status',
-    // What the driver produces when the tool call carries no `command`.
+    // What claude-events.ts produces when the call carries no `command`.
     invocation: 'mcp__chat__set_status',
-  });
+  };
 
-  assert.equal(grant, 'mcp__chat__set_status(mcp__chat__set_status)');
-  assert.equal(commandFromGrant(grant ?? ''), 'mcp__chat__set_status');
+  assert.equal(grantFor(denial), 'mcp__chat__set_status');
+  assert.deepEqual(grantVariants(denial), ['mcp__chat__set_status']);
 });

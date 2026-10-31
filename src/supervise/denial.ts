@@ -50,7 +50,20 @@ export interface Denial {
 export function grantFor(denial: Denial): string | null {
   if (!denial.tool || !denial.invocation) return null;
 
-  return `${denial.tool}(${canonicalisePaths(denial.invocation)})`;
+  return entryFor(denial.tool, canonicalisePaths(denial.invocation));
+}
+
+/**
+ * One allowlist entry for a tool and the thing it was asked to do.
+ *
+ * 🚨 A TOOL WITH NO RULE CONTENT TAKES ITS BARE NAME. Measured on run 12:
+ * `mcp__chat__set_status(mcp__chat__set_status)` went into --allowedTools and
+ * the child asked for the same permission again, so approvals 23 and 24 came
+ * out byte-identical. The parenthesised form is for a Bash command or an Edit
+ * glob; an MCP tool has nothing to put in the parentheses.
+ */
+function entryFor(tool: string, content: string): string {
+  return content === tool ? tool : `${tool}(${content})`;
 }
 
 /**
@@ -73,12 +86,13 @@ export function grantFor(denial: Denial): string | null {
 export function grantVariants(denial: Denial): string[] {
   if (!denial.tool || !denial.invocation) return [];
 
+  const tool = denial.tool;
   const whole = denial.invocation;
   const lead = leadingSegment(whole);
 
   const forms = new Set([whole, canonicalisePaths(whole), lead, canonicalisePaths(lead)]);
 
-  return [...forms].map((form) => `${denial.tool}(${form})`);
+  return [...forms].map((form) => entryFor(tool, form));
 }
 
 /**
@@ -100,9 +114,15 @@ function leadingSegment(invocation: string): string {
  * covered and was re-blocked while the allowlist was perfectly correct.
  */
 export function commandFromGrant(grant: string): string | null {
-  const match = /^[A-Za-z_]\w*\((.*)\)$/s.exec(grant.trim());
+  const entry = grant.trim();
+  if (entry.length === 0) return null;
 
-  return match === null ? null : match[1];
+  const match = /^[A-Za-z_]\w*\((.*)\)$/s.exec(entry);
+
+  // 🛑 A BARE ENTRY IS ALREADY THE ANSWER. An MCP tool grants its own name
+  // with no parentheses, and returning null here made the prompt fall back
+  // to the prose — which is null for those denials, so it threw.
+  return match === null ? entry : match[1];
 }
 
 /**
