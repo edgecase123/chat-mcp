@@ -319,9 +319,21 @@ test('EVERY child callback registration goes through the generation guard', () =
   const body = src.slice(src.indexOf('function wireChild()'), src.indexOf('const replaceChild'));
   assert.ok(body.length > 0, 'wireChild moved; this check is stale');
 
-  const registrations = [...body.matchAll(/child\.(on[A-Za-z]+)\(\s*([\s\S]{0,20})/g)];
+  const registrations = [...body.matchAll(/child\.(on[A-Za-z]+)\(\s*([\s\S]{0,30})/g)];
 
-  assert.ok(registrations.length >= 4, `expected the callbacks, found ${registrations.length}`);
+  // 🛑 THE NAME SET, NOT A COUNT. An earlier version asserted
+  // `length >= 4` with five present, so DELETING one stayed green — and the
+  // original bug was `onTurnEnd` being ABSENT, not unwrapped. "Every
+  // registration present is wrapped" is a different property from "every
+  // required callback is registered". Raised by claude1.
+  const REQUIRED = ['onTurnEnd', 'onSession', 'onDenial', 'onUsage', 'onExit'];
+  const present = registrations.map(([, name]) => name);
+
+  assert.deepEqual(
+    [...present].sort(),
+    [...REQUIRED].sort(),
+    'a required callback is missing, or an unexpected one was added',
+  );
 
   const unguarded = registrations
     .filter(([, , next]) => !next.includes('ifCurrent'))

@@ -255,29 +255,38 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
      * ⚠️ `onTurnEnd` had `generation` in scope two lines above and did not
      * use it. A per-call check is something to forget; a wrapper is not.
      */
-    const ifCurrent = <A extends unknown[]>(fn: (...args: A) => void) => {
+    const ifCurrent = <A extends unknown[]>(label: string, fn: (...args: A) => void) => {
       return (...args: A): void => {
-        if (generation !== childGeneration) return;
+        if (generation !== childGeneration) {
+          // 🛑 SAY IT, DO NOT SWALLOW IT. The first version returned
+          // silently, which is the ambiguity this file argues against two
+          // lines later. A dropped signal and a signal that never came look
+          // identical otherwise. Raised by claude1.
+          log(`stale ${label} from replaced child #${generation}; ignoring`);
+
+          return;
+        }
 
         fn(...args);
       };
     };
 
+
     child.onTurnEnd(
-      ifCurrent(() => {
+      ifCurrent('onTurnEnd', () => {
         queue.turnEnded();
         log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
       }),
     );
 
     child.onSession(
-      ifCurrent((id) => {
+      ifCurrent('onSession', (id) => {
         childSession = id;
       }),
     );
 
     child.onDenial(
-      ifCurrent((denial) => {
+      ifCurrent('onDenial', (denial) => {
       const grantHandle = grant?.handle ?? `${opts.handle}-agent`;
 
       try {
@@ -302,7 +311,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     );
 
     child.onUsage(
-      ifCurrent((snapshot) => {
+      ifCurrent('onUsage', (snapshot) => {
         gate.update(snapshot);
         log(gate.describe());
         releaseHeld();
@@ -310,7 +319,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     );
 
     child.onExit(
-      ifCurrent((code, signal) => {
+      ifCurrent('onExit', (code, signal) => {
       // 🛑 Anything queued is UNSENT. Reporting it is the difference between a
       // visible gap and silence, and silence is the ambiguity this whole change
       // exists to remove.
