@@ -159,18 +159,43 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
  * immediately — which looks exactly like the bug above.
  */
 function resolveChatMcpEntry(): { command: string; args: string[] } {
+  // Installed layout: dist/supervise/child.js next to dist/index.js.
   const built = fileURLToPath(new URL('../index.js', import.meta.url));
   if (existsSync(built)) return { command: process.execPath, args: [built] };
 
+  // Source layout with a build present — preferred, because it needs no loader
+  // and therefore nothing to resolve from the child's cwd.
+  const builtFromSource = fileURLToPath(new URL('../../dist/index.js', import.meta.url));
+  if (existsSync(builtFromSource)) return { command: process.execPath, args: [builtFromSource] };
+
+  // Source layout with no build. The loader has to be an ABSOLUTE path.
   const source = fileURLToPath(new URL('../index.ts', import.meta.url));
   if (existsSync(source)) {
-    return { command: process.execPath, args: ['--import', 'tsx', source] };
+    return { command: process.execPath, args: ['--import', resolveLoader(), source] };
   }
 
   throw new Error(
     `cannot locate the chat-mcp entry point next to ${import.meta.url}; ` +
       'pass an explicit entry to writeClaudeMcpConfig',
   );
+}
+
+/**
+ * The tsx loader as an ABSOLUTE path.
+ *
+ * 🛑 `--import tsx` IS A BARE SPECIFIER AND THE CHILD RESOLVES IT FROM ITS OWN
+ * CWD. The supervised child runs in whatever directory the operator chose, and
+ * the live harness uses an empty temp dir — which has no `node_modules` above
+ * it, so the chat server died with `ERR_MODULE_NOT_FOUND` the instant it
+ * started. The agent then had no chat tool and WROTE OUT the call it could not
+ * make, which reads like a model failure rather than a missing dependency.
+ *
+ * ⚠️ SECOND INSTANCE OF ONE MISTAKE. The script path was already absolute; the
+ * loader name was not. Any part of this command line that is resolved rather
+ * than stated is resolved against the CHILD's cwd, not ours.
+ */
+function resolveLoader(): string {
+  return fileURLToPath(import.meta.resolve('tsx'));
 }
 
 /**

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, basename } from 'node:path';
+import { join, basename, isAbsolute } from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import { claudeArgs, writeClaudeMcpConfig } from '../../src/supervise/child.js';
 import { DEFAULT_REPLY_TOOLS } from '../../src/supervise/bus-reply.js';
@@ -245,6 +245,44 @@ test('a TypeScript entry is launched with a loader, a JavaScript one is not', ()
       assert.ok(args.includes('--import'), 'a .ts entry needs a loader or the child dies at once');
     } else {
       assert.ok(!args.includes('--import'), 'a .js entry needs no loader');
+    }
+  });
+});
+
+/**
+ * 🛑 THE GENERALISED FORM OF TWO SEPARATE BUGS, BOTH SHIPPED TONIGHT.
+ *
+ * First the script path came from `process.argv[1]`. Then the script path was
+ * absolute but the LOADER was the bare specifier `tsx`, which the child
+ * resolves from ITS OWN cwd — and the supervised child runs in whatever
+ * directory the operator chose. The live harness uses an empty temp dir with
+ * no `node_modules` above it, so the chat server died with
+ * ERR_MODULE_NOT_FOUND the instant it started.
+ *
+ * **Anything on this command line that is RESOLVED rather than STATED is
+ * resolved against the child's cwd.** So nothing may be relative.
+ */
+test('every path in the generated command is absolute, because the child has a different cwd', () => {
+  withTempHome(() => {
+    const path = writeClaudeMcpConfig('sup-claude2');
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+      mcpServers: { chat: { command: string; args: string[] } };
+    };
+
+    const { command, args } = parsed.mcpServers.chat;
+
+    assert.ok(isAbsolute(command), `the interpreter is not an absolute path: ${command}`);
+
+    // Everything that is not a flag or the handle value must be an absolute
+    // path. A bare specifier like `tsx` is exactly what broke.
+    const flags = new Set(['--import', '--handle']);
+    const handleValues = new Set(['sup-claude2']);
+
+    for (const [i, a] of args.entries()) {
+      if (flags.has(a) || handleValues.has(a)) continue;
+      if (args[i - 1] === '--handle') continue;
+
+      assert.ok(isAbsolute(a), `argument ${i} is relative and will resolve in the CHILD's cwd: ${a}`);
     }
   });
 });

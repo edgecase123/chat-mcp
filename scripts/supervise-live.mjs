@@ -85,12 +85,16 @@ function probeBodies() {
   return dao.pendingInbox(db, { to: PROBE, limit: 500 }).map((m) => m.body);
 }
 
+/**
+ * ⚠️ WORDED LIKE A PERSON ASKING, AND THAT IS NOT COSMETIC. The first version
+ * repeated an identical robotic instruction — "automated liveness probe. Do
+ * exactly one thing and nothing else." — and turns 3, 4 and 5 came back as
+ * `API Error: Opus 5's safeguards flagged this message`, with zero output
+ * tokens. Three of five turns were lost to the shape of the prompt rather than
+ * to anything the supervisor did.
+ */
 function prompt(token) {
-  return [
-    `This is an automated liveness probe. Do exactly one thing and nothing else.`,
-    `Call mcp__chat__send with to="${PROBE}" and body="${token}".`,
-    `Send the body EXACTLY as given, with no extra words.`,
-  ].join(' ');
+  return `Please send a chat message to ${PROBE} with the body "${token}", so I can tell this reply apart from the others. Thanks.`;
 }
 
 const checks = [];
@@ -123,6 +127,23 @@ async function awaitToken(token, expectedTurns) {
 
   return ok;
 }
+
+/**
+ * 🛑 THE PROBE HANDLE MUST BE REGISTERED OR THE CHILD'S SEND IS REFUSED.
+ *
+ * The first two runs of this harness failed here and the supervisor was
+ * innocent. The child woke, its chat server connected, the allowlist let it
+ * through, it called `mcp__chat__send` — and the bus answered that the
+ * recipient "isn't a registered peer on the bus". A handle this script invents
+ * does not exist until somebody registers it.
+ */
+dao.upsertAgent(db, {
+  handle: PROBE,
+  pid: process.pid,
+  session_id: `live-harness-${Date.now()}`,
+  display_name: PROBE,
+  metadata: { kind: 'agent' },
+});
 
 console.log(`supervisor=${HANDLE}  child=${CHILD}  probe=${PROBE}`);
 console.log(`cwd=${childCwd}  idle gap=${IDLE_GAP_MS / 1000}s\n`);
@@ -222,6 +243,25 @@ try {
 }
 
 const failed = checks.filter((c) => !c.ok);
+
+// 🛑 A FAILING RUN MUST EXPLAIN ITSELF. The first two failures had to be
+// diagnosed by hand, re-running the child's command and reading its stream.
+// The answer was in the assistant text all along.
+if (failed.length > 0) {
+  console.log('\nwhat the child actually said:');
+
+  for (const e of events) {
+    if (e.type !== 'assistant') continue;
+
+    for (const part of e.message?.content ?? []) {
+      if (part.type === 'text') console.log(`  text: ${part.text.slice(0, 300)}`);
+      if (part.type === 'tool_use') console.log(`  call: ${part.name} ${JSON.stringify(part.input).slice(0, 200)}`);
+    }
+  }
+
+  const probeSeen = probeBodies();
+  console.log(`\nprobe inbox held ${probeSeen.length} message(s): ${JSON.stringify(probeSeen).slice(0, 300)}`);
+}
 
 console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);
 
