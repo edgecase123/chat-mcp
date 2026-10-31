@@ -43,9 +43,15 @@
   },
   {
     "outcome": "refused",
-    "approvalId": 16,
+    "approvalId": 33,
     "attempted": "rm /private/var/folders/T/e2e/work/README.md",
-    "allowlist": null,
+    "allowlist": [
+      "Read",
+      "Glob",
+      "Grep",
+      "mcp__chat__send",
+      "mcp__chat__room_send"
+    ],
     "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
@@ -102,6 +108,45 @@
     "attempted": "git -C /private/var/folders/T/e2e/work status --short --branch; git -C /private/var/folders/T/e2e/work log --oneline -5; git -C /private/var/folders/T/e2e/work remote -v",
     "allowlist": null,
     "refusal": "This Bash command contains multiple operations. The following parts require approval: git -C /private/var/folders/T/e2e/work status --short --branch, git -C /private/var/folders/T/e2e/work log --oneline -5, git -C /private/var/folders/T/e2e/work remote -v"
+  },
+  {
+    "outcome": "refused",
+    "approvalId": 34,
+    "attempted": "touch /private/var/folders/T/e2e/work/made.txt",
+    "allowlist": [
+      "Read",
+      "Glob",
+      "Grep",
+      "mcp__chat__send",
+      "mcp__chat__room_send"
+    ],
+    "refusal": "touch in '/var/folders/T/e2e/work/made.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/private/var/folders/T/e2e'."
+  },
+  {
+    "outcome": "refused",
+    "approvalId": 35,
+    "attempted": "cd /private/var/folders/T/e2e/work && git status",
+    "allowlist": [
+      "Read",
+      "Glob",
+      "Grep",
+      "mcp__chat__send",
+      "mcp__chat__room_send"
+    ],
+    "refusal": "This command changes directory before running a version-control command, which can pick up untrusted hooks or repository configuration from the target directory. Approve only if you trust it."
+  },
+  {
+    "outcome": "refused",
+    "approvalId": 36,
+    "attempted": "env | head -3",
+    "allowlist": [
+      "Read",
+      "Glob",
+      "Grep",
+      "mcp__chat__send",
+      "mcp__chat__room_send"
+    ],
+    "refusal": "This Bash command contains multiple operations. The following part requires approval: env"
   },
   {
     "outcome": "permitted",
