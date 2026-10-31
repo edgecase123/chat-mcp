@@ -71,6 +71,15 @@ export interface Supervisor {
   readonly heldDepth: number;
   /** One line of window utilization, never dollars. */
   rateLimits(): string;
+  /**
+   * Called every time the child finishes a turn.
+   *
+   * 🛑 EXPOSED SO NOBODY HAS TO TIME IT. The supervisor already knew, and
+   * logged `← turn complete` without telling anyone, so a caller waiting for
+   * the agent to stop had to guess with a quiet-period timer — shorter than a
+   * routine model pause. Raised by claude1 on PR 43.
+   */
+  onTurnEnd(cb: () => void): void;
   stop(): Promise<void>;
 }
 
@@ -178,6 +187,9 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    */
   const held: { text: string; messageIds: number[] }[] = [];
 
+  /** Observers of the child finishing a turn. See `Supervisor.onTurnEnd`. */
+  const turnEndListeners: (() => void)[] = [];
+
   const queue = new TurnQueue({
     send: (prompt) => {
       log(`→ child: ${prompt.text.slice(0, 80).replace(/\n/g, ' ')}`);
@@ -277,6 +289,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       ifCurrent('onTurnEnd', () => {
         queue.turnEnded();
         log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
+
+        // ⚠️ AFTER the queue is settled, so an observer that reacts by
+        // reading state does not see a half-drained queue.
+        for (const cb of turnEndListeners) cb();
       }),
     );
 
@@ -322,6 +338,15 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
           // not match a retry in the other — measured live, caused by this
           // supervisor's own realpath resolution.
           grantForms: grantVariants(denial),
+          // 🛑 WHAT WAS IN FORCE WHEN IT WAS REFUSED. Without this a refusal
+          // cannot say what a grant would have done: the same command is
+          // refused under one allowlist and permitted under another, which
+          // approvals 23 and 25 measured. Raised by claude1 on PR 43.
+          allowlist: grant?.allowed ?? [],
+          // 🛑 WHAT WAS IN FORCE WHEN IT WAS REFUSED. Without this a refusal
+          // cannot say what a grant would have done: the same command is
+          // refused under one allowlist and permitted under another, which
+          // approvals 23 and 25 measured. Raised by claude1 on PR 43.
           reason: denial.raw,
           sessionId: childSession,
         });
@@ -515,6 +540,9 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     },
     rateLimits(): string {
       return gate.describe();
+    },
+    onTurnEnd(cb: () => void): void {
+      turnEndListeners.push(cb);
     },
     async stop(): Promise<void> {
       await listener.close();

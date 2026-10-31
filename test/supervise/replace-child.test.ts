@@ -26,6 +26,12 @@ interface FakeChild {
   readonly sent: string[];
   finishTurn: () => void;
   exit: () => void;
+  /**
+   * 🛑 THE FAKE USED TO DROP onDenial. This file's own docblock says a fake
+   * that drops a callback is testing a child that cannot exist, and onDenial
+   * was the one still dropped — so nothing could exercise the producer.
+   */
+  denial: (d: { requested: string | null; raw: string; tool: string | null; invocation: string | null }) => void;
 }
 
 /**
@@ -42,12 +48,14 @@ function recordingChild(children: FakeChild[]) {
     const sent: string[] = [];
     let endTurn: (() => void) | undefined;
     let onExit: ((c: number | null, s: string | null) => void) | undefined;
+    let onDenial: ((d: unknown) => void) | undefined;
 
     children.push({
       opts,
       sent,
       finishTurn: () => endTurn?.(),
       exit: () => onExit?.(0, null),
+      denial: (d) => onDenial?.(d),
     });
 
     return {
@@ -57,7 +65,9 @@ function recordingChild(children: FakeChild[]) {
         endTurn = cb;
       },
       onUsage: () => undefined,
-      onDenial: () => undefined,
+      onDenial: (cb) => {
+        onDenial = cb as (d: unknown) => void;
+      },
       onSession: (cb) => cb('sess-from-fake'),
       onEvent: () => undefined,
       onExit: (cb) => {
@@ -485,6 +495,137 @@ test('the re-dispatch prompt names the GRANTED COMMAND, never the prose', async 
     assert.ok(
       !prompt.includes("touch in '"),
       `the prompt tells the child to run prose: ${prompt}`,
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🛑 UNIT 2 OF #42. THE FAKE NOW REFUSES WHAT A REAL CHILD WOULD REFUSE.
+ *
+ * Every test above this point asserts that a string was BUILT and a flag
+ * CHANGED. None can say the string was usable, which is how six unusable
+ * grants passed a green suite.
+ *
+ * ⚠️ THE GRANT HERE COMES FROM `grantFor`, NOT FROM THIS FILE. A hardcoded
+ * envelope would skip the producer and certify only the plumbing — the exact
+ * gap claude1 named on PR 41. Break `entryFor` and this test goes red.
+ */
+function attemptedCommand(prompt: string): string | null {
+  const m = /Please attempt `([\s\S]*?)` now/.exec(prompt);
+
+  return m === null ? null : m[1];
+}
+
+test('the replacement child is sent something it could actually run', async () => {
+  const { grantFor, grantVariants } = await import('../../src/supervise/denial.js');
+  const { classify } = await import('../support/would-refuse.js');
+
+  const children: FakeChild[] = [];
+  const handle = `rc-${process.pid}-usable`;
+  const sup = await supervisorFor(handle, children);
+
+  // The shape run 12 filed: an MCP tool call carrying no `command`.
+  const denial = {
+    requested: null,
+    raw: 'denied',
+    tool: 'mcp__chat__set_status',
+    invocation: 'mcp__chat__set_status',
+  };
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 11,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      approval: {
+        approvalId: 11,
+        decision: 'approve',
+        requested: denial.requested,
+        grant: grantFor(denial),
+        grantForms: grantVariants(denial),
+        sessionId: 'sess-1',
+      },
+    });
+
+    assert.equal(children.length, 2, 'the child was never replaced');
+
+    const prompt = children[1]?.sent.join('\n') ?? '';
+    const attempted = attemptedCommand(prompt);
+
+    assert.ok(attempted, `the prompt names no command to attempt: ${prompt}`);
+
+    const verdict = classify(attempted, children[1]?.opts.grant?.allowed ?? []);
+
+    // 🛑 `permitted` ONLY — `unknown` must fail here. claude1's point on PR
+    // 43: the corpus records refusals plus one measured success, so the
+    // absence of a refusal is not evidence the grant works. Treating unknown
+    // as good is what let five wrong answers read as green.
+    assert.equal(
+      verdict.kind,
+      'permitted',
+      `the replacement child got a grant no run has shown to work: ` +
+        `attempted ${JSON.stringify(attempted)} -> ${verdict.kind}. ` +
+        (verdict.kind === 'refused' ? verdict.record.refusal : '') +
+        (verdict.kind === 'unknown' ? verdict.reason : ''),
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🛑 THE PRODUCER MUST RECORD THE ALLOWLIST, AND THE ROW IS THE ONLY PROOF.
+ *
+ * claude1 on PR 43: a refused record without its allowlist can only ever
+ * answer `refused`, so the fake could never show a grant working for 14 of 15
+ * captures, and the N-of-N test had to use an empty allowlist — fictional,
+ * because every real refusal happened under a non-empty one.
+ *
+ * ⚠️ ASSERTED ON THE ROW, NOT ON THE CALL. A dao-level test proves the column
+ * accepts a value; only this proves the supervisor passes one.
+ */
+test('a filed approval carries the allowlist the refused child actually had', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { migrate } = await import('../../src/storage/db.js');
+  const dao = await import('../../src/storage/dao.js');
+  const { startSupervisor } = await import('../../src/supervise/index.js');
+
+  const db = new DatabaseSync(':memory:');
+  migrate(db);
+
+  const children: FakeChild[] = [];
+  const handle = `rc-${process.pid}-allowlist`;
+
+  const sup = await startSupervisor({
+    handle,
+    db,
+    extraDirs: DIRS,
+    spawnChild: recordingChild(children),
+    log: () => undefined,
+  });
+
+  try {
+    const granted = children[0]?.opts.grant?.allowed ?? [];
+
+    assert.ok(granted.length > 0, 'the child started with nothing allowed, so this proves nothing');
+
+    children[0]?.denial({
+      requested: "rm in '/tmp/x'",
+      raw: 'Permission for this tool use was denied. What required approval: rm in /tmp/x',
+      tool: 'Bash',
+      invocation: 'rm /tmp/x',
+    });
+
+    const filed = dao.pendingApprovals(db);
+
+    assert.equal(filed.length, 1, 'the denial filed no approval at all');
+    assert.deepEqual(
+      filed[0]?.allowlist,
+      granted,
+      'the row does not carry what the child was actually allowed to use',
     );
   } finally {
     await sup.stop();

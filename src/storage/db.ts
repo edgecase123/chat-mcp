@@ -188,6 +188,21 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       ALTER TABLE approvals ADD COLUMN grant_forms TEXT;
     `);
   },
+  (db) => {
+    // What the child was allowed to use when it was refused, JSON-encoded.
+    //
+    // 🛑 WITHOUT IT A REFUSAL CANNOT SAY WHAT A GRANT WOULD HAVE DONE. The
+    // same command is refused under one allowlist and permitted under
+    // another — measured on approvals 23 and 25, where only the allowlist
+    // differed. A row that omits it can only ever answer "refused".
+    //
+    // NULL on an older row means UNRECORDED, never "nothing was allowed".
+    // Every approval filed before this column had a non-empty allowlist that
+    // nobody wrote down.
+    db.exec(`
+      ALTER TABLE approvals ADD COLUMN allowlist TEXT;
+    `);
+  },
 ];
 
 function tx(db: Db, fn: () => void): void {
