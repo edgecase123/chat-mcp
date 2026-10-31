@@ -21,25 +21,57 @@ import { deliverToSupervisor } from '../../src/supervise/socket.js';
 
 const DIRS = [process.cwd()];
 
-function recordingChild(spawns: SpawnOptions[]) {
+interface FakeChild {
+  readonly opts: SpawnOptions;
+  readonly sent: string[];
+  finishTurn: () => void;
+  exit: () => void;
+}
+
+/**
+ * 🛑 THE FAKE RECORDS ITS CALLBACKS INSTEAD OF SWALLOWING THEM.
+ *
+ * The previous version used `onTurnEnd: () => undefined`, so the suite was
+ * green while every replacement child hung — it certified the one path it
+ * could not exercise. claude1 flagged incomplete fakes twice before this
+ * finally bit. A fake that drops a callback is testing a child that cannot
+ * exist.
+ */
+function recordingChild(children: FakeChild[]) {
   return (opts: SpawnOptions): AgentChild => {
-    spawns.push(opts);
+    const sent: string[] = [];
+    let endTurn: (() => void) | undefined;
+    let onExit: ((c: number | null, s: string | null) => void) | undefined;
+
+    children.push({
+      opts,
+      sent,
+      finishTurn: () => endTurn?.(),
+      exit: () => onExit?.(0, null),
+    });
 
     return {
       reportsUsage: false,
-      send: () => undefined,
-      onTurnEnd: () => undefined,
+      send: (t) => sent.push(t),
+      onTurnEnd: (cb) => {
+        endTurn = cb;
+      },
       onUsage: () => undefined,
       onDenial: () => undefined,
       onSession: (cb) => cb('sess-from-fake'),
       onEvent: () => undefined,
-      onExit: () => undefined,
-      kill: () => undefined,
+      onExit: (cb) => {
+        onExit = cb;
+      },
+      // 🛑 A REAL kill() ENDS THE PROCESS AND FIRES onExit. A fake that does
+      // nothing hides exactly the bug where a dead child's exit handler
+      // mutates the live queue.
+      kill: () => onExit?.(null, 'SIGTERM'),
     };
   };
 }
 
-async function supervisorFor(handle: string, spawns: SpawnOptions[]) {
+async function supervisorFor(handle: string, children: FakeChild[]) {
   const db = new DatabaseSync(':memory:');
   migrate(db);
 
@@ -47,18 +79,18 @@ async function supervisorFor(handle: string, spawns: SpawnOptions[]) {
     handle,
     db,
     extraDirs: DIRS,
-    spawnChild: recordingChild(spawns),
+    spawnChild: recordingChild(children),
     log: () => undefined,
   });
 }
 
 test('an APPROVAL respawns the child with the command added to its allowlist', async () => {
-  const spawns: SpawnOptions[] = [];
-  const sup = await supervisorFor(`rc-${process.pid}-a`, spawns);
+  const children: FakeChild[] = [];
+  const sup = await supervisorFor(`rc-${process.pid}-a`, children);
 
   try {
-    assert.equal(spawns.length, 1, 'the first child never spawned');
-    assert.ok(!spawns[0]?.grant?.allowed.includes('Bash(rm:*)'), 'already granted before approval');
+    assert.equal(children.length, 1, 'the first child never spawned');
+    assert.ok(!children[0]?.opts.grant?.allowed.includes('Bash(rm:*)'), 'already granted before approval');
 
     await deliverToSupervisor(`rc-${process.pid}-a`, {
       id: 1,
@@ -73,9 +105,9 @@ test('an APPROVAL respawns the child with the command added to its allowlist', a
       },
     });
 
-    assert.equal(spawns.length, 2, 'the child was NOT replaced — the grant never reached it');
+    assert.equal(children.length, 2, 'the child was NOT replaced — the grant never reached it');
     assert.ok(
-      spawns[1]?.grant?.allowed.includes('Bash(rm:*)'),
+      children[1]?.opts.grant?.allowed.includes('Bash(rm:*)'),
       'the replacement child did not receive the granted command',
     );
   } finally {
@@ -89,8 +121,8 @@ test('an APPROVAL respawns the child with the command added to its allowlist', a
  * trip is not a restart.
  */
 test('the replacement RESUMES the session rather than starting a new one', async () => {
-  const spawns: SpawnOptions[] = [];
-  const sup = await supervisorFor(`rc-${process.pid}-b`, spawns);
+  const children: FakeChild[] = [];
+  const sup = await supervisorFor(`rc-${process.pid}-b`, children);
 
   try {
     await deliverToSupervisor(`rc-${process.pid}-b`, {
@@ -101,7 +133,7 @@ test('the replacement RESUMES the session rather than starting a new one', async
       approval: { approvalId: 2, decision: 'approve', requested: 'Bash(rm:*)', sessionId: 'x' },
     });
 
-    assert.equal(spawns[1]?.resumeSessionId, 'sess-from-fake');
+    assert.equal(children[1]?.opts.resumeSessionId, 'sess-from-fake');
   } finally {
     await sup.stop();
   }
@@ -113,11 +145,11 @@ test('the replacement RESUMES the session rather than starting a new one', async
  * for something that worked a minute earlier.
  */
 test('a grant keeps every tool the child already had', async () => {
-  const spawns: SpawnOptions[] = [];
-  const sup = await supervisorFor(`rc-${process.pid}-c`, spawns);
+  const children: FakeChild[] = [];
+  const sup = await supervisorFor(`rc-${process.pid}-c`, children);
 
   try {
-    const before = [...(spawns[0]?.grant?.allowed ?? [])];
+    const before = [...(children[0]?.opts.grant?.allowed ?? [])];
     assert.ok(before.length > 0, 'the first child had no tools, so this proves nothing');
 
     await deliverToSupervisor(`rc-${process.pid}-c`, {
@@ -129,7 +161,7 @@ test('a grant keeps every tool the child already had', async () => {
     });
 
     for (const tool of before) {
-      assert.ok(spawns[1]?.grant?.allowed.includes(tool), `the grant revoked: ${tool}`);
+      assert.ok(children[1]?.opts.grant?.allowed.includes(tool), `the grant revoked: ${tool}`);
     }
   } finally {
     await sup.stop();
@@ -138,8 +170,8 @@ test('a grant keeps every tool the child already had', async () => {
 
 /** A DENY must not replace anything — nothing changed, so nothing respawns. */
 test('a DENY does not respawn the child', async () => {
-  const spawns: SpawnOptions[] = [];
-  const sup = await supervisorFor(`rc-${process.pid}-d`, spawns);
+  const children: FakeChild[] = [];
+  const sup = await supervisorFor(`rc-${process.pid}-d`, children);
 
   try {
     await deliverToSupervisor(`rc-${process.pid}-d`, {
@@ -150,7 +182,7 @@ test('a DENY does not respawn the child', async () => {
       approval: { approvalId: 4, decision: 'deny', requested: 'Bash(rm:*)', sessionId: 'x' },
     });
 
-    assert.equal(spawns.length, 1, 'a refusal replaced the child for no reason');
+    assert.equal(children.length, 1, 'a refusal replaced the child for no reason');
   } finally {
     await sup.stop();
   }
@@ -166,4 +198,106 @@ test('replaceChild carries a model change, so a switch is a caller not new machi
 
   assert.match(src, /allowedTools\?: readonly string\[\]; model\?: string/);
   assert.ok(src.includes('model: currentModel'), 'the replacement never passes a model');
+});
+
+/**
+ * 🚨 EVERY REPLACEMENT CHILD HUNG, AND 245 TESTS WERE GREEN.
+ *
+ * `onTurnEnd` was registered OUTSIDE `wireChild()`, on the first child only.
+ * A replacement's turn-complete signal reached nothing, the queue stayed
+ * `inTurn` forever, and the supervisor looked idle rather than broken. The
+ * approval path is the only caller, so it was the FIRST approval. Found by
+ * claude1; the suite could not see it because the fake swallowed the
+ * callback.
+ */
+test('the REPLACEMENT child can end a turn, or the queue waits forever', async () => {
+  const children: FakeChild[] = [];
+  const handle = `rc-${process.pid}-turn`;
+  const sup = await supervisorFor(handle, children);
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 10,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      approval: { approvalId: 10, decision: 'approve', requested: 'Bash(rm:*)', sessionId: 'x' },
+    });
+
+    const replacement = children[1];
+    assert.ok(replacement, 'no replacement child');
+
+    // Its first prompt is the re-dispatch. Finish that turn, then a new
+    // message must actually be delivered.
+    replacement.finishTurn();
+
+    await deliverToSupervisor(handle, {
+      id: 11,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      body: 'anything',
+    });
+
+    assert.ok(
+      replacement.sent.length >= 2,
+      `the replacement never received a second prompt — the queue is stuck (sent ${replacement.sent.length})`,
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🚨 THE DEAD CHILD'S onExit DRAINED THE LIVE QUEUE. `kill()` fires it after
+ * the replacement is already running, so it threw away the carried-over work
+ * AND reset the queue to idle mid-turn — two turns in flight at once. Found
+ * by claude1.
+ */
+test("the old child's exit does not drain the NEW child's PENDING queue", async () => {
+  const children: FakeChild[] = [];
+  const handle = `rc-${process.pid}-exit`;
+  const sup = await supervisorFor(handle, children);
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 12,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      approval: { approvalId: 12, decision: 'approve', requested: 'Bash(rm:*)', sessionId: 'x' },
+    });
+
+    const replacement = children[1];
+    assert.ok(replacement, 'no replacement child');
+    assert.equal(replacement.sent.length, 1, 'the re-dispatch prompt was not sent');
+
+    // 🛑 QUEUE WORK WHILE THE REPLACEMENT IS MID-TURN. This is the state the
+    // bug destroys: the dead child's exit drains a queue that belongs to the
+    // live child. An earlier version of this test fired the stale exit with
+    // NOTHING pending, so it passed with the guard removed — vacuous.
+    await deliverToSupervisor(handle, {
+      id: 13,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      body: 'queued while busy',
+    });
+
+    assert.equal(replacement.sent.length, 1, 'the second prompt should still be QUEUED');
+
+    // The dead child's kill signal lands late.
+    children[0]?.exit();
+
+    // The replacement finishes its turn; the queued prompt must now go out.
+    replacement.finishTurn();
+
+    assert.equal(
+      replacement.sent.length,
+      2,
+      "the dead child's exit drained the live queue and the pending prompt was lost",
+    );
+  } finally {
+    await sup.stop();
+  }
 });

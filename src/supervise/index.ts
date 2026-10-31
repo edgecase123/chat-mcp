@@ -192,14 +192,6 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     for (const h of held.splice(0, held.length)) queue.offer(h);
   };
 
-  // 🛑 SEMANTIC CALLBACKS ONLY. Nothing here knows Claude Code's event shapes —
-  // the driver maps its own. That is what makes a Cursor or other CLI driver a
-  // new file rather than a change to the queue and the gate.
-  child.onTurnEnd(() => {
-    queue.turnEnded();
-    log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
-  });
-
   /**
    * 🛑 THE PRODUCER. Without it `denialFromClaude` was imported and never
    * called and `insertApproval` had no caller in `src/` at all — the approval
@@ -220,6 +212,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    */
   const grantedCommands: string[] = [];
 
+  /**
+   * Which spawn is current. A dead child's callbacks must not act on the
+   * live one's state.
+   */
+  let childGeneration = 0;
+
   let childSession: string | null = null;
 
   /**
@@ -230,6 +228,20 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * turn that already ended, and the supervisor would look hung.
    */
   function wireChild(): void {
+    // 🛑 SEMANTIC CALLBACKS ONLY. Nothing here knows any CLI's event shapes.
+    //
+    // 🚨 `onTurnEnd` WAS REGISTERED OUTSIDE THIS FUNCTION, ON THE FIRST CHILD
+    // ONLY. Every replacement then hung: the new child's turn-complete signal
+    // reached nothing, the queue stayed `inTurn` forever, and the supervisor
+    // looked idle rather than broken. The approval path is the only caller,
+    // so it was the FIRST approval, not an edge case. Found by claude1.
+    const generation = ++childGeneration;
+
+    child.onTurnEnd(() => {
+      queue.turnEnded();
+      log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
+    });
+
     child.onSession((id) => {
       childSession = id;
     });
@@ -264,6 +276,16 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     });
 
     child.onExit((code, signal) => {
+      // 🚨 THE DEAD CHILD'S EXIT MUST NOT TOUCH THE LIVE QUEUE. `kill()`
+      // fires this AFTER a replacement is already running, so draining here
+      // threw away the carried-over work AND reset the queue to idle
+      // mid-turn — two turns in flight at once. Found by claude1.
+      if (generation !== childGeneration) {
+        log(`old child exited code=${code} signal=${signal} (replaced); ignoring`);
+
+        return;
+      }
+
       // 🛑 Anything queued is UNSENT. Reporting it is the difference between a
       // visible gap and silence, and silence is the ambiguity this whole change
       // exists to remove.
