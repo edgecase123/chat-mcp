@@ -103,9 +103,7 @@ test('char-count estimator (old behavior) DOES undercount vs wrappedRowCount', (
 });
 
 test('Ctrl-N advances by one message (fine step)', async () => {
-  // Two messages long enough that the first + a chunk of the second are
-  // visible on mount. Ctrl-N should reveal the second's first line one
-  // press at a time, not jump by a whole message.
+  // Three messages, two of which fit the row budget.
   const contentColumns = 60;
   const viewportRows = 6;
   const messages: Message[] = [
@@ -128,14 +126,25 @@ test('Ctrl-N advances by one message (fine step)', async () => {
     ),
   );
 
-  // Snap two consecutive frames after one Ctrl-N. The header count above
-  // the top-visible content should NOT reset to zero — that would indicate
-  // whole-message scroll. Instead, the ↑ / ↓ markers should shift by ~1.
-  const before = lastFrame() ?? '';
-  stdin.write('\x0e'); // Ctrl-N
-  await new Promise((r) => setTimeout(r, 20));
-  const after = lastFrame() ?? '';
-  assert.notEqual(before, after, 'Ctrl-N should change the frame');
+  // The list mounts pinned to the NEWEST message, so Ctrl-N starts with
+  // nothing to advance to. Scroll back to the oldest first, then measure
+  // the step. Asserting on the ↓ counter rather than on frame inequality
+  // is what distinguishes a one-message step from a whole-page jump.
+  const newerHidden = (frame: string): number =>
+    Number(/↓ (\d+) newer/.exec(frame)?.[1] ?? 0);
+
+  const press = async (seq: string): Promise<string> => {
+    stdin.write(seq);
+    await new Promise((r) => setTimeout(r, 20));
+    return lastFrame() ?? '';
+  };
+
+  await press('\x10'); // Ctrl-P
+  const atOldest = await press('\x10'); // Ctrl-P
+  assert.equal(newerHidden(atOldest), 2, 'both newer messages should be hidden');
+
+  const stepped = await press('\x0e'); // Ctrl-N
+  assert.equal(newerHidden(stepped), 1, 'Ctrl-N should advance by exactly one message');
 });
 
 test('row-budget slice actually fits within viewportRows', () => {
