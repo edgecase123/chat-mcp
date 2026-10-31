@@ -290,6 +290,39 @@ test('the generated config launches a file that EXISTS', () => {
   });
 });
 
+/**
+ * 🚨 THE EXISTING CHECKS PASSED ON THE WRONG FILE. They asserted the target
+ * EXISTS and is named `index.(js|ts)` — and `src/supervise/index.ts`, the
+ * SUPERVISOR, satisfies both. A one-level path error pointed every child's
+ * MCP server at the supervisor, which exits immediately, so every child
+ * reported `chat: failed, Connection closed` and had no bus tools at all.
+ *
+ * Two live e2e runs were misdiagnosed before this was found. "Named like the
+ * entry" is not "is the entry".
+ */
+test('the generated config launches the CLI, not some other file called index', () => {
+  withTempHome(() => {
+    const path = writeClaudeMcpConfig('sup-claude2');
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+      mcpServers: { chat: { args: string[] } };
+    };
+
+    const script = parsed.mcpServers.chat.args.find((a) => a.endsWith('.js') || a.endsWith('.ts'))!;
+    const source = readFileSync(script, 'utf8');
+
+    // The CLI registers subcommands and the shim fallback. The supervisor
+    // does neither, so this distinguishes them by CONTENT, not by name.
+    assert.ok(
+      source.includes('KNOWN_SUBCOMMANDS') || source.includes("command('supervise"),
+      `that is not the chat-mcp CLI entry: ${script}`,
+    );
+    assert.ok(
+      !/export async function startSupervisor/.test(source),
+      `that is the SUPERVISOR, not the CLI: ${script}`,
+    );
+  });
+});
+
 test("the generated config launches chat-mcp's ENTRY, not the running script", () => {
   withTempHome(() => {
     const path = writeClaudeMcpConfig('sup-claude2');

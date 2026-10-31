@@ -111,17 +111,27 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
  * immediately — which looks exactly like the bug above.
  */
 function resolveChatMcpEntry(): { command: string; args: string[] } {
-  // Installed layout: dist/supervise/child.js next to dist/index.js.
-  const built = fileURLToPath(new URL('../index.js', import.meta.url));
+  // 🚨 THESE ARE RELATIVE TO drivers/, AND THEY WERE OFF BY ONE LEVEL.
+  // `../index.ts` from `src/supervise/drivers/` is `src/supervise/index.ts`
+  // — the SUPERVISOR, not the CLI. The child's MCP server launched the
+  // supervisor, which exits immediately, so every child reported
+  // `chat: failed, Connection closed` and had no bus tools at all.
+  //
+  // ⚠️ THE EXISTING TEST COULD NOT SEE IT: it asserted the file EXISTS and
+  // is named `index.(js|ts)`, and the supervisor satisfies both. Third bug
+  // of this exact shape tonight.
+  //
+  // Installed layout: dist/supervise/drivers/claude.js -> dist/index.js
+  const built = fileURLToPath(new URL('../../index.js', import.meta.url));
   if (existsSync(built)) return { command: process.execPath, args: [built] };
 
   // Source layout with a build present — preferred, because it needs no loader
   // and therefore nothing to resolve from the child's cwd.
-  const builtFromSource = fileURLToPath(new URL('../../dist/index.js', import.meta.url));
+  const builtFromSource = fileURLToPath(new URL('../../../dist/index.js', import.meta.url));
   if (existsSync(builtFromSource)) return { command: process.execPath, args: [builtFromSource] };
 
   // Source layout with no build. The loader has to be an ABSOLUTE path.
-  const source = fileURLToPath(new URL('../index.ts', import.meta.url));
+  const source = fileURLToPath(new URL('../../index.ts', import.meta.url));
   if (existsSync(source)) {
     return { command: process.execPath, args: ['--import', resolveLoader(), source] };
   }

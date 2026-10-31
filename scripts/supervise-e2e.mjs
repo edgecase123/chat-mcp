@@ -39,6 +39,20 @@ if (!process.env.CHAT_MCP_LIVE) {
 }
 
 const HANDLE = `e2e-${process.pid}`;
+
+/**
+ * 🛑 THE TASK MUST BE DENIED WITH A NAME, or the run cannot test a grant.
+ *
+ * Measured: `rm` names itself — *"What required approval: rm in '/path' was
+ * blocked."* — but only when NO `Edit(<glob>)` scope covers the target,
+ * because those rules govern every file-editing tool. A `git push` refusal
+ * gives a prose reason instead, which is unnameable and can only be denied.
+ *
+ * So the allowlist here deliberately has no Edit scope. The directory is
+ * still reachable, which is what makes the denial about the COMMAND rather
+ * than the location.
+ */
+const MODE = process.env.E2E_MODE ?? 'nameable';
 const WAIT_MS = Number(process.env.APPROVAL_WAIT_SECONDS ?? 300) * 1000;
 
 /**
@@ -110,6 +124,12 @@ console.log(`remote=${remote}\n`);
 const sup = await startSupervisor({
   handle: HANDLE,
   extraDirs: [root],
+  // No Edit scope: the target is REACHABLE but no rule covers editing it,
+  // which is what makes `rm` name itself in the refusal.
+  allowedTools:
+    MODE === 'nameable'
+      ? ['Read', 'Glob', 'Grep', 'mcp__chat__send', 'mcp__chat__room_send']
+      : undefined,
   log: (line) => console.log(`    ${line}`),
 });
 
@@ -121,8 +141,11 @@ try {
     from: 'e2e-harness',
     ts: Date.now(),
     body:
-      `Please run \`git push -u origin main\` in ${workdir}. ` +
-      `If you are blocked, say so and stop — do not work around it.`,
+      MODE === 'nameable'
+        ? `Please delete the file ${join(workdir, 'README.md')} using the shell, with rm. ` +
+          `If you are blocked, say so and stop — do not work around it.`
+        : `Please run \`git push -u origin main\` in ${workdir}. ` +
+          `If you are blocked, say so and stop — do not work around it.`,
   });
 
   record('the socket ACKs the delivery', ack?.ok === true, JSON.stringify(ack));
@@ -165,15 +188,19 @@ try {
   const decision = dao.getApproval(db, request.id)?.decision;
   console.log(`  decision: ${decision}\n`);
 
+  // The check differs by mode, and the TARGET is the only honest answer in
+  // both: asking the agent whether it succeeded asks the thing under test.
+  const succeeded = MODE === 'nameable' ? () => !existsSync(join(workdir, 'README.md')) : pushed;
+
   if (request.requested == null) {
-    record('an UNNAMED request offers Deny only, and nothing was pushed', !pushed());
+    record('an UNNAMED request offers Deny only, and nothing happened', !succeeded());
   } else if (decision !== 'approve') {
-    record('nothing was pushed after a DENY', !pushed());
+    record('nothing happened after a DENY', !succeeded());
   } else {
     // ── 4. The grant must REACH the child, which is the bug that shipped ──
-    const done = await until(pushed, 180_000, 'the push to land on the remote');
+    const done = await until(succeeded, 180_000, 'the approved command to run');
 
-    record('the approved command actually RAN', done, done ? 'remote has the commit' : 'remote empty');
+    record('the approved command actually RAN', done, done ? 'target is gone' : 'target still there');
   }
 } finally {
   await sup.stop();
