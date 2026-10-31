@@ -90,7 +90,10 @@ test('an APPROVAL respawns the child with the command added to its allowlist', a
 
   try {
     assert.equal(children.length, 1, 'the first child never spawned');
-    assert.ok(!children[0]?.opts.grant?.allowed.includes('Bash(rm:*)'), 'already granted before approval');
+    assert.ok(
+      !children[0]?.opts.grant?.allowed.includes('Bash(rm -f /tmp/x.txt)'),
+      'already granted before approval',
+    );
 
     await deliverToSupervisor(`rc-${process.pid}-a`, {
       id: 1,
@@ -100,14 +103,18 @@ test('an APPROVAL respawns the child with the command added to its allowlist', a
       approval: {
         approvalId: 1,
         decision: 'approve',
-        requested: 'Bash(rm:*)',
+        // 🛑 TWO FIELDS ON PURPOSE. `requested` is the prose a human read;
+        // `grant` is what the allowlist understands. Sending the prose
+        // granted nothing and looped — measured live.
+        requested: "rm in '/tmp/x.txt'",
+        grant: 'Bash(rm -f /tmp/x.txt)',
         sessionId: 'sess-1',
       },
     });
 
     assert.equal(children.length, 2, 'the child was NOT replaced — the grant never reached it');
     assert.ok(
-      children[1]?.opts.grant?.allowed.includes('Bash(rm:*)'),
+      children[1]?.opts.grant?.allowed.includes('Bash(rm -f /tmp/x.txt)'),
       'the replacement child did not receive the granted command',
     );
   } finally {
@@ -130,7 +137,13 @@ test('the replacement RESUMES the session rather than starting a new one', async
       to: `rc-${process.pid}-b`,
       from: 'lee',
       ts: Date.now(),
-      approval: { approvalId: 2, decision: 'approve', requested: 'Bash(rm:*)', sessionId: 'x' },
+      approval: {
+        approvalId: 2,
+        decision: 'approve',
+        requested: "rm in '/tmp/x.txt'",
+        grant: 'Bash(rm -f /tmp/x.txt)',
+        sessionId: 'x',
+      },
     });
 
     assert.equal(children[1]?.opts.resumeSessionId, 'sess-from-fake');
@@ -157,7 +170,13 @@ test('a grant keeps every tool the child already had', async () => {
       to: `rc-${process.pid}-c`,
       from: 'lee',
       ts: Date.now(),
-      approval: { approvalId: 3, decision: 'approve', requested: 'Bash(rm:*)', sessionId: 'x' },
+      approval: {
+        approvalId: 3,
+        decision: 'approve',
+        requested: "rm in '/tmp/x.txt'",
+        grant: 'Bash(rm -f /tmp/x.txt)',
+        sessionId: 'x',
+      },
     });
 
     for (const tool of before) {
@@ -179,7 +198,13 @@ test('a DENY does not respawn the child', async () => {
       to: `rc-${process.pid}-d`,
       from: 'lee',
       ts: Date.now(),
-      approval: { approvalId: 4, decision: 'deny', requested: 'Bash(rm:*)', sessionId: 'x' },
+      approval: {
+        approvalId: 4,
+        decision: 'deny',
+        requested: "rm in '/tmp/x.txt'",
+        grant: 'Bash(rm -f /tmp/x.txt)',
+        sessionId: 'x',
+      },
     });
 
     assert.equal(children.length, 1, 'a refusal replaced the child for no reason');
@@ -221,7 +246,13 @@ test('the REPLACEMENT child can end a turn, or the queue waits forever', async (
       to: handle,
       from: 'lee',
       ts: Date.now(),
-      approval: { approvalId: 10, decision: 'approve', requested: 'Bash(rm:*)', sessionId: 'x' },
+      approval: {
+        approvalId: 10,
+        decision: 'approve',
+        requested: "rm in '/tmp/x.txt'",
+        grant: 'Bash(rm -f /tmp/x.txt)',
+        sessionId: 'x',
+      },
     });
 
     const replacement = children[1];
@@ -265,7 +296,13 @@ test("the old child's exit does not drain the NEW child's PENDING queue", async 
       to: handle,
       from: 'lee',
       ts: Date.now(),
-      approval: { approvalId: 12, decision: 'approve', requested: 'Bash(rm:*)', sessionId: 'x' },
+      approval: {
+        approvalId: 12,
+        decision: 'approve',
+        requested: "rm in '/tmp/x.txt'",
+        grant: 'Bash(rm -f /tmp/x.txt)',
+        sessionId: 'x',
+      },
     });
 
     const replacement = children[1];
@@ -372,7 +409,13 @@ test("the old child's turn-end does not release the NEW child's queue", async ()
       to: handle,
       from: 'lee',
       ts: Date.now(),
-      approval: { approvalId: 20, decision: 'approve', requested: 'Bash(rm:*)', sessionId: 'x' },
+      approval: {
+        approvalId: 20,
+        decision: 'approve',
+        requested: "rm in '/tmp/x.txt'",
+        grant: 'Bash(rm -f /tmp/x.txt)',
+        sessionId: 'x',
+      },
     });
 
     const replacement = children[1];
@@ -396,6 +439,52 @@ test("the old child's turn-end does not release the NEW child's queue", async ()
       replacement.sent.length,
       1,
       'a stale turn-end released the queue into a child that is mid-turn',
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🛑 THE PROMPT TOLD THE CHILD TO RUN PROSE, AND THE LOOP WAS INVISIBLE
+ * BECAUSE THE ALLOWLIST WAS CORRECT. Measured on run 10: approvals 19 and 20
+ * carried byte-identical, well-formed grants, and the child was re-blocked
+ * anyway — it had been asked to attempt `touch in '<path>'`, which is not a
+ * command anyone can run.
+ *
+ * The two fields are different languages. The allowlist argument already said
+ * so; the prompt argument beside it still passed the prose.
+ */
+test('the re-dispatch prompt names the GRANTED COMMAND, never the prose', async () => {
+  const children: FakeChild[] = [];
+  const handle = `rc-${process.pid}-prose`;
+  const sup = await supervisorFor(handle, children);
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 9,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      approval: {
+        approvalId: 9,
+        decision: 'approve',
+        requested: "touch in '/tmp/x.txt'",
+        grant: 'Bash(touch /tmp/x.txt)',
+        sessionId: 'x',
+      },
+    });
+
+    const prompt = children[1]?.sent.join('\n') ?? '';
+
+    assert.ok(prompt.length > 0, 'the replacement child was sent nothing at all');
+    assert.ok(
+      prompt.includes('touch /tmp/x.txt'),
+      `the prompt never names the real command: ${prompt}`,
+    );
+    assert.ok(
+      !prompt.includes("touch in '"),
+      `the prompt tells the child to run prose: ${prompt}`,
     );
   } finally {
     await sup.stop();

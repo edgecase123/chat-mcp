@@ -215,10 +215,31 @@ test('the allowlist the child receives is the one it was given, verbatim', () =>
  * measured on chat-mcp#33 — the child woke, understood it was on the bus,
  * tried to answer and was refused. The flags are useless without this.
  */
-test('a child with a grant does not default to the mode that denies everything', () => {
+/**
+ * 🚨 "NOT plan" WAS TOO WEAK, AND acceptEdits PASSED IT WHILE BREAKING THE
+ * ALLOWLIST. Measured 2026-10-31, cwd and allowlist held constant:
+ *
+ *   acceptEdits + allowlist WITHOUT Bash  -> the rm RAN
+ *   manual      + allowlist WITHOUT Bash  -> the rm was DENIED
+ *
+ * `acceptEdits` auto-approves inside the allowed directories and never
+ * consults the list, so lee's narrow allowlist was decorative and nothing
+ * was ever blocked — which is why the approval path could not fire. The mode
+ * is NAMED here so a revert is visible rather than silent.
+ */
+test('a child with a grant defaults to manual, the mode that enforces the allowlist', () => {
   const args = claudeArgs({ grant });
 
-  assert.notEqual(args[args.indexOf('--permission-mode') + 1], 'plan');
+  assert.equal(args[args.indexOf('--permission-mode') + 1], 'manual');
+});
+
+test('an allowlisted MCP tool is still permitted under that mode', () => {
+  // Measured live: `mcp__chat__send` landed on the bus under BOTH modes, so
+  // manual does not mute the child. Recorded as the reason the switch is safe.
+  assert.ok(
+    DEFAULT_ALLOWED.some((t) => t.startsWith('mcp__chat__')),
+    'the child has no bus tool at all, so the mode choice is moot',
+  );
 });
 
 test('a child with no grant still defaults to plan', () => {
@@ -287,6 +308,39 @@ test('the generated config launches a file that EXISTS', () => {
 
     assert.ok(script, 'the config names no script at all');
     assert.ok(existsSync(script), `the child would launch a file that is not there: ${script}`);
+  });
+});
+
+/**
+ * 🚨 THE EXISTING CHECKS PASSED ON THE WRONG FILE. They asserted the target
+ * EXISTS and is named `index.(js|ts)` — and `src/supervise/index.ts`, the
+ * SUPERVISOR, satisfies both. A one-level path error pointed every child's
+ * MCP server at the supervisor, which exits immediately, so every child
+ * reported `chat: failed, Connection closed` and had no bus tools at all.
+ *
+ * Two live e2e runs were misdiagnosed before this was found. "Named like the
+ * entry" is not "is the entry".
+ */
+test('the generated config launches the CLI, not some other file called index', () => {
+  withTempHome(() => {
+    const path = writeClaudeMcpConfig('sup-claude2');
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+      mcpServers: { chat: { args: string[] } };
+    };
+
+    const script = parsed.mcpServers.chat.args.find((a) => a.endsWith('.js') || a.endsWith('.ts'))!;
+    const source = readFileSync(script, 'utf8');
+
+    // The CLI registers subcommands and the shim fallback. The supervisor
+    // does neither, so this distinguishes them by CONTENT, not by name.
+    assert.ok(
+      source.includes('KNOWN_SUBCOMMANDS') || source.includes("command('supervise"),
+      `that is not the chat-mcp CLI entry: ${script}`,
+    );
+    assert.ok(
+      !/export async function startSupervisor/.test(source),
+      `that is the SUPERVISOR, not the CLI: ${script}`,
+    );
   });
 });
 
@@ -414,4 +468,37 @@ test('no module above drivers/ knows any CLI event shape or flag', async () => {
   }
 
   assert.deepEqual(leaks, [], 'a CLI specific lives above the driver directory');
+});
+
+/**
+ * 🛑 `manual` IS THE DEFAULT SO THE SHIPPED BEHAVIOUR IS A LIST A SECOND
+ * PERSON CAN READ. lee, 2026-10-31: *"manual as default with opt in for auto
+ * through an easy flag"*, because *"I want it to be usable by other devs
+ * too"*.
+ *
+ * Measured: `auto` let an un-allowlisted `rm` through with no denial at all,
+ * so its gate is a classifier nobody can inspect. That is fine for an
+ * operator who has lived with it and wrong as a default for someone who has
+ * not.
+ */
+test('--auto is a shorthand, and an explicit --permission-mode still wins', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
+
+  assert.match(src, /\.option\(\s*'--auto'/, 'there is no opt-in flag');
+  assert.match(
+    src,
+    /permissionMode:\s*\n?\s*o\.permissionMode \?\?/,
+    'the flag overrides an explicitly named mode',
+  );
+});
+
+test('the help text says what --auto costs, not just what it does', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
+
+  const help = src.slice(src.indexOf("'--auto'"), src.indexOf("'--auto'") + 400);
+
+  assert.match(help, /allowlist/, 'the flag does not say what it replaces');
+  assert.match(help, /not written down|cannot read|second person/, 'it does not state the cost');
 });

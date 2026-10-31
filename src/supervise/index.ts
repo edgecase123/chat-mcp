@@ -8,6 +8,7 @@ import * as dao from '../storage/dao.js';
 import { availableBuiltins, childHandleFor, defaultAllowed, type ChildGrant } from './grant.js';
 import { dirsFor } from './projects.js';
 import { allowlistWith, resolveCwd } from './allowlist.js';
+import { commandFromGrant, grantFor, grantVariants } from './denial.js';
 import { writeClaudeMcpConfig } from './drivers/claude.js';
 
 /**
@@ -293,15 +294,43 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
         const approvalId = dao.insertApproval(approvalsDb, {
           agentHandle: grantHandle,
           supervisorHandle: opts.handle,
-          // ⚠️ VERBATIM, and null when the clause could not be parsed. The
-          // operator approves this exact string and it is what gets
-          // allowlisted, so a guess would grant what the child never asked for.
-          requested: denial.requested ?? '(could not parse the request)',
+          // 🛑 NULL WHEN THE CLI DID NOT NAME IT, never a placeholder.
+          //
+          // Measured end to end: a `git push` denial gives a prose reason
+          // with no command. A placeholder was filed, lee APPROVED A BLANK,
+          // the literal went into `--allowedTools` and granted nothing, the
+          // retry was denied, and a second card appeared.
+          //
+          // ⚠️ FILING NOTHING WAS THE FIRST FIX AND IT WAS WORSE. claude1:
+          // it restores the bug #39 exists to fix — the child stops and
+          // nobody is told. Worse still, the one unnameable case measured is
+          // `git push`, which is on lee's excluded list BY NAME, so silence
+          // would land exactly on the high-stakes requests.
+          //
+          // The row is filed, the reason is shown, and `answerApproval`
+          // refuses to APPROVE it. Deny always works.
+          requested: denial.requested,
+          // 🛑 WHAT THE CARD SHOWS AND WHAT THE GRANT CARRIES ARE DIFFERENT
+          // LANGUAGES. `requested` is prose a human reads; `grant` is the
+          // allowlist entry. Feeding the prose into `--allowedTools` grants
+          // nothing — measured live: lee approved
+          // `rm in '/path/README.md'`, the child was denied again, and a
+          // second card appeared.
+          grant: grantFor(denial),
+          // 🛑 EVERY SPELLING OF THE SAME FILE. `/var` and `/private/var`
+          // are the same path on macOS, and a grant in one spelling does
+          // not match a retry in the other — measured live, caused by this
+          // supervisor's own realpath resolution.
+          grantForms: grantVariants(denial),
           reason: denial.raw,
           sessionId: childSession,
         });
 
-        log(`child BLOCKED, approval ${approvalId} pending: ${denial.requested ?? 'unparsed'}`);
+        log(
+          denial.requested
+            ? `child BLOCKED, approval ${approvalId} pending: ${denial.requested}`
+            : `child BLOCKED, approval ${approvalId} pending but UNNAMED — it can only be denied`,
+        );
       } catch (err) {
         // 🛑 SAY SO. A failed write here means the operator is never asked, and
         // silence is the failure mode this whole path exists to remove.
@@ -415,9 +444,23 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // second denial, and the prompt makes it look like the grant worked.
     replaceChild(
       `approved: ${answer.requested}`,
-      { allowedTools: allowlistWith(currentGrant?.allowed ?? [], [answer.requested]) },
+      // The GRANT, never the prose. An approval with no grant cannot widen
+      // anything, so it re-dispatches with the allowlist unchanged — the
+      // child will be denied again, visibly, rather than silently.
+      {
+        // Every spelling, not just the one shown. They denote one file.
+        allowedTools: allowlistWith(
+          currentGrant?.allowed ?? [],
+          answer.grantForms?.length ? [...answer.grantForms] : answer.grant ? [answer.grant] : [],
+        ),
+      },
       driver.redispatchPrompt({
-        grantedCommand: answer.requested,
+        // 🛑 THE COMMAND, NOT THE PROSE. `requested` is a sentence; a child
+        // asked to attempt it types something no grant covers.
+        grantedCommand:
+          (answer.grant === null || answer.grant === undefined
+            ? null
+            : commandFromGrant(answer.grant)) ?? answer.requested,
         followUp: 'Then carry on with the task you were on.',
       }),
     );

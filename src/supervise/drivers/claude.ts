@@ -5,7 +5,7 @@ import type { AgentChild, SpawnOptions } from '../child.js';
 import { createLineParser } from '../child.js';
 import { type RateLimitSnapshot } from '../rate-limit.js';
 import { parseClaudeRateLimit } from './claude-events.js';
-import { denialFromClaude } from './claude-events.js';
+import { denialFromClaude, rememberClaudeToolUse } from './claude-events.js';
 import type { Denial } from '../denial.js';
 import { ensureMcpConfigDir, mcpConfigPathFor } from '../../util/paths.js';
 
@@ -40,7 +40,21 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
     // 🛑 `plan` DENIES every tool, measured on chat-mcp#33 — a child in plan
     // mode wakes, understands it is on the bus, tries to answer and is
     // refused. So a working child needs a mode that permits an allowlisted
-    // tool, and `acceptEdits` is the one proven to.
+    // tool.
+    //
+    // 🚨 `acceptEdits` WAS THAT MODE AND IT DID NOT ENFORCE THE ALLOWLIST.
+    // Measured 2026-10-31, cwd and allowlist held constant, only the mode
+    // changing:
+    //
+    //   acceptEdits + allowlist WITHOUT Bash  -> the rm RAN
+    //   manual      + allowlist WITHOUT Bash  -> the rm was DENIED
+    //
+    // It auto-approves inside the allowed directories and never consults
+    // the list, so lee's narrow allowlist was decorative and the approval
+    // path could never fire — nothing was ever blocked.
+    //
+    // `manual` enforces it, and an allowlisted MCP tool still works:
+    // measured, a `mcp__chat__send` landed on the bus under both modes.
     //
     // ⚠️ AN EARLIER VERSION OF THIS COMMENT SAID acceptEdits "widens nothing,
     // because `--tools ''` means there is no Edit tool to accept". THAT
@@ -50,7 +64,7 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
     // Found by claude1 reviewing PR 34.
     //
     // An explicit --permission-mode always wins over both defaults.
-    opts.permissionMode ?? (opts.grant ? 'acceptEdits' : 'plan'),
+    opts.permissionMode ?? (opts.grant ? 'manual' : 'plan'),
     '--permission-prompts',
     opts.permissionPrompts ?? 'none',
   ];
@@ -111,17 +125,27 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
  * immediately — which looks exactly like the bug above.
  */
 function resolveChatMcpEntry(): { command: string; args: string[] } {
-  // Installed layout: dist/supervise/child.js next to dist/index.js.
-  const built = fileURLToPath(new URL('../index.js', import.meta.url));
+  // 🚨 THESE ARE RELATIVE TO drivers/, AND THEY WERE OFF BY ONE LEVEL.
+  // `../index.ts` from `src/supervise/drivers/` is `src/supervise/index.ts`
+  // — the SUPERVISOR, not the CLI. The child's MCP server launched the
+  // supervisor, which exits immediately, so every child reported
+  // `chat: failed, Connection closed` and had no bus tools at all.
+  //
+  // ⚠️ THE EXISTING TEST COULD NOT SEE IT: it asserted the file EXISTS and
+  // is named `index.(js|ts)`, and the supervisor satisfies both. Third bug
+  // of this exact shape tonight.
+  //
+  // Installed layout: dist/supervise/drivers/claude.js -> dist/index.js
+  const built = fileURLToPath(new URL('../../index.js', import.meta.url));
   if (existsSync(built)) return { command: process.execPath, args: [built] };
 
   // Source layout with a build present — preferred, because it needs no loader
   // and therefore nothing to resolve from the child's cwd.
-  const builtFromSource = fileURLToPath(new URL('../../dist/index.js', import.meta.url));
+  const builtFromSource = fileURLToPath(new URL('../../../dist/index.js', import.meta.url));
   if (existsSync(builtFromSource)) return { command: process.execPath, args: [builtFromSource] };
 
   // Source layout with no build. The loader has to be an ABSOLUTE path.
-  const source = fileURLToPath(new URL('../index.ts', import.meta.url));
+  const source = fileURLToPath(new URL('../../index.ts', import.meta.url));
   if (existsSync(source)) {
     return { command: process.execPath, args: ['--import', resolveLoader(), source] };
   }
@@ -208,6 +232,10 @@ export function routeClaudeEvent(
   // imported and never called, `insertApproval` had no caller, and the whole
   // relay started one step after the break — which is exactly how the live
   // test passed while the feature did not exist. Found by claude1.
+  // 🛑 BEFORE the denial check. The call arrives in an earlier event than
+  // its refusal, so the recorder must see every assistant event first.
+  rememberClaudeToolUse(event);
+
   const denial = denialFromClaude(event);
   if (denial && on.denial) on.denial(denial);
 

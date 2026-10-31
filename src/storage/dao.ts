@@ -660,12 +660,31 @@ export interface Approval {
   /** The supervisor to wake once the operator has answered. */
   readonly supervisorHandle: string;
   /**
-   * The command, VERBATIM.
+   * The command, VERBATIM, or null when the CLI did not name one.
    *
-   * 🛑 It is what the operator approves AND what then goes into the allowlist.
-   * A summary would grant something the child never asked for.
+   * 🛑 NULL IS NOT A PLACEHOLDER. It is what the operator approves AND what
+   * goes into the allowlist, so a stand-in string grants nothing and reads
+   * as a real request. A null request may be DENIED but never APPROVED.
    */
-  readonly requested: string;
+  readonly requested: string | null;
+  /**
+   * The allowlist entry that grants exactly this invocation.
+   *
+   * 🛑 NOT THE SAME STRING AS `requested`. That is prose for a human; this
+   * is what `--allowedTools` understands. NULL when the pairing failed, and
+   * an approval without one cannot widen anything.
+   */
+  readonly grant: string | null;
+
+  /**
+   * Every equivalent spelling of `grant`, including it.
+   *
+   * 🛑 ALL OF THEM ARE ALLOWLISTED. `/var/x` and `/private/var/x` are the
+   * same file, and granting only the spelling the operator happened to see
+   * leaves the other one denied — measured live.
+   */
+  readonly grantForms: string[];
+
   /** The whole denial text, so the UI can quote the reason rather than retell it. */
   readonly reason: string;
   /** The child session to `--resume`, or null when it is not known. */
@@ -678,7 +697,9 @@ export interface Approval {
 export interface ApprovalInput {
   agentHandle: string;
   supervisorHandle: string;
-  requested: string;
+  requested: string | null;
+  grant?: string | null;
+  grantForms?: readonly string[];
   reason: string;
   sessionId?: string | null;
 }
@@ -687,12 +708,34 @@ interface ApprovalRow {
   id: number;
   agent_handle: string;
   supervisor_handle: string;
-  requested: string;
+  requested: string | null;
+  grant_entry: string | null;
+  grant_forms: string | null;
   reason: string;
   session_id: string | null;
   created_at: number;
   answered_at: number | null;
   decision: string | null;
+}
+
+/**
+ * The stored spellings, falling back to the single grant.
+ *
+ * ⚠️ A ROW WRITTEN BEFORE MIGRATION 10 HAS NO FORMS, and must still be
+ * approvable — returning an empty list there would make every historic card
+ * un-grantable.
+ */
+function parseForms(raw: string | null, fallback: string | null): string[] {
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) return parsed.filter((x): x is string => typeof x === 'string');
+    } catch {
+      // A corrupt value must not make the row unreadable.
+    }
+  }
+
+  return fallback ? [fallback] : [];
 }
 
 function toApproval(row: ApprovalRow): Approval {
@@ -701,6 +744,8 @@ function toApproval(row: ApprovalRow): Approval {
     agentHandle: row.agent_handle,
     supervisorHandle: row.supervisor_handle,
     requested: row.requested,
+    grant: row.grant_entry,
+    grantForms: parseForms(row.grant_forms, row.grant_entry),
     reason: row.reason,
     sessionId: row.session_id,
     createdAt: row.created_at,
@@ -712,13 +757,17 @@ function toApproval(row: ApprovalRow): Approval {
 export function insertApproval(db: Db, input: ApprovalInput): number {
   const result = db
     .prepare(
-      `INSERT INTO approvals (agent_handle, supervisor_handle, requested, reason, session_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO approvals (agent_handle, supervisor_handle, requested, grant_entry, grant_forms, reason, session_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.agentHandle,
       input.supervisorHandle,
-      input.requested,
+      input.requested ?? null,
+      input.grant ?? null,
+      input.grantForms && input.grantForms.length > 0
+        ? JSON.stringify([...input.grantForms])
+        : null,
       input.reason,
       input.sessionId ?? null,
       Date.now(),
@@ -761,7 +810,38 @@ export function getApproval(db: Db, id: number): Approval | null {
  * worst outcome is a second click upgrading a `deny` to an `approve`, so the
  * `answered_at IS NULL` clause is what refuses it rather than a prior read.
  */
+/**
+ * 🛑 AN UNNAMED REQUEST CANNOT BE APPROVED, ONLY DENIED.
+ *
+ * Approving one grants a string nobody can act on — measured: a placeholder
+ * went into `--allowedTools`, the retry was denied, and a second card
+ * appeared. Deny still works, because stopping something you cannot name is
+ * always a safe answer.
+ */
+export class UnnameableApprovalError extends Error {
+  constructor(readonly id: number) {
+    super(
+      `approval ${id} cannot be approved: no allowlist entry could be derived from the ` +
+        'refusal, so approving it would permit nothing. It can be denied.',
+    );
+    this.name = 'UnnameableApprovalError';
+  }
+}
+
 export function answerApproval(db: Db, id: number, decision: 'approve' | 'deny'): boolean {
+  // ⚠️ ONLY WHEN THE ROW EXISTS. `?.requested == null` is also true for an
+  // approval that is not there, so the first version threw
+  // UnnameableApprovalError for a missing id instead of returning false —
+  // "no such approval" would have been reported as "cannot be approved".
+  const existing = decision === 'approve' ? getApproval(db, id) : null;
+
+  // 🛑 THE TEST IS `grant`, NOT `requested`. A row can name a command in
+  // prose and still carry no allowlist entry — approving that permits
+  // nothing and the agent is denied again, which is the loop lee hit.
+  if (existing && existing.grant == null) {
+    throw new UnnameableApprovalError(id);
+  }
+
   const result = db
     .prepare(`UPDATE approvals SET answered_at = ?, decision = ? WHERE id = ? AND answered_at IS NULL`)
     .run(Date.now(), decision, id);

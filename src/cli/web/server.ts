@@ -397,7 +397,19 @@ async function handleAnswerApproval(
   }
 
   const request = dao.getApproval(ctx.db, id);
-  const answered = dao.answerApproval(ctx.db, id, decision);
+  let answered: boolean;
+  try {
+    answered = dao.answerApproval(ctx.db, id, decision);
+  } catch (err) {
+    // 🛑 422, NOT 500. An unnamed request is a valid row that cannot be
+    // APPROVED — there is nothing to grant. The UI hides Approve for these,
+    // so reaching here means a stale page or a direct call.
+    if (err instanceof dao.UnnameableApprovalError) {
+      return respondJson(res, { error: err.message, canApprove: false }, 422);
+    }
+
+    throw err;
+  }
 
   if (!answered) {
     const existing = dao.getApproval(ctx.db, id);
@@ -423,13 +435,15 @@ async function handleAnswerApproval(
       to: request.supervisorHandle,
       from: ctx.handle,
       ts: Date.now(),
-      body: `approval ${id} ${decision}: ${request.requested}`,
+      body: `approval ${id} ${decision}: ${request.requested ?? '(unnamed)'}`,
       // 🛑 TYPED, so the supervisor runs the re-dispatch template instead of
       // reading the sentence above as a chat message.
       approval: {
         approvalId: id,
         decision,
-        requested: request.requested,
+        requested: request.requested ?? '',
+        grant: request.grant,
+        grantForms: request.grantForms,
         sessionId: request.sessionId,
       },
     });

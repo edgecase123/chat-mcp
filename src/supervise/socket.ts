@@ -37,6 +37,22 @@ export interface ApprovalAnswer {
   readonly decision: 'approve' | 'deny';
   /** The command, VERBATIM, as the operator saw and approved it. */
   readonly requested: string;
+
+  /**
+   * The allowlist entry to add, or null when the pairing failed.
+   *
+   * 🛑 NOT `requested`. The operator reads prose; the CLI reads
+   * `Tool(invocation)`. Sending the prose grants nothing.
+   */
+  readonly grant: string | null;
+
+  /**
+   * Every equivalent spelling of `grant`, all of which are allowlisted.
+   *
+   * 🛑 `/var/x` and `/private/var/x` are the same file. Granting only the
+   * spelling the operator saw leaves the other denied — measured live.
+   */
+  readonly grantForms?: readonly string[];
   /** The child session to resume, so a grant is not a restart. */
   readonly sessionId: string | null;
 }
