@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseRateLimitEvent, type RateLimitSnapshot } from './rate-limit.js';
 import type { BusReply } from './bus-reply.js';
 import { ensureMcpConfigDir, mcpConfigPathFor } from '../util/paths.js';
@@ -142,6 +143,37 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
 }
 
 /**
+ * How to launch this build of chat-mcp as the child's MCP server.
+ *
+ * 🛑 RESOLVED MODULE-RELATIVE, NEVER FROM `process.argv[1]`. argv[1] was used
+ * here to mean "the chat-mcp entry point". It means "whatever script is
+ * running right now". Under the installed bin those coincide; under a script
+ * or a test they do not, so a child got
+ * `node scripts/supervise-live.mjs --handle ...` and had NO chat tool at all.
+ * It woke, ran its turn, and could not answer. Found by the live harness —
+ * every unit test here asserted the handle and none asserted the command.
+ *
+ * `package.json` ships only `dist`, so from `dist/supervise/child.js` the
+ * sibling `../index.js` is the installed `bin`. Running from source there is
+ * no `../index.js`, and the TypeScript entry needs a loader or the child exits
+ * immediately — which looks exactly like the bug above.
+ */
+function resolveChatMcpEntry(): { command: string; args: string[] } {
+  const built = fileURLToPath(new URL('../index.js', import.meta.url));
+  if (existsSync(built)) return { command: process.execPath, args: [built] };
+
+  const source = fileURLToPath(new URL('../index.ts', import.meta.url));
+  if (existsSync(source)) {
+    return { command: process.execPath, args: ['--import', 'tsx', source] };
+  }
+
+  throw new Error(
+    `cannot locate the chat-mcp entry point next to ${import.meta.url}; ` +
+      'pass an explicit entry to writeClaudeMcpConfig',
+  );
+}
+
+/**
  * Write the child's own MCP config and return its path.
  *
  * 🛑 The child must reach the bus under a handle of its OWN. `inbox` marks
@@ -155,12 +187,13 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
 export function writeClaudeMcpConfig(handle: string, entry?: string): string {
   ensureMcpConfigDir();
 
+  const launch = entry ? { command: process.execPath, args: [entry] } : resolveChatMcpEntry();
   const path = mcpConfigPathFor(handle);
   const config = {
     mcpServers: {
       chat: {
-        command: process.execPath,
-        args: [entry ?? process.argv[1], '--handle', handle],
+        command: launch.command,
+        args: [...launch.args, '--handle', handle],
       },
     },
   };

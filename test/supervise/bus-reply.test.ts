@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import { claudeArgs, writeClaudeMcpConfig } from '../../src/supervise/child.js';
 import { DEFAULT_REPLY_TOOLS } from '../../src/supervise/bus-reply.js';
@@ -177,4 +177,74 @@ test('an explicit permission mode wins over both defaults', () => {
   });
 
   assert.equal(args[args.indexOf('--permission-mode') + 1], 'plan');
+});
+
+/**
+ * 🛑 THE FIELD THAT WAS WRONG WAS THE ONE NOTHING ASSERTED.
+ *
+ * The generated config named the right handle and launched the WRONG PROGRAM.
+ * `process.argv[1]` was used to mean "the chat-mcp entry point"; it means
+ * "whatever script is running now". Under the installed bin those coincide.
+ * Under a script or a test they do not, so the child got
+ * `node scripts/supervise-live.mjs --handle ...` and had no chat tool at all.
+ *
+ * Found by the live harness, which is the only thing that could have: every
+ * unit test here checked the handle.
+ */
+test('the generated config launches a file that EXISTS', () => {
+  withTempHome(() => {
+    const path = writeClaudeMcpConfig('sup-claude2');
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+      mcpServers: { chat: { command: string; args: string[] } };
+    };
+
+    const script = parsed.mcpServers.chat.args.find((a) => a.endsWith('.js') || a.endsWith('.ts'));
+
+    assert.ok(script, 'the config names no script at all');
+    assert.ok(existsSync(script), `the child would launch a file that is not there: ${script}`);
+  });
+});
+
+test("the generated config launches chat-mcp's ENTRY, not the running script", () => {
+  withTempHome(() => {
+    const path = writeClaudeMcpConfig('sup-claude2');
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+      mcpServers: { chat: { command: string; args: string[] } };
+    };
+
+    const script = parsed.mcpServers.chat.args.find((a) => a.endsWith('.js') || a.endsWith('.ts'));
+
+    assert.match(
+      basename(script!),
+      /^index\.(js|ts)$/,
+      'the child is being pointed at something that is not the CLI entry',
+    );
+
+    // 🛑 THE ASSERTION THAT WOULD HAVE CAUGHT IT. Under the test runner
+    // argv[1] is the test file, so these must differ.
+    assert.notEqual(script, process.argv[1], 'still using the running script as the entry');
+  });
+});
+
+/**
+ * ⚠️ Under tsx the entry is TypeScript, which plain node cannot run. The
+ * failure would be the child's MCP server exiting instantly, which looks
+ * exactly like the bug above.
+ */
+test('a TypeScript entry is launched with a loader, a JavaScript one is not', () => {
+  withTempHome(() => {
+    const path = writeClaudeMcpConfig('sup-claude2');
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+      mcpServers: { chat: { command: string; args: string[] } };
+    };
+
+    const args = parsed.mcpServers.chat.args;
+    const script = args.find((a) => a.endsWith('.js') || a.endsWith('.ts'))!;
+
+    if (script.endsWith('.ts')) {
+      assert.ok(args.includes('--import'), 'a .ts entry needs a loader or the child dies at once');
+    } else {
+      assert.ok(!args.includes('--import'), 'a .js entry needs no loader');
+    }
+  });
 });
