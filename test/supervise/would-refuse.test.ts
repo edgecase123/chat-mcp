@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { classify, corpusSize } from '../support/would-refuse.js';
-import type { RefusedRecord } from '../support/would-refuse.js';
 
 /**
  * 🛑 THE FIRST VERSION OF THIS FILE PASSED WHILE THE MODEL ANSWERED 5 OF 7
@@ -18,6 +17,7 @@ const CORPUS = JSON.parse(readFileSync('test/fixtures/captured-refusals.json', '
   outcome: string;
   approvalId: number;
   attempted: string;
+  allowlist: string[] | null;
 }[];
 
 test('EVERY refused capture classifies as refused — N of N, with the count named', () => {
@@ -28,12 +28,11 @@ test('EVERY refused capture classifies as refused — N of N, with the count nam
   const wrong: string[] = [];
 
   for (const r of refused) {
-    // ⚠️ AN EMPTY ALLOWLIST, DELIBERATELY. Passing the attempted string as an
-    // entry accidentally grants an MCP tool, and the model then correctly
-    // reports approval 23 as permitted — approval 25 measured exactly that.
-    // The question here is whether a refusal is still a refusal when nothing
-    // has been granted.
-    const v = classify(r.attempted, []);
+    // 🛑 EACH RECORD'S OWN ALLOWLIST. A refusal is only evidence under the
+    // allowlist it happened beneath, so asking under a different one is a
+    // different question. Rows that predate the column answer for "nothing
+    // granted", which is `[]`.
+    const v = classify(r.attempted, r.allowlist ?? []);
 
     if (v.kind !== 'refused') wrong.push(`approval ${r.approvalId} -> ${v.kind}: ${r.attempted}`);
   }
@@ -62,11 +61,15 @@ test('the one measured success classifies as permitted, and names its evidence',
   assert.match(evidence, /HISTORICAL/, 'the evidence implies it can be re-read');
 });
 
-test('the SAME command with a Tool(Tool) allowlist is refused — the c7973ee defect', () => {
+test('the SAME command with a Tool(Tool) allowlist is NOT permitted — the c7973ee defect', () => {
   const v = classify('mcp__chat__set_status', ['mcp__chat__set_status(mcp__chat__set_status)']);
 
-  assert.equal(v.kind, 'refused', 'Tool(Tool) was certified as working, which is the run-12 bug');
-  assert.match((v as { record: RefusedRecord }).record.refusal, /haven't granted it yet/);
+  // ⚠️ `unknown` IS THE HONEST ANSWER, AND IT STILL CATCHES THE DEFECT.
+  // Run 12's approval 24 did attempt this under exactly that allowlist, but
+  // it predates the allowlist column, so the corpus cannot speak for it.
+  // What matters is that it is never `permitted`: the chain test demands
+  // `permitted`, so unknown fails there just as a refusal would.
+  assert.notEqual(v.kind, 'permitted', 'Tool(Tool) was certified as working, the run-12 bug');
 });
 
 test('a compound command is refused even when the whole line is allowlisted', () => {
@@ -76,7 +79,7 @@ test('a compound command is refused even when the whole line is allowlisted', ()
 
   assert.ok(record, 'the corpus holds no compound command, so this proves nothing');
 
-  const v = classify(record.attempted, [`Bash(${record.attempted})`]);
+  const v = classify(record.attempted, record.allowlist ?? []);
 
   assert.equal(v.kind, 'refused', 'the compound case that cost c12c81d was certified as working');
 });

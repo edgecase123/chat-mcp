@@ -24,6 +24,15 @@ export interface RefusedRecord {
   readonly outcome: 'refused';
   readonly approvalId: number;
   readonly attempted: string;
+  /**
+   * What the child was allowed to use when it was refused.
+   *
+   * 🛑 NULL MEANS UNRECORDED. Those rows predate the column, and every one of
+   * them had a non-empty allowlist nobody wrote down. Such a record can say
+   * "this was refused with nothing granted"; it CANNOT say what happens under
+   * a caller's own allowlist.
+   */
+  readonly allowlist: string[] | null;
   readonly refusal: string;
 }
 
@@ -66,6 +75,15 @@ export function normalise(command: string): string {
     .trim();
 }
 
+function sameSet(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+
+  const left = [...a].sort();
+  const right = [...b].sort();
+
+  return left.every((v, i) => v === right[i]);
+}
+
 export function classify(attempted: string, allowed: readonly string[]): Verdict {
   const want = normalise(attempted);
 
@@ -78,14 +96,25 @@ export function classify(attempted: string, allowed: readonly string[]): Verdict
     if (allowed.includes(r.allowlistEntry)) return { kind: 'permitted', record: r };
   }
 
+  // 🛑 A REFUSAL IS ONLY A REFUSAL UNDER THE SAME ALLOWLIST. claude1 on PR
+  // 43: ignoring it meant a refused command stayed refused even with a
+  // correct grant present, so 14 of 15 records could never show a grant
+  // working. A record whose allowlist was never recorded can only answer for
+  // "nothing granted", which is why the N-of-N test passes an empty one —
+  // that is the single case those rows are evidence for, not a fiction.
   for (const r of CORPUS) {
-    if (r.outcome === 'refused' && r.attempted === want) return { kind: 'refused', record: r };
+    if (r.outcome !== 'refused' || r.attempted !== want) continue;
+
+    const context = r.allowlist ?? [];
+
+    if (sameSet(context, allowed)) return { kind: 'refused', record: r };
   }
 
   return {
     kind: 'unknown',
     reason:
-      `nothing in the corpus records attempting ${JSON.stringify(want)}. ` +
-      'Capture it from a live run rather than assuming it is allowed.',
+      `nothing in the corpus records attempting ${JSON.stringify(want)} under this ` +
+      `allowlist (${allowed.length} entries). Capture it from a live run rather ` +
+      'than assuming it is allowed.',
   };
 }

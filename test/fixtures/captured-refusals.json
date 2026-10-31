@@ -3,84 +3,104 @@
     "outcome": "refused",
     "approvalId": 8,
     "attempted": "rm /var/folders/T/e2e/work/README.md && ls -la /var/folders/T/e2e/work/",
+    "allowlist": null,
     "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
     "approvalId": 9,
     "attempted": "rm /private/var/folders/T/e2e/work/README.md && ls -la /private/var/folders/T/e2e/work/",
+    "allowlist": null,
     "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
     "approvalId": 10,
     "attempted": "mcp__chat__list_agents",
+    "allowlist": null,
     "refusal": "Claude requested permissions to use mcp__chat__list_agents, but you haven't granted it yet."
   },
   {
     "outcome": "refused",
     "approvalId": 11,
     "attempted": "rm /private/var/folders/T/e2e/work/README.md && ls -la /private/var/folders/T/e2e/work",
+    "allowlist": null,
     "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
     "approvalId": 14,
     "attempted": "rm /private/var/folders/T/e2e/work/README.md && echo \"removed\" && ls -la /private/var/folders/T/e2e/work",
+    "allowlist": null,
     "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
     "approvalId": 15,
     "attempted": "rm /private/var/folders/T/e2e/work/README.md; echo \"exit=$?\"; ls -la /private/var/folders/T/e2e/work",
+    "allowlist": null,
     "refusal": "This Bash command contains multiple operations. The following parts require approval: rm /private/var/folders/T/e2e/work/README.md, echo \"exit=$?\""
   },
   {
     "outcome": "refused",
     "approvalId": 16,
     "attempted": "rm /private/var/folders/T/e2e/work/README.md",
+    "allowlist": null,
     "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
     "approvalId": 17,
     "attempted": "mkdir -p /private/var/folders/T/e2e/work && touch /var/folders/T/e2e/work/created-by-agent.txt && ls -l /var/folders/T/e2e/work/created-by-agent.txt",
+    "allowlist": null,
     "refusal": "This Bash command contains multiple operations. The following parts require approval: mkdir -p /var/folders/T/e2e/work, touch /var/folders/T/e2e/work/created-by-agent.txt"
   },
   {
     "outcome": "refused",
     "approvalId": 19,
     "attempted": "touch /private/var/folders/T/e2e/work/created-by-agent.txt && ls -l /private/var/folders/T/e2e/work/created-by-agent.txt",
+    "allowlist": null,
     "refusal": "touch in '/var/folders/T/e2e/work/created-by-agent.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
     "approvalId": 22,
     "attempted": "touch /private/var/folders/T/e2e/work/created-by-agent.txt && ls -l /private/var/folders/T/e2e/work/created-by-agent.txt",
+    "allowlist": null,
     "refusal": "touch in '/private/var/folders/T/e2e/work/created-by-agent.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
-    "approvalId": 23,
+    "approvalId": 32,
     "attempted": "mcp__chat__set_status",
+    "allowlist": [
+      "Read",
+      "Glob",
+      "Grep",
+      "mcp__chat__send",
+      "mcp__chat__room_send"
+    ],
     "refusal": "Claude requested permissions to use mcp__chat__set_status, but you haven't granted it yet."
   },
   {
     "outcome": "refused",
     "approvalId": 26,
     "attempted": "cd /private/var/folders/T/e2e/work && git status && git log --oneline -5 && git remote -v",
+    "allowlist": null,
     "refusal": "This command changes directory before running a version-control command, which can pick up untrusted hooks or repository configuration from the target directory. Approve only if you trust it."
   },
   {
     "outcome": "refused",
     "approvalId": 27,
     "attempted": "git -C /private/var/folders/T/e2e/work push -u origin main",
+    "allowlist": null,
     "refusal": "This command requires approval"
   },
   {
     "outcome": "refused",
     "approvalId": 31,
     "attempted": "git -C /private/var/folders/T/e2e/work status --short --branch; git -C /private/var/folders/T/e2e/work log --oneline -5; git -C /private/var/folders/T/e2e/work remote -v",
+    "allowlist": null,
     "refusal": "This Bash command contains multiple operations. The following parts require approval: git -C /private/var/folders/T/e2e/work status --short --branch, git -C /private/var/folders/T/e2e/work log --oneline -5, git -C /private/var/folders/T/e2e/work remote -v"
   },
   {
