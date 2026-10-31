@@ -485,6 +485,14 @@ el.composer.addEventListener('submit', async (ev) => {
 function connectSse() {
   const source = new EventSource('/api/events');
   source.addEventListener('wake', () => { refresh(); });
+
+  // 🛑 A SEPARATE EVENT, SERVER-POLLED, NOT FILE-WATCHED. A dropped `wake`
+  // costs a chat message some latency; a dropped approval means a blocked
+  // agent the operator never sees.
+  source.addEventListener('approvals', async () => {
+    await fetchApprovals();
+    renderApprovals();
+  });
   source.addEventListener('error', () => {
     // EventSource auto-reconnects. Just log for debugging.
     // console.warn('SSE dropped, browser will retry');

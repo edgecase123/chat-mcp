@@ -27,18 +27,19 @@ import { join } from 'node:path';
 const ALLOWED = new Map<string, string>([
   // 🛑 THREE BOOT ENTRIES WERE REMOVED FROM HERE, AND THEY WERE FALSE.
   // They claimed "only sysId and now are in scope". claude1 reviewing PR 34
-  // found `const body` nine to twelve lines above each call —
-  // cli/index.ts:294, oneshot/boot.ts:33, room_boot.ts:39. The justification
-  // was written from a three-line window and generalised. All three now pass a
-  // body.
+  // found `const body` nine to twelve lines above each call. All three now
+  // pass a body.
   //
   // ⚠️ An entry here is a CLAIM about what is reachable. Verify by reading the
   // enclosing function, not the lines next to the call.
-  //
-  // `id: 0` is the "no specific message" marker: a presence ping with no text
-  // to carry at all.
-  ['src/cli/ink/App.tsx:343', 'presence ping, id 0, there is no message'],
-  ['src/cli/ink/App.tsx:357', 'presence ping, id 0, there is no message'],
+  [
+    'src/cli/ink/App.tsx :: notifyPeer(member, { id: 0, to: member, from: dao.SYSTEM_HANDLE, ts: Date.now() });',
+    'presence ping, id 0, there is no message',
+  ],
+  [
+    'src/cli/ink/App.tsx :: notifyPeer(target, { id: 0, to: target, from: dao.SYSTEM_HANDLE, ts: Date.now() });',
+    'presence ping, id 0, there is no message',
+  ],
 ]);
 
 function sources(dir: string, acc: string[] = []): string[] {
@@ -53,6 +54,23 @@ function sources(dir: string, acc: string[] = []): string[] {
 }
 
 const ROOT = new URL('../../', import.meta.url).pathname;
+
+/**
+ * A STABLE identity for a call site: the file plus the call itself.
+ *
+ * 🛑 THESE WERE LINE NUMBERS AND IT BROKE TWICE IN ONE HOUR. Adding the
+ * approvals handler shifted `server.ts:296` to `299`; adding the approvals
+ * poll shifted it again. Each time the failure reads as a NEW violation, and
+ * the fix is to edit a number — which trains the next person to edit the
+ * number rather than look at the call.
+ *
+ * ⚠️ The key changes if the call's own text changes, and that is deliberate:
+ * an exception is a claim about one specific call, so editing the call should
+ * invalidate the claim.
+ */
+function siteKey(rel: string, call: string): string {
+  return `${rel} :: ${call.replace(/\s+/g, ' ').trim()}`;
+}
 
 function dropSites(): string[] {
   const dropped: string[] = [];
@@ -72,8 +90,7 @@ function dropSites(): string[] {
       // found a false PASS as well.
       if (/(?:^|[{,\s])body\s*[,:}]/.test(m[0])) continue;
 
-      const line = source.slice(0, m.index).split('\n').length;
-      dropped.push(`${rel}:${line}`);
+      dropped.push(siteKey(rel, m[0]));
     }
   }
 
@@ -142,23 +159,60 @@ test('the scan sees EVERY notifyPeer call — a regex blind spot would hide drop
  * to `insertMessage` must forward it — rather than by the files a fix touched,
  * which is what claude1 rejected in the previous version of this test.
  */
+/**
+ * 🛑 KEYED ON THE CALL ITSELF, NOT ON A LINE NUMBER.
+ *
+ * These were line numbers and it broke TWICE IN ONE HOUR: adding the
+ * approvals handler shifted `server.ts:296` to `299`, and adding the
+ * approvals poll shifted it again. Each time the failure reads as a NEW
+ * violation, and the fix is to edit a number — which trains the next person
+ * to edit the number rather than look at the call.
+ *
+ * ⚠️ THE TRADE: two byte-identical calls in one file collapse to one key, so
+ * an exemption would cover both. That is a smaller hazard than a list that
+ * goes stale on every unrelated insertion.
+ */
 const KIND_EXEMPT = new Map<string, string>([
-  // ⚠️ THESE KEYS ARE LINE NUMBERS, so ANY insertion above a call site
-  // invalidates its entry and the failure reads as a new violation. Adding the
-  // approvals handler moved 296 to 299. Worth keying on something stabler, but
-  // that is a change to the guard and not to this list.
-  ['src/cli/web/server.ts:299', 'room-join system notice; the kind nearby belongs to the DM handler above'],
-  // An approval decision is not a chat `kind` — there is no chat/dispatch/alert
-  // to forward. The body carries the decision instead.
-  ['src/cli/web/server.ts:366', 'approval answer; no caller kind exists'],
-  ['src/cli/ink/App.tsx:376', 'room-join system notice, no caller kind'],
-  ['src/cli/ink/App.tsx:415', 'room-join system notice, no caller kind'],
-  ['src/cli/ink/App.tsx:563', 'room-join system notice, no caller kind'],
-  ['src/cli/ink/App.tsx:602', 'room-join system notice, no caller kind'],
-  ['src/cli/ink/App.tsx:729', 'room-join system notice, no caller kind'],
-  ['src/cli/ink/App.tsx:874', 'room-join system notice, no caller kind'],
-  ['src/cli/ink/App.tsx:343', 'presence ping, id 0'],
-  ['src/cli/ink/App.tsx:357', 'presence ping, id 0'],
+  [
+    'src/cli/ink/App.tsx :: notifyPeer(member, { id: 0, to: member, from: dao.SYSTEM_HANDLE, ts: Date.now() });',
+    'presence ping, id 0, there is no message',
+  ],
+  [
+    'src/cli/ink/App.tsx :: notifyPeer(target, { id: 0, to: target, from: dao.SYSTEM_HANDLE, ts: Date.now() });',
+    'presence ping, id 0, there is no message',
+  ],
+  [
+    'src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body, });',
+    'room-join system notice, no caller kind',
+  ],
+  [
+    'src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: name, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body, });',
+    'room-join system notice, no caller kind',
+  ],
+  [
+    'src/cli/ink/App.tsx :: notifyPeer(member, { id: joinRes.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: joinRes.system_message.sent_at, body: joinRes.system_message.body });',
+    'room-join system notice, no caller kind',
+  ],
+  [
+    'src/cli/ink/App.tsx :: notifyPeer(member, { id: r.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: r.system_message.sent_at, body: r.system_message.body });',
+    'room-join system notice, no caller kind',
+  ],
+  [
+    'src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: t.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });',
+    'room-join system notice, no caller kind',
+  ],
+  [
+    'src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });',
+    'room-join system notice, no caller kind',
+  ],
+  [
+    'src/cli/web/server.ts :: notifyPeer(member, { id: result.system_message.id, to: body.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });',
+    'room-join system notice, no caller kind',
+  ],
+  [
+    'src/cli/web/server.ts :: notifyPeer(request.supervisorHandle, { id, to: request.supervisorHandle, from: ctx.handle, ts: Date.now(), body: `approval ${id} ${decision}: ${request.requested}`, });',
+    'approval answer; no caller kind exists, the body carries the decision',
+  ],
 ]);
 
 test('every file that hands a kind to insertMessage forwards it on the wake', () => {
@@ -179,7 +233,7 @@ test('every file that hands a kind to insertMessage forwards it on the wake', ()
     for (const m of source.matchAll(/notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs)) {
       if (/(?:^|[{,\s])kind\s*[,:}]/.test(m[0])) continue;
 
-      const site = `${rel}:${source.slice(0, m.index).split('\n').length}`;
+      const site = siteKey(rel, m[0]);
 
       if (!KIND_EXEMPT.has(site)) unexplained.push(site);
     }

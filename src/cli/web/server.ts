@@ -158,7 +158,51 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   };
   armIdleShutdown();
 
+  /**
+   * 🛑 A POLL, NOT A FILE WATCH, AND THAT IS THE POINT.
+   *
+   * The SSE `wake` event above is driven by `NotifyBus`, which is chokidar on
+   * the notify file — the mechanism measured on #33 at 8 of 10 signals LOST.
+   * For a chat message a dropped signal costs latency, because the next wake
+   * re-syncs everything. For an approval it costs correctness: the card never
+   * appears, and a supervised agent sits blocked while the operator sees
+   * nothing. "Nothing arrived" and "the signal was dropped" look identical,
+   * which is the exact ambiguity #33 exists to remove.
+   *
+   * Approvals are rare and the query is one indexed read, so polling is
+   * cheaper than being wrong.
+   */
+  const APPROVAL_POLL_MS = 2_000;
+  let lastApprovalSignature = approvalsSignature(dao.pendingApprovals(db));
+
+  const approvalPoll = setInterval(() => {
+    // Nobody watching means nothing to tell. The idle shutdown handles the
+    // rest.
+    if (sseClients.size === 0) return;
+
+    let signature: string;
+    try {
+      signature = approvalsSignature(dao.pendingApprovals(db));
+    } catch {
+      // A transient read failure must not kill the poll; the next tick
+      // retries. Dying here would look exactly like no approvals arriving.
+      return;
+    }
+
+    if (signature === lastApprovalSignature) return;
+    lastApprovalSignature = signature;
+
+    const frame = `event: approvals\ndata: ${JSON.stringify({ ts: Date.now() })}\n\n`;
+    for (const res of sseClients) {
+      try { res.write(frame); } catch { /* client hung up mid-write */ }
+    }
+  }, APPROVAL_POLL_MS);
+
+  // Never hold the process open for the poll alone.
+  approvalPoll.unref();
+
   const shutdown = (code: number): void => {
+    clearInterval(approvalPoll);
     notifyUnsub();
     server.close();
     void notify.close();
@@ -316,6 +360,17 @@ async function handleRoomLeave(req: IncomingMessage, res: ServerResponse, ctx: R
  * string, and that same string is what the supervisor then allowlists. The UI
  * must be able to show exactly what will run.
  */
+/**
+ * A fingerprint of the pending set, for change detection.
+ *
+ * 🛑 IDS, NOT A COUNT. One approval answered and another arriving in the same
+ * interval leaves the count identical, and the card would never refresh. That
+ * is the whole failure mode a poll exists to avoid.
+ */
+export function approvalsSignature(approvals: readonly { id: number }[]): string {
+  return approvals.map((a) => a.id).join(',');
+}
+
 function handleGetApprovals(res: ServerResponse, ctx: RouteContext): void {
   respondJson(res, { approvals: dao.pendingApprovals(ctx.db) });
 }
