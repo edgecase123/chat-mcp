@@ -1,5 +1,4 @@
-import chokidar, { type FSWatcher } from 'chokidar';
-import { writeFileSync, existsSync, unlinkSync } from 'node:fs';
+import { writeFileSync, existsSync, unlinkSync, statSync } from 'node:fs';
 import { ensureNotifyDir, notifyPathFor } from '../util/paths.js';
 
 type Callback = () => void;
@@ -102,27 +101,105 @@ export function notifyPeer(handle: string, envelope?: NotifyEnvelope): void {
  */
 export class NotifyBus {
   private readonly subs = new Set<Callback>();
-  private readonly watcher: FSWatcher;
   private readonly path: string;
+  private timer: NodeJS.Timeout;
+  private seen: string;
+  private interval: number;
+  private closed = false;
+
+  /**
+   * Poll bounds. The interval RESETS to the floor on any activity and
+   * relaxes toward the ceiling while nothing happens.
+   *
+   * 🛑 THIS IS ABOUT LATENCY, NOT COST, and the measurement says so: one
+   * `statSync` is 1392ns, so a fixed 400ms poll costs 0.0125 SECONDS OF CPU
+   * PER HOUR per bus. There is no saving worth chasing.
+   *
+   * What backoff buys is permission to be FAST when it matters. Conversation
+   * is bursty: a reply usually follows within seconds, so 150ms during a
+   * burst is a real improvement over a flat 400ms, and 2s while nobody is
+   * talking costs nothing anyone can feel.
+   */
+  static readonly MIN_POLL_MS = 150;
+  static readonly MAX_POLL_MS = 2000;
+
+  /** How fast it relaxes. 1.5 reaches the ceiling in ~7 idle ticks. */
+  static readonly BACKOFF = 1.5;
 
   constructor(handle: string) {
     ensureNotifyDir();
     this.path = notifyPathFor(handle);
-    // Ensure the file exists so chokidar has something to watch on add
+
     try {
       writeFileSync(this.path, '', { flag: 'a' });
     } catch {
       // Best-effort; subsequent touch() calls will create it
     }
-    this.watcher = chokidar.watch(this.path, {
-      persistent: true,
-      ignoreInitial: true,
-      awaitWriteFinish: false,
-      atomic: false,
-    });
-    const fire = (): void => this.fire();
-    this.watcher.on('change', fire);
-    this.watcher.on('add', fire);
+
+    this.seen = this.stamp();
+    this.interval = NotifyBus.MIN_POLL_MS;
+
+    // 🛑 A POLL, NOT chokidar. lee, 2026-10-31: *"I just don't want file
+    // watchers"*. The watch is also the mechanism measured on #33 at 8 of 10
+    // signals LOST — ten writes to this file produced two events, because
+    // the file overwrites and the watcher coalesces.
+    //
+    // ⚠️ POLLING COALESCES TOO, and that is harmless HERE for a reason worth
+    // stating: every subscriber re-reads the bus from SQLite on any signal,
+    // so a merged signal costs latency and never a message. SQLite is the
+    // truth; this file is only a doorbell.
+    this.timer = this.arm();
+  }
+
+  /**
+   * One tick, then re-arm at the next interval.
+   *
+   * ⚠️ `setTimeout` RATHER THAN `setInterval`, because the interval changes.
+   * A `setInterval` would have to be cleared and recreated anyway, and a
+   * missed clear leaves two timers polling the same file forever.
+   */
+  private arm(): NodeJS.Timeout {
+    const timer = setTimeout(() => {
+      if (this.closed) return;
+
+      const now = this.stamp();
+
+      if (now === this.seen) {
+        this.interval = Math.min(
+          Math.round(this.interval * NotifyBus.BACKOFF),
+          NotifyBus.MAX_POLL_MS,
+        );
+      } else {
+        this.seen = now;
+        // Activity means more is likely. Drop straight to the floor rather
+        // than easing down, because a burst is exactly when latency shows.
+        this.interval = NotifyBus.MIN_POLL_MS;
+        this.fire();
+      }
+
+      this.timer = this.arm();
+    }, this.interval);
+
+    // Never hold a process open for the doorbell alone.
+    timer.unref();
+
+    return timer;
+  }
+
+  /** The current gap between checks. Exposed so the behaviour is testable. */
+  get pollIntervalMs(): number {
+    return this.interval;
+  }
+
+  /** mtime plus size — a rewrite of identical length still changes mtime. */
+  private stamp(): string {
+    try {
+      const s = statSync(this.path);
+
+      return `${s.mtimeMs}:${s.size}`;
+    } catch {
+      return 'missing';
+    }
   }
 
   private fire(): void {
@@ -168,8 +245,9 @@ export class NotifyBus {
   }
 
   async close(): Promise<void> {
+    this.closed = true;
     this.subs.clear();
-    await this.watcher.close();
+    clearTimeout(this.timer);
     // Clean up our own notify file on shutdown so a stale entry doesn't
     // linger for the next boot.
     try {
