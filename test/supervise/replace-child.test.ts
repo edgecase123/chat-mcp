@@ -94,6 +94,93 @@ async function supervisorFor(handle: string, children: FakeChild[]) {
   });
 }
 
+/**
+ * The same supervisor, with its database handed back.
+ *
+ * 🛑 WHAT WAS SPAWNED AND WHAT WAS RECORDED ARE DIFFERENT QUESTIONS, and
+ * every test above asks only the first. The approvals table is the only place
+ * the second one can be read.
+ */
+async function supervisorWithDb(handle: string, children: FakeChild[]) {
+  const db = new DatabaseSync(':memory:');
+  migrate(db);
+
+  const sup = await startSupervisor({
+    handle,
+    db,
+    extraDirs: DIRS,
+    spawnChild: recordingChild(children),
+    log: () => undefined,
+  });
+
+  return { sup, db };
+}
+
+/**
+ * 🛑 A SECOND DENIAL MUST RECORD THE SET THAT WAS ACTUALLY IN FORCE.
+ *
+ * The `allowlist` column exists to answer one question: what would a grant
+ * have done? Measured on the live capture run of 2026-10-31 — approvals 50,
+ * 52 and 53 were all retries after an approval, and all three recorded the
+ * same base entries as the first attempt.
+ *
+ * So the column answered wrongly in exactly the case it was added for, and a
+ * reader concluded the grant had never been applied. It had; the recorder was
+ * reading a binding fixed at spawn while the widening path read the live one.
+ *
+ * Found by claude1 from the run output. #49.
+ */
+test('a SECOND denial records the allowlist in force, not the one the child started with', async () => {
+  const children: FakeChild[] = [];
+  const handle = `rc-${process.pid}-live`;
+  const { sup, db } = await supervisorWithDb(handle, children);
+  const GRANT = 'Bash(rm -f /tmp/second.txt)';
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 10,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      approval: {
+        approvalId: 1,
+        decision: 'approve',
+        requested: "rm in '/tmp/second.txt'",
+        grant: GRANT,
+        sessionId: 'sess-1',
+      },
+    });
+
+    assert.equal(children.length, 2, 'the child was never replaced, so there is no second state to record');
+    assert.ok(
+      children[1]?.opts.grant?.allowed.includes(GRANT),
+      'the replacement child did not receive the grant, so this test cannot measure anything',
+    );
+
+    // Now the child is denied AGAIN, while that grant is in force.
+    children[1]?.denial({
+      requested: "rm in '/tmp/other.txt'",
+      raw: "What required approval: rm in '/tmp/other.txt' was blocked.",
+      tool: 'Bash',
+      invocation: 'rm -f /tmp/other.txt',
+    });
+
+    const row = db
+      .prepare('SELECT allowlist FROM approvals ORDER BY id DESC LIMIT 1')
+      .get() as { allowlist: string | null } | undefined;
+
+    const recorded: string[] = JSON.parse(row?.allowlist ?? '[]');
+
+    assert.ok(
+      recorded.includes(GRANT),
+      `the second denial recorded ${recorded.length} entries and none of them is the grant already in force: ` +
+        JSON.stringify(recorded),
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
 test('an APPROVAL respawns the child with the command added to its allowlist', async () => {
   const children: FakeChild[] = [];
   const sup = await supervisorFor(`rc-${process.pid}-a`, children);
