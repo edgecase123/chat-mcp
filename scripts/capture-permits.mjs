@@ -32,7 +32,12 @@ import { answerAndNotify } from '../src/supervise/answer.ts';
 import { openDb } from '../src/storage/db.ts';
 import * as dao from '../src/storage/dao.ts';
 
-if (!process.env.CHAT_MCP_LIVE) {
+// 🛑 `--list` IS THE ONLY FREE WAY TO SEE WHAT THIS RUN WOULD MEASURE.
+// The loop derives its indices from the probe list, and nothing else can show
+// that the two agree without spawning an agent and spending money.
+const LIST_ONLY = process.argv.includes('--list');
+
+if (!LIST_ONLY && !process.env.CHAT_MCP_LIVE) {
   console.error('Refusing to run: this spawns a real agent CLI and spends money.');
   console.error('Set CHAT_MCP_LIVE=1 to opt in.');
   process.exit(2);
@@ -42,6 +47,17 @@ const BASE_ALLOWLIST = ['Read', 'Glob', 'Grep', 'mcp__chat__send', 'mcp__chat__r
 const SETTLE_MS = Number(process.env.PERMIT_SETTLE_SECONDS ?? 90) * 1000;
 const db = openDb();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 🛑 ONE READER FOR BOTH TAG PROBES. Copying the seven lines is the
+// one-fix-two-sites shape that landed three times in one day: a later fix to
+// the swallowed-error branch would reach one probe and not the other.
+function hasTag(work, name) {
+  try {
+    return execFileSync('git', ['-C', work, 'tag', '-l', name]).toString().includes(name);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Every probe needs an OBSERVABLE target.
@@ -53,7 +69,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function probesFor(root, work, handle) {
   const made = join(work, 'made.txt');
   const tag = `permit-${process.pid}`;
+  const cdTag = `permit-cd-${process.pid}`;
   const sentinel = `permit-ok-${process.pid}`;
+  const firstHalf = join(work, 'compound-a.txt');
+  const secondHalf = join(work, 'compound-b.txt');
 
   return [
     {
@@ -79,13 +98,7 @@ function probesFor(root, work, handle) {
     {
       label: 'create a git tag in the scratch repo',
       command: `git -C ${work} tag ${tag}`,
-      moved: () => {
-        try {
-          return execFileSync('git', ['-C', work, 'tag', '-l', tag]).toString().includes(tag);
-        } catch {
-          return false;
-        }
-      },
+      moved: () => hasTag(work, tag),
     },
     {
       label: 'publish a status over MCP',
@@ -96,13 +109,57 @@ function probesFor(root, work, handle) {
         return `${a?.focus ?? ''} ${a?.status ?? ''}`.includes(sentinel);
       },
     },
+    {
+      /**
+       * 🛑 THE `cd && git` GATE CLASS, WHICH NOTHING HAS EVER REACHED.
+       * Approval 43 granted `git -C <work> tag <name>` and the tag resolved,
+       * so the git half is measured. It carried no `cd`, so it says nothing
+       * about the guard that fires when a command changes directory first.
+       *
+       * Same observable target as probe 3 ON PURPOSE. The tag either resolves
+       * or it does not, and `cd` is then the only variable between them.
+       */
+      label: 'change directory and then create a git tag',
+      command: `cd ${work} && git tag ${cdTag}`,
+      moved: () => hasTag(work, cdTag),
+    },
+    {
+      /**
+       * 🛑 THE MULTIPLE-OPERATIONS GATE CLASS. The corpus holds a
+       * compound REFUSAL and no compound permit, so `c12c81d` is recorded as
+       * a defect and the shape is unmeasured under a well-formed grant.
+       *
+       * Both halves are `touch`, which approval 42 already measured as
+       * grantable on its own. The separator is therefore the only variable.
+       */
+      label: 'two operations in one command, separated by a semicolon',
+      command: `touch ${firstHalf}; touch ${secondHalf}`,
+      moved: () => existsSync(firstHalf) && existsSync(secondHalf),
+      /**
+       * ⚠️ A HALF-RUN COMPOUND IS NOT A REFUSED COMPOUND, and `moved: false`
+       * alone cannot tell them apart. Six of six defects were "the string we
+       * sent was wrong", so the run must say which halves landed.
+       */
+      note: () =>
+        `halves present: a=${existsSync(firstHalf)} b=${existsSync(secondHalf)}`,
+    },
   ];
 }
 
 const captured = [];
 const PROBE_LABELS = probesFor('', '', 'x').map((p) => p.label);
 
-for (const index of [0, 1, 2, 3]) {
+if (LIST_ONLY) {
+  for (const [i, label] of PROBE_LABELS.entries()) console.log(`${i + 1}. ${label}`);
+
+  console.log(`\n${PROBE_LABELS.length} probe(s), and the run iterates every one of them.`);
+  process.exit(0);
+}
+
+// 🛑 DERIVED, NEVER A LITERAL. A hardcoded [0, 1, 2, 3] leaves a fifth probe
+// unrun, and the run then prints `NO PERMIT` for it. That reads as a measured
+// refusal when nothing was attempted at all.
+for (const index of PROBE_LABELS.keys()) {
   const handle = `perm-${process.pid}-${index}`;
   const root = mkdtempSync(join(tmpdir(), 'chat-mcp-e2e-'));
   const work = join(root, 'work');
@@ -160,6 +217,8 @@ for (const index of [0, 1, 2, 3]) {
     const worked = probe.moved();
 
     console.log(`   target moved: ${worked}`);
+
+    if (probe.note) console.log(`   ${probe.note()}`);
 
     if (worked && grantedAllowlist) {
       captured.push({
