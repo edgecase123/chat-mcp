@@ -1,3 +1,5 @@
+import { resolve } from 'node:path';
+
 /**
  * What a supervised agent may do without asking.
  *
@@ -53,6 +55,51 @@ export const EXTRA_DIRS = [
  * The rules say WHICH PATHS. `EXTRA_DIRS` makes those paths reachable at all.
  */
 export const EDIT_SCOPES = EXTRA_DIRS.map((dir) => `Edit(${dir}/**)`);
+
+/**
+ * The working directory a supervised child runs in.
+ *
+ * 🛑 THE CWD IS A THIRD CONTAINMENT INPUT AND IT HAD NO DEFAULT. A child's
+ * working directory is reachable BY DEFINITION, so an unset one silently
+ * inherits wherever the operator happened to launch the supervisor — from
+ * `~/dev/leagues` that is the sibling agent's live tree. Found by claude1.
+ *
+ * ⚠️ NO MEASUREMENT COULD SETTLE IT CHEAPLY, because every run so far held
+ * the cwd at a directory that is already in EXTRA_DIRS. That is the same
+ * two-variable confound that produced the previous wrong conclusion. A
+ * default plus a refusal removes the question instead of answering it.
+ */
+export const DEFAULT_CWD = EXTRA_DIRS[0];
+
+/**
+ * Refuse a working directory outside the reachable set.
+ *
+ * Returns the directory to use. Throws rather than falling back, because a
+ * silent correction would put the child somewhere the operator did not ask
+ * for and did not notice.
+ */
+export function resolveCwd(requested: string | undefined, dirs: readonly string[] = EXTRA_DIRS): string {
+  if (requested === undefined) return dirs[0] ?? DEFAULT_CWD;
+
+  // A trailing slash and a parent-relative segment both defeat a prefix
+  // match, so compare resolved paths.
+  const want = resolve(requested);
+  const ok = dirs.some((dir) => {
+    const base = resolve(dir);
+
+    return want === base || want.startsWith(`${base}/`);
+  });
+
+  if (!ok) {
+    throw new Error(
+      `refusing to run a supervised child in "${requested}": a child's working directory is ` +
+        `always reachable, and this one is outside every allowed directory ` +
+        `(${dirs.join(', ')})`,
+    );
+  }
+
+  return want;
+}
 
 /**
  * The narrow starting set.

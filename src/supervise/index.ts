@@ -12,7 +12,7 @@ import {
   childHandleFor,
   type ChildGrant,
 } from './grant.js';
-import { allowlistWith } from './allowlist.js';
+import { allowlistWith, resolveCwd } from './allowlist.js';
 import { writeClaudeMcpConfig } from './drivers/claude.js';
 
 /**
@@ -131,13 +131,18 @@ function buildGrant(opts: SupervisorOptions): ChildGrant | undefined {
 export async function startSupervisor(opts: SupervisorOptions): Promise<Supervisor> {
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const driver = driverFor(opts.driver ?? 'claude');
+
+  // 🛑 THROWS BEFORE ANYTHING SPAWNS. A child's cwd is reachable by
+  // definition, so an unvalidated one is a containment hole that no
+  // allowlist or directory list can close.
+  const childCwd = resolveCwd(opts.cwd, opts.extraDirs ?? DEFAULT_EXTRA_DIRS);
   // Injected in tests; the real one is the shared bus database the web UI
   // already reads.
   const approvalsDb = opts.db ?? openDb();
   const spawnFn = opts.spawnChild ?? driver.spawn;
 
   const grant = opts.grant ?? buildGrant(opts);
-  const child = spawnFn({ ...opts, grant });
+  const child = spawnFn({ ...opts, cwd: childCwd, grant });
 
   // 🛑 SAID OUT LOUD, both ways. A doorbell that cannot answer and a child
   // holding a bus identity are both things an operator must be able to see in
