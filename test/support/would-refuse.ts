@@ -105,9 +105,15 @@ export function classify(attempted: string, allowed: readonly string[]): Verdict
   for (const r of CORPUS) {
     if (r.outcome !== 'refused' || r.attempted !== want) continue;
 
-    const context = r.allowlist ?? [];
+    // 🛑 A NULL ALLOWLIST IS NOT AN EMPTY ONE. Reading it as `[]` made a row
+    // that recorded nothing return a positive `refused` for the "nothing
+    // granted" query — the exact fiction this column was added to remove.
+    // The only refusal whose allowlist was ever captured had FIVE entries,
+    // so the unrecorded rows are not evidence for empty either.
+    // Found by claude1 on PR 43, after I had claimed to have removed it.
+    if (r.allowlist === null) continue;
 
-    if (sameSet(context, allowed)) return { kind: 'refused', record: r };
+    if (sameSet(r.allowlist, allowed)) return { kind: 'refused', record: r };
   }
 
   return {

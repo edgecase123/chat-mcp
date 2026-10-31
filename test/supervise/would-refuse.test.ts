@@ -20,27 +20,38 @@ const CORPUS = JSON.parse(readFileSync('test/fixtures/captured-refusals.json', '
   allowlist: string[] | null;
 }[];
 
-test('EVERY refused capture classifies as refused — N of N, with the count named', () => {
+test('a refusal answers under its OWN allowlist, and an unrecorded one answers at all', () => {
   const refused = CORPUS.filter((r) => r.outcome === 'refused');
+  const recorded = refused.filter((r) => r.allowlist !== null);
+  const unrecorded = refused.filter((r) => r.allowlist === null);
 
-  assert.ok(refused.length >= 10, `the corpus shrank to ${refused.length} refusals`);
+  // 🛑 THE DENOMINATOR IS THE POINT. Real coverage is the `recorded` count,
+  // and it is small. The earlier version of this test counted all of them by
+  // reading a null allowlist as `[]`, which borrowed coverage it did not have.
+  assert.ok(recorded.length >= 1, `no refusal carries its allowlist: 0 of ${refused.length}`);
 
   const wrong: string[] = [];
 
-  for (const r of refused) {
-    // 🛑 EACH RECORD'S OWN ALLOWLIST. A refusal is only evidence under the
-    // allowlist it happened beneath, so asking under a different one is a
-    // different question. Rows that predate the column answer for "nothing
-    // granted", which is `[]`.
-    const v = classify(r.attempted, r.allowlist ?? []);
+  for (const r of recorded) {
+    const v = classify(r.attempted, r.allowlist as string[]);
 
-    if (v.kind !== 'refused') wrong.push(`approval ${r.approvalId} -> ${v.kind}: ${r.attempted}`);
+    if (v.kind !== 'refused') wrong.push(`approval ${r.approvalId} -> ${v.kind}`);
   }
 
   assert.deepEqual(
     wrong,
     [],
-    `${wrong.length} of ${refused.length} captured refusals are answered wrongly:\n  ${wrong.join('\n  ')}`,
+    `${wrong.length} of ${recorded.length} RECORDED refusals answered wrongly: ${wrong.join(', ')}`,
+  );
+
+  // ⚠️ AND THE UNRECORDED ONES MUST STAY SILENT. The only captured allowlist
+  // had five entries, so a null row is not evidence for "nothing granted".
+  const spoke = unrecorded.filter((r) => classify(r.attempted, []).kind !== 'unknown');
+
+  assert.deepEqual(
+    spoke.map((r) => r.approvalId),
+    [],
+    `${spoke.length} of ${unrecorded.length} unrecorded rows answered a question they cannot`,
   );
 });
 
@@ -81,7 +92,15 @@ test('a compound command is refused even when the whole line is allowlisted', ()
 
   const v = classify(record.attempted, record.allowlist ?? []);
 
-  assert.equal(v.kind, 'refused', 'the compound case that cost c12c81d was certified as working');
+  // ⚠️ `unknown` IS CORRECT WHILE THAT RECORD'S ALLOWLIST IS UNRECORDED, and
+  // it still catches c12c81d: the chain test demands `permitted`, so unknown
+  // fails there. Asserting `refused` here would be borrowing the coverage
+  // claude1 showed I did not have.
+  assert.notEqual(
+    v.kind,
+    'permitted',
+    'the compound case that cost c12c81d was certified as working',
+  );
 });
 
 test('an unrecognised command is UNKNOWN, never permitted', () => {
