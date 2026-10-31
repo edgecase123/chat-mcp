@@ -469,3 +469,36 @@ test('no module above drivers/ knows any CLI event shape or flag', async () => {
 
   assert.deepEqual(leaks, [], 'a CLI specific lives above the driver directory');
 });
+
+/**
+ * 🛑 `manual` IS THE DEFAULT SO THE SHIPPED BEHAVIOUR IS A LIST A SECOND
+ * PERSON CAN READ. lee, 2026-10-31: *"manual as default with opt in for auto
+ * through an easy flag"*, because *"I want it to be usable by other devs
+ * too"*.
+ *
+ * Measured: `auto` let an un-allowlisted `rm` through with no denial at all,
+ * so its gate is a classifier nobody can inspect. That is fine for an
+ * operator who has lived with it and wrong as a default for someone who has
+ * not.
+ */
+test('--auto is a shorthand, and an explicit --permission-mode still wins', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
+
+  assert.match(src, /\.option\(\s*'--auto'/, 'there is no opt-in flag');
+  assert.match(
+    src,
+    /permissionMode:\s*\n?\s*o\.permissionMode \?\?/,
+    'the flag overrides an explicitly named mode',
+  );
+});
+
+test('the help text says what --auto costs, not just what it does', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
+
+  const help = src.slice(src.indexOf("'--auto'"), src.indexOf("'--auto'") + 400);
+
+  assert.match(help, /allowlist/, 'the flag does not say what it replaces');
+  assert.match(help, /not written down|cannot read|second person/, 'it does not state the cost');
+});

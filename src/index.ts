@@ -277,7 +277,16 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .option('--driver <name>', 'which agent CLI to drive', 'claude')
     .option('--cwd <dir>', 'working directory for the child')
     .option('--resume <sessionId>', 'resume an existing session')
-    .option('--permission-mode <mode>', 'permission mode for the child (default: plan, or acceptEdits when the child may reply)')
+    .option(
+      '--permission-mode <mode>',
+      'permission mode for the child (default: manual, which enforces the allowlist)',
+    )
+    .option(
+      '--auto',
+      "let the CLI's own classifier decide instead of the allowlist — lower friction, " +
+        'but the rule is not written down anywhere a second person can read',
+      false,
+    )
     .option('--permission-prompts <target>', 'who answers prompts: host | none', 'none')
     .option('--no-reply', 'do NOT let the child answer on the bus — makes this supervisor a doorbell')
     .option('--allowed-tools <tools>', "comma-separated tool allowlist for the child (default: lee's narrow list)")
@@ -290,7 +299,11 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         driver: o.driver,
         cwd: o.cwd,
         resumeSessionId: o.resume,
-        permissionMode: o.permissionMode,
+        // 🛑 EXPLICIT --permission-mode STILL WINS. `--auto` is a shorthand,
+        // not an override, so a mode named on the command line is never
+        // silently replaced.
+        permissionMode:
+          o.permissionMode ?? ((o as unknown as { auto?: boolean }).auto ? 'auto' : undefined),
         permissionPrompts: o.permissionPrompts === 'host' ? 'host' : 'none',
         // commander turns --no-reply into reply:false and omits it otherwise.
         reply: (o as unknown as { reply?: boolean }).reply,
