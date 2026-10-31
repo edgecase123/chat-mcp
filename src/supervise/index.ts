@@ -3,6 +3,8 @@ import { spawnClaude } from './child.js';
 import { TurnQueue } from './turn-queue.js';
 import { WakeListener, type WakeAck, type WakeEnvelope } from './socket.js';
 import { RateLimitGate } from './rate-limit.js';
+import { DEFAULT_REPLY_TOOLS, childHandleFor, type BusReply } from './bus-reply.js';
+import { writeClaudeMcpConfig } from './child.js';
 
 /**
  * The supervisor: it owns the loop the harness used to own.
@@ -21,6 +23,17 @@ export interface SupervisorOptions extends SpawnOptions {
    * REFUSES requests rather than billing for them. Running out stops work.
    */
   readonly utilizationCeiling?: number;
+  /**
+   * Whether the supervised child may answer on the bus. Default true.
+   *
+   * 🛑 `false` makes the supervisor a DOORBELL — it wakes an agent that cannot
+   * respond. That was the shipped behaviour and it is not a sensible default.
+   */
+  readonly reply?: boolean;
+
+  /** Allowlist override. Default `DEFAULT_REPLY_TOOLS`. */
+  readonly replyTools?: readonly string[];
+
   /** Injected so the supervisor is testable without spawning or spending. */
   readonly spawnChild?: (opts: SpawnOptions) => AgentChild;
   readonly log?: (line: string) => void;
@@ -64,11 +77,40 @@ export function formatPrompt(envelope: WakeEnvelope): string {
   return `${banner}[chat-mcp] ${from}${where}:\n\n${body}`;
 }
 
+/**
+ * The child's bus identity and tool grant, or undefined when replies are off.
+ *
+ * Derived from the supervisor's handle rather than configured, so the two can
+ * never be made equal by forgetting a flag — a child sharing the supervisor's
+ * handle consumes the deliveries meant for it (chat-mcp#35).
+ */
+function buildBusReply(opts: SupervisorOptions): BusReply | undefined {
+  if (opts.reply === false) return undefined;
+
+  const handle = childHandleFor(opts.handle);
+
+  return {
+    handle,
+    configPath: writeClaudeMcpConfig(handle),
+    tools: opts.replyTools ?? DEFAULT_REPLY_TOOLS,
+  };
+}
+
 export async function startSupervisor(opts: SupervisorOptions): Promise<Supervisor> {
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const spawnFn = opts.spawnChild ?? spawnClaude;
 
-  const child = spawnFn(opts);
+  const busReply = opts.busReply ?? buildBusReply(opts);
+  const child = spawnFn({ ...opts, busReply });
+
+  // 🛑 SAID OUT LOUD, both ways. A doorbell that cannot answer and a child
+  // holding a bus identity are both things an operator must be able to see in
+  // the log rather than deduce from a flag they did not pass.
+  log(
+    busReply
+      ? `child replies on the bus as "${busReply.handle}", tools: ${busReply.tools.join(', ')}`
+      : 'child CANNOT reply on the bus — this supervisor is a doorbell (--no-reply)',
+  );
   const gate = new RateLimitGate(opts.utilizationCeiling ?? 0.9, child.reportsUsage);
 
   /**

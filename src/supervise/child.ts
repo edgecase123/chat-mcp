@@ -1,5 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { parseRateLimitEvent, type RateLimitSnapshot } from './rate-limit.js';
+import type { BusReply } from './bus-reply.js';
+import { ensureMcpConfigDir, mcpConfigPathFor } from '../util/paths.js';
 
 /**
  * The supervised agent process.
@@ -75,6 +78,12 @@ export interface SpawnOptions {
    */
   readonly permissionMode?: string;
   readonly permissionPrompts?: 'host' | 'none';
+
+  /**
+   * Permission to answer on the bus. Omitted means the child can be woken and
+   * cannot reply, which is the behaviour this field exists to end.
+   */
+  readonly busReply?: BusReply;
 }
 
 /**
@@ -97,7 +106,13 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
     '--input-format',
     'stream-json',
     '--permission-mode',
-    opts.permissionMode ?? 'plan',
+    // 🛑 `plan` DENIES `mcp__chat__send`, measured on chat-mcp#33 — a child in
+    // plan mode wakes, understands it is on the bus, tries to answer and is
+    // refused. So a reply-capable child needs a mode that permits an
+    // allowlisted MCP tool. `acceptEdits` is the one proven to; with
+    // `--tools ''` there is no Edit tool for it to accept, so it widens
+    // nothing. An explicit --permission-mode always wins over both defaults.
+    opts.permissionMode ?? (opts.busReply ? 'acceptEdits' : 'plan'),
     '--permission-prompts',
     opts.permissionPrompts ?? 'none',
   ];
@@ -105,7 +120,54 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
   if (opts.model) args.push('--model', opts.model);
   if (opts.resumeSessionId) args.push('--resume', opts.resumeSessionId);
 
+  // 🛑 ALL FOUR OR NONE. `--mcp-config` ADDS to whatever the cwd already
+  // configures, so without `--strict-mcp-config` the child also loads the
+  // project's `.mcp.json` and registers under the handle hardcoded there —
+  // the handle a live session is already using. `--tools ''` removes every
+  // built-in, which is what makes the allowlist a least-privilege grant
+  // rather than a wider permission mode.
+  if (opts.busReply) {
+    args.push(
+      '--mcp-config',
+      opts.busReply.configPath,
+      '--strict-mcp-config',
+      '--tools',
+      '',
+      '--allowedTools',
+      opts.busReply.tools.join(','),
+    );
+  }
+
   return args;
+}
+
+/**
+ * Write the child's own MCP config and return its path.
+ *
+ * 🛑 The child must reach the bus under a handle of its OWN. `inbox` marks
+ * messages read, so a child sharing the supervisor's handle silently consumes
+ * the deliveries meant for it. See chat-mcp#35.
+ *
+ * The server command is the binary this supervisor is itself running, not a
+ * fresh `npx` fetch, so the child cannot end up on a different build of the
+ * bus than the process delivering to it.
+ */
+export function writeClaudeMcpConfig(handle: string, entry?: string): string {
+  ensureMcpConfigDir();
+
+  const path = mcpConfigPathFor(handle);
+  const config = {
+    mcpServers: {
+      chat: {
+        command: process.execPath,
+        args: [entry ?? process.argv[1], '--handle', handle],
+      },
+    },
+  };
+
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+
+  return path;
 }
 
 /** Split a byte stream into whole JSON lines. Partial lines are held back. */

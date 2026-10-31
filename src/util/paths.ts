@@ -43,6 +43,29 @@ export function ensureSocketDir(): string {
   return dir;
 }
 
+/**
+ * Where a supervisor writes the private MCP config for its child.
+ *
+ * 🛑 NOT the consuming project's `.mcp.json`. That file hardcodes a handle a
+ * live session already owns, and `--strict-mcp-config` exists precisely to
+ * exclude it. Writing there would also mutate somebody else's repo.
+ */
+export function mcpConfigDir(): string {
+  return join(stateDir(), 'mcp');
+}
+
+export function mcpConfigPathFor(handle: string): string {
+  return join(mcpConfigDir(), `${handle}.json`);
+}
+
+export function ensureMcpConfigDir(): string {
+  ensureStateDir();
+  const dir = mcpConfigDir();
+  mkdirSync(dir, { recursive: true });
+
+  return dir;
+}
+
 export function adaptersDir(): string {
   return join(stateDir(), 'adapters');
 }
