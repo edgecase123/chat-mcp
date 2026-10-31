@@ -108,17 +108,53 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
         -- own handle, which wakes nobody who can act. The guard test on
         -- bodyless wakes is what surfaced it.
         supervisor_handle TEXT NOT NULL,
-        -- 🛑 NULLABLE. A denial does not always NAME its command: a
-        -- git-push refusal gives a prose reason with no command in it.
-        -- NOT NULL forced a placeholder, lee approved a blank, and the
-        -- placeholder went into --allowedTools and granted nothing.
-        requested    TEXT,
+        requested    TEXT NOT NULL,
         reason       TEXT NOT NULL,
         session_id   TEXT,
         created_at   INTEGER NOT NULL,
         answered_at  INTEGER,
         decision     TEXT
       );
+      CREATE INDEX ix_approvals_pending ON approvals(answered_at, id);
+    `);
+  },
+  (db) => {
+    // Make `approvals.requested` NULLABLE.
+    //
+    // 🚨 A SEPARATE MIGRATION, NOT AN EDIT TO THE ONE ABOVE. Editing
+    // migration 7 in place left `MIGRATIONS.length` at 7, so
+    // `for (i = current; i < length)` ran zero times on an existing
+    // database and lee's table kept NOT NULL. Measured live: an unnameable
+    // denial hit the constraint, threw, and logged "nobody will be asked" —
+    // the exact silence this change exists to remove.
+    //
+    // ⚠️ AND MIGRATION 7 IS LEFT AS IT SHIPPED, deliberately. If 7 were also
+    // edited, a fresh database would arrive nullable and never run this
+    // migration — so the rebuild below would execute nowhere except an
+    // already-migrated machine, which is the one place nothing tests.
+    // Raised by claude1.
+    //
+    // SQLite cannot drop NOT NULL, so the table is rebuilt.
+    db.exec(`
+      CREATE TABLE approvals_new (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_handle      TEXT NOT NULL,
+        supervisor_handle TEXT NOT NULL,
+        -- NULL when the CLI named no command. A placeholder here is what
+        -- let lee approve a blank that then granted nothing.
+        requested         TEXT,
+        reason            TEXT NOT NULL,
+        session_id        TEXT,
+        created_at        INTEGER NOT NULL,
+        answered_at       INTEGER,
+        decision          TEXT
+      );
+      INSERT INTO approvals_new
+        SELECT id, agent_handle, supervisor_handle, requested, reason,
+               session_id, created_at, answered_at, decision
+          FROM approvals;
+      DROP TABLE approvals;
+      ALTER TABLE approvals_new RENAME TO approvals;
       CREATE INDEX ix_approvals_pending ON approvals(answered_at, id);
     `);
   },

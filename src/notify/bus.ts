@@ -111,14 +111,19 @@ export class NotifyBus {
    * Poll bounds. The interval RESETS to the floor on any activity and
    * relaxes toward the ceiling while nothing happens.
    *
-   * 🛑 THIS IS ABOUT LATENCY, NOT COST, and the measurement says so: one
-   * `statSync` is 1392ns, so a fixed 400ms poll costs 0.0125 SECONDS OF CPU
-   * PER HOUR per bus. There is no saving worth chasing.
+   * 🛑 THIS IS ABOUT LATENCY, NOT CPU. One `statSync` is 1392ns, so even a
+   * flat 150ms poll is 0.033 seconds of CPU per hour — free either way.
    *
-   * What backoff buys is permission to be FAST when it matters. Conversation
-   * is bursty: a reply usually follows within seconds, so 150ms during a
-   * burst is a real improvement over a flat 400ms, and 2s while nobody is
-   * talking costs nothing anyone can feel.
+   * ⚠️ AN EARLIER VERSION OF THIS COMMENT CITED THAT CPU FIGURE AS THE
+   * REASON, which claude1 pointed out measures the wrong thing: the cost of
+   * a poll is TIMER WAKEUPS, not cycles. A laptop that never idles its CPU
+   * is the argument against a fast flat poll, and `0.0125 s/hour` says
+   * nothing about it.
+   *
+   * So what backoff buys is permission to be FAST when it matters.
+   * Conversation is bursty: a reply usually follows within seconds, so
+   * 150ms during a burst is a real improvement, and relaxing to 2s while
+   * nobody is talking costs nothing anyone can feel.
    */
   static readonly MIN_POLL_MS = 150;
   static readonly MAX_POLL_MS = 2000;
