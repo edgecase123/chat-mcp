@@ -344,6 +344,17 @@ test('EVERY child callback registration goes through the generation guard', () =
     [],
     `these act on the LIVE child after being replaced: ${unguarded.join(', ')}`,
   );
+
+  // ⚠️ THE LABEL IS A HAND-WRITTEN DUPLICATE OF THE METHOD NAME, so
+  // `ifCurrent('onUsage', …)` inside `child.onDenial(…)` would log the wrong
+  // callback — and the log is the only trace a stale signal leaves. Raised
+  // by claude1 as optional; it is three lines. The regex already captured
+  // both halves.
+  const mislabelled = registrations
+    .filter(([, name, next]) => !next.includes(`'${name}'`))
+    .map(([, name]) => name);
+
+  assert.deepEqual(mislabelled, [], `these log under the wrong name: ${mislabelled.join(', ')}`);
 });
 
 /**
