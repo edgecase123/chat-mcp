@@ -184,3 +184,66 @@ test('every link in the approval chain has a guard in this file', async () => {
     assert.ok(self.includes(link), `no guard asserts the call to ${link}`);
   }
 });
+
+/**
+ * 🚨 MEASURED END TO END ON 2026-10-31, AND IT COST A LIVE APPROVAL LOOP.
+ *
+ * A `git push` denial's clause is a REASON, not a command:
+ *
+ *   "What required approval: This command changes directory before running a
+ *    version-control command… Approve only if you trust it."
+ *
+ * The parse failed, `(could not parse the request)` was filed, lee APPROVED A
+ * BLANK, that literal went into `--allowedTools`, the retry was denied again,
+ * and a second card appeared. 249 unit tests were green throughout.
+ */
+test('a denial whose request cannot be NAMED is not filed as an approval', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
+
+  // ⚠️ COMMENTS STRIPPED FIRST. The placeholder is NAMED in the comment that
+  // explains why it was removed, so a raw text search finds it and reports
+  // the bug as present. Same mistake as the guard keys.
+  const handler = src
+    .slice(src.indexOf('child.onDenial('), src.indexOf('child.onUsage('))
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ');
+
+  assert.ok(handler.length > 0, 'the denial handler moved; this check is stale');
+
+  assert.ok(
+    /if \(!denial\.requested\)[\s\S]{0,400}return;/.test(handler),
+    'an unnamed denial still files an approval',
+  );
+  assert.ok(
+    !handler.includes('could not parse the request'),
+    'the placeholder is back; it gets allowlisted as a literal',
+  );
+});
+
+/**
+ * 🛑 THE REAL `git push` TEXT, as a fixture. A paraphrase would let the
+ * parser pass against wording the CLI does not emit.
+ */
+test('the real git-push denial parses to NULL, not to a placeholder', async () => {
+  const { denialFromClaude } = await import('../../src/supervise/drivers/claude-events.js');
+
+  const real =
+    'Permission for this tool use was denied. It requires approval, and this session has no ' +
+    'approval surface — nobody can answer a permission prompt here — so it was denied ' +
+    'automatically. The action was NOT performed; do not claim it succeeded, and do not retry ' +
+    'it: this action, and anything else that requires approval, will be denied the same way ' +
+    'for the rest of this session. Tell the user what was blocked and why you needed it, then ' +
+    'continue with the parts of the task that do not require approval. What required approval: ' +
+    'This command changes directory before running a version-control command, which can pick ' +
+    'up untrusted hooks or repository configuration from the target directory. Approve only ' +
+    'if you trust it.';
+
+  const denial = denialFromClaude({
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'tool_result', content: real }] },
+  });
+
+  assert.ok(denial, 'the denial itself is not recognised');
+  assert.equal(denial?.requested, null, 'a prose reason was mistaken for a command');
+});

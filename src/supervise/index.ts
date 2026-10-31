@@ -289,19 +289,37 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       ifCurrent('onDenial', (denial) => {
       const grantHandle = grant?.handle ?? `${opts.handle}-agent`;
 
+      // 🛑 NO NAME, NO CARD. Measured end to end on 2026-10-31: a `git push`
+      // denial's clause is a REASON, not a command —
+      //
+      //   "What required approval: This command changes directory before
+      //    running a version-control command… Approve only if you trust it."
+      //
+      // so the parse failed, `(could not parse the request)` was filed, lee
+      // APPROVED A BLANK, that literal went into `--allowedTools`, the retry
+      // was denied again, and a second card appeared. An approval loop.
+      //
+      // Filing nothing is strictly better: the operator is not asked to
+      // approve something nobody can name, and the log says what was lost.
+      if (!denial.requested) {
+        log(`child BLOCKED but the request could not be NAMED; filing nothing: ${denial.raw}`);
+
+        return;
+      }
+
       try {
         const approvalId = dao.insertApproval(approvalsDb, {
           agentHandle: grantHandle,
           supervisorHandle: opts.handle,
-          // ⚠️ VERBATIM, and null when the clause could not be parsed. The
-          // operator approves this exact string and it is what gets
-          // allowlisted, so a guess would grant what the child never asked for.
-          requested: denial.requested ?? '(could not parse the request)',
+          // ⚠️ VERBATIM. The operator approves this exact string and it is
+          // what gets allowlisted, so a guess would grant what the child
+          // never asked for.
+          requested: denial.requested,
           reason: denial.raw,
           sessionId: childSession,
         });
 
-        log(`child BLOCKED, approval ${approvalId} pending: ${denial.requested ?? 'unparsed'}`);
+        log(`child BLOCKED, approval ${approvalId} pending: ${denial.requested}`);
       } catch (err) {
         // 🛑 SAY SO. A failed write here means the operator is never asked, and
         // silence is the failure mode this whole path exists to remove.
