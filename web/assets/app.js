@@ -213,8 +213,9 @@ function renderMessages() {
     const body = h('div', { className: 'message__body', html: m.body_html || '' });
     el.messages.appendChild(h('li', { className: cls }, [meta, body]));
   }
-  // Scroll to newest.
-  el.messages.scrollTop = el.messages.scrollHeight;
+  // Jump to newest. INSTANT, never animated: this runs on every room open,
+  // and a smooth scroll there reads as the view sliding away on its own.
+  el.messages.scrollTo({ top: el.messages.scrollHeight, behavior: 'instant' });
 }
 
 function renderPaneHeader() {

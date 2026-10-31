@@ -254,7 +254,6 @@ html, body {
   margin: 0;
   padding: 16px 20px;
   list-style: none;
-  scroll-behavior: smooth;
 }
 .message {
   padding: 8px 0;
