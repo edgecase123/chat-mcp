@@ -22,7 +22,7 @@
  * two-variable run is how three wrong conclusions were drawn in one evening.
  */
 
-import { mkdtempSync, rmSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, existsSync, writeFileSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -79,6 +79,11 @@ function probesFor(root, work, handle) {
   const sentinel = `permit-ok-${process.pid}`;
   const firstHalf = join(work, 'compound-a.txt');
   const secondHalf = join(work, 'compound-b.txt');
+
+  // ⚠️ `probesFor('', '', 'x')` builds the ROSTER with dummy arguments, and
+  // `realpathSync('')` throws. The roster only needs labels.
+  const symlinked = join(work, 'canonical.txt');
+  const realpath = work ? join(realpathSync(work), 'canonical.txt') : symlinked;
 
   return [
     {
@@ -149,6 +154,37 @@ function probesFor(root, work, handle) {
       note: () =>
         `halves present: a=${existsSync(firstHalf)} b=${existsSync(secondHalf)}`,
     },
+    {
+      /**
+       * 🛑 DOES THE CLI CANONICALISE A PATH BEFORE MATCHING IT?
+       *
+       * Every path-bearing permit in the corpus names a spelling the child
+       * never typed — 6 of 6, measured 2026-10-31. It is structural:
+       * `grantFor()` canonicalises, and a probe's path comes from
+       * `mkdtempSync`, which returns the `/var` symlink. So the pair can
+       * never agree and no re-run of the other probes can settle it.
+       *
+       * If the CLI canonicalises, the stored entry IS the one that matched
+       * and all six records are sound. If it matches the string as typed,
+       * they name the wrong entry. Nothing measured so far separates those.
+       *
+       * 🛑 SO THIS PROBE IS PRE-GRANTED, AND ONLY WITH THE REALPATH FORM.
+       * The command names the symlink. One variable.
+       *
+       * ⚠️ IT DOES NOT GO THROUGH `applyAnswer`. A pre-granted probe is never
+       * denied, so the relay is not exercised and this measures the CLI's
+       * matching alone. That is the right trade for this question and it must
+       * not be read later as proof the relay works for a single-form grant.
+       * claude1's caveat, and the evidence string carries it.
+       */
+      label: 'the grant names the realpath and the command names the symlink',
+      command: `touch ${symlinked}`,
+      preGranted: `Bash(touch ${realpath})`,
+      caveat:
+        'PRE-GRANTED, so no approval occurred and `applyAnswer` was never reached. ' +
+        'It measures the CLI\'s path matching, NOT the relay.',
+      moved: () => existsSync(symlinked),
+    },
   ];
 }
 
@@ -188,7 +224,15 @@ const underGrant = [];
 const PROBE_LABELS = probesFor('', '', 'x').map((p) => p.label);
 
 if (LIST_ONLY) {
-  for (const [i, label] of PROBE_LABELS.entries()) console.log(`${i + 1}. ${label}`);
+  // 🛑 THE ALLOWLIST SIZE IS PART OF THE ROSTER. A probe measured under a
+  // different starting set is a different experiment, and a roster that hides
+  // that reads as seven runs of one setup.
+  for (const [i, probe] of probesFor('', '', 'x').entries()) {
+    const size = (probe.preGranted ? [...BASE_ALLOWLIST, probe.preGranted] : BASE_ALLOWLIST).length;
+
+    console.log(`${i + 1}. ${probe.label}`);
+    console.log(`   starts with ${size} allowed tool(s)${probe.preGranted ? ', PRE-GRANTED' : ''}`);
+  }
 
   console.log(`\n${PROBE_LABELS.length} probe(s), and the run iterates every one of them.`);
   process.exit(0);
@@ -223,10 +267,17 @@ for (const index of PROBE_LABELS.keys()) {
   console.log(`\n── probe ${index + 1}: ${probe.label}`);
   console.log(`   ${probe.command}`);
 
+  // 🛑 THE STARTING SET IS PER-PROBE. A pre-granted probe holds its one
+  // entry from spawn, which is the only way to ask what a SINGLE form does —
+  // the approval path adds every spelling.
+  const startingAllowlist = probe.preGranted
+    ? [...BASE_ALLOWLIST, probe.preGranted]
+    : BASE_ALLOWLIST;
+
   const sup = await startSupervisor({
     handle,
     extraDirs: [root],
-    allowedTools: BASE_ALLOWLIST,
+    allowedTools: startingAllowlist,
     log: () => undefined,
   });
 
@@ -247,7 +298,10 @@ for (const index of PROBE_LABELS.keys()) {
     // 🛑 ACCUMULATED, NOT REPLACED. This was `[...BASE_ALLOWLIST, row.grant]`,
     // so a probe answering two approvals kept the second grant and silently
     // dropped the first. The set is what a record is keyed on.
-    const grantedEntries = [];
+    // ⚠️ A PRE-GRANTED ENTRY COUNTS AS A GRANT. It was in force when the
+    // command ran, which is exactly what a record is keyed on, so the
+    // one-grant rule and the refused-under-grant rule both apply unchanged.
+    const grantedEntries = probe.preGranted ? [probe.preGranted] : [];
 
     while (Date.now() < deadline && !probe.moved()) {
       await sleep(2000);
@@ -325,8 +379,8 @@ for (const index of PROBE_LABELS.keys()) {
         evidence:
           `${new Date().toISOString().slice(0, 10)}: ${probe.label} — approved under ` +
           `${grantedEntries.length} grant(s) and the target did not move.` +
-          `${note ? ` ${note}.` : ''} HISTORICAL: the scratch directory is deleted ` +
-          'when this run ends.',
+          `${note ? ` ${note}.` : ''}${probe.caveat ? ` ${probe.caveat}` : ''}` +
+          ' HISTORICAL: the scratch directory is deleted when this run ends.',
       });
 
       console.log(`   REFUSED UNDER GRANT: approved, and the target did not move`);
@@ -344,7 +398,8 @@ for (const index of PROBE_LABELS.keys()) {
         allowlistEntry: grantedEntries[0],
         evidence:
           `${new Date().toISOString().slice(0, 10)}: ${probe.label} — the target moved after ` +
-          `the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.`,
+          `the grant was added.${probe.caveat ? ` ${probe.caveat}` : ''}` +
+          ' HISTORICAL: the scratch directory is deleted when this run ends.',
       });
     }
   } finally {
