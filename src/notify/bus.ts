@@ -9,6 +9,45 @@ export interface NotifyEnvelope {
   to: string;
   from: string;
   ts: number;
+  /**
+   * The message text, when the sender has it to hand.
+   *
+   * 🛑 THIS IS THE POINT OF THE WHOLE CHANGE. lee, 2026-10-16: *"if it could
+   * contain the chat message body it would save the agent from calling
+   * chat-mcp to get the message before processing it"*.
+   *
+   * Without it a woken agent must call `inbox` or `room_inbox` before it can
+   * do anything — and that is a TOOL ROUND-TRIP, a full model call carrying
+   * the entire context, on every single wake. With it, the turn starts with
+   * the message already in the prompt.
+   *
+   * ⚠️ OPTIONAL on purpose. Some senders — room fan-outs, presence pings —
+   * have no body. `formatPrompt` handles both, and a bodyless wake correctly
+   * tells the agent to go and read its inbox.
+   */
+  body?: string;
+  /**
+   * An operator's answer to a permission request.
+   *
+   * Carried so a supervisor can act on it directly. Without it the answer
+   * reaches the agent as a sentence and the re-dispatch template never runs.
+   */
+  approval?: {
+    approvalId: number;
+    decision: 'approve' | 'deny';
+    requested: string;
+    sessionId: string | null;
+  };
+  /**
+   * The coordination kind the sender chose: `chat`, `dispatch` or `alert`.
+   *
+   * 🛑 DROPPING THIS IS A CORRECTNESS BUG, NOT MISSING POLISH. This repo's
+   * own tool description says `alert` *"tags it as blocking/high-severity and
+   * surfaces it in the recipient CLI's alert lane"*. A wake that omits it
+   * delivers a blocking alert as an ordinary message — the urgency is lost at
+   * the exact layer built to deliver it faster.
+   */
+  kind?: string;
 }
 
 /**
@@ -21,6 +60,37 @@ export function notifyPeer(handle: string, envelope?: NotifyEnvelope): void {
   ensureNotifyDir();
   const payload = envelope ? JSON.stringify(envelope) : String(Date.now());
   writeFileSync(notifyPathFor(handle), payload);
+
+  // 🛑 ALSO hand it straight to a supervisor, if one is listening.
+  //
+  // Both paths fire on purpose, and this is a SPIKE arrangement (#33). The
+  // file wakes an agent running on a harness watch; the socket wakes a
+  // supervised one. Running them side by side is what makes the comparison
+  // possible — if the supervisor misses something, the file path still
+  // catches it and the gap is visible.
+  //
+  // ⚠️ NOT awaited, and `notifyPeer` stays SYNCHRONOUS. There are ~30 call
+  // sites across 10 files and none of them await it; making this async would
+  // change every one of them. The cost is that the SENDER does not see the
+  // ack — the supervisor still gets the payload, which is the half that
+  // removes de-duplication.
+  //
+  // `deliverToSupervisor` resolves null on every failure rather than
+  // rejecting, so there is nothing to reject here; the catch is belt and
+  // braces against a throw from the filesystem probe.
+  void import('../supervise/socket.js')
+    .then(({ deliverToSupervisor }) =>
+      deliverToSupervisor(handle, {
+        id: envelope?.id ?? 0,
+        to: envelope?.to ?? handle,
+        from: envelope?.from ?? 'unknown',
+        ts: envelope?.ts ?? Date.now(),
+        body: envelope?.body,
+        kind: envelope?.kind,
+        approval: envelope?.approval,
+      }),
+    )
+    .catch(() => undefined);
 }
 
 /**

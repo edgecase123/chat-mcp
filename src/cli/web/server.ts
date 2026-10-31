@@ -158,7 +158,51 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   };
   armIdleShutdown();
 
+  /**
+   * 🛑 A POLL, NOT A FILE WATCH, AND THAT IS THE POINT.
+   *
+   * The SSE `wake` event above is driven by `NotifyBus`, which is chokidar on
+   * the notify file — the mechanism measured on #33 at 8 of 10 signals LOST.
+   * For a chat message a dropped signal costs latency, because the next wake
+   * re-syncs everything. For an approval it costs correctness: the card never
+   * appears, and a supervised agent sits blocked while the operator sees
+   * nothing. "Nothing arrived" and "the signal was dropped" look identical,
+   * which is the exact ambiguity #33 exists to remove.
+   *
+   * Approvals are rare and the query is one indexed read, so polling is
+   * cheaper than being wrong.
+   */
+  const APPROVAL_POLL_MS = 2_000;
+  let lastApprovalSignature = approvalsSignature(dao.pendingApprovals(db));
+
+  const approvalPoll = setInterval(() => {
+    // Nobody watching means nothing to tell. The idle shutdown handles the
+    // rest.
+    if (sseClients.size === 0) return;
+
+    let signature: string;
+    try {
+      signature = approvalsSignature(dao.pendingApprovals(db));
+    } catch {
+      // A transient read failure must not kill the poll; the next tick
+      // retries. Dying here would look exactly like no approvals arriving.
+      return;
+    }
+
+    if (signature === lastApprovalSignature) return;
+    lastApprovalSignature = signature;
+
+    const frame = `event: approvals\ndata: ${JSON.stringify({ ts: Date.now() })}\n\n`;
+    for (const res of sseClients) {
+      try { res.write(frame); } catch { /* client hung up mid-write */ }
+    }
+  }, APPROVAL_POLL_MS);
+
+  // Never hold the process open for the poll alone.
+  approvalPoll.unref();
+
   const shutdown = (code: number): void => {
+    clearInterval(approvalPoll);
     notifyUnsub();
     server.close();
     void notify.close();
@@ -186,6 +230,9 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContex
   if (path === '/api/messages' && req.method === 'POST') return handlePostMessage(req, res, ctx);
   if (path === '/api/rooms/join' && req.method === 'POST') return handleRoomJoin(req, res, ctx);
   if (path === '/api/rooms/leave' && req.method === 'POST') return handleRoomLeave(req, res, ctx);
+  if (path === '/api/approvals' && req.method === 'GET') return handleGetApprovals(res, ctx);
+  if (path === '/api/approvals/answer' && req.method === 'POST')
+    return handleAnswerApproval(req, res, ctx);
   if (path === '/api/events') return handleSseStream(req, res, ctx);
 
   // Static assets
@@ -270,7 +317,7 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
     dao.advanceRoomRead(ctx.db, room, ctx.handle, sent.id);
     for (const member of dao.roomMembers(ctx.db, room)) {
       if (member === ctx.handle) continue;
-      notifyPeer(member, { id: sent.id, to: room, from: ctx.handle, ts: sent.sent_at });
+      notifyPeer(member, { id: sent.id, to: room, from: ctx.handle, ts: sent.sent_at, body: bodyText, kind });
     }
     respondJson(res, { id: sent.id, sent_at: sent.sent_at });
   } else {
@@ -279,7 +326,7 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
       return respondJson(res, { error: `unknown peer: ${peer}` }, 404);
     }
     const sent = dao.insertMessage(ctx.db, { from: ctx.handle, to: peer, body: bodyText, kind });
-    notifyPeer(peer, { id: sent.id, to: peer, from: ctx.handle, ts: sent.sent_at });
+    notifyPeer(peer, { id: sent.id, to: peer, from: ctx.handle, ts: sent.sent_at, body: bodyText, kind });
     respondJson(res, { id: sent.id, sent_at: sent.sent_at });
   }
 }
@@ -293,7 +340,7 @@ async function handleRoomJoin(req: IncomingMessage, res: ServerResponse, ctx: Ro
   if (result.was_new_member && result.system_message) {
     for (const member of dao.roomMembers(ctx.db, body.room)) {
       if (member === ctx.handle) continue;
-      notifyPeer(member, { id: result.system_message.id, to: body.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at });
+      notifyPeer(member, { id: result.system_message.id, to: body.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });
     }
   }
   respondJson(res, { ok: true, was_new_member: result.was_new_member });
@@ -304,6 +351,91 @@ async function handleRoomLeave(req: IncomingMessage, res: ServerResponse, ctx: R
   if (!body.room) return respondJson(res, { error: 'room required' }, 400);
   const ok = dao.leaveRoom(ctx.db, body.room, ctx.handle);
   respondJson(res, { ok });
+}
+
+/**
+ * What a supervised agent is blocked on.
+ *
+ * 🛑 THE COMMAND GOES OUT VERBATIM. The operator is approving one specific
+ * string, and that same string is what the supervisor then allowlists. The UI
+ * must be able to show exactly what will run.
+ */
+/**
+ * A fingerprint of the pending set, for change detection.
+ *
+ * 🛑 IDS, NOT A COUNT. One approval answered and another arriving in the same
+ * interval leaves the count identical, and the card would never refresh. That
+ * is the whole failure mode a poll exists to avoid.
+ */
+export function approvalsSignature(approvals: readonly { id: number }[]): string {
+  return approvals.map((a) => a.id).join(',');
+}
+
+function handleGetApprovals(res: ServerResponse, ctx: RouteContext): void {
+  respondJson(res, { approvals: dao.pendingApprovals(ctx.db) });
+}
+
+/**
+ * Record an approve or a deny.
+ *
+ * 🛑 409 ON AN ALREADY-ANSWERED REQUEST, NOT 200. Two browser tabs are the
+ * normal case, and a silent success on the second click would tell the
+ * operator they had granted something that was in fact already denied.
+ */
+async function handleAnswerApproval(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as { id?: unknown; decision?: unknown };
+  const id = typeof body.id === 'number' ? body.id : NaN;
+  const decision = body.decision;
+
+  if (!Number.isInteger(id)) return respondJson(res, { error: 'id must be an integer' }, 400);
+  if (decision !== 'approve' && decision !== 'deny') {
+    return respondJson(res, { error: "decision must be 'approve' or 'deny'" }, 400);
+  }
+
+  const request = dao.getApproval(ctx.db, id);
+  const answered = dao.answerApproval(ctx.db, id, decision);
+
+  if (!answered) {
+    const existing = dao.getApproval(ctx.db, id);
+
+    return respondJson(
+      res,
+      existing
+        ? { error: 'already answered', decision: existing.decision }
+        : { error: 'no such approval' },
+      existing ? 409 : 404,
+    );
+  }
+
+  // 🛑 WAKE THE SUPERVISOR, NOT OURSELVES. A first cut passed `ctx.handle` —
+  // the WEB USER's handle — which wakes nobody who can act on the answer. The
+  // bodyless-wake guard test is what surfaced it.
+  //
+  // The decision rides in the body so the supervisor can act without a
+  // database read, which is the whole reason envelopes carry a body.
+  if (request) {
+    notifyPeer(request.supervisorHandle, {
+      id,
+      to: request.supervisorHandle,
+      from: ctx.handle,
+      ts: Date.now(),
+      body: `approval ${id} ${decision}: ${request.requested}`,
+      // 🛑 TYPED, so the supervisor runs the re-dispatch template instead of
+      // reading the sentence above as a chat message.
+      approval: {
+        approvalId: id,
+        decision,
+        requested: request.requested,
+        sessionId: request.sessionId,
+      },
+    });
+  }
+
+  respondJson(res, { ok: true, id, decision });
 }
 
 function handleSseStream(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {

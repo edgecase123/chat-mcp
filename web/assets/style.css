@@ -453,3 +453,70 @@ html, body {
 }
 .toast.is-warn { border-left-color: #eab308; }
 .toast.is-error { border-left-color: var(--danger); }
+
+/* ── Approvals ───────────────────────────────────────────────────────────
+   A supervised agent is STOPPED until one of these is answered, so the card
+   sits above the message list and is loud on purpose. */
+
+.approvals {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised, transparent);
+}
+
+.approval {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  border: 1px solid var(--warn, #b58900);
+  border-left-width: 4px;
+  border-radius: 4px;
+}
+
+.approval__who {
+  font-weight: 600;
+}
+
+.approval__cmd {
+  display: block;
+  padding: 0.4rem 0.5rem;
+  border-radius: 3px;
+  background: var(--code-bg, rgba(127, 127, 127, 0.15));
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* The command can be long and must never be truncated — the operator is
+     approving this exact string. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approval__reason {
+  font-size: 0.85em;
+  opacity: 0.75;
+  max-height: 6.5em;
+  overflow-y: auto;
+}
+
+.approval__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.approval__btn {
+  padding: 0.35rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.approval__btn--yes {
+  border-color: var(--ok, #2aa198);
+}
+
+.approval__btn--no {
+  border-color: var(--danger, #dc322f);
+}

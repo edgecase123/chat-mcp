@@ -643,3 +643,128 @@ export function deleteRoomMessages(db: Db, room: string): number {
   db.prepare('UPDATE room_reads SET last_read_id = 0 WHERE room_name = ?').run(room);
   return Number(info.changes);
 }
+
+// ── Approvals ────────────────────────────────────────────────────────────
+
+/**
+ * A permission request a supervised agent is blocked on.
+ *
+ * 🛑 AN APPROVAL IS A MODAL WITH TWO OUTCOMES, NOT A SENTENCE. A denied child
+ * is instructed not to retry for the rest of its session, so it stops partway
+ * through and nobody is told. This is how the request reaches a human.
+ */
+export interface Approval {
+  readonly id: number;
+  /** The supervised child that was refused. */
+  readonly agentHandle: string;
+  /** The supervisor to wake once the operator has answered. */
+  readonly supervisorHandle: string;
+  /**
+   * The command, VERBATIM.
+   *
+   * 🛑 It is what the operator approves AND what then goes into the allowlist.
+   * A summary would grant something the child never asked for.
+   */
+  readonly requested: string;
+  /** The whole denial text, so the UI can quote the reason rather than retell it. */
+  readonly reason: string;
+  /** The child session to `--resume`, or null when it is not known. */
+  readonly sessionId: string | null;
+  readonly createdAt: number;
+  readonly answeredAt: number | null;
+  readonly decision: 'approve' | 'deny' | null;
+}
+
+export interface ApprovalInput {
+  agentHandle: string;
+  supervisorHandle: string;
+  requested: string;
+  reason: string;
+  sessionId?: string | null;
+}
+
+interface ApprovalRow {
+  id: number;
+  agent_handle: string;
+  supervisor_handle: string;
+  requested: string;
+  reason: string;
+  session_id: string | null;
+  created_at: number;
+  answered_at: number | null;
+  decision: string | null;
+}
+
+function toApproval(row: ApprovalRow): Approval {
+  return {
+    id: row.id,
+    agentHandle: row.agent_handle,
+    supervisorHandle: row.supervisor_handle,
+    requested: row.requested,
+    reason: row.reason,
+    sessionId: row.session_id,
+    createdAt: row.created_at,
+    answeredAt: row.answered_at,
+    decision: row.decision === 'approve' || row.decision === 'deny' ? row.decision : null,
+  };
+}
+
+export function insertApproval(db: Db, input: ApprovalInput): number {
+  const result = db
+    .prepare(
+      `INSERT INTO approvals (agent_handle, supervisor_handle, requested, reason, session_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.agentHandle,
+      input.supervisorHandle,
+      input.requested,
+      input.reason,
+      input.sessionId ?? null,
+      Date.now(),
+    );
+
+  return Number(result.lastInsertRowid);
+}
+
+/**
+ * Unanswered requests, OLDEST FIRST, because that is the order to answer them.
+ *
+ * Omitting the handle returns every supervisor's, which is what one operator
+ * watching several agents needs.
+ */
+export function pendingApprovals(db: Db, agentHandle?: string): Approval[] {
+  const rows = agentHandle
+    ? db
+        .prepare(
+          `SELECT * FROM approvals WHERE answered_at IS NULL AND agent_handle = ? ORDER BY id ASC`,
+        )
+        .all(agentHandle)
+    : db.prepare(`SELECT * FROM approvals WHERE answered_at IS NULL ORDER BY id ASC`).all();
+
+  return (rows as unknown as ApprovalRow[]).map(toApproval);
+}
+
+export function getApproval(db: Db, id: number): Approval | null {
+  const row = db.prepare(`SELECT * FROM approvals WHERE id = ?`).get(id) as unknown as
+    | ApprovalRow
+    | undefined;
+
+  return row ? toApproval(row) : null;
+}
+
+/**
+ * Record a decision. Returns false when it was already answered.
+ *
+ * 🛑 A COMPARE-AND-SWAP, FOR THE SAME REASON THE HANDLE CLAIM NEEDED ONE. Two
+ * browser tabs are the normal case, and check-then-write is not atomic. The
+ * worst outcome is a second click upgrading a `deny` to an `approve`, so the
+ * `answered_at IS NULL` clause is what refuses it rather than a prior read.
+ */
+export function answerApproval(db: Db, id: number, decision: 'approve' | 'deny'): boolean {
+  const result = db
+    .prepare(`UPDATE approvals SET answered_at = ?, decision = ? WHERE id = ? AND answered_at IS NULL`)
+    .run(Date.now(), decision, id);
+
+  return Number(result.changes) > 0;
+}

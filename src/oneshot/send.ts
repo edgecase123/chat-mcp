@@ -33,7 +33,7 @@ export async function runSend(opts: SendOpts): Promise<void> {
       );
     }
     const result = dao.insertMessage(db, { from, to: opts.to, body });
-    notifyPeer(opts.to, { id: result.id, to: opts.to, from, ts: result.sent_at });
+    notifyPeer(opts.to, { id: result.id, to: opts.to, from, ts: result.sent_at, body });
     if (opts.json) {
       process.stdout.write(`${JSON.stringify({ message_id: result.id, sent_at: result.sent_at })}\n`);
     } else {
