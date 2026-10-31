@@ -26,6 +26,12 @@ interface FakeChild {
   readonly sent: string[];
   finishTurn: () => void;
   exit: () => void;
+  /**
+   * 🛑 THE FAKE USED TO DROP onDenial. This file's own docblock says a fake
+   * that drops a callback is testing a child that cannot exist, and onDenial
+   * was the one still dropped — so nothing could exercise the producer.
+   */
+  denial: (d: { requested: string | null; raw: string; tool: string | null; invocation: string | null }) => void;
 }
 
 /**
@@ -42,12 +48,14 @@ function recordingChild(children: FakeChild[]) {
     const sent: string[] = [];
     let endTurn: (() => void) | undefined;
     let onExit: ((c: number | null, s: string | null) => void) | undefined;
+    let onDenial: ((d: unknown) => void) | undefined;
 
     children.push({
       opts,
       sent,
       finishTurn: () => endTurn?.(),
       exit: () => onExit?.(0, null),
+      denial: (d) => onDenial?.(d),
     });
 
     return {
@@ -57,7 +65,9 @@ function recordingChild(children: FakeChild[]) {
         endTurn = cb;
       },
       onUsage: () => undefined,
-      onDenial: () => undefined,
+      onDenial: (cb) => {
+        onDenial = cb as (d: unknown) => void;
+      },
       onSession: (cb) => cb('sess-from-fake'),
       onEvent: () => undefined,
       onExit: (cb) => {
@@ -560,6 +570,62 @@ test('the replacement child is sent something it could actually run', async () =
         `attempted ${JSON.stringify(attempted)} -> ${verdict.kind}. ` +
         (verdict.kind === 'refused' ? verdict.record.refusal : '') +
         (verdict.kind === 'unknown' ? verdict.reason : ''),
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🛑 THE PRODUCER MUST RECORD THE ALLOWLIST, AND THE ROW IS THE ONLY PROOF.
+ *
+ * claude1 on PR 43: a refused record without its allowlist can only ever
+ * answer `refused`, so the fake could never show a grant working for 14 of 15
+ * captures, and the N-of-N test had to use an empty allowlist — fictional,
+ * because every real refusal happened under a non-empty one.
+ *
+ * ⚠️ ASSERTED ON THE ROW, NOT ON THE CALL. A dao-level test proves the column
+ * accepts a value; only this proves the supervisor passes one.
+ */
+test('a filed approval carries the allowlist the refused child actually had', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+  const { migrate } = await import('../../src/storage/db.js');
+  const dao = await import('../../src/storage/dao.js');
+  const { startSupervisor } = await import('../../src/supervise/index.js');
+
+  const db = new DatabaseSync(':memory:');
+  migrate(db);
+
+  const children: FakeChild[] = [];
+  const handle = `rc-${process.pid}-allowlist`;
+
+  const sup = await startSupervisor({
+    handle,
+    db,
+    extraDirs: DIRS,
+    spawnChild: recordingChild(children),
+    log: () => undefined,
+  });
+
+  try {
+    const granted = children[0]?.opts.grant?.allowed ?? [];
+
+    assert.ok(granted.length > 0, 'the child started with nothing allowed, so this proves nothing');
+
+    children[0]?.denial({
+      requested: "rm in '/tmp/x'",
+      raw: 'Permission for this tool use was denied. What required approval: rm in /tmp/x',
+      tool: 'Bash',
+      invocation: 'rm /tmp/x',
+    });
+
+    const filed = dao.pendingApprovals(db);
+
+    assert.equal(filed.length, 1, 'the denial filed no approval at all');
+    assert.deepEqual(
+      filed[0]?.allowlist,
+      granted,
+      'the row does not carry what the child was actually allowed to use',
     );
   } finally {
     await sup.stop();

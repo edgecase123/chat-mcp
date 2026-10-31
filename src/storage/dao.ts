@@ -685,6 +685,15 @@ export interface Approval {
    */
   readonly grantForms: string[];
 
+  /**
+   * What the child was allowed to use when it was refused.
+   *
+   * 🛑 NULL MEANS UNRECORDED, NOT "nothing was allowed". Rows filed before
+   * this was captured all had a non-empty allowlist nobody wrote down, and
+   * reading them as `[]` would assert a clean experiment that never happened.
+   */
+  readonly allowlist: string[] | null;
+
   /** The whole denial text, so the UI can quote the reason rather than retell it. */
   readonly reason: string;
   /** The child session to `--resume`, or null when it is not known. */
@@ -700,6 +709,7 @@ export interface ApprovalInput {
   requested: string | null;
   grant?: string | null;
   grantForms?: readonly string[];
+  allowlist?: readonly string[];
   reason: string;
   sessionId?: string | null;
 }
@@ -709,6 +719,7 @@ interface ApprovalRow {
   agent_handle: string;
   supervisor_handle: string;
   requested: string | null;
+  allowlist: string | null;
   grant_entry: string | null;
   grant_forms: string | null;
   reason: string;
@@ -746,6 +757,7 @@ function toApproval(row: ApprovalRow): Approval {
     requested: row.requested,
     grant: row.grant_entry,
     grantForms: parseForms(row.grant_forms, row.grant_entry),
+    allowlist: row.allowlist === null ? null : (JSON.parse(row.allowlist) as string[]),
     reason: row.reason,
     sessionId: row.session_id,
     createdAt: row.created_at,
@@ -757,8 +769,8 @@ function toApproval(row: ApprovalRow): Approval {
 export function insertApproval(db: Db, input: ApprovalInput): number {
   const result = db
     .prepare(
-      `INSERT INTO approvals (agent_handle, supervisor_handle, requested, grant_entry, grant_forms, reason, session_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO approvals (agent_handle, supervisor_handle, requested, grant_entry, grant_forms, allowlist, reason, session_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.agentHandle,
@@ -768,6 +780,10 @@ export function insertApproval(db: Db, input: ApprovalInput): number {
       input.grantForms && input.grantForms.length > 0
         ? JSON.stringify([...input.grantForms])
         : null,
+      // ⚠️ UNDEFINED STAYS NULL. An omitted allowlist is unrecorded, and an
+      // empty one is a real state a caller may want to record, so the two
+      // must not collapse.
+      input.allowlist === undefined ? null : JSON.stringify([...input.allowlist]),
       input.reason,
       input.sessionId ?? null,
       Date.now(),

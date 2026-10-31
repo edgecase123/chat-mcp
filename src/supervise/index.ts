@@ -322,6 +322,15 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
           // not match a retry in the other — measured live, caused by this
           // supervisor's own realpath resolution.
           grantForms: grantVariants(denial),
+          // 🛑 WHAT WAS IN FORCE WHEN IT WAS REFUSED. Without this a refusal
+          // cannot say what a grant would have done: the same command is
+          // refused under one allowlist and permitted under another, which
+          // approvals 23 and 25 measured. Raised by claude1 on PR 43.
+          allowlist: grant?.allowed ?? [],
+          // 🛑 WHAT WAS IN FORCE WHEN IT WAS REFUSED. Without this a refusal
+          // cannot say what a grant would have done: the same command is
+          // refused under one allowlist and permitted under another, which
+          // approvals 23 and 25 measured. Raised by claude1 on PR 43.
           reason: denial.raw,
           sessionId: childSession,
         });
