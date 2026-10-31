@@ -158,9 +158,17 @@ test('an approval answer bypasses formatPrompt', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
 
+  // The approval branch must RETURN before the chat renderer is reached.
+  const accept = src.slice(src.indexOf('WakeListener.bind('));
+  const approvalAt = accept.indexOf('applyAnswer(envelope.approval)');
+  const formatAt = accept.indexOf('formatPrompt(envelope)');
+
+  assert.notEqual(approvalAt, -1, 'an answer is never handled as an answer');
+  assert.notEqual(formatAt, -1, 'the chat path is gone; this check is stale');
+  assert.ok(approvalAt < formatAt, 'the chat renderer runs before the answer is handled');
   assert.ok(
-    /envelope\.approval\s*\?\s*applyAnswer\(/.test(src),
-    'an answer still goes through the chat renderer',
+    /applyAnswer\(envelope\.approval\);[\s\S]{0,120}return/.test(accept),
+    'the answer branch falls through into the chat renderer',
   );
 });
 

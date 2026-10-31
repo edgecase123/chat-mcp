@@ -144,7 +144,19 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   const spawnFn = opts.spawnChild ?? driver.spawn;
 
   const grant = opts.grant ?? buildGrant(opts, dirs);
-  const child = spawnFn({ ...opts, cwd: childCwd, grant });
+
+  /**
+   * The live child. Mutable, because replacing it is a first-class operation.
+   *
+   * 🛑 IT USED TO BE `const` AND SPAWNED EXACTLY ONCE, which is how the
+   * approval path stayed broken after it looked fixed: a grant recorded the
+   * command, sent the child a prompt saying it was now allowed, and never
+   * changed the child's `--allowedTools`. The next attempt was denied again.
+   * `grantedCommands` was written and never read.
+   */
+  let child = spawnFn({ ...opts, cwd: childCwd, grant });
+  let currentGrant = grant;
+  let currentModel = opts.model;
 
   // 🛑 SAID OUT LOUD, both ways. A doorbell that cannot answer and a child
   // holding a bus identity are both things an operator must be able to see in
@@ -209,48 +221,114 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   const grantedCommands: string[] = [];
 
   let childSession: string | null = null;
-  child.onSession((id) => {
-    childSession = id;
-  });
 
-  child.onDenial((denial) => {
-    const grantHandle = grant?.handle ?? `${opts.handle}-agent`;
+  /**
+   * Register every callback on the CURRENT child.
+   *
+   * 🛑 CALLED AGAIN AFTER A REPLACEMENT. Callbacks live on the instance, so a
+   * new child with none of them would leave the queue waiting forever for a
+   * turn that already ended, and the supervisor would look hung.
+   */
+  function wireChild(): void {
+    child.onSession((id) => {
+      childSession = id;
+    });
 
-    try {
-      const approvalId = dao.insertApproval(approvalsDb, {
-        agentHandle: grantHandle,
-        supervisorHandle: opts.handle,
-        // ⚠️ VERBATIM, and null when the clause could not be parsed. The
-        // operator approves this exact string and it is what gets
-        // allowlisted, so a guess would grant what the child never asked for.
-        requested: denial.requested ?? '(could not parse the request)',
-        reason: denial.raw,
-        sessionId: childSession,
-      });
+    child.onDenial((denial) => {
+      const grantHandle = grant?.handle ?? `${opts.handle}-agent`;
 
-      log(`child BLOCKED, approval ${approvalId} pending: ${denial.requested ?? 'unparsed'}`);
-    } catch (err) {
-      // 🛑 SAY SO. A failed write here means the operator is never asked, and
-      // silence is the failure mode this whole path exists to remove.
-      log(`FAILED to record a denial — nobody will be asked: ${String(err)}`);
-    }
-  });
+      try {
+        const approvalId = dao.insertApproval(approvalsDb, {
+          agentHandle: grantHandle,
+          supervisorHandle: opts.handle,
+          // ⚠️ VERBATIM, and null when the clause could not be parsed. The
+          // operator approves this exact string and it is what gets
+          // allowlisted, so a guess would grant what the child never asked for.
+          requested: denial.requested ?? '(could not parse the request)',
+          reason: denial.raw,
+          sessionId: childSession,
+        });
 
-  child.onUsage((snapshot) => {
-    gate.update(snapshot);
-    log(gate.describe());
-    releaseHeld();
-  });
+        log(`child BLOCKED, approval ${approvalId} pending: ${denial.requested ?? 'unparsed'}`);
+      } catch (err) {
+        // 🛑 SAY SO. A failed write here means the operator is never asked, and
+        // silence is the failure mode this whole path exists to remove.
+        log(`FAILED to record a denial — nobody will be asked: ${String(err)}`);
+      }
+    });
 
-  child.onExit((code, signal) => {
-    // 🛑 Anything queued is UNSENT. Reporting it is the difference between a
-    // visible gap and silence, and silence is the ambiguity this whole change
-    // exists to remove.
+    child.onUsage((snapshot) => {
+      gate.update(snapshot);
+      log(gate.describe());
+      releaseHeld();
+    });
+
+    child.onExit((code, signal) => {
+      // 🛑 Anything queued is UNSENT. Reporting it is the difference between a
+      // visible gap and silence, and silence is the ambiguity this whole change
+      // exists to remove.
+      const unsent = queue.drain();
+      log(`child exited code=${code} signal=${signal}; ${unsent.length} prompt(s) never sent`);
+
+      for (const p of unsent) log(`  UNSENT ids=[${p.messageIds.join(',')}]`);
+    });
+
+
+
+  }
+
+  wireChild();
+
+  /**
+   * Replace the live child, resuming its session, with different flags.
+   *
+   * 🛑 ONE OPERATION, THREE CALLERS, AND THAT IS THE POINT. An approval
+   * changes `--allowedTools`; a model switch changes `--model`; a crash
+   * restart changes nothing. All three are "kill, respawn with --resume,
+   * send a prompt that explains what changed", so a model switch is a new
+   * CALLER rather than new machinery. lee, 2026-10-31: *"make it easy to
+   * bolt on later"*.
+   *
+   * ⚠️ A NEW CHILD NEEDS THE CALLBACKS REWIRED. They are registered on the
+   * instance, so a replacement with no `onTurnEnd` would leave the queue
+   * waiting forever for a turn that already ended.
+   *
+   * ⚠️ THE QUEUE IS DRAINED, NOT DISCARDED. Anything unsent is re-offered to
+   * the new child; dropping it would lose work the operator never saw fail.
+   */
+  const replaceChild = (
+    reason: string,
+    change: { allowedTools?: readonly string[]; model?: string },
+    prompt: string,
+  ): void => {
     const unsent = queue.drain();
-    log(`child exited code=${code} signal=${signal}; ${unsent.length} prompt(s) never sent`);
 
-    for (const p of unsent) log(`  UNSENT ids=[${p.messageIds.join(',')}]`);
-  });
+    log(`replacing child (${reason}); ${unsent.length} prompt(s) carried over`);
+    child.kill();
+
+    if (change.model) currentModel = change.model;
+
+    if (change.allowedTools && currentGrant) {
+      const allowed = [...change.allowedTools];
+      currentGrant = { ...currentGrant, allowed, available: availableBuiltins(allowed) };
+    }
+
+    child = spawnFn({
+      ...opts,
+      cwd: childCwd,
+      grant: currentGrant,
+      model: currentModel,
+      // 🛑 THE SESSION, SO A CHANGE IS NOT A RESTART. Measured 2026-10-31:
+      // resuming works 3 of 3 with an explicit prompt, 0 of 2 with a vague
+      // one, so the prompt below is as load-bearing as the flag.
+      resumeSessionId: childSession ?? opts.resumeSessionId,
+    });
+
+    wireChild();
+    queue.offer({ text: prompt, messageIds: [] });
+
+    for (const p of unsent) queue.offer(p);
+  };
 
   /**
    * 🛑 THE THIRD LINK, AND IT WAS DEAD WHILE TWO GUARDS SAID THE PATH WAS
@@ -261,26 +339,46 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * made the gap LOOK closed.
    *
    * A denied child will not retry, so a grant means a NEW invocation: the
-   * child is replaced, resuming its session, with the one command added.
+   * child is REPLACED, resuming its session, with the one command added.
    */
-  const applyAnswer = (answer: NonNullable<WakeEnvelope['approval']>): string => {
+  const applyAnswer = (answer: NonNullable<WakeEnvelope['approval']>): void => {
     if (answer.decision === 'deny') {
-      return `[chat-mcp] your request for \`${answer.requested}\` was DENIED by the operator. Do not retry it; carry on with what does not need it.`;
+      queue.offer({
+        text: `[chat-mcp] your request for \`${answer.requested}\` was DENIED by the operator. Do not retry it; carry on with what does not need it.`,
+        messageIds: [],
+      });
+
+      return;
     }
 
     grantedCommands.push(answer.requested);
-    log(`APPROVED: ${answer.requested} — re-dispatching with the session resumed`);
 
-    return driver.redispatchPrompt({
-      grantedCommand: answer.requested,
-      followUp: 'Then carry on with the task you were on.',
-    });
+    // 🛑 THE FLAGS MUST CHANGE, NOT JUST THE PROMPT. Telling a child a
+    // command is now allowed while its `--allowedTools` is unchanged earns a
+    // second denial, and the prompt makes it look like the grant worked.
+    replaceChild(
+      `approved: ${answer.requested}`,
+      { allowedTools: allowlistWith(currentGrant?.allowed ?? [], [answer.requested]) },
+      driver.redispatchPrompt({
+        grantedCommand: answer.requested,
+        followUp: 'Then carry on with the task you were on.',
+      }),
+    );
   };
 
   const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
     // An answer is not a chat message and must not be rendered as one.
+    // 🛑 AN ANSWER REPLACES THE CHILD AND QUEUES ITS OWN PROMPT, so there is
+    // nothing left for this path to send. Routing it on would deliver the
+    // re-dispatch text twice.
+    if (envelope.approval) {
+      applyAnswer(envelope.approval);
+
+      return { ok: true, queued: 'sent' };
+    }
+
     const prompt = {
-      text: envelope.approval ? applyAnswer(envelope.approval) : formatPrompt(envelope),
+      text: formatPrompt(envelope),
       messageIds: envelope.id > 0 ? [envelope.id] : [],
     };
 
