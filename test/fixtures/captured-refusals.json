@@ -2,8 +2,14 @@
   {
     "outcome": "refused",
     "approvalId": 8,
-    "attempted": "rm /tmp/e2e/work/README.md && ls -la /tmp/e2e/work/",
-    "refusal": "rm in '/tmp/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/tmp/e2e'."
+    "attempted": "rm /var/folders/T/e2e/work/README.md && ls -la /var/folders/T/e2e/work/",
+    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
+  },
+  {
+    "outcome": "refused",
+    "approvalId": 9,
+    "attempted": "rm /private/var/folders/T/e2e/work/README.md && ls -la /private/var/folders/T/e2e/work/",
+    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
@@ -14,38 +20,44 @@
   {
     "outcome": "refused",
     "approvalId": 11,
-    "attempted": "rm /tmp/e2e/work/README.md && ls -la /tmp/e2e/work",
-    "refusal": "rm in '/tmp/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/tmp/e2e'."
+    "attempted": "rm /private/var/folders/T/e2e/work/README.md && ls -la /private/var/folders/T/e2e/work",
+    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
     "approvalId": 14,
-    "attempted": "rm /tmp/e2e/work/README.md && echo \"removed\" && ls -la /tmp/e2e/work",
-    "refusal": "rm in '/tmp/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/tmp/e2e'."
+    "attempted": "rm /private/var/folders/T/e2e/work/README.md && echo \"removed\" && ls -la /private/var/folders/T/e2e/work",
+    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
     "approvalId": 15,
-    "attempted": "rm /tmp/e2e/work/README.md; echo \"exit=$?\"; ls -la /tmp/e2e/work",
-    "refusal": "This Bash command contains multiple operations. The following parts require approval: rm /tmp/e2e/work/README.md, echo \"exit=$?\""
+    "attempted": "rm /private/var/folders/T/e2e/work/README.md; echo \"exit=$?\"; ls -la /private/var/folders/T/e2e/work",
+    "refusal": "This Bash command contains multiple operations. The following parts require approval: rm /private/var/folders/T/e2e/work/README.md, echo \"exit=$?\""
   },
   {
     "outcome": "refused",
     "approvalId": 16,
-    "attempted": "rm /tmp/e2e/work/README.md",
-    "refusal": "rm in '/tmp/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/tmp/e2e'."
+    "attempted": "rm /private/var/folders/T/e2e/work/README.md",
+    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
     "approvalId": 17,
-    "attempted": "mkdir -p /tmp/e2e/work && touch /tmp/e2e/work/created-by-agent.txt && ls -l /tmp/e2e/work/created-by-agent.txt",
-    "refusal": "This Bash command contains multiple operations. The following parts require approval: mkdir -p /tmp/e2e/work, touch /tmp/e2e/work/created-by-agent.txt"
+    "attempted": "mkdir -p /private/var/folders/T/e2e/work && touch /var/folders/T/e2e/work/created-by-agent.txt && ls -l /var/folders/T/e2e/work/created-by-agent.txt",
+    "refusal": "This Bash command contains multiple operations. The following parts require approval: mkdir -p /var/folders/T/e2e/work, touch /var/folders/T/e2e/work/created-by-agent.txt"
   },
   {
     "outcome": "refused",
     "approvalId": 19,
-    "attempted": "touch /tmp/e2e/work/created-by-agent.txt && ls -l /tmp/e2e/work/created-by-agent.txt",
-    "refusal": "touch in '/tmp/e2e/work/created-by-agent.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/tmp/e2e'."
+    "attempted": "touch /private/var/folders/T/e2e/work/created-by-agent.txt && ls -l /private/var/folders/T/e2e/work/created-by-agent.txt",
+    "refusal": "touch in '/var/folders/T/e2e/work/created-by-agent.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/private/var/folders/T/e2e'."
+  },
+  {
+    "outcome": "refused",
+    "approvalId": 22,
+    "attempted": "touch /private/var/folders/T/e2e/work/created-by-agent.txt && ls -l /private/var/folders/T/e2e/work/created-by-agent.txt",
+    "refusal": "touch in '/private/var/folders/T/e2e/work/created-by-agent.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/private/var/folders/T/e2e'."
   },
   {
     "outcome": "refused",
@@ -56,26 +68,26 @@
   {
     "outcome": "refused",
     "approvalId": 26,
-    "attempted": "cd /tmp/e2e/work && git status && git log --oneline -5 && git remote -v",
+    "attempted": "cd /private/var/folders/T/e2e/work && git status && git log --oneline -5 && git remote -v",
     "refusal": "This command changes directory before running a version-control command, which can pick up untrusted hooks or repository configuration from the target directory. Approve only if you trust it."
   },
   {
     "outcome": "refused",
     "approvalId": 27,
-    "attempted": "git -C /tmp/e2e/work push -u origin main",
+    "attempted": "git -C /private/var/folders/T/e2e/work push -u origin main",
     "refusal": "This command requires approval"
   },
   {
     "outcome": "refused",
     "approvalId": 31,
-    "attempted": "git -C /tmp/e2e/work status --short --branch; git -C /tmp/e2e/work log --oneline -5; git -C /tmp/e2e/work remote -v",
-    "refusal": "This Bash command contains multiple operations. The following parts require approval: git -C /tmp/e2e/work status --short --branch, git -C /tmp/e2e/work log --oneline -5, git -C /tmp/e2e/work remote -v"
+    "attempted": "git -C /private/var/folders/T/e2e/work status --short --branch; git -C /private/var/folders/T/e2e/work log --oneline -5; git -C /private/var/folders/T/e2e/work remote -v",
+    "refusal": "This Bash command contains multiple operations. The following parts require approval: git -C /private/var/folders/T/e2e/work status --short --branch, git -C /private/var/folders/T/e2e/work log --oneline -5, git -C /private/var/folders/T/e2e/work remote -v"
   },
   {
     "outcome": "permitted",
     "approvalId": 25,
     "attempted": "mcp__chat__set_status",
     "allowlistEntry": "mcp__chat__set_status",
-    "evidence": "run 13, 2026-10-31: after lee approved approval 25, agents.focus for e2e-62471-agent read e2e-ok-62471, so the child really used the tool. HISTORICAL \u2014 that row is transient and was cleared when the agent deregistered, so this is not re-readable. The run-13 log and ~/context/main-dev/claude2-run7-findings.md hold it."
+    "evidence": "run 13, 2026-10-31: after lee approved approval 25, agents.focus for e2e-62471-agent read e2e-ok-62471, so the child really used the tool. HISTORICAL — that row is transient and was cleared when the agent deregistered, so this is not re-readable. The run-13 log and ~/context/main-dev/claude2-run7-findings.md hold it."
   }
 ]

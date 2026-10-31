@@ -70,8 +70,13 @@ test('the SAME command with a Tool(Tool) allowlist is refused — the c7973ee de
 });
 
 test('a compound command is refused even when the whole line is allowlisted', () => {
-  const attempted = 'rm /tmp/e2e/work/README.md; echo "exit=$?"; ls -la /tmp/e2e/work';
-  const v = classify(attempted, [`Bash(${attempted})`]);
+  // ⚠️ SOURCED FROM THE CORPUS, not written here. A hardcoded path drifted the
+  // moment normalise() changed, and the test then failed for the wrong reason.
+  const record = CORPUS.find((r) => r.outcome === 'refused' && /;|&&/.test(r.attempted));
+
+  assert.ok(record, 'the corpus holds no compound command, so this proves nothing');
+
+  const v = classify(record.attempted, [`Bash(${record.attempted})`]);
 
   assert.equal(v.kind, 'refused', 'the compound case that cost c12c81d was certified as working');
 });

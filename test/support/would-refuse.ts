@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * What a real child did when it attempted something, read from a record of
@@ -38,9 +40,11 @@ export type Verdict =
   | { readonly kind: 'permitted'; readonly record: PermittedRecord }
   | { readonly kind: 'unknown'; readonly reason: string };
 
-const CORPUS: (RefusedRecord | PermittedRecord)[] = JSON.parse(
-  readFileSync('test/fixtures/captured-refusals.json', 'utf8'),
-);
+// ⚠️ RESOLVED FROM THIS MODULE, NOT THE CWD. A relative path made the corpus
+// load only when the suite ran from the package root.
+const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'captured-refusals.json');
+
+const CORPUS: (RefusedRecord | PermittedRecord)[] = JSON.parse(readFileSync(FIXTURE, 'utf8'));
 
 export const corpusSize = (): { refused: number; permitted: number } => ({
   refused: CORPUS.filter((r) => r.outcome === 'refused').length,
@@ -48,14 +52,17 @@ export const corpusSize = (): { refused: number; permitted: number } => ({
 });
 
 /**
- * The one transform applied before lookup: scratch temp paths collapse to the
- * spelling the corpus was captured with. Every run gets a fresh directory, so
- * without it no record would ever match a live attempt.
+ * The one transform applied before lookup: the RANDOM segments of a scratch
+ * directory collapse, so a record can match a later run's fresh directory.
+ *
+ * 🛑 THE `/private` PREFIX SURVIVES. An earlier version mapped `/var/...` and
+ * `/private/var/...` to one key, which erased the exact distinction that cost
+ * `6cca826` — a grant that named one directory two ways. Found by claude1 on
+ * PR 43, in the transform rather than the rules.
  */
-function normalise(command: string): string {
+export function normalise(command: string): string {
   return command
-    .replace(/\/private\/var\/folders\/\S+?\/chat-mcp-e2e-\w+/g, '/tmp/e2e')
-    .replace(/\/var\/folders\/\S+?\/chat-mcp-e2e-\w+/g, '/tmp/e2e')
+    .replace(/(\/private)?\/var\/folders\/\S+?\/chat-mcp-e2e-\w+/g, '$1/var/folders/T/e2e')
     .trim();
 }
 
