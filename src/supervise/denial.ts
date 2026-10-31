@@ -72,9 +72,22 @@ export function grantFor(denial: Denial): string | null {
 export function grantVariants(denial: Denial): string[] {
   if (!denial.tool || !denial.invocation) return [];
 
-  const forms = new Set([denial.invocation, canonicalisePaths(denial.invocation)]);
+  const whole = denial.invocation;
+  const lead = leadingSegment(whole);
+
+  const forms = new Set([whole, canonicalisePaths(whole), lead, canonicalisePaths(lead)]);
 
   return [...forms].map((form) => `${denial.tool}(${form})`);
+}
+
+/**
+ * The first command of a compound line, e.g. `rm x && ls y` -> `rm x`.
+ *
+ * Rejected: granting only the whole line. The child rewrites its trailing
+ * commands between attempts, so an exact grant never covers the retry.
+ */
+function leadingSegment(invocation: string): string {
+  return invocation.split(/\s*(?:&&|\|\||;|\|)\s*/)[0]!.trim();
 }
 
 /**

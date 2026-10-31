@@ -439,3 +439,51 @@ test('an unpaired denial yields no forms at all', async () => {
     [],
   );
 });
+
+test('a compound invocation also grants its leading segment alone', async () => {
+  const { grantVariants } = await import('../../src/supervise/denial.js');
+
+  const forms = grantVariants({
+    requested: "rm in '/a/b/README.md'",
+    raw: 'denied',
+    tool: 'Bash',
+    invocation: 'rm /a/b/README.md && ls -la /a/b/',
+  });
+
+  assert.ok(
+    forms.includes('Bash(rm /a/b/README.md)'),
+    'the leading segment alone is missing, so a reworded retry re-blocks',
+  );
+  assert.ok(
+    forms.includes('Bash(rm /a/b/README.md && ls -la /a/b/)'),
+    'the full command the child used is missing',
+  );
+});
+
+test('the leading segment is split on every shell separator', async () => {
+  const { grantVariants } = await import('../../src/supervise/denial.js');
+
+  const leading = (invocation: string) =>
+    grantVariants({ requested: null, raw: 'denied', tool: 'Bash', invocation });
+
+  for (const sep of ['&&', '||', ';', '|']) {
+    assert.ok(
+      leading(`rm /a/b ${sep} ls /a`).includes('Bash(rm /a/b)'),
+      `separator ${sep} did not yield the leading segment`,
+    );
+  }
+});
+
+test('a single-segment invocation gains no duplicate form', async () => {
+  const { grantVariants } = await import('../../src/supervise/denial.js');
+
+  assert.deepEqual(
+    grantVariants({
+      requested: 'git push',
+      raw: 'denied',
+      tool: 'Bash',
+      invocation: 'git push origin main',
+    }),
+    ['Bash(git push origin main)'],
+  );
+});
