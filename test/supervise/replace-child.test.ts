@@ -490,3 +490,72 @@ test('the re-dispatch prompt names the GRANTED COMMAND, never the prose', async 
     await sup.stop();
   }
 });
+
+/**
+ * 🛑 UNIT 2 OF #42. THE FAKE NOW REFUSES WHAT A REAL CHILD WOULD REFUSE.
+ *
+ * Every test above this point asserts that a string was BUILT and a flag
+ * CHANGED. None can say the string was usable, which is how six unusable
+ * grants passed a green suite.
+ *
+ * ⚠️ THE GRANT HERE COMES FROM `grantFor`, NOT FROM THIS FILE. A hardcoded
+ * envelope would skip the producer and certify only the plumbing — the exact
+ * gap claude1 named on PR 41. Break `entryFor` and this test goes red.
+ */
+function attemptedCommand(prompt: string): string | null {
+  const m = /Please attempt `([\s\S]*?)` now/.exec(prompt);
+
+  return m === null ? null : m[1];
+}
+
+test('the replacement child is sent something it could actually run', async () => {
+  const { grantFor, grantVariants } = await import('../../src/supervise/denial.js');
+  const { wouldRefuse } = await import('../support/would-refuse.js');
+
+  const children: FakeChild[] = [];
+  const handle = `rc-${process.pid}-usable`;
+  const sup = await supervisorFor(handle, children);
+
+  // The shape run 12 filed: an MCP tool call carrying no `command`.
+  const denial = {
+    requested: null,
+    raw: 'denied',
+    tool: 'mcp__chat__set_status',
+    invocation: 'mcp__chat__set_status',
+  };
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 11,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      approval: {
+        approvalId: 11,
+        decision: 'approve',
+        requested: denial.requested,
+        grant: grantFor(denial),
+        grantForms: grantVariants(denial),
+        sessionId: 'sess-1',
+      },
+    });
+
+    assert.equal(children.length, 2, 'the child was never replaced');
+
+    const prompt = children[1]?.sent.join('\n') ?? '';
+    const attempted = attemptedCommand(prompt);
+
+    assert.ok(attempted, `the prompt names no command to attempt: ${prompt}`);
+
+    const refusal = wouldRefuse(attempted, children[1]?.opts.grant?.allowed ?? []);
+
+    assert.equal(
+      refusal,
+      null,
+      `a real child would refuse this: attempted ${JSON.stringify(attempted)} — ` +
+        `${refusal?.refusal} (first seen on approval ${refusal?.firstSeenApprovalId})`,
+    );
+  } finally {
+    await sup.stop();
+  }
+});

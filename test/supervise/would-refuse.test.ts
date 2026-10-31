@@ -81,3 +81,22 @@ test('every refusal returned is a VERBATIM capture, never a hand-written string'
     if (r) assert.ok(known.has(r.refusal), `invented a refusal for: ${attempted}`);
   }
 });
+
+/**
+ * ⚠️ VERBATIM, BUT THE MOST RELEVANT VERBATIM ONE. The first control run
+ * replayed approval 10's wording — which names `mcp__chat__list_agents` —
+ * for an attempt on `mcp__chat__set_status`. The text was a true capture and
+ * the failure message pointed at the wrong tool.
+ *
+ * Still no editing of captured text. Only the CHOICE between captures of the
+ * same shape changes.
+ */
+test('among captures of one shape, the one naming the attempted tool wins', async () => {
+  const { wouldRefuse } = await import('../support/would-refuse.js');
+
+  const refusal = wouldRefuse('mcp__chat__set_status', ['mcp__chat__set_status(x)']);
+
+  assert.ok(refusal);
+  assert.match(refusal.refusal, /mcp__chat__set_status/);
+  assert.doesNotMatch(refusal.refusal, /list_agents/);
+});

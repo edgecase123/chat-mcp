@@ -31,8 +31,13 @@ const CORPUS: Capture[] = JSON.parse(
  * capture can rot, and a silent fallback to a hand-written string would hide
  * exactly the rot the replay rule exists to prevent.
  */
-function replay(shape: RegExp): Capture {
-  const found = CORPUS.find((c) => shape.test(c.refusal));
+function replay(shape: RegExp, attempted = ''): Capture {
+  const matching = CORPUS.filter((c) => shape.test(c.refusal));
+
+  // ⚠️ MOST RELEVANT, NOT FIRST. Several captures share a shape and name
+  // different tools, and the first one pointed the failure message at a tool
+  // the run never touched. The text itself is never edited.
+  const found = matching.find((c) => attempted !== '' && c.refusal.includes(attempted)) ?? matching[0];
 
   if (!found) {
     throw new Error(
@@ -53,7 +58,7 @@ export function wouldRefuse(attempted: string, allowed: readonly string[]): Capt
   // A bare tool name has no whitespace. `Tool(Tool)` in the list does NOT
   // grant it — measured on run 12, approvals 23 and 24 came out identical.
   if (!/\s/.test(want)) {
-    return allowed.includes(want) ? null : replay(/haven't granted it yet/);
+    return allowed.includes(want) ? null : replay(/haven't granted it yet/, want);
   }
 
   // `<verb> in '<path>'` is the sentence a human reads, not a command. The
