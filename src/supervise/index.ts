@@ -8,7 +8,7 @@ import * as dao from '../storage/dao.js';
 import { availableBuiltins, childHandleFor, defaultAllowed, type ChildGrant } from './grant.js';
 import { dirsFor } from './projects.js';
 import { allowlistWith, resolveCwd } from './allowlist.js';
-import { grantFor } from './denial.js';
+import { grantFor, grantVariants } from './denial.js';
 import { writeClaudeMcpConfig } from './drivers/claude.js';
 
 /**
@@ -317,6 +317,11 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
           // `rm in '/path/README.md'`, the child was denied again, and a
           // second card appeared.
           grant: grantFor(denial),
+          // 🛑 EVERY SPELLING OF THE SAME FILE. `/var` and `/private/var`
+          // are the same path on macOS, and a grant in one spelling does
+          // not match a retry in the other — measured live, caused by this
+          // supervisor's own realpath resolution.
+          grantForms: grantVariants(denial),
           reason: denial.raw,
           sessionId: childSession,
         });
@@ -442,7 +447,13 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       // The GRANT, never the prose. An approval with no grant cannot widen
       // anything, so it re-dispatches with the allowlist unchanged — the
       // child will be denied again, visibly, rather than silently.
-      { allowedTools: allowlistWith(currentGrant?.allowed ?? [], answer.grant ? [answer.grant] : []) },
+      {
+        // Every spelling, not just the one shown. They denote one file.
+        allowedTools: allowlistWith(
+          currentGrant?.allowed ?? [],
+          answer.grantForms?.length ? [...answer.grantForms] : answer.grant ? [answer.grant] : [],
+        ),
+      },
       driver.redispatchPrompt({
         grantedCommand: answer.requested,
         followUp: 'Then carry on with the task you were on.',

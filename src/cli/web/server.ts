@@ -443,6 +443,7 @@ async function handleAnswerApproval(
         decision,
         requested: request.requested ?? '',
         grant: request.grant,
+        grantForms: request.grantForms,
         sessionId: request.sessionId,
       },
     });

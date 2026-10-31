@@ -676,6 +676,15 @@ export interface Approval {
    */
   readonly grant: string | null;
 
+  /**
+   * Every equivalent spelling of `grant`, including it.
+   *
+   * 🛑 ALL OF THEM ARE ALLOWLISTED. `/var/x` and `/private/var/x` are the
+   * same file, and granting only the spelling the operator happened to see
+   * leaves the other one denied — measured live.
+   */
+  readonly grantForms: string[];
+
   /** The whole denial text, so the UI can quote the reason rather than retell it. */
   readonly reason: string;
   /** The child session to `--resume`, or null when it is not known. */
@@ -690,6 +699,7 @@ export interface ApprovalInput {
   supervisorHandle: string;
   requested: string | null;
   grant?: string | null;
+  grantForms?: readonly string[];
   reason: string;
   sessionId?: string | null;
 }
@@ -700,11 +710,32 @@ interface ApprovalRow {
   supervisor_handle: string;
   requested: string | null;
   grant_entry: string | null;
+  grant_forms: string | null;
   reason: string;
   session_id: string | null;
   created_at: number;
   answered_at: number | null;
   decision: string | null;
+}
+
+/**
+ * The stored spellings, falling back to the single grant.
+ *
+ * ⚠️ A ROW WRITTEN BEFORE MIGRATION 10 HAS NO FORMS, and must still be
+ * approvable — returning an empty list there would make every historic card
+ * un-grantable.
+ */
+function parseForms(raw: string | null, fallback: string | null): string[] {
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) return parsed.filter((x): x is string => typeof x === 'string');
+    } catch {
+      // A corrupt value must not make the row unreadable.
+    }
+  }
+
+  return fallback ? [fallback] : [];
 }
 
 function toApproval(row: ApprovalRow): Approval {
@@ -714,6 +745,7 @@ function toApproval(row: ApprovalRow): Approval {
     supervisorHandle: row.supervisor_handle,
     requested: row.requested,
     grant: row.grant_entry,
+    grantForms: parseForms(row.grant_forms, row.grant_entry),
     reason: row.reason,
     sessionId: row.session_id,
     createdAt: row.created_at,
@@ -725,14 +757,17 @@ function toApproval(row: ApprovalRow): Approval {
 export function insertApproval(db: Db, input: ApprovalInput): number {
   const result = db
     .prepare(
-      `INSERT INTO approvals (agent_handle, supervisor_handle, requested, grant_entry, reason, session_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO approvals (agent_handle, supervisor_handle, requested, grant_entry, grant_forms, reason, session_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.agentHandle,
       input.supervisorHandle,
       input.requested ?? null,
       input.grant ?? null,
+      input.grantForms && input.grantForms.length > 0
+        ? JSON.stringify([...input.grantForms])
+        : null,
       input.reason,
       input.sessionId ?? null,
       Date.now(),

@@ -174,6 +174,20 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       ALTER TABLE approvals ADD COLUMN grant_entry TEXT;
     `);
   },
+  (db) => {
+    // Every equivalent spelling of the granted command, JSON-encoded.
+    //
+    // 🚨 ONE SPELLING WAS NOT ENOUGH. On macOS `/var` is a symlink to
+    // `/private/var`, so a grant approved as `/var/…` did not match a retry
+    // the supervisor itself had prompted as `/private/var/…`. Measured
+    // live; the cause was this supervisor's own realpath resolution.
+    //
+    // `grant_entry` stays the one the operator SEES. This column is what is
+    // actually allowlisted, and it includes that one.
+    db.exec(`
+      ALTER TABLE approvals ADD COLUMN grant_forms TEXT;
+    `);
+  },
 ];
 
 function tx(db: Db, fn: () => void): void {

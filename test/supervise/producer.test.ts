@@ -376,3 +376,66 @@ test('a paired call is consumed, so the pending map does not grow', async () => 
   // Second time: the entry is gone, so no stale invocation is attached.
   assert.equal(denialFromClaude(deny)?.invocation, null, 'the pairing was not consumed');
 });
+
+/**
+ * 🚨 ONE SPELLING WAS NOT ENOUGH, AND MY OWN FIX CAUSED THE BREAK.
+ *
+ * On macOS `/var` is a symlink to `/private/var`. The child's first attempt
+ * used `/var/…`; `resolveCwd` resolves the cwd, so the re-dispatch prompt
+ * named `/private/var/…` and the retry did not match the grant lee had just
+ * approved. Two strings, same file, another card.
+ */
+test('a grant covers every spelling of the same path', async () => {
+  const { grantVariants, grantFor } = await import('../../src/supervise/denial.js');
+  const { realpathSync, mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-grant-'));
+  const file = join(dir, 'x.txt');
+  writeFileSync(file, 'x');
+
+  try {
+    const real = realpathSync(file);
+
+    // Only meaningful where the two spellings differ, which is the macOS case.
+    if (real === file) return;
+
+    const denial = {
+      requested: "rm in '" + real + "'",
+      raw: 'Permission for this tool use was denied.',
+      tool: 'Bash',
+      invocation: `rm ${file}`,
+    };
+
+    const forms = grantVariants(denial);
+
+    assert.ok(forms.includes(`Bash(rm ${file})`), 'the spelling the child used is missing');
+    assert.ok(forms.includes(`Bash(rm ${real})`), 'the resolved spelling is missing');
+    assert.equal(grantFor(denial), `Bash(rm ${real})`, 'the card should show the resolved path');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a grant with no path yields exactly one form, not duplicates', async () => {
+  const { grantVariants } = await import('../../src/supervise/denial.js');
+
+  const forms = grantVariants({
+    requested: 'git push',
+    raw: 'denied',
+    tool: 'Bash',
+    invocation: 'git push origin main',
+  });
+
+  assert.deepEqual(forms, ['Bash(git push origin main)']);
+});
+
+test('an unpaired denial yields no forms at all', async () => {
+  const { grantVariants } = await import('../../src/supervise/denial.js');
+
+  assert.deepEqual(
+    grantVariants({ requested: null, raw: 'denied', tool: null, invocation: null }),
+    [],
+  );
+});

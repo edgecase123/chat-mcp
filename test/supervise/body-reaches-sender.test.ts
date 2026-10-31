@@ -213,7 +213,7 @@ const KIND_EXEMPT = new Map<string, string>([
     'room-join system notice, no caller kind',
   ],
   [
-    'src/cli/web/server.ts :: notifyPeer(request.supervisorHandle, { id, to: request.supervisorHandle, from: ctx.handle, ts: Date.now(), body: `approval ${id} ${decision}: ${request.requested ?? \'(unnamed)\'}`, approval: { approvalId: id, decision, requested: request.requested ?? \'\', grant: request.grant, sessionId: request.sessionId, }, });',
+    'src/cli/web/server.ts :: notifyPeer(request.supervisorHandle, { id, to: request.supervisorHandle, from: ctx.handle, ts: Date.now(), body: `approval ${id} ${decision}: ${request.requested ?? \'(unnamed)\'}`, approval: { approvalId: id, decision, requested: request.requested ?? \'\', grant: request.grant, grantForms: request.grantForms, sessionId: request.sessionId, }, });',
     'approval answer; no caller kind exists, the body and the typed field carry it',
   ],
 ]);

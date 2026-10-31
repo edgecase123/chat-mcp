@@ -1,3 +1,5 @@
+import { realpathSync } from 'node:fs';
+
 /**
  * The semantic shape of "the child was refused a tool".
  *
@@ -47,5 +49,46 @@ export interface Denial {
 export function grantFor(denial: Denial): string | null {
   if (!denial.tool || !denial.invocation) return null;
 
-  return `${denial.tool}(${denial.invocation})`;
+  return `${denial.tool}(${canonicalisePaths(denial.invocation)})`;
+}
+
+/**
+ * Every spelling of the grant that means the same thing.
+ *
+ * 🚨 ONE SPELLING IS NOT ENOUGH, AND THE FIRST LIVE PROOF WAS MY OWN FIX
+ * BREAKING IT. On macOS `/var` is a symlink to `/private/var`. The child's
+ * first attempt used `/var/…`; the re-dispatch prompt named the REALPATH,
+ * because `resolveCwd` resolves it; so the retry used `/private/var/…` and
+ * did not match the grant lee had just approved. Two strings, same file,
+ * another card.
+ *
+ * ⚠️ This is the re-issue risk that was flagged when exact matching was
+ * chosen over a prefix pattern. It bit on the first attempt, by a route
+ * neither of us predicted — not a reworded command, a normalised path.
+ *
+ * Both forms are allowlisted because they denote the same file. That is
+ * wider than one string and NOT wider than the file lee approved.
+ */
+export function grantVariants(denial: Denial): string[] {
+  if (!denial.tool || !denial.invocation) return [];
+
+  const forms = new Set([denial.invocation, canonicalisePaths(denial.invocation)]);
+
+  return [...forms].map((form) => `${denial.tool}(${form})`);
+}
+
+/**
+ * Rewrite absolute paths in a command to their resolved form.
+ *
+ * A path that cannot be resolved is left alone: it may not exist yet, which
+ * is normal for a command that creates something.
+ */
+function canonicalisePaths(invocation: string): string {
+  return invocation.replace(/(^|\s)(\/[^\s'"]+)/g, (whole, lead: string, path: string) => {
+    try {
+      return `${lead}${realpathSync(path)}`;
+    } catch {
+      return whole;
+    }
+  });
 }

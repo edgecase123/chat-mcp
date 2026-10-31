@@ -45,6 +45,14 @@ export interface ApprovalAnswer {
    * `Tool(invocation)`. Sending the prose grants nothing.
    */
   readonly grant: string | null;
+
+  /**
+   * Every equivalent spelling of `grant`, all of which are allowlisted.
+   *
+   * 🛑 `/var/x` and `/private/var/x` are the same file. Granting only the
+   * spelling the operator saw leaves the other denied — measured live.
+   */
+  readonly grantForms?: readonly string[];
   /** The child session to resume, so a grant is not a restart. */
   readonly sessionId: string | null;
 }
