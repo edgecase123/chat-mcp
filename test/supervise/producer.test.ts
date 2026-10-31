@@ -487,3 +487,54 @@ test('a single-segment invocation gains no duplicate form', async () => {
     ['Bash(git push origin main)'],
   );
 });
+
+test('a path whose leaf does not exist yet still gets the canonical prefix', async () => {
+  const { grantVariants } = await import('../../src/supervise/denial.js');
+  const { realpathSync, mkdtempSync, mkdirSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+
+  const root = mkdtempSync(join(tmpdir(), 'chat-mcp-canon-'));
+  const work = join(root, 'work');
+  mkdirSync(work);
+
+  try {
+    const real = realpathSync(work);
+
+    // Only meaningful where the two spellings differ, which is the macOS case.
+    if (real === work) return;
+
+    // 🛑 THE SHAPE RUN 9 PRODUCED: an existing dir and a missing leaf in one
+    // command. Resolving only what exists mixed both spellings into one grant.
+    const forms = grantVariants({
+      requested: null,
+      raw: 'denied',
+      tool: 'Bash',
+      invocation: `mkdir -p ${work} && touch ${work}/new.txt`,
+    });
+
+    const mixed = forms.filter((f) => f.includes('/private/var') && f.includes(' /var'));
+
+    assert.deepEqual(mixed, [], `a grant mixes two spellings of one directory: ${mixed[0]}`);
+    assert.ok(
+      forms.includes(`Bash(mkdir -p ${real} && touch ${real}/new.txt)`),
+      'the all-resolved spelling is missing',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a path with no existing ancestor is left exactly as written', async () => {
+  const { grantVariants } = await import('../../src/supervise/denial.js');
+
+  assert.deepEqual(
+    grantVariants({
+      requested: null,
+      raw: 'denied',
+      tool: 'Bash',
+      invocation: 'touch /no/such/root/f.txt',
+    }),
+    ['Bash(touch /no/such/root/f.txt)'],
+  );
+});

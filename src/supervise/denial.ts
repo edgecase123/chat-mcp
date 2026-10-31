@@ -1,4 +1,5 @@
 import { realpathSync } from 'node:fs';
+import { basename, dirname } from 'node:path';
 
 /**
  * The semantic shape of "the child was refused a tool".
@@ -93,15 +94,41 @@ function leadingSegment(invocation: string): string {
 /**
  * Rewrite absolute paths in a command to their resolved form.
  *
- * A path that cannot be resolved is left alone: it may not exist yet, which
- * is normal for a command that creates something.
+ * A path with no existing ancestor is left alone — nothing can be resolved
+ * about it.
  */
 function canonicalisePaths(invocation: string): string {
   return invocation.replace(/(^|\s)(\/[^\s'"]+)/g, (whole, lead: string, path: string) => {
-    try {
-      return `${lead}${realpathSync(path)}`;
-    } catch {
-      return whole;
-    }
+    const resolved = resolveDeepest(path);
+
+    return resolved === null ? whole : `${lead}${resolved}`;
   });
+}
+
+/**
+ * The path with its longest EXISTING ancestor resolved, tail re-appended.
+ *
+ * 🚨 RESOLVING ONLY WHAT EXISTS PUT TWO SPELLINGS OF ONE DIRECTORY INTO ONE
+ * GRANT. Measured on run 9: `mkdir -p <dir> && touch <dir>/new.txt` became
+ * `mkdir -p /private/var/…/work && touch /var/…/work/new.txt`, because the
+ * directory resolved and the file it was about to create could not. That
+ * string matches nothing the child could type, so the approval re-looped.
+ *
+ * A leaf that does not exist yet is the NORMAL case for a creating command,
+ * so the mixed spelling was guaranteed rather than unlucky.
+ */
+function resolveDeepest(path: string): string | null {
+  const tail: string[] = [];
+  let head = path;
+
+  while (head !== '/' && head !== '.') {
+    try {
+      return [realpathSync(head), ...tail].join('/');
+    } catch {
+      tail.unshift(basename(head));
+      head = dirname(head);
+    }
+  }
+
+  return null;
 }
