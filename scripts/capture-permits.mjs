@@ -175,6 +175,16 @@ const observations = [];
 // the command did not work.
 const withheld = [];
 
+/**
+ * 🛑 APPROVED, AND THE TARGET DID NOT MOVE. lee ruled on 2026-10-31 that
+ * this gets its own corpus outcome, so it is no longer observation-only.
+ *
+ * 🛑 IT IS NOT A REFUSAL. The child was ALLOWED. Filing it as `refused`
+ * would make `classify()` answer "no, not under that grant" to a question
+ * whose measured answer is "yes, and it did nothing".
+ */
+const underGrant = [];
+
 const PROBE_LABELS = probesFor('', '', 'x').map((p) => p.label);
 
 if (LIST_ONLY) {
@@ -303,6 +313,25 @@ for (const index of PROBE_LABELS.keys()) {
       console.log(`   PERMIT WITHHELD: the target moved under ${grantedEntries.length} grants, and a record names one`);
     }
 
+    if (!worked && grantedEntries.length > 0) {
+      underGrant.push({
+        outcome: 'refused_under_grant',
+        probe: probe.label,
+        // ⚠️ PLURAL, unlike the permit records' single `approvalId`. A probe
+        // can answer more than one approval before its target is checked.
+        approvalIds: [...answered],
+        attempted: probe.command,
+        allowlist: [...BASE_ALLOWLIST, ...grantedEntries],
+        evidence:
+          `${new Date().toISOString().slice(0, 10)}: ${probe.label} — approved under ` +
+          `${grantedEntries.length} grant(s) and the target did not move.` +
+          `${note ? ` ${note}.` : ''} HISTORICAL: the scratch directory is deleted ` +
+          'when this run ends.',
+      });
+
+      console.log(`   REFUSED UNDER GRANT: approved, and the target did not move`);
+    }
+
     if (worked && grantedEntries.length === 1) {
       captured.push({
         outcome: 'permitted',
@@ -344,6 +373,12 @@ for (const c of captured) console.log(`  ${c.allowlistEntry}`);
 // rebuild silently discarded a record earlier today.
 writeFileSync(join(ROOT, 'test', 'fixtures', 'captured-permits.pending.json'), `${JSON.stringify(captured, null, 2)}\n`);
 console.log('\nwrote test/fixtures/captured-permits.pending.json');
+
+writeFileSync(
+  join(ROOT, 'test', 'fixtures', 'captured-refused-under-grant.pending.json'),
+  `${JSON.stringify(underGrant, null, 2)}\n`,
+);
+console.log(`wrote test/fixtures/captured-refused-under-grant.pending.json — ${underGrant.length} record(s)`);
 
 mkdirSync(join(ROOT, 'measurements'), { recursive: true });
 
