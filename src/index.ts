@@ -230,7 +230,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .option('--permission-mode <mode>', 'permission mode for the child (default: plan, or acceptEdits when the child may reply)')
     .option('--permission-prompts <target>', 'who answers prompts: host | none', 'none')
     .option('--no-reply', 'do NOT let the child answer on the bus — makes this supervisor a doorbell')
-    .option('--reply-tools <tools>', 'comma-separated MCP tool allowlist for the child')
+    .option('--allowed-tools <tools>', "comma-separated tool allowlist for the child (default: lee's narrow list)")
     .action(async (handle: string, o: Record<string, string>) => {
       const { startSupervisor } = await import('./supervise/index.js');
       const sup = await startSupervisor({
@@ -243,7 +243,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         permissionPrompts: o.permissionPrompts === 'host' ? 'host' : 'none',
         // commander turns --no-reply into reply:false and omits it otherwise.
         reply: (o as unknown as { reply?: boolean }).reply,
-        replyTools: typeof o.replyTools === 'string' ? o.replyTools.split(',') : undefined,
+        allowedTools: typeof o.allowedTools === 'string' ? o.allowedTools.split(',') : undefined,
       });
       const shutdown = (): void => {
         void sup.stop().then(() => process.exit(0));

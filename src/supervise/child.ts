@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parseRateLimitEvent, type RateLimitSnapshot } from './rate-limit.js';
-import type { BusReply } from './bus-reply.js';
+import type { ChildGrant } from './grant.js';
 import { ensureMcpConfigDir, mcpConfigPathFor } from '../util/paths.js';
 
 /**
@@ -81,10 +81,11 @@ export interface SpawnOptions {
   readonly permissionPrompts?: 'host' | 'none';
 
   /**
-   * Permission to answer on the bus. Omitted means the child can be woken and
-   * cannot reply, which is the behaviour this field exists to end.
+   * What the child may be and do. Omitted means it can be woken, cannot
+   * reply, and cannot touch anything — which is the behaviour this exists to
+   * end.
    */
-  readonly busReply?: BusReply;
+  readonly grant?: ChildGrant;
 }
 
 /**
@@ -113,7 +114,7 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
     // allowlisted MCP tool. `acceptEdits` is the one proven to; with
     // `--tools ''` there is no Edit tool for it to accept, so it widens
     // nothing. An explicit --permission-mode always wins over both defaults.
-    opts.permissionMode ?? (opts.busReply ? 'acceptEdits' : 'plan'),
+    opts.permissionMode ?? (opts.grant ? 'acceptEdits' : 'plan'),
     '--permission-prompts',
     opts.permissionPrompts ?? 'none',
   ];
@@ -127,15 +128,18 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
   // the handle a live session is already using. `--tools ''` removes every
   // built-in, which is what makes the allowlist a least-privilege grant
   // rather than a wider permission mode.
-  if (opts.busReply) {
+  if (opts.grant) {
     args.push(
       '--mcp-config',
-      opts.busReply.configPath,
+      opts.grant.configPath,
       '--strict-mcp-config',
       '--tools',
-      '',
+      // 🛑 SPACE-SEPARATED, because `--tools <tools...>` is variadic. An empty
+      // list disables every built-in, which is correct for a reply-only child
+      // and wrong for one that edits files.
+      ...opts.grant.available,
       '--allowedTools',
-      opts.busReply.tools.join(','),
+      opts.grant.allowed.join(','),
     );
   }
 

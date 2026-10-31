@@ -3,7 +3,7 @@ import { spawnClaude } from './child.js';
 import { TurnQueue } from './turn-queue.js';
 import { WakeListener, type WakeAck, type WakeEnvelope } from './socket.js';
 import { RateLimitGate } from './rate-limit.js';
-import { DEFAULT_REPLY_TOOLS, childHandleFor, type BusReply } from './bus-reply.js';
+import { DEFAULT_ALLOWED, builtinsFrom, childHandleFor, type ChildGrant } from './grant.js';
 import { writeClaudeMcpConfig } from './child.js';
 
 /**
@@ -31,8 +31,8 @@ export interface SupervisorOptions extends SpawnOptions {
    */
   readonly reply?: boolean;
 
-  /** Allowlist override. Default `DEFAULT_REPLY_TOOLS`. */
-  readonly replyTools?: readonly string[];
+  /** Allowlist override. Default `DEFAULT_ALLOWED` — lee's narrow list. */
+  readonly allowedTools?: readonly string[];
 
   /** Injected so the supervisor is testable without spawning or spending. */
   readonly spawnChild?: (opts: SpawnOptions) => AgentChild;
@@ -84,15 +84,18 @@ export function formatPrompt(envelope: WakeEnvelope): string {
  * never be made equal by forgetting a flag — a child sharing the supervisor's
  * handle consumes the deliveries meant for it (chat-mcp#35).
  */
-function buildBusReply(opts: SupervisorOptions): BusReply | undefined {
+function buildGrant(opts: SupervisorOptions): ChildGrant | undefined {
   if (opts.reply === false) return undefined;
 
   const handle = childHandleFor(opts.handle);
 
+  const allowed = opts.allowedTools ?? DEFAULT_ALLOWED;
+
   return {
     handle,
     configPath: writeClaudeMcpConfig(handle),
-    tools: opts.replyTools ?? DEFAULT_REPLY_TOOLS,
+    allowed,
+    available: builtinsFrom(allowed),
   };
 }
 
@@ -100,16 +103,16 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const spawnFn = opts.spawnChild ?? spawnClaude;
 
-  const busReply = opts.busReply ?? buildBusReply(opts);
-  const child = spawnFn({ ...opts, busReply });
+  const grant = opts.grant ?? buildGrant(opts);
+  const child = spawnFn({ ...opts, grant });
 
   // 🛑 SAID OUT LOUD, both ways. A doorbell that cannot answer and a child
   // holding a bus identity are both things an operator must be able to see in
   // the log rather than deduce from a flag they did not pass.
   log(
-    busReply
-      ? `child replies on the bus as "${busReply.handle}", tools: ${busReply.tools.join(', ')}`
-      : 'child CANNOT reply on the bus — this supervisor is a doorbell (--no-reply)',
+    grant
+      ? `child acts as "${grant.handle}"; ${grant.allowed.length} allowed tool(s), built-ins: ${grant.available.join(' ')}`
+      : 'child has NO grant — it can be woken and can do nothing (--no-reply)',
   );
   const gate = new RateLimitGate(opts.utilizationCeiling ?? 0.9, child.reportsUsage);
 

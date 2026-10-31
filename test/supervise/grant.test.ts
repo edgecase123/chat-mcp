@@ -1,27 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename, isAbsolute } from 'node:path';
-import { mkdtempSync } from 'node:fs';
 import { claudeArgs, writeClaudeMcpConfig } from '../../src/supervise/child.js';
-import { DEFAULT_REPLY_TOOLS } from '../../src/supervise/bus-reply.js';
+import { DEFAULT_ALLOWED, builtinsFrom } from '../../src/supervise/grant.js';
 
 /**
- * 🛑 A SUPERVISED AGENT THAT CANNOT REPLY IS A DOORBELL, NOT A BUS.
+ * 🛑 A SUPERVISED AGENT THAT CANNOT ACT IS A DOORBELL, NOT A BUS.
  *
- * The supervisor woke an idle agent and the agent's correct action — answering
- * on the bus — was denied, because `plan` mode blocks `mcp__chat__send`. So
- * delivery was proven and conversation was not.
+ * The configuration below is ONE decision, not a bag of flags. `--mcp-config`
+ * without `--strict-mcp-config` leaves the child reading the consuming
+ * project's `.mcp.json`, which hardcodes a handle a live session already owns.
  *
- * The combination below is the one measured to work on chat-mcp#33. It is a
- * COMBINATION: `--mcp-config` without `--strict-mcp-config` leaves the child
- * reading the project's own `.mcp.json`, and that file hardcodes a handle a
- * live session is already using.
+ * ⚠️ THESE REPLACED A REPLY-ONLY SET, on lee's decision of 2026-10-31. The old
+ * ones asserted `--tools ''` — every built-in disabled — which was right for an
+ * agent that only answered on the bus and is incompatible with one that edits
+ * files and runs tests.
  */
 
 function withTempHome<T>(fn: (home: string) => T): T {
-  const home = mkdtempSync(join(tmpdir(), 'chat-mcp-bus-reply-'));
+  const home = mkdtempSync(join(tmpdir(), 'chat-mcp-grant-'));
   const previous = process.env.CHAT_MCP_HOME;
   process.env.CHAT_MCP_HOME = home;
 
@@ -34,7 +33,14 @@ function withTempHome<T>(fn: (home: string) => T): T {
   }
 }
 
-test('without busReply the child gets NONE of the reply flags', () => {
+const grant = {
+  handle: 'sup-claude2',
+  configPath: '/tmp/x.json',
+  allowed: DEFAULT_ALLOWED,
+  available: builtinsFrom(DEFAULT_ALLOWED),
+};
+
+test('without a grant the child gets NONE of the four flags', () => {
   const args = claudeArgs({});
 
   for (const flag of ['--mcp-config', '--strict-mcp-config', '--tools', '--allowedTools']) {
@@ -42,15 +48,13 @@ test('without busReply the child gets NONE of the reply flags', () => {
   }
 });
 
-test('busReply passes all four flags, because any three of them do not work', () => {
-  const args = claudeArgs({
-    busReply: { handle: 'sup-claude2', configPath: '/tmp/x.json', tools: ['mcp__chat__send'] },
-  });
+test('a grant passes all four flags, because any three of them do not work', () => {
+  const args = claudeArgs({ grant });
 
   assert.ok(args.includes('--mcp-config'), 'the child has no chat server at all');
   assert.ok(args.includes('--strict-mcp-config'), 'the child inherits the project .mcp.json');
-  assert.ok(args.includes('--tools'), 'every built-in tool stays available');
-  assert.ok(args.includes('--allowedTools'), 'the chat tool is present but not permitted');
+  assert.ok(args.includes('--tools'), 'no built-in tool surface is declared');
+  assert.ok(args.includes('--allowedTools'), 'the tools exist but nothing is permitted');
 });
 
 /**
@@ -60,55 +64,89 @@ test('busReply passes all four flags, because any three of them do not work', ()
  * fights the live session. `WakeListener.bind` refuses a live socket rival;
  * MCP registration has no such guard. See chat-mcp#35.
  */
-test('--strict-mcp-config is never passed without --mcp-config, and never omitted with it', () => {
-  const withReply = claudeArgs({
-    busReply: { handle: 'sup-claude2', configPath: '/tmp/x.json', tools: ['mcp__chat__send'] },
-  });
+test('--strict-mcp-config and --mcp-config travel together or not at all', () => {
+  const args = claudeArgs({ grant });
 
   assert.equal(
-    withReply.includes('--mcp-config'),
-    withReply.includes('--strict-mcp-config'),
+    args.includes('--mcp-config'),
+    args.includes('--strict-mcp-config'),
     'the two flags must travel together or the child steals a live handle',
   );
 });
 
-test('--tools is given an EMPTY value, so no built-in tool survives', () => {
-  const args = claudeArgs({
-    busReply: { handle: 'sup-claude2', configPath: '/tmp/x.json', tools: ['mcp__chat__send'] },
-  });
+/**
+ * 🛑 THE BUILT-IN SURFACE MUST COVER EVERY ALLOWLIST ENTRY, OR AN ENTRY NAMES A
+ * TOOL THAT DOES NOT EXIST AND THE CHILD SIMPLY CANNOT RUN IT. That failure is
+ * silent: the allowlist looks generous and the agent looks incapable.
+ */
+test('every allowed built-in is also declared available', () => {
+  const args = claudeArgs({ grant });
+  const toolsIdx = args.indexOf('--tools');
+  const allowedIdx = args.indexOf('--allowedTools');
 
-  assert.equal(args[args.indexOf('--tools') + 1], '', 'a non-empty --tools re-enables built-ins');
+  assert.notEqual(toolsIdx, -1, 'no --tools flag, so this test proves nothing');
+  assert.ok(allowedIdx > toolsIdx, 'expected --allowedTools after --tools');
+
+  const available = args.slice(toolsIdx + 1, allowedIdx);
+  const needed = DEFAULT_ALLOWED.filter((t) => !t.startsWith('mcp__')).map((t) =>
+    t.replace(/\(.*$/, ''),
+  );
+
+  for (const tool of new Set(needed)) {
+    assert.ok(available.includes(tool), `allowlisted but not available: ${tool}`);
+  }
 });
 
-/**
- * ⚠️ Asserting "Bash is absent" against the allowlist alone is vacuous — it
- * would pass on a list that never mentioned Bash because the flag was dropped.
- * So assert the flag is PRESENT first, then that its value is only chat tools.
- */
-test('the allowlist contains chat tools and nothing that can touch the machine', () => {
-  const args = claudeArgs({
-    busReply: {
-      handle: 'sup-claude2',
-      configPath: '/tmp/x.json',
-      tools: [...DEFAULT_REPLY_TOOLS],
-    },
-  });
+test('Bash is available, because the allowlist scopes Bash commands', () => {
+  assert.ok(
+    DEFAULT_ALLOWED.some((t) => t.startsWith('Bash(')),
+    'no Bash(...) entries, so this test proves nothing',
+  );
+  assert.ok(builtinsFrom(DEFAULT_ALLOWED).includes('Bash'));
+});
 
-  const idx = args.indexOf('--allowedTools');
-  assert.notEqual(idx, -1, 'the allowlist flag is missing, so this test proves nothing');
+test('an MCP tool is allowed but never declared as a built-in', () => {
+  const builtins = builtinsFrom(DEFAULT_ALLOWED);
 
-  const allowed = args[idx + 1]!.split(',');
-
-  assert.ok(allowed.length > 0, 'an empty allowlist denies the reply it exists to permit');
   assert.deepEqual(
-    allowed.filter((t) => !t.startsWith('mcp__chat__')),
+    builtins.filter((t) => t.startsWith('mcp__')),
     [],
-    'a non-chat tool is allowlisted',
+    '`--tools` governs built-ins only; an MCP tool there is meaningless',
+  );
+  assert.ok(
+    DEFAULT_ALLOWED.some((t) => t.startsWith('mcp__chat__')),
+    'the child cannot answer on the bus at all',
   );
 });
 
-test('the default allowlist permits a DM and a room post, and no third thing', () => {
-  assert.deepEqual([...DEFAULT_REPLY_TOOLS], ['mcp__chat__send', 'mcp__chat__room_send']);
+test('the allowlist the child receives is the one it was given, verbatim', () => {
+  const args = claudeArgs({ grant });
+  const allowed = args[args.indexOf('--allowedTools') + 1]!.split(',');
+
+  assert.deepEqual(allowed, [...DEFAULT_ALLOWED]);
+});
+
+/**
+ * 🛑 THE MODE IS PART OF THE COMBINATION. `plan` DENIES tool use outright,
+ * measured on chat-mcp#33 — the child woke, understood it was on the bus,
+ * tried to answer and was refused. The flags are useless without this.
+ */
+test('a child with a grant does not default to the mode that denies everything', () => {
+  const args = claudeArgs({ grant });
+
+  assert.notEqual(args[args.indexOf('--permission-mode') + 1], 'plan');
+});
+
+test('a child with no grant still defaults to plan', () => {
+  const args = claudeArgs({});
+
+  assert.equal(args[args.indexOf('--permission-mode') + 1], 'plan');
+});
+
+test('an explicit permission mode wins over both defaults', () => {
+  const args = claudeArgs({ permissionMode: 'plan', grant });
+
+  assert.equal(args[args.indexOf('--permission-mode') + 1], 'plan');
 });
 
 /**
@@ -132,11 +170,6 @@ test('the written config registers the CHILD handle it was given', () => {
   });
 });
 
-/**
- * ⚠️ The generated file must not be the project's own `.mcp.json`. Writing
- * there would mutate the consuming repo, and `--strict-mcp-config` would then
- * be pointing at the very file it exists to exclude.
- */
 test('the config is written under the chat-mcp state dir, not into any repo', () => {
   withTempHome((home) => {
     const path = writeClaudeMcpConfig('sup-claude2');
@@ -153,43 +186,11 @@ test('two handles get two different config files', () => {
 });
 
 /**
- * 🛑 THE MODE IS PART OF THE COMBINATION. `plan` denies `mcp__chat__send`,
- * measured on chat-mcp#33 — the child woke, read the project's CLAUDE.md,
- * understood it was on the bus, tried to answer and was refused. The flags
- * above are useless without this.
- */
-test('a reply-capable child does not default to the mode that denies the reply', () => {
-  const args = claudeArgs({
-    busReply: { handle: 'sup-claude2', configPath: '/tmp/x.json', tools: ['mcp__chat__send'] },
-  });
-
-  assert.notEqual(args[args.indexOf('--permission-mode') + 1], 'plan');
-});
-
-test('a child with no reply permission still defaults to plan', () => {
-  assert.equal(claudeArgs({}) [claudeArgs({}).indexOf('--permission-mode') + 1], 'plan');
-});
-
-test('an explicit permission mode wins over both defaults', () => {
-  const args = claudeArgs({
-    permissionMode: 'plan',
-    busReply: { handle: 'sup-claude2', configPath: '/tmp/x.json', tools: ['mcp__chat__send'] },
-  });
-
-  assert.equal(args[args.indexOf('--permission-mode') + 1], 'plan');
-});
-
-/**
- * 🛑 THE FIELD THAT WAS WRONG WAS THE ONE NOTHING ASSERTED.
- *
- * The generated config named the right handle and launched the WRONG PROGRAM.
+ * 🛑 THE FIELD THAT WAS WRONG WAS THE ONE NOTHING ASSERTED. The generated
+ * config named the right handle and launched the WRONG PROGRAM.
  * `process.argv[1]` was used to mean "the chat-mcp entry point"; it means
- * "whatever script is running now". Under the installed bin those coincide.
- * Under a script or a test they do not, so the child got
- * `node scripts/supervise-live.mjs --handle ...` and had no chat tool at all.
- *
- * Found by the live harness, which is the only thing that could have: every
- * unit test here checked the handle.
+ * "whatever script is running now". Found by the live harness, which was the
+ * only thing that could — every other test here checked the handle.
  */
 test('the generated config launches a file that EXISTS', () => {
   withTempHome(() => {
@@ -219,18 +220,10 @@ test("the generated config launches chat-mcp's ENTRY, not the running script", (
       /^index\.(js|ts)$/,
       'the child is being pointed at something that is not the CLI entry',
     );
-
-    // 🛑 THE ASSERTION THAT WOULD HAVE CAUGHT IT. Under the test runner
-    // argv[1] is the test file, so these must differ.
     assert.notEqual(script, process.argv[1], 'still using the running script as the entry');
   });
 });
 
-/**
- * ⚠️ Under tsx the entry is TypeScript, which plain node cannot run. The
- * failure would be the child's MCP server exiting instantly, which looks
- * exactly like the bug above.
- */
 test('a TypeScript entry is launched with a loader, a JavaScript one is not', () => {
   withTempHome(() => {
     const path = writeClaudeMcpConfig('sup-claude2');
@@ -250,17 +243,12 @@ test('a TypeScript entry is launched with a loader, a JavaScript one is not', ()
 });
 
 /**
- * 🛑 THE GENERALISED FORM OF TWO SEPARATE BUGS, BOTH SHIPPED TONIGHT.
- *
+ * 🛑 THE GENERALISED FORM OF TWO SEPARATE BUGS, BOTH SHIPPED IN ONE HOUR.
  * First the script path came from `process.argv[1]`. Then the script path was
  * absolute but the LOADER was the bare specifier `tsx`, which the child
- * resolves from ITS OWN cwd — and the supervised child runs in whatever
- * directory the operator chose. The live harness uses an empty temp dir with
+ * resolves from ITS OWN cwd — and the live harness uses an empty temp dir with
  * no `node_modules` above it, so the chat server died with
  * ERR_MODULE_NOT_FOUND the instant it started.
- *
- * **Anything on this command line that is RESOLVED rather than STATED is
- * resolved against the child's cwd.** So nothing may be relative.
  */
 test('every path in the generated command is absolute, because the child has a different cwd', () => {
   withTempHome(() => {
@@ -273,16 +261,13 @@ test('every path in the generated command is absolute, because the child has a d
 
     assert.ok(isAbsolute(command), `the interpreter is not an absolute path: ${command}`);
 
-    // Everything that is not a flag or the handle value must be an absolute
-    // path. A bare specifier like `tsx` is exactly what broke.
     const flags = new Set(['--import', '--handle']);
-    const handleValues = new Set(['sup-claude2']);
 
     for (const [i, a] of args.entries()) {
-      if (flags.has(a) || handleValues.has(a)) continue;
+      if (flags.has(a)) continue;
       if (args[i - 1] === '--handle') continue;
 
-      assert.ok(isAbsolute(a), `argument ${i} is relative and will resolve in the CHILD's cwd: ${a}`);
+      assert.ok(isAbsolute(a), `argument ${i} is relative and resolves in the CHILD's cwd: ${a}`);
     }
   });
 });

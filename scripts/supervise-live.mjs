@@ -30,7 +30,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startSupervisor } from '../src/supervise/index.ts';
 import { spawnClaude } from '../src/supervise/child.ts';
-import { childHandleFor } from '../src/supervise/bus-reply.ts';
+import { childHandleFor } from '../src/supervise/grant.ts';
 import { deliverToSupervisor } from '../src/supervise/socket.ts';
 import { openDb } from '../src/storage/db.ts';
 import * as dao from '../src/storage/dao.ts';
