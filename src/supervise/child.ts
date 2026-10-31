@@ -72,6 +72,27 @@ export interface AgentChild {
    */
   onUsage(cb: (snapshot: RateLimitSnapshot) => void): void;
 
+  /**
+   * The child was refused a tool and will not retry it this session.
+   *
+   * 🛑 SEMANTIC, LIKE onTurnEnd. Claude Code reports this as a `tool_result`
+   * opening with a fixed English sentence. Another CLI will not, so each
+   * driver maps its own signal onto the `Denial` type.
+   *
+   * ⚠️ Without this the supervisor cannot know the child has given up, and
+   * "finished" and "blocked and silent" look identical.
+   */
+  onDenial(cb: (denial: Denial) => void): void;
+
+  /**
+   * The child's session id, once it is known, for `--resume`.
+   *
+   * 🛑 A GRANT KEEPS THE SESSION. Measured 2026-10-31: resuming works 3 of 3
+   * with an explicit re-dispatch prompt, so a permission round trip does not
+   * have to cost the child its memory of the task.
+   */
+  onSession(cb: (sessionId: string) => void): void;
+
   /** Raw driver events, for logging and diagnosis only. Never for control flow. */
   onEvent(cb: (event: Record<string, unknown>) => void): void;
 

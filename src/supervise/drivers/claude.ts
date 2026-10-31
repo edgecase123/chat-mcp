@@ -37,12 +37,19 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
     '--input-format',
     'stream-json',
     '--permission-mode',
-    // 🛑 `plan` DENIES `mcp__chat__send`, measured on chat-mcp#33 — a child in
-    // plan mode wakes, understands it is on the bus, tries to answer and is
-    // refused. So a reply-capable child needs a mode that permits an
-    // allowlisted MCP tool. `acceptEdits` is the one proven to; with
-    // `--tools ''` there is no Edit tool for it to accept, so it widens
-    // nothing. An explicit --permission-mode always wins over both defaults.
+    // 🛑 `plan` DENIES every tool, measured on chat-mcp#33 — a child in plan
+    // mode wakes, understands it is on the bus, tries to answer and is
+    // refused. So a working child needs a mode that permits an allowlisted
+    // tool, and `acceptEdits` is the one proven to.
+    //
+    // ⚠️ AN EARLIER VERSION OF THIS COMMENT SAID acceptEdits "widens nothing,
+    // because `--tools ''` means there is no Edit tool to accept". THAT
+    // PREMISE WAS DELETED when Write and Edit became available, and the
+    // comment outlived it. What actually contains the mode now is that NO
+    // bare `Write` or `Edit` is allowlisted — only `Edit(<glob>)` scopes.
+    // Found by claude1 reviewing PR 34.
+    //
+    // An explicit --permission-mode always wins over both defaults.
     opts.permissionMode ?? (opts.grant ? 'acceptEdits' : 'plan'),
     '--permission-prompts',
     opts.permissionPrompts ?? 'none',
@@ -63,10 +70,13 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
       opts.grant.configPath,
       '--strict-mcp-config',
       '--tools',
-      // 🛑 SPACE-SEPARATED, because `--tools <tools...>` is variadic. An empty
-      // list disables every built-in, which is correct for a reply-only child
-      // and wrong for one that edits files.
-      ...opts.grant.available,
+      // 🛑 SPACE-SEPARATED, because `--tools <tools...>` is variadic.
+      //
+      // ⚠️ AN EMPTY LIST WOULD EMIT A VALUELESS FLAG and the next argument
+      // would be swallowed as its value. Fail CLOSED with an explicit empty
+      // string instead, which disables every built-in — the reply-only
+      // behaviour. Raised by claude1 reviewing PR 34.
+      ...(opts.grant.available.length > 0 ? opts.grant.available : ['']),
       '--allowedTools',
       opts.grant.allowed.join(','),
     );
@@ -174,11 +184,28 @@ export function writeClaudeMcpConfig(handle: string, entry?: string): string {
  */
 export function routeClaudeEvent(
   event: Record<string, unknown>,
-  on: { turnEnd(): void; usage(snapshot: RateLimitSnapshot): void },
+  on: {
+    turnEnd(): void;
+    usage(snapshot: RateLimitSnapshot): void;
+    denial?(denial: Denial): void;
+    session?(id: string): void;
+  },
 ): void {
   const usage = parseClaudeRateLimit(event);
 
   if (usage) on.usage(usage);
+
+  // 🛑 THE PRODUCER FOR THE APPROVAL PATH. Without this the detector was
+  // imported and never called, `insertApproval` had no caller, and the whole
+  // relay started one step after the break — which is exactly how the live
+  // test passed while the feature did not exist. Found by claude1.
+  const denial = denialFromClaude(event);
+  if (denial && on.denial) on.denial(denial);
+
+  // The session id arrives on the `system` init event and is what makes a
+  // grant resumable instead of a restart.
+  const id = event.session_id;
+  if (typeof id === 'string' && on.session) on.session(id);
 
   // `result` is Claude Code's terminal event. An `assistant` event with no
   // following `result` is a turn still in flight.
@@ -195,6 +222,9 @@ export function spawnClaude(opts: SpawnOptions = {}): AgentChild {
   const eventCbs: ((e: Record<string, unknown>) => void)[] = [];
   const turnEndCbs: (() => void)[] = [];
   const usageCbs: ((s: RateLimitSnapshot) => void)[] = [];
+  const denialCbs: ((d: Denial) => void)[] = [];
+  const sessionCbs: ((id: string) => void)[] = [];
+  let lastSession: string | null = null;
 
   const feed = createLineParser((parsed) => {
     for (const cb of eventCbs) cb(parsed);
@@ -205,6 +235,15 @@ export function spawnClaude(opts: SpawnOptions = {}): AgentChild {
       },
       usage: (snapshot) => {
         for (const cb of usageCbs) cb(snapshot);
+      },
+      denial: (d) => {
+        for (const cb of denialCbs) cb(d);
+      },
+      session: (id) => {
+        // Only the FIRST sighting matters; every later event repeats it.
+        if (lastSession === id) return;
+        lastSession = id;
+        for (const cb of sessionCbs) cb(id);
       },
     });
   });
@@ -228,6 +267,14 @@ export function spawnClaude(opts: SpawnOptions = {}): AgentChild {
     },
     onUsage(cb): void {
       usageCbs.push(cb);
+    },
+    onDenial(cb): void {
+      denialCbs.push(cb);
+    },
+    onSession(cb): void {
+      sessionCbs.push(cb);
+      // A late subscriber must not miss an id that already arrived.
+      if (lastSession) cb(lastSession);
     },
     onEvent(cb): void {
       eventCbs.push(cb);

@@ -4,7 +4,7 @@ import { readFileSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename, isAbsolute } from 'node:path';
 import { claudeArgs, writeClaudeMcpConfig } from '../../src/supervise/drivers/claude.js';
-import { DEFAULT_ALLOWED, builtinsFrom } from '../../src/supervise/grant.js';
+import { DEFAULT_ALLOWED, availableBuiltins, builtinsFrom } from '../../src/supervise/grant.js';
 
 /**
  * 🛑 A SUPERVISED AGENT THAT CANNOT ACT IS A DOORBELL, NOT A BUS.
@@ -37,7 +37,7 @@ const grant = {
   handle: 'sup-claude2',
   configPath: '/tmp/x.json',
   allowed: DEFAULT_ALLOWED,
-  available: builtinsFrom(DEFAULT_ALLOWED),
+  available: availableBuiltins(DEFAULT_ALLOWED),
 };
 
 test('without a grant the child gets NONE of the four flags', () => {
@@ -75,26 +75,59 @@ test('--strict-mcp-config and --mcp-config travel together or not at all', () =>
 });
 
 /**
- * 🛑 THE BUILT-IN SURFACE MUST COVER EVERY ALLOWLIST ENTRY, OR AN ENTRY NAMES A
- * TOOL THAT DOES NOT EXIST AND THE CHILD SIMPLY CANNOT RUN IT. That failure is
- * silent: the allowlist looks generous and the agent looks incapable.
+ * 🛑 THE PREVIOUS VERSION OF THIS TEST COULD NEVER SEE DRIFT. It recomputed
+ * the expected set with the same regex `builtinsFrom` uses, so a bug in that
+ * function appeared identically on both sides and the assertion passed.
+ * Found by claude1 reviewing PR 34.
+ *
+ * The expected values are now LITERAL.
  */
-test('every allowed built-in is also declared available', () => {
-  const args = claudeArgs({ grant });
-  const toolsIdx = args.indexOf('--tools');
-  const allowedIdx = args.indexOf('--allowedTools');
+test('builtinsFrom strips the specifier and drops MCP tools — against fixed values', () => {
+  assert.deepEqual(builtinsFrom(['Read', 'Bash(git commit:*)', 'mcp__chat__send', 'Edit(/a/**)']), [
+    'Read',
+    'Bash',
+    'Edit',
+  ]);
+});
 
-  assert.notEqual(toolsIdx, -1, 'no --tools flag, so this test proves nothing');
-  assert.ok(allowedIdx > toolsIdx, 'expected --allowedTools after --tools');
+test('builtinsFrom de-duplicates, so two Bash rules do not yield two Bash entries', () => {
+  assert.deepEqual(builtinsFrom(['Bash(git add:*)', 'Bash(git commit:*)']), ['Bash']);
+});
 
-  const available = args.slice(toolsIdx + 1, allowedIdx);
-  const needed = DEFAULT_ALLOWED.filter((t) => !t.startsWith('mcp__')).map((t) =>
-    t.replace(/\(.*$/, ''),
-  );
+/**
+ * 🛑 `available` IS A SUPERSET OF WHAT THE ALLOWLIST IMPLIES, BY DESIGN, AND
+ * AN EQUALITY TEST HERE WOULD FORCE A SECURITY HOLE BACK.
+ *
+ * `Write` and `Edit` must EXIST or an `Edit(<glob>)` scope has nothing to
+ * permit — but allowlisting them BARE is what made the scopes decorative and
+ * let a supervised agent edit any file on the machine.
+ */
+test('every built-in the allowlist implies is available, and Write/Edit are available too', () => {
+  const available = availableBuiltins(DEFAULT_ALLOWED);
 
-  for (const tool of new Set(needed)) {
-    assert.ok(available.includes(tool), `allowlisted but not available: ${tool}`);
+  for (const implied of builtinsFrom(DEFAULT_ALLOWED)) {
+    assert.ok(available.includes(implied), `allowlisted but not available: ${implied}`);
   }
+
+  for (const scoped of ['Write', 'Edit']) {
+    assert.ok(available.includes(scoped), `${scoped} must exist for Edit(<glob>) to permit it`);
+  }
+});
+
+/**
+ * 🚨 THE SECURITY REGRESSION TEST. A bare entry allows the tool against ANY
+ * path and makes every scope below it decorative.
+ */
+test('no file-editing tool is allowlisted BARE — only under an Edit(<glob>) scope', () => {
+  for (const bare of ['Write', 'Edit']) {
+    assert.ok(
+      !DEFAULT_ALLOWED.includes(bare),
+      `a bare '${bare}' allows any path and makes EDIT_SCOPES decorative`,
+    );
+  }
+
+  const scopes = DEFAULT_ALLOWED.filter((t) => t.startsWith('Edit('));
+  assert.ok(scopes.length > 0, 'there are no scopes at all, so this test proves nothing');
 });
 
 test('Bash is available, because the allowlist scopes Bash commands', () => {

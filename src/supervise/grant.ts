@@ -1,4 +1,4 @@
-import { DEFAULT_ALLOWLIST } from './allowlist.js';
+import { AVAILABLE_BUILTINS, DEFAULT_ALLOWLIST } from './allowlist.js';
 
 /**
  * What a supervised child is allowed to be and to do.
@@ -67,6 +67,22 @@ export function builtinsFrom(allowed: readonly string[]): string[] {
 
 /** The default grant's tool surface: lee's narrow allowlist. */
 export const DEFAULT_ALLOWED = DEFAULT_ALLOWLIST;
+
+/**
+ * Which built-ins must EXIST for this allowlist to mean anything.
+ *
+ * 🛑 A UNION, NOT A DERIVATION, AND THE EXTRA ENTRIES ARE THE POINT. `Write`
+ * and `Edit` are never allowlisted bare — only under `Edit(<glob>)` scopes —
+ * but they must exist or the scopes have nothing to permit. Deriving this
+ * from `allowed` alone would silently drop them and the agent could not edit
+ * anything.
+ *
+ * Everything an allowlist entry names is still included, so a `Bash(git ...)`
+ * entry cannot end up without `Bash`.
+ */
+export function availableBuiltins(allowed: readonly string[]): string[] {
+  return [...new Set([...AVAILABLE_BUILTINS, ...builtinsFrom(allowed)])];
+}
 
 /**
  * The handle a supervised child registers under, derived from the supervisor's.

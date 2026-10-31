@@ -90,12 +90,23 @@ test('every path-scoped rule uses Edit, never Write', () => {
   assert.deepEqual(pathScopedWrites, [], 'a Write(<glob>) rule is silently ignored');
 });
 
-test('the allowlist contains the four things lee asked for and none of the three he excluded', () => {
+/**
+ * ⚠️ THIS TEST USED TO REQUIRE BARE `Write` AND `Edit`, WHICH IS THE BUG IT
+ * SHOULD HAVE CAUGHT. It encoded "lee asked for Write and Edit" literally,
+ * and a bare entry allows the tool against ANY path, making every
+ * `Edit(<glob>)` scope decorative. What lee asked for is the CAPABILITY.
+ */
+test('the allowlist grants what lee asked for, and excludes what he excluded', () => {
   const joined = DEFAULT_ALLOWLIST.join(' ');
 
-  for (const wanted of ['Read', 'Write', 'Edit', 'Bash(git commit:*)']) {
+  for (const wanted of ['Read', 'Bash(git commit:*)']) {
     assert.ok(DEFAULT_ALLOWLIST.includes(wanted), `missing: ${wanted}`);
   }
+
+  assert.ok(
+    DEFAULT_ALLOWLIST.some((t) => t.startsWith('Edit(')),
+    'file editing was asked for and no scope grants it',
+  );
 
   for (const forbidden of ['git push', 'Bash(rm', 'deploy']) {
     assert.ok(!joined.includes(forbidden), `must not be pre-approved: ${forbidden}`);

@@ -38,8 +38,18 @@ export const DEFAULT_ALLOWLIST = [
   'Read',
   'Glob',
   'Grep',
-  'Write',
-  'Edit',
+
+  // 🛑 NO BARE `Write` OR `Edit` HERE, AND THAT IS THE WHOLE POINT OF
+  // EDIT_SCOPES. A bare entry allows the tool against ANY path, which made
+  // the scopes below decorative — a supervised agent could edit any file on
+  // the machine. Found by claude1 reviewing PR 34.
+  //
+  // ⚠️ IT COMPOUNDED WITH THE PERMISSION MODE. `acceptEdits` was justified by
+  // a comment claiming no Edit tool existed to accept, which stopped being
+  // true the moment Write and Edit were added. Two findings, one outcome.
+  //
+  // The CLI states that `Edit(<glob>)` governs every file-editing tool, so
+  // these three cover Write as well.
   ...EDIT_SCOPES,
 
   // Inspect and record work, but never publish it.
@@ -70,3 +80,16 @@ export const DEFAULT_ALLOWLIST = [
 export function allowlistWith(granted: readonly string[]): string[] {
   return [...new Set([...DEFAULT_ALLOWLIST, ...granted])];
 }
+
+/**
+ * The built-in tools that EXIST for a supervised child. Feeds `--tools`.
+ *
+ * 🛑 DELIBERATELY WIDER THAN THE ALLOWLIST IMPLIES, AND THE GAP IS THE DESIGN.
+ * `Write` and `Edit` must EXIST or a scoped `Edit(<glob>)` rule has nothing to
+ * permit — but neither is allowlisted bare, so they are usable only inside
+ * the three directories above.
+ *
+ * ⚠️ So `builtinsFrom(DEFAULT_ALLOWLIST)` is a strict SUBSET of this, not an
+ * equal. A test asserting equality would force one of the two bugs back.
+ */
+export const AVAILABLE_BUILTINS = ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash'] as const;

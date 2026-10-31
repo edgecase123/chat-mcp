@@ -3,7 +3,9 @@ import { driverFor } from './drivers/index.js';
 import { TurnQueue } from './turn-queue.js';
 import { WakeListener, type WakeAck, type WakeEnvelope } from './socket.js';
 import { RateLimitGate } from './rate-limit.js';
-import { DEFAULT_ALLOWED, builtinsFrom, childHandleFor, type ChildGrant } from './grant.js';
+import { openDb } from '../storage/db.js';
+import * as dao from '../storage/dao.js';
+import { DEFAULT_ALLOWED, availableBuiltins, childHandleFor, type ChildGrant } from './grant.js';
 import { writeClaudeMcpConfig } from './drivers/claude.js';
 
 /**
@@ -41,6 +43,9 @@ export interface SupervisorOptions extends SpawnOptions {
    * fallback would mean asking for Cursor and getting Claude.
    */
   readonly driver?: string;
+
+  /** Injected so the supervisor is testable without touching the real bus. */
+  readonly db?: Parameters<typeof dao.insertApproval>[0];
 
   /** Injected so the supervisor is testable without spawning or spending. */
   readonly spawnChild?: (opts: SpawnOptions) => AgentChild;
@@ -103,13 +108,16 @@ function buildGrant(opts: SupervisorOptions): ChildGrant | undefined {
     handle,
     configPath: writeClaudeMcpConfig(handle),
     allowed,
-    available: builtinsFrom(allowed),
+    available: availableBuiltins(allowed),
   };
 }
 
 export async function startSupervisor(opts: SupervisorOptions): Promise<Supervisor> {
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const driver = driverFor(opts.driver ?? 'claude');
+  // Injected in tests; the real one is the shared bus database the web UI
+  // already reads.
+  const approvalsDb = opts.db ?? openDb();
   const spawnFn = opts.spawnChild ?? driver.spawn;
 
   const grant = opts.grant ?? buildGrant(opts);
@@ -155,6 +163,45 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   child.onTurnEnd(() => {
     queue.turnEnded();
     log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
+  });
+
+  /**
+   * 🛑 THE PRODUCER. Without it `denialFromClaude` was imported and never
+   * called and `insertApproval` had no caller in `src/` at all — the approval
+   * path began one step AFTER the break, which is why a live test that
+   * inserted the row by hand passed against a feature that did not exist.
+   * Found by claude1 reviewing PR 34.
+   *
+   * A denial is not a delay. The child is instructed not to retry for the
+   * rest of its session, so an unrecorded denial is an agent that has given
+   * up silently.
+   */
+  let childSession: string | null = null;
+  child.onSession((id) => {
+    childSession = id;
+  });
+
+  child.onDenial((denial) => {
+    const grantHandle = grant?.handle ?? `${opts.handle}-agent`;
+
+    try {
+      const approvalId = dao.insertApproval(approvalsDb, {
+        agentHandle: grantHandle,
+        supervisorHandle: opts.handle,
+        // ⚠️ VERBATIM, and null when the clause could not be parsed. The
+        // operator approves this exact string and it is what gets
+        // allowlisted, so a guess would grant what the child never asked for.
+        requested: denial.requested ?? '(could not parse the request)',
+        reason: denial.raw,
+        sessionId: childSession,
+      });
+
+      log(`child BLOCKED, approval ${approvalId} pending: ${denial.requested ?? 'unparsed'}`);
+    } catch (err) {
+      // 🛑 SAY SO. A failed write here means the operator is never asked, and
+      // silence is the failure mode this whole path exists to remove.
+      log(`FAILED to record a denial — nobody will be asked: ${String(err)}`);
+    }
   });
 
   child.onUsage((snapshot) => {

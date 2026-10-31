@@ -45,6 +45,12 @@ function fakeChild(): {
       onUsage: (cb) => {
         usage = cb;
       },
+      // 🛑 ADDED WHEN THE SEAM GREW. These fakes were silently incomplete —
+      // the supervisor called `child.onSession` and every test threw. A fake
+      // that does not implement the whole interface tests a child that
+      // cannot exist.
+      onDenial: () => undefined,
+      onSession: () => undefined,
       onEvent: () => undefined,
       onExit: () => undefined,
       kill: () => undefined,
@@ -343,6 +349,12 @@ test('a driver that reports NO usage is UNMETERED and says so, not "unknown" for
         endTurn = cb;
       },
       onUsage: () => undefined,
+      // 🛑 ADDED WHEN THE SEAM GREW. These fakes were silently incomplete —
+      // the supervisor called `child.onSession` and every test threw. A fake
+      // that does not implement the whole interface tests a child that
+      // cannot exist.
+      onDenial: () => undefined,
+      onSession: () => undefined,
       onEvent: () => undefined,
       onExit: () => undefined,
       kill: () => undefined,
