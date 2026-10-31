@@ -153,7 +153,17 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   const approvalsDb = opts.db ?? openDb();
   const spawnFn = opts.spawnChild ?? driver.spawn;
 
-  const grant = opts.grant ?? buildGrant(opts, dirs);
+  /**
+   * 🛑 `initialGrant`, NOT `grant`. It is the set at SPAWN and it never
+   * changes, so a reader who wants "what is in force" must not be able to
+   * reach it by typing the obvious name. `currentGrant` below is that value.
+   *
+   * It was called `grant`, and the denial recorder read it while the widening
+   * path read `currentGrant`. Every denial after the first then recorded the
+   * set the child started with. Renaming makes the compiler find each site,
+   * which is the property the four earlier instances of this shape lacked.
+   */
+  const initialGrant = opts.grant ?? buildGrant(opts, dirs);
 
   /**
    * The live child. Mutable, because replacing it is a first-class operation.
@@ -164,16 +174,17 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * changed the child's `--allowedTools`. The next attempt was denied again.
    * `grantedCommands` was written and never read.
    */
-  let child = spawnFn({ ...opts, cwd: childCwd, grant });
-  let currentGrant = grant;
+  let child = spawnFn({ ...opts, cwd: childCwd, grant: initialGrant });
+  let currentGrant = initialGrant;
   let currentModel = opts.model;
 
   // 🛑 SAID OUT LOUD, both ways. A doorbell that cannot answer and a child
   // holding a bus identity are both things an operator must be able to see in
   // the log rather than deduce from a flag they did not pass.
   log(
-    grant
-      ? `child acts as "${grant.handle}"; ${grant.allowed.length} allowed tool(s), built-ins: ${grant.available.join(' ')}`
+    initialGrant
+      ? `child acts as "${initialGrant.handle}"; ${initialGrant.allowed.length} allowed tool(s), ` +
+        `built-ins: ${initialGrant.available.join(' ')}`
       : 'child has NO grant — it can be woken and can do nothing (--no-reply)',
   );
   const gate = new RateLimitGate(opts.utilizationCeiling ?? 0.9, child.reportsUsage);
@@ -304,7 +315,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
     child.onDenial(
       ifCurrent('onDenial', (denial) => {
-      const grantHandle = grant?.handle ?? `${opts.handle}-agent`;
+      const grantHandle = currentGrant?.handle ?? `${opts.handle}-agent`;
 
       try {
         const approvalId = dao.insertApproval(approvalsDb, {
@@ -338,15 +349,20 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
           // not match a retry in the other — measured live, caused by this
           // supervisor's own realpath resolution.
           grantForms: grantVariants(denial),
-          // 🛑 WHAT WAS IN FORCE WHEN IT WAS REFUSED. Without this a refusal
-          // cannot say what a grant would have done: the same command is
-          // refused under one allowlist and permitted under another, which
-          // approvals 23 and 25 measured. Raised by claude1 on PR 43.
-          allowlist: grant?.allowed ?? [],
-          // 🛑 WHAT WAS IN FORCE WHEN IT WAS REFUSED. Without this a refusal
-          // cannot say what a grant would have done: the same command is
-          // refused under one allowlist and permitted under another, which
-          // approvals 23 and 25 measured. Raised by claude1 on PR 43.
+          // 🛑 WHAT WAS IN FORCE WHEN IT WAS REFUSED — SO IT MUST BE THE LIVE
+          // VALUE. Without this a refusal cannot say what a grant would have
+          // done: the same command is refused under one allowlist and
+          // permitted under another, which approvals 23 and 25 measured.
+          // Raised by claude1 on PR 43.
+          //
+          // 🛑 IT READ THE SPAWN-TIME BINDING FOR FOUR COMMITS. Every denial
+          // after the first then reported the set the child started with, so
+          // the column answered wrongly in exactly the case it was added for.
+          // Measured on the live run of 2026-10-31: approvals 50, 52 and 53
+          // were all retries and all three recorded the base set. #49.
+          allowlist: currentGrant?.allowed ?? [],
+          // The CLI's own words, kept verbatim so the denial can be re-parsed
+          // if the detector changes.
           reason: denial.raw,
           sessionId: childSession,
         });
