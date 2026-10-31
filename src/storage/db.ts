@@ -101,7 +101,7 @@ function tx(db: Db, fn: () => void): void {
   }
 }
 
-function migrate(db: Db): void {
+export function migrate(db: Db): void {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)`);
   const row = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as unknown as { v: number | null };
   const current = row.v ?? 0;

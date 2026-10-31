@@ -26,6 +26,13 @@ import { dbPath, notifyPathFor } from '../util/paths.js';
 
 export interface ShimOptions {
   handle: string;
+  /**
+   * Claim the handle even if a live process holds it.
+   *
+   * The escape hatch for a REUSED pid, which makes a dead incumbent read as
+   * live. Without a flag the only recovery is editing SQLite by hand.
+   */
+  force?: boolean;
 }
 
 function buildInstructions(handle: string): string {
@@ -120,6 +127,7 @@ export async function runShim(opts: ShimOptions): Promise<void> {
     session_id,
     display_name: opts.handle,
     metadata: { kind: 'agent' },
+    force: opts.force,
   });
 
   const adapterStatus = checkWakeAdapter(opts.handle);

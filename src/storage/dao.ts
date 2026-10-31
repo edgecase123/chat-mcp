@@ -72,7 +72,14 @@ function coerceKind(raw: string | null): MessageKind {
   return 'chat';
 }
 
-function isAlive(pid: number | null): boolean {
+/**
+ * Whether a pid names a running process.
+ *
+ * EPERM means it exists and belongs to another user, which is still alive.
+ * ⚠️ Pid numbers are REUSED, so a long-dead incumbent can read as live. That
+ * is why claiming a handle has a `force` escape hatch.
+ */
+export function isProcessAlive(pid: number | null): boolean {
   if (pid == null) return false;
   try {
     process.kill(pid, 0);
@@ -95,7 +102,7 @@ function hydrate(row: AgentRow): Agent {
     last_seen_at: row.last_seen_at,
     metadata,
     kind,
-    online: isAlive(row.pid),
+    online: isProcessAlive(row.pid),
     status: coerceStatus(row.status),
     focus: row.focus,
     status_updated_at: row.status_updated_at,
@@ -136,9 +143,65 @@ export interface RegisterInput {
   pid: number;
   session_id: string;
   metadata?: Record<string, unknown>;
+  /**
+   * Take the handle from a live incumbent anyway.
+   *
+   * The escape hatch for a reused pid, so recovery never requires editing
+   * SQLite by hand.
+   */
+  force?: boolean;
+}
+
+/**
+ * A second LIVE process tried to claim a handle that is already held.
+ *
+ * 🛑 REFUSED RATHER THAN MERGED. `inbox` and `room_inbox` mark messages read,
+ * so two processes on one handle means whichever reads first consumes the mail
+ * and the other sees `[]` — indistinguishable from "nothing arrived".
+ *
+ * `WakeListener.bind` already refuses a live socket rival for the same reason.
+ * Registration did not, and `.mcp.json` hardcodes `--handle`, so a second
+ * process launched in a consuming repo claimed its live session's identity by
+ * accident.
+ */
+export class HandleClaimedError extends Error {
+  constructor(
+    readonly handle: string,
+    readonly heldByPid: number,
+  ) {
+    super(
+      `handle "${handle}" is already held by a live process (pid ${heldByPid}). ` +
+        `Refusing to take it: inbox marks messages read, so one of the two ` +
+        `processes would silently consume the other's mail. ` +
+        `Use a different --handle, or force the claim if that pid is stale.`,
+    );
+    this.name = 'HandleClaimedError';
+  }
+}
+
+/**
+ * Refuse the claim when a DIFFERENT live process holds the handle.
+ *
+ * Three cases are deliberately allowed through:
+ *   - the same pid re-registering, which every shim does on boot;
+ *   - a dead incumbent, which is debris a crash left behind;
+ *   - an incumbent with no pid, because refusing on missing data would lock
+ *     the handle permanently — a worse failure than the one this prevents.
+ */
+function refuseLiveRival(db: Db, input: RegisterInput): void {
+  if (input.force) return;
+
+  const incumbent = getAgent(db, input.handle);
+  if (!incumbent || incumbent.pid == null) return;
+  if (incumbent.pid === input.pid) return;
+  if (!isProcessAlive(incumbent.pid)) return;
+
+  throw new HandleClaimedError(input.handle, incumbent.pid);
 }
 
 export function upsertAgent(db: Db, input: RegisterInput): Agent {
+  refuseLiveRival(db, input);
+
   const now = Date.now();
   const metadata_json = input.metadata ? JSON.stringify(input.metadata) : null;
   db.prepare(
