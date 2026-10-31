@@ -237,16 +237,47 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // so it was the FIRST approval, not an edge case. Found by claude1.
     const generation = ++childGeneration;
 
-    child.onTurnEnd(() => {
-      queue.turnEnded();
-      log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
-    });
+    /**
+     * 🛑 EVERY CALLBACK GOES THROUGH THIS, NOT JUST THE ONE THAT BIT.
+     *
+     * A replaced child keeps emitting, and its callbacks close over the
+     * MUTABLE `child` binding — so a stale signal acts on the LIVE child. The
+     * first version guarded `onExit` alone, which claude1 pointed out is one
+     * of four.
+     *
+     *   onTurnEnd  a stale turn-end releases the queue into a child that is
+     *              mid-turn, so two turns run at once
+     *   onDenial   the dying child was just denied X, so one more denial for
+     *              X files a SECOND approval for the command lee just granted
+     *   onUsage    benign, wrapped for uniformity — an unwrapped one is the
+     *              exception a reader has to re-derive
+     *
+     * ⚠️ `onTurnEnd` had `generation` in scope two lines above and did not
+     * use it. A per-call check is something to forget; a wrapper is not.
+     */
+    const ifCurrent = <A extends unknown[]>(fn: (...args: A) => void) => {
+      return (...args: A): void => {
+        if (generation !== childGeneration) return;
 
-    child.onSession((id) => {
-      childSession = id;
-    });
+        fn(...args);
+      };
+    };
 
-    child.onDenial((denial) => {
+    child.onTurnEnd(
+      ifCurrent(() => {
+        queue.turnEnded();
+        log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
+      }),
+    );
+
+    child.onSession(
+      ifCurrent((id) => {
+        childSession = id;
+      }),
+    );
+
+    child.onDenial(
+      ifCurrent((denial) => {
       const grantHandle = grant?.handle ?? `${opts.handle}-agent`;
 
       try {
@@ -265,35 +296,30 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       } catch (err) {
         // 🛑 SAY SO. A failed write here means the operator is never asked, and
         // silence is the failure mode this whole path exists to remove.
-        log(`FAILED to record a denial — nobody will be asked: ${String(err)}`);
-      }
-    });
+          log(`FAILED to record a denial — nobody will be asked: ${String(err)}`);
+        }
+      }),
+    );
 
-    child.onUsage((snapshot) => {
-      gate.update(snapshot);
-      log(gate.describe());
-      releaseHeld();
-    });
+    child.onUsage(
+      ifCurrent((snapshot) => {
+        gate.update(snapshot);
+        log(gate.describe());
+        releaseHeld();
+      }),
+    );
 
-    child.onExit((code, signal) => {
-      // 🚨 THE DEAD CHILD'S EXIT MUST NOT TOUCH THE LIVE QUEUE. `kill()`
-      // fires this AFTER a replacement is already running, so draining here
-      // threw away the carried-over work AND reset the queue to idle
-      // mid-turn — two turns in flight at once. Found by claude1.
-      if (generation !== childGeneration) {
-        log(`old child exited code=${code} signal=${signal} (replaced); ignoring`);
-
-        return;
-      }
-
+    child.onExit(
+      ifCurrent((code, signal) => {
       // 🛑 Anything queued is UNSENT. Reporting it is the difference between a
       // visible gap and silence, and silence is the ambiguity this whole change
       // exists to remove.
-      const unsent = queue.drain();
-      log(`child exited code=${code} signal=${signal}; ${unsent.length} prompt(s) never sent`);
+        const unsent = queue.drain();
+        log(`child exited code=${code} signal=${signal}; ${unsent.length} prompt(s) never sent`);
 
-      for (const p of unsent) log(`  UNSENT ids=[${p.messageIds.join(',')}]`);
-    });
+        for (const p of unsent) log(`  UNSENT ids=[${p.messageIds.join(',')}]`);
+      }),
+    );
 
 
 

@@ -301,3 +301,80 @@ test("the old child's exit does not drain the NEW child's PENDING queue", async 
     await sup.stop();
   }
 });
+
+/**
+ * 🛑 THE SHAPE, NOT FOUR SEPARATE CHECKS.
+ *
+ * The first fix guarded `onExit` alone. claude1 pointed out that is one of
+ * four, and that `onTurnEnd` had `generation` in scope two lines above and
+ * did not use it. A stale turn-end releases the queue into a child that is
+ * mid-turn; a stale denial files a SECOND approval for the command lee just
+ * granted.
+ *
+ * A per-call check is something to forget. This asserts the wrapper instead.
+ */
+test('EVERY child callback registration goes through the generation guard', () => {
+  const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
+
+  const body = src.slice(src.indexOf('function wireChild()'), src.indexOf('const replaceChild'));
+  assert.ok(body.length > 0, 'wireChild moved; this check is stale');
+
+  const registrations = [...body.matchAll(/child\.(on[A-Za-z]+)\(\s*([\s\S]{0,20})/g)];
+
+  assert.ok(registrations.length >= 4, `expected the callbacks, found ${registrations.length}`);
+
+  const unguarded = registrations
+    .filter(([, , next]) => !next.includes('ifCurrent'))
+    .map(([, name]) => name);
+
+  assert.deepEqual(
+    unguarded,
+    [],
+    `these act on the LIVE child after being replaced: ${unguarded.join(', ')}`,
+  );
+});
+
+/**
+ * 🚨 A STALE TURN-END RUNS TWO TURNS AT ONCE. The replaced child's signal
+ * releases the queue into a child that is still mid-turn.
+ */
+test("the old child's turn-end does not release the NEW child's queue", async () => {
+  const children: FakeChild[] = [];
+  const handle = `rc-${process.pid}-stale-turn`;
+  const sup = await supervisorFor(handle, children);
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 20,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      approval: { approvalId: 20, decision: 'approve', requested: 'Bash(rm:*)', sessionId: 'x' },
+    });
+
+    const replacement = children[1];
+    assert.ok(replacement, 'no replacement child');
+    assert.equal(replacement.sent.length, 1, 'the re-dispatch prompt was not sent');
+
+    await deliverToSupervisor(handle, {
+      id: 21,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      body: 'queued while busy',
+    });
+
+    assert.equal(replacement.sent.length, 1, 'the second prompt should still be QUEUED');
+
+    // The DEAD child finishes its turn, late.
+    children[0]?.finishTurn();
+
+    assert.equal(
+      replacement.sent.length,
+      1,
+      'a stale turn-end released the queue into a child that is mid-turn',
+    );
+  } finally {
+    await sup.stop();
+  }
+});
