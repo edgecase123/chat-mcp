@@ -79,6 +79,46 @@ test('a refused_under_grant under the query set beats a permitted record for the
   assert.equal(v.kind, 'refused_under_grant', 'a containment guess outranked an exact measurement');
 });
 
+/**
+ * 🛑 THE SAME RULE, ON THE OTHER EXACT-SET BRANCH.
+ *
+ * `refused` matches on `sameSet` exactly as `refused_under_grant` does, so it
+ * belongs above the containment branch for the same reason. It was below it,
+ * which is the one-fix-two-sites shape: the precedence rule was introduced
+ * for the new outcome and not applied to the old one beside it.
+ *
+ * ⚠️ LATENT, NOT LIVE. Measured 0 such pairs across 25 combinations in the
+ * fixture, because all five recorded refusals ran under the probe allowlist
+ * and it holds no granted entry. The path to live is a probe denied TWICE:
+ * its second refusal is recorded with the first grant already in the set.
+ *
+ * Found by claude1 on this PR.
+ */
+test('a refused measured under the query set beats a permitted record for the same command', () => {
+  const command = 'git -C /var/folders/T/e2e/work tag v1';
+  const allowlist = ['Read', `Bash(${command})`];
+
+  const permitted = {
+    outcome: 'permitted' as const,
+    approvalId: 50,
+    attempted: command,
+    allowlistEntry: `Bash(${command})`,
+    evidence: 'HISTORICAL: an earlier run under a different allowlist.',
+  };
+
+  const refused = {
+    outcome: 'refused' as const,
+    approvalId: 51,
+    attempted: command,
+    allowlist,
+    refusal: 'denied a second time, with the first grant already present',
+  };
+
+  const v = classify(command, allowlist, [permitted, refused]);
+
+  assert.equal(v.kind, 'refused', 'a containment guess outranked an exact measurement');
+});
+
 // ⚠️ AND AN UNRELATED ALLOWLIST STAYS SILENT. The record answers for the set
 // it was measured under, not for every set that shares a command.
 test('a refused_under_grant does not answer for an allowlist it was not measured under', () => {
