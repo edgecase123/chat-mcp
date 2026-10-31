@@ -11,13 +11,27 @@ process.on('warning', (w) => {
 
 import { Command } from 'commander';
 
-async function runShimEntry(handle: string | undefined): Promise<void> {
+async function runShimEntry(handle: string | undefined, force = false): Promise<void> {
   if (!handle) {
     console.error('Error: --handle <handle> is required in MCP shim mode');
     process.exit(1);
   }
   const { runShim } = await import('./shim/index.js');
-  await runShim({ handle });
+
+  // 🛑 A refused claim must say WHY on stderr. An MCP client shows a stack
+  // trace as "the server failed to start", which looks like a broken install
+  // rather than another process holding the handle.
+  try {
+    await runShim({ handle, force });
+  } catch (err) {
+    const { HandleClaimedError } = await import('./storage/dao.js');
+    if (err instanceof HandleClaimedError) {
+      console.error(`chat-mcp: ${err.message}`);
+      console.error('chat-mcp: pass --force-handle to claim it anyway.');
+      process.exit(1);
+    }
+    throw err;
+  }
 }
 
 // Backward-compat: `chat-mcp --handle X` (no subcommand) runs the MCP shim.
@@ -30,7 +44,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   const argv = process.argv.slice(2);
   const idx = argv.indexOf('--handle');
   const handle = idx >= 0 ? argv[idx + 1] : undefined;
-  await runShimEntry(handle);
+  await runShimEntry(handle, argv.includes('--force-handle'));
 } else {
   const program = new Command();
 
