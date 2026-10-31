@@ -55,6 +55,17 @@ const HANDLE = `e2e-${process.pid}`;
  * but is not allowlisted here — and carries no rule of its own.
  */
 const MODE = process.env.E2E_MODE ?? 'nameable';
+
+/**
+ * Which permission path this mode exercises, named in the summary.
+ *
+ * 🛑 A GREEN COVERS ONE PATH, NOT BOTH. `nameable` grants an MCP tool by its
+ * bare name. The Bash path has a second gate on top of `--allowedTools` — the
+ * working-directory rule that refused `rm` on run 8 and `touch` on run 11,
+ * each time naming a directory the target already sat inside. A summary that
+ * does not say which path ran reads as covering both.
+ */
+const PATH_UNDER_TEST = MODE === 'nameable' ? 'MCP tool (mcp__chat__set_status)' : 'Bash (git push)';
 const WAIT_MS = Number(process.env.APPROVAL_WAIT_SECONDS ?? 300) * 1000;
 
 /**
@@ -145,6 +156,7 @@ const record = (name, ok, detail) => {
 
 const pending = () => dao.pendingApprovals(db, `${HANDLE}-agent`);
 
+console.log(`path under test: ${PATH_UNDER_TEST}`);
 console.log(`handle=${HANDLE}  workdir=${workdir}`);
 console.log(`remote=${remote}\n`);
 
@@ -238,6 +250,11 @@ try {
 
 const failed = checks.filter((c) => !c.ok);
 console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);
+console.log(`path proven: ${failed.length === 0 ? PATH_UNDER_TEST : 'NONE — this run failed'}`);
+
+if (failed.length === 0 && MODE === 'nameable') {
+  console.log('NOT proven: the Bash path. Its working-directory gate is separate.');
+}
 
 for (const f of failed) console.log(`  FAILED: ${f.name}`);
 
