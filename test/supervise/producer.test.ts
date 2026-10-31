@@ -538,3 +538,31 @@ test('a path with no existing ancestor is left exactly as written', async () => 
     ['Bash(touch /no/such/root/f.txt)'],
   );
 });
+
+/**
+ * 🛑 THE PROMPT MUST NEVER NAME A BARE PATH. claude1 raised this on PR 41,
+ * reasoning that `commandFromGrant('Edit(/x/**)')` yields `/x/**` and the
+ * child would be told to attempt a glob.
+ *
+ * Measured: that entry shape never reaches here. `claude-events.ts` sets
+ * `invocation` to `command ?? name`, and only Bash carries a `command`, so a
+ * non-Bash denial always grants `Tool(Tool)` and unwraps to the tool name.
+ * Every non-Bash grant in the live database is that shape.
+ *
+ * This test pins the premise. A driver that starts putting a path in
+ * `invocation` for a non-Bash tool fails here instead of in a live run.
+ */
+test('a non-Bash grant unwraps to the TOOL NAME, never a path or a glob', async () => {
+  const { grantFor, commandFromGrant } = await import('../../src/supervise/denial.js');
+
+  const grant = grantFor({
+    requested: null,
+    raw: 'denied',
+    tool: 'mcp__chat__set_status',
+    // What the driver produces when the tool call carries no `command`.
+    invocation: 'mcp__chat__set_status',
+  });
+
+  assert.equal(grant, 'mcp__chat__set_status(mcp__chat__set_status)');
+  assert.equal(commandFromGrant(grant ?? ''), 'mcp__chat__set_status');
+});
