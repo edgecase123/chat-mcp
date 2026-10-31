@@ -169,6 +169,12 @@ const captured = [];
  * until the ruling lands. Nothing reads it.
  */
 const observations = [];
+
+// 🛑 A PERMIT THE HARNESS REFUSED TO CLAIM IS NOT A FAILED PROBE, and the
+// summary has to say which it was. Both exit 1, and only one of them means
+// the command did not work.
+const withheld = [];
+
 const PROBE_LABELS = probesFor('', '', 'x').map((p) => p.label);
 
 if (LIST_ONLY) {
@@ -273,7 +279,31 @@ for (const index of PROBE_LABELS.keys()) {
       at: new Date().toISOString(),
     });
 
-    if (worked && grantedEntries.length > 0) {
+    /**
+     * 🛑 EXACTLY ONE GRANT, OR NO PERMIT RECORD.
+     *
+     * `classify()`'s permitted branch is a CONTAINMENT test:
+     * `grants.includes(normalise(r.allowlistEntry))`. So a record naming one
+     * entry asserts that THAT entry is sufficient. If the target only moved
+     * because two grants were present, that over-claims in the permissive
+     * direction, and a later query holding the second entry alone would be
+     * told `permitted`.
+     *
+     * A compound command is the shape that draws a second denial, so this is
+     * live for probes 5 and 6 rather than theoretical. `c12c81d` is in the
+     * corpus because a reworded compound retry was blocked again.
+     *
+     * The multi-grant case goes to the observation file with its full
+     * `grants` array instead. Widening the field is NOT the fix: the
+     * permitted branch would have to require every entry, which is a
+     * `classify()` change and so part of lee's ruling. claude1 on this PR.
+     */
+    if (worked && grantedEntries.length > 1) {
+      withheld.push({ probe: probe.label, grants: grantedEntries.length });
+      console.log(`   PERMIT WITHHELD: the target moved under ${grantedEntries.length} grants, and a record names one`);
+    }
+
+    if (worked && grantedEntries.length === 1) {
       captured.push({
         outcome: 'permitted',
         probe: probe.label,
@@ -282,7 +312,7 @@ for (const index of PROBE_LABELS.keys()) {
         // ⚠️ STILL A SINGLE ENTRY. `classify()`'s permitted branch asks
         // `grants.includes(normalise(r.allowlistEntry))`, so widening this to
         // a set would break the half that already works.
-        allowlistEntry: grantedEntries[grantedEntries.length - 1],
+        allowlistEntry: grantedEntries[0],
         evidence:
           `${new Date().toISOString().slice(0, 10)}: ${probe.label} — the target moved after ` +
           `the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.`,
@@ -300,7 +330,12 @@ const missing = PROBE_LABELS.filter((l) => !captured.some((c) => c.probe === l))
 
 console.log(`\n${captured.length} of ${PROBE_LABELS.length} probe(s) produced a permit, 0 clicks needed.`);
 
-for (const m of missing) console.log(`  NO PERMIT: ${m}`);
+for (const m of missing) {
+  const w = withheld.find((x) => x.probe === m);
+
+  if (w) console.log(`  PERMIT WITHHELD: ${m} — worked under ${w.grants} grants, see the observation log`);
+  else console.log(`  NO PERMIT: ${m}`);
+}
 
 for (const c of captured) console.log(`  ${c.allowlistEntry}`);
 
