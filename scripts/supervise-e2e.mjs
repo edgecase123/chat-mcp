@@ -134,7 +134,18 @@ try {
   if (!asked) throw new Error('no approval was ever filed; the producer is broken');
 
   const request = pending()[0];
-  console.log(`\n  🛑 APPROVAL ${request.id} IS WAITING: ${request.requested}`);
+
+  // 🛑 THIS SCRIPT AND THE FIX USED TO CONTRADICT EACH OTHER. It asks for
+  // `git push`, the one case measured as UNNAMEABLE, and the first fix filed
+  // nothing for those — so the script would have failed while the producer
+  // worked exactly as designed. Found by claude1 reviewing PR 41.
+  //
+  // The row is filed now, so the card always appears. An unnamed one can
+  // only be DENIED, and the run says so rather than waiting for an Approve
+  // that is not offered.
+  console.log(
+    `\n  🛑 APPROVAL ${request.id} IS WAITING: ${request.requested ?? '(the CLI named no command — Deny only)'}`,
+  );
   console.log('  Open `chat-mcp web` and click Approve, or run:');
   console.log(
     `    curl -s -X POST http://127.0.0.1:<port>/api/approvals/answer ` +
@@ -154,7 +165,9 @@ try {
   const decision = dao.getApproval(db, request.id)?.decision;
   console.log(`  decision: ${decision}\n`);
 
-  if (decision !== 'approve') {
+  if (request.requested == null) {
+    record('an UNNAMED request offers Deny only, and nothing was pushed', !pushed());
+  } else if (decision !== 'approve') {
     record('nothing was pushed after a DENY', !pushed());
   } else {
     // ── 4. The grant must REACH the child, which is the bug that shipped ──

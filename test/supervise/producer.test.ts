@@ -193,38 +193,34 @@ test('every link in the approval chain has a guard in this file', async () => {
  *   "What required approval: This command changes directory before running a
  *    version-control command… Approve only if you trust it."
  *
- * The parse failed, `(could not parse the request)` was filed, lee APPROVED A
- * BLANK, that literal went into `--allowedTools`, the retry was denied again,
- * and a second card appeared. 249 unit tests were green throughout.
+ * The parse failed, a PLACEHOLDER was filed, lee APPROVED A BLANK, that
+ * literal went into `--allowedTools`, the retry was denied, and a second card
+ * appeared. 251 unit tests were green throughout.
+ *
+ * ⚠️ THE FIRST FIX — file nothing — WAS WORSE, and claude1 said so: it
+ * restores the bug #39 exists to fix, because the child stops and nobody is
+ * told. And the one unnameable case measured is `git push`, which is on
+ * lee's excluded list BY NAME, so silence would land exactly on the
+ * high-stakes requests.
  */
-test('a denial whose request cannot be NAMED is not filed as an approval', async () => {
+test('an unnamed request is filed as NULL, never as a placeholder', async () => {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
 
-  // ⚠️ COMMENTS STRIPPED FIRST. The placeholder is NAMED in the comment that
-  // explains why it was removed, so a raw text search finds it and reports
-  // the bug as present. Same mistake as the guard keys.
+  // Comments are stripped: the placeholder is NAMED in the comment that
+  // explains its removal, so a raw search reports the bug as present.
   const handler = src
     .slice(src.indexOf('child.onDenial('), src.indexOf('child.onUsage('))
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/\/\/[^\n]*/g, ' ');
 
-  assert.ok(handler.length > 0, 'the denial handler moved; this check is stale');
-
+  assert.ok(handler.includes('requested: denial.requested'), 'the request is not passed through');
   assert.ok(
-    /if \(!denial\.requested\)[\s\S]{0,400}return;/.test(handler),
-    'an unnamed denial still files an approval',
-  );
-  assert.ok(
-    !handler.includes('could not parse the request'),
+    !handler.includes('could not parse'),
     'the placeholder is back; it gets allowlisted as a literal',
   );
 });
 
-/**
- * 🛑 THE REAL `git push` TEXT, as a fixture. A paraphrase would let the
- * parser pass against wording the CLI does not emit.
- */
 test('the real git-push denial parses to NULL, not to a placeholder', async () => {
   const { denialFromClaude } = await import('../../src/supervise/drivers/claude-events.js');
 

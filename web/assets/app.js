@@ -318,20 +318,39 @@ function renderApprovals() {
   root.hidden = false;
 
   for (const a of state.approvals) {
-    const approve = h('button', { class: 'approval__btn approval__btn--yes', type: 'button' }, ['Approve']);
     const deny = h('button', { class: 'approval__btn approval__btn--no', type: 'button' }, ['Deny']);
-
-    approve.addEventListener('click', () => answerApproval(a.id, 'approve'));
     deny.addEventListener('click', () => answerApproval(a.id, 'deny'));
+
+    // 🛑 NO NAME, NO APPROVE BUTTON. A denial does not always name a command
+    // — a `git push` refusal gives a prose reason. Approving one grants a
+    // string nobody can act on: measured, a placeholder went into
+    // --allowedTools, the retry was denied, and a second card appeared.
+    // Deny stays, because stopping something you cannot name is always safe.
+    const actions = [deny];
+
+    if (a.requested) {
+      const approve = h(
+        'button',
+        { class: 'approval__btn approval__btn--yes', type: 'button' },
+        ['Approve'],
+      );
+
+      approve.addEventListener('click', () => answerApproval(a.id, 'approve'));
+      actions.unshift(approve);
+    }
 
     root.appendChild(
       h('article', { class: 'approval' }, [
         h('div', { class: 'approval__who' }, [`${a.agentHandle} is blocked`]),
-        // 🛑 VERBATIM, in a <code> block. The operator is approving this exact
-        // string and it is what gets allowlisted.
-        h('code', { class: 'approval__cmd' }, [a.requested]),
+        // 🛑 VERBATIM, in a <code> block, or an explicit statement that the
+        // CLI named nothing. Never a placeholder that reads like a command.
+        a.requested
+          ? h('code', { class: 'approval__cmd' }, [a.requested])
+          : h('div', { class: 'approval__unnamed' }, [
+              'The agent was blocked but the CLI did not say which command. It can only be denied.',
+            ]),
         h('div', { class: 'approval__reason' }, [a.reason]),
-        h('div', { class: 'approval__actions' }, [approve, deny]),
+        h('div', { class: 'approval__actions' }, actions),
       ]),
     );
   }

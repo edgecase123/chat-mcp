@@ -520,3 +520,13 @@ html, body {
 .approval__btn--no {
   border-color: var(--danger, #dc322f);
 }
+
+/* An approval whose command the CLI never named. It can only be denied, so
+   it must not look like the others. */
+.approval__unnamed {
+  padding: 0.4rem 0.5rem;
+  border-radius: 3px;
+  background: var(--code-bg, rgba(127, 127, 127, 0.15));
+  font-style: italic;
+  opacity: 0.85;
+}

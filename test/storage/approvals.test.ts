@@ -165,3 +165,57 @@ test('approvals are scoped per agent, so two supervisors do not see each other',
   assert.equal(dao.pendingApprovals(db, 'claude2-agent').length, 1);
   assert.equal(dao.pendingApprovals(db).length, 2, 'omitting the handle must return all');
 });
+
+/**
+ * 🚨 AN UNNAMED REQUEST CAN BE DENIED, NEVER APPROVED.
+ *
+ * Measured end to end 2026-10-31: a `git push` denial gives a prose reason
+ * with no command. A placeholder was filed, lee APPROVED A BLANK, the
+ * literal went into `--allowedTools` and granted nothing, the retry was
+ * denied, and a second card appeared.
+ *
+ * ⚠️ FILING NOTHING WAS THE FIRST FIX AND IT WAS WORSE — claude1: it
+ * restores the bug #39 exists to fix, because the child stops and nobody is
+ * told. The row is filed; only Approve is refused.
+ */
+test('an unnamed request is stored as NULL, not as a placeholder', () => {
+  const db = freshDb();
+  dao.insertApproval(db, { ...REQUEST, requested: null });
+
+  assert.equal(dao.pendingApprovals(db)[0]?.requested, null);
+});
+
+test('approving an unnamed request THROWS rather than granting a blank', () => {
+  const db = freshDb();
+  const id = dao.insertApproval(db, { ...REQUEST, requested: null });
+
+  assert.throws(() => dao.answerApproval(db, id, 'approve'), dao.UnnameableApprovalError);
+});
+
+/** Stopping something you cannot name is always a safe answer. */
+test('an unnamed request CAN be denied', () => {
+  const db = freshDb();
+  const id = dao.insertApproval(db, { ...REQUEST, requested: null });
+
+  assert.equal(dao.answerApproval(db, id, 'deny'), true);
+  assert.equal(dao.getApproval(db, id)?.decision, 'deny');
+});
+
+test('a refused approve leaves the request still pending, not half-answered', () => {
+  const db = freshDb();
+  const id = dao.insertApproval(db, { ...REQUEST, requested: null });
+
+  assert.throws(() => dao.answerApproval(db, id, 'approve'));
+  assert.equal(dao.pendingApprovals(db).length, 1, 'the refusal consumed the request');
+});
+
+/**
+ * ⚠️ `?.requested == null` is ALSO true for a row that is not there, so the
+ * first version of the guard threw "cannot be approved" for a missing id —
+ * reporting "no such approval" as a different problem entirely.
+ */
+test('approving an id that does not exist still returns false, not a throw', () => {
+  const db = freshDb();
+
+  assert.equal(dao.answerApproval(db, 4242, 'approve'), false);
+});

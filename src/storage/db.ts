@@ -108,7 +108,11 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
         -- own handle, which wakes nobody who can act. The guard test on
         -- bodyless wakes is what surfaced it.
         supervisor_handle TEXT NOT NULL,
-        requested    TEXT NOT NULL,
+        -- 🛑 NULLABLE. A denial does not always NAME its command: a
+        -- git-push refusal gives a prose reason with no command in it.
+        -- NOT NULL forced a placeholder, lee approved a blank, and the
+        -- placeholder went into --allowedTools and granted nothing.
+        requested    TEXT,
         reason       TEXT NOT NULL,
         session_id   TEXT,
         created_at   INTEGER NOT NULL,

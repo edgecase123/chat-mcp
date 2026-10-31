@@ -289,37 +289,35 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       ifCurrent('onDenial', (denial) => {
       const grantHandle = grant?.handle ?? `${opts.handle}-agent`;
 
-      // 🛑 NO NAME, NO CARD. Measured end to end on 2026-10-31: a `git push`
-      // denial's clause is a REASON, not a command —
-      //
-      //   "What required approval: This command changes directory before
-      //    running a version-control command… Approve only if you trust it."
-      //
-      // so the parse failed, `(could not parse the request)` was filed, lee
-      // APPROVED A BLANK, that literal went into `--allowedTools`, the retry
-      // was denied again, and a second card appeared. An approval loop.
-      //
-      // Filing nothing is strictly better: the operator is not asked to
-      // approve something nobody can name, and the log says what was lost.
-      if (!denial.requested) {
-        log(`child BLOCKED but the request could not be NAMED; filing nothing: ${denial.raw}`);
-
-        return;
-      }
-
       try {
         const approvalId = dao.insertApproval(approvalsDb, {
           agentHandle: grantHandle,
           supervisorHandle: opts.handle,
-          // ⚠️ VERBATIM. The operator approves this exact string and it is
-          // what gets allowlisted, so a guess would grant what the child
-          // never asked for.
+          // 🛑 NULL WHEN THE CLI DID NOT NAME IT, never a placeholder.
+          //
+          // Measured end to end: a `git push` denial gives a prose reason
+          // with no command. A placeholder was filed, lee APPROVED A BLANK,
+          // the literal went into `--allowedTools` and granted nothing, the
+          // retry was denied, and a second card appeared.
+          //
+          // ⚠️ FILING NOTHING WAS THE FIRST FIX AND IT WAS WORSE. claude1:
+          // it restores the bug #39 exists to fix — the child stops and
+          // nobody is told. Worse still, the one unnameable case measured is
+          // `git push`, which is on lee's excluded list BY NAME, so silence
+          // would land exactly on the high-stakes requests.
+          //
+          // The row is filed, the reason is shown, and `answerApproval`
+          // refuses to APPROVE it. Deny always works.
           requested: denial.requested,
           reason: denial.raw,
           sessionId: childSession,
         });
 
-        log(`child BLOCKED, approval ${approvalId} pending: ${denial.requested}`);
+        log(
+          denial.requested
+            ? `child BLOCKED, approval ${approvalId} pending: ${denial.requested}`
+            : `child BLOCKED, approval ${approvalId} pending but UNNAMED — it can only be denied`,
+        );
       } catch (err) {
         // 🛑 SAY SO. A failed write here means the operator is never asked, and
         // silence is the failure mode this whole path exists to remove.

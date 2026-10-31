@@ -660,12 +660,13 @@ export interface Approval {
   /** The supervisor to wake once the operator has answered. */
   readonly supervisorHandle: string;
   /**
-   * The command, VERBATIM.
+   * The command, VERBATIM, or null when the CLI did not name one.
    *
-   * 🛑 It is what the operator approves AND what then goes into the allowlist.
-   * A summary would grant something the child never asked for.
+   * 🛑 NULL IS NOT A PLACEHOLDER. It is what the operator approves AND what
+   * goes into the allowlist, so a stand-in string grants nothing and reads
+   * as a real request. A null request may be DENIED but never APPROVED.
    */
-  readonly requested: string;
+  readonly requested: string | null;
   /** The whole denial text, so the UI can quote the reason rather than retell it. */
   readonly reason: string;
   /** The child session to `--resume`, or null when it is not known. */
@@ -678,7 +679,7 @@ export interface Approval {
 export interface ApprovalInput {
   agentHandle: string;
   supervisorHandle: string;
-  requested: string;
+  requested: string | null;
   reason: string;
   sessionId?: string | null;
 }
@@ -687,7 +688,7 @@ interface ApprovalRow {
   id: number;
   agent_handle: string;
   supervisor_handle: string;
-  requested: string;
+  requested: string | null;
   reason: string;
   session_id: string | null;
   created_at: number;
@@ -718,7 +719,7 @@ export function insertApproval(db: Db, input: ApprovalInput): number {
     .run(
       input.agentHandle,
       input.supervisorHandle,
-      input.requested,
+      input.requested ?? null,
       input.reason,
       input.sessionId ?? null,
       Date.now(),
@@ -761,7 +762,35 @@ export function getApproval(db: Db, id: number): Approval | null {
  * worst outcome is a second click upgrading a `deny` to an `approve`, so the
  * `answered_at IS NULL` clause is what refuses it rather than a prior read.
  */
+/**
+ * 🛑 AN UNNAMED REQUEST CANNOT BE APPROVED, ONLY DENIED.
+ *
+ * Approving one grants a string nobody can act on — measured: a placeholder
+ * went into `--allowedTools`, the retry was denied, and a second card
+ * appeared. Deny still works, because stopping something you cannot name is
+ * always a safe answer.
+ */
+export class UnnameableApprovalError extends Error {
+  constructor(readonly id: number) {
+    super(
+      `approval ${id} cannot be approved: the CLI did not name a command, so there is ` +
+        'nothing to grant. It can be denied.',
+    );
+    this.name = 'UnnameableApprovalError';
+  }
+}
+
 export function answerApproval(db: Db, id: number, decision: 'approve' | 'deny'): boolean {
+  // ⚠️ ONLY WHEN THE ROW EXISTS. `?.requested == null` is also true for an
+  // approval that is not there, so the first version threw
+  // UnnameableApprovalError for a missing id instead of returning false —
+  // "no such approval" would have been reported as "cannot be approved".
+  const existing = decision === 'approve' ? getApproval(db, id) : null;
+
+  if (existing && existing.requested == null) {
+    throw new UnnameableApprovalError(id);
+  }
+
   const result = db
     .prepare(`UPDATE approvals SET answered_at = ?, decision = ? WHERE id = ? AND answered_at IS NULL`)
     .run(Date.now(), decision, id);
