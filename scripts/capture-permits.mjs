@@ -171,6 +171,26 @@ function probesFor(root, work, handle) {
        * 🛑 SO THIS PROBE IS PRE-GRANTED, AND ONLY WITH THE REALPATH FORM.
        * The command names the symlink. One variable.
        *
+       * 🛑 `moved` ALONE CANNOT ANSWER IT. THE APPROVAL COUNT IS THE
+       * DISCRIMINATOR. If the CLI matches as typed, the child is denied, this
+       * harness approves, every spelling is added, and the retry SUCCEEDS — so
+       * both answers end with the target moved.
+       *
+       *   moved, 0 approvals   the pre-granted realpath alone sufficed
+       *                        -> the CLI canonicalises, the six records stand
+       *   moved, >0 approvals  it only worked after the harness widened
+       *                        -> the CLI matched as typed
+       *   not moved, >0        approved and still failed, a real
+       *                        refused_under_grant row
+       *   not moved, 0         THE CHILD NEVER TRIED. No information.
+       *
+       * 🛑 THE LAST ROW IS WHY A PRE-GRANTED PROBE NEEDS ITS OWN GUARD.
+       * Every other probe is denied first, so an approval row proves the
+       * attempt. This one has no such row, and `grantedEntries` is
+       * pre-populated — so an unguarded `!worked` would FILE a
+       * `refused_under_grant` for a command that was never run. claude1 found
+       * the missing outcome; the fabricated row is what it would have caused.
+       *
        * ⚠️ IT DOES NOT GO THROUGH `applyAnswer`. A pre-granted probe is never
        * denied, so the relay is not exercised and this measures the CLI's
        * matching alone. That is the right trade for this question and it must
@@ -181,9 +201,16 @@ function probesFor(root, work, handle) {
       command: `touch ${symlinked}`,
       preGranted: `Bash(touch ${realpath})`,
       caveat:
-        'PRE-GRANTED, so no approval occurred and `applyAnswer` was never reached. ' +
-        'It measures the CLI\'s path matching, NOT the relay.',
+        'PRE-GRANTED, so `applyAnswer` was never reached. It measures the ' +
+        "CLI's path matching, NOT the relay.",
       moved: () => existsSync(symlinked),
+      // 🛑 THE DISCRIMINATOR, PRINTED. Without it the run says
+      // `target moved: false` and nothing else, which is the unsupported read
+      // this probe exists to replace.
+      note: ({ approvals }) =>
+        approvals.length === 0
+          ? 'approvals: 0 — so a move means the realpath form alone sufficed, and no move means the child never tried'
+          : `approvals: ${approvals.length} — the harness widened the set, so a move no longer isolates canonicalisation`,
     },
   ];
 }
@@ -324,7 +351,7 @@ for (const index of PROBE_LABELS.keys()) {
 
     console.log(`   target moved: ${worked}`);
 
-    const note = probe.note ? probe.note() : null;
+    const note = probe.note ? probe.note({ approvals: [...answered] }) : null;
 
     if (note) console.log(`   ${note}`);
 
@@ -367,7 +394,21 @@ for (const index of PROBE_LABELS.keys()) {
       console.log(`   PERMIT WITHHELD: the target moved under ${grantedEntries.length} grants, and a record names one`);
     }
 
-    if (!worked && grantedEntries.length > 0) {
+    /**
+     * 🛑 A RECORD NEEDS EVIDENCE THE COMMAND WAS ATTEMPTED, and an approval
+     * row is the only evidence this harness has. A denial exists because the
+     * child tried.
+     *
+     * For every probe but one, `grantedEntries` is non-empty only after an
+     * approval, so this changes nothing. A PRE-GRANTED probe starts with an
+     * entry already, and without this guard a target that never moved because
+     * the child never ran anything would be filed as "approved and it failed".
+     */
+    if (!worked && answered.size === 0) {
+      console.log('   NO INFORMATION: nothing was denied and nothing moved — the command was never attempted');
+    }
+
+    if (!worked && answered.size > 0 && grantedEntries.length > 0) {
       underGrant.push({
         outcome: 'refused_under_grant',
         probe: probe.label,
