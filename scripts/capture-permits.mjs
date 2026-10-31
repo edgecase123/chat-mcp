@@ -209,8 +209,8 @@ function probesFor(root, work, handle) {
       // this probe exists to replace.
       note: ({ approvals }) =>
         approvals.length === 0
-          ? 'approvals: 0 — so a move means the realpath form alone sufficed, and no move means the child never tried'
-          : `approvals: ${approvals.length} — the harness widened the set, so a move no longer isolates canonicalisation`,
+          ? 'approvals: 0 — a move means the realpath form ALONE sufficed, so the CLI canonicalises; no move means the child never tried'
+          : `approvals: ${approvals.length} — an approval was NEEDED, so the CLI matched the path AS TYPED`,
     },
   ];
 }
@@ -395,6 +395,47 @@ for (const index of PROBE_LABELS.keys()) {
     }
 
     /**
+     * 🛑 A PRE-GRANTED PROBE IS ANSWERED BY ITS FIRST DENIAL, NOT BY WHERE
+     * IT ENDS UP.
+     *
+     * The answer loop approves whatever it finds, so a pre-granted entry that
+     * does NOT match gets rescued: the denial is approved, every spelling is
+     * added, the retry succeeds. The run then ends with the target moved and
+     * two grants, so the only line printed is `PERMIT WITHHELD` — a
+     * bookkeeping decision standing where the finding should be.
+     *
+     * 🛑 BUT A DENIAL UNDER A KNOWN SET IS A COMPLETE MEASUREMENT. At that
+     * moment the child held exactly BASE plus the pre-granted entry, and it
+     * was refused. A later widening cannot unmake that. So the record is
+     * keyed on the PRE-GRANTED set, never the widened one.
+     *
+     * Without this the most informative outcome of the whole run reaches the
+     * observation log and nothing else. claude1 found it; the row it files is
+     * the first the corpus has ever held for this outcome.
+     */
+    if (probe.preGranted && answered.size > 0) {
+      console.log(
+        '   ANSWERED: an approval was NEEDED, so the pre-granted entry alone did not match',
+      );
+
+      underGrant.push({
+        outcome: 'refused_under_grant',
+        probe: probe.label,
+        approvalIds: [...answered],
+        attempted: probe.command,
+        // 🛑 THE PRE-GRANTED SET, NOT `grantedEntries`. The latter has
+        // collected whatever the rescue added, which is a different question.
+        allowlist: [...BASE_ALLOWLIST, probe.preGranted],
+        evidence:
+          `${new Date().toISOString().slice(0, 10)}: ${probe.label} — refused while holding ` +
+          `exactly the pre-granted entry, so that entry alone does not match this command.` +
+          `${worked ? ' A later widening then made it succeed, which does not unmake the refusal.' : ''}` +
+          `${probe.caveat ? ` ${probe.caveat}` : ''}` +
+          ' HISTORICAL: the scratch directory is deleted when this run ends.',
+      });
+    }
+
+    /**
      * 🛑 A RECORD NEEDS EVIDENCE THE COMMAND WAS ATTEMPTED, and an approval
      * row is the only evidence this harness has. A denial exists because the
      * child tried.
@@ -408,7 +449,7 @@ for (const index of PROBE_LABELS.keys()) {
       console.log('   NO INFORMATION: nothing was denied and nothing moved — the command was never attempted');
     }
 
-    if (!worked && answered.size > 0 && grantedEntries.length > 0) {
+    if (!worked && answered.size > 0 && grantedEntries.length > 0 && !probe.preGranted) {
       underGrant.push({
         outcome: 'refused_under_grant',
         probe: probe.label,
