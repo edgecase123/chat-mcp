@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { openDb, type Db } from '../../storage/db.js';
 import { NotifyBus, notifyPeer } from '../../notify/bus.js';
+import { answerAndNotify } from '../../supervise/answer.js';
 import * as dao from '../../storage/dao.js';
 import type { MessageKind } from '../../storage/dao.js';
 import { assertRoomName } from '../../util/naming.js';
@@ -396,57 +397,27 @@ async function handleAnswerApproval(
     return respondJson(res, { error: "decision must be 'approve' or 'deny'" }, 400);
   }
 
-  const request = dao.getApproval(ctx.db, id);
-  let answered: boolean;
-  try {
-    answered = dao.answerApproval(ctx.db, id, decision);
-  } catch (err) {
-    // 🛑 422, NOT 500. An unnamed request is a valid row that cannot be
-    // APPROVED — there is nothing to grant. The UI hides Approve for these,
-    // so reaching here means a stale page or a direct call.
-    if (err instanceof dao.UnnameableApprovalError) {
-      return respondJson(res, { error: err.message, canApprove: false }, 422);
-    }
+  const outcome = answerAndNotify(ctx.db, id, decision, ctx.handle);
 
-    throw err;
+  // 🛑 404, NOT 409, FOR A MISSING ID. `?.requested == null` is also true for
+  // an approval that is not there, and reporting "cannot be approved" for
+  // "no such approval" sent one operator looking for the wrong problem.
+  if (outcome.kind === 'no-such-approval') {
+    return respondJson(res, { error: 'no such approval' }, 404);
   }
 
-  if (!answered) {
-    const existing = dao.getApproval(ctx.db, id);
-
-    return respondJson(
-      res,
-      existing
-        ? { error: 'already answered', decision: existing.decision }
-        : { error: 'no such approval' },
-      existing ? 409 : 404,
-    );
+  // 🛑 422, NOT 500. An unnamed request is a valid row that cannot be
+  // APPROVED — there is nothing to grant. The UI hides Approve for these,
+  // so reaching here means a stale page or a direct call.
+  if (outcome.kind === 'ungrantable') {
+    return respondJson(res, { error: outcome.message, canApprove: false }, 422);
   }
 
-  // 🛑 WAKE THE SUPERVISOR, NOT OURSELVES. A first cut passed `ctx.handle` —
-  // the WEB USER's handle — which wakes nobody who can act on the answer. The
-  // bodyless-wake guard test is what surfaced it.
-  //
-  // The decision rides in the body so the supervisor can act without a
-  // database read, which is the whole reason envelopes carry a body.
-  if (request) {
-    notifyPeer(request.supervisorHandle, {
-      id,
-      to: request.supervisorHandle,
-      from: ctx.handle,
-      ts: Date.now(),
-      body: `approval ${id} ${decision}: ${request.requested ?? '(unnamed)'}`,
-      // 🛑 TYPED, so the supervisor runs the re-dispatch template instead of
-      // reading the sentence above as a chat message.
-      approval: {
-        approvalId: id,
-        decision,
-        requested: request.requested ?? '',
-        grant: request.grant,
-        grantForms: request.grantForms,
-        sessionId: request.sessionId,
-      },
-    });
+  // 🛑 409 ON AN ALREADY-ANSWERED REQUEST, NOT 200. Two browser tabs are the
+  // normal case, and a silent success on the second click would tell the
+  // operator they had granted something that was in fact already denied.
+  if (outcome.kind === 'already-answered') {
+    return respondJson(res, { error: 'already answered', decision: outcome.decision }, 409);
   }
 
   respondJson(res, { ok: true, id, decision });
