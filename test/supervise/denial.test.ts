@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { denialFrom, DENIAL_PREFIX } from '../../src/supervise/denial.js';
+import { denialFromClaude, DENIAL_PREFIX } from '../../src/supervise/drivers/claude-events.js';
 
 /**
  * 🛑 THE DENIAL IS STRUCTURED, SO THE DETECTOR MUST NOT GUESS FROM PROSE.
@@ -34,13 +34,13 @@ function toolResult(content: unknown, extra: Record<string, unknown> = {}): Reco
 }
 
 test('the real captured denial is recognised', () => {
-  const denial = denialFrom(toolResult(REAL_DENIAL));
+  const denial = denialFromClaude(toolResult(REAL_DENIAL));
 
   assert.ok(denial, 'the detector does not recognise what the CLI actually emits');
 });
 
 test('the detector reports WHAT needed approval, not the whole paragraph', () => {
-  const denial = denialFrom(toolResult(REAL_DENIAL));
+  const denial = denialFromClaude(toolResult(REAL_DENIAL));
 
   assert.equal(denial?.requested, "rm in '/private/tmp/claude-501/perm-none/target.txt'");
 });
@@ -50,7 +50,7 @@ test('the detector reports WHAT needed approval, not the whole paragraph', () =>
  * trustworthy if it can quote the reason rather than summarise it.
  */
 test('the detector keeps the full text for quoting', () => {
-  const denial = denialFrom(toolResult(REAL_DENIAL));
+  const denial = denialFromClaude(toolResult(REAL_DENIAL));
 
   assert.equal(denial?.raw, REAL_DENIAL);
 });
@@ -61,13 +61,13 @@ test('the detector keeps the full text for quoting', () => {
  * blocked.
  */
 test('a successful tool result is NOT a denial', () => {
-  assert.equal(denialFrom(toolResult('total 72\ndrwxr-xr-x  6 leejenkins  wheel  192 .')), null);
+  assert.equal(denialFromClaude(toolResult('total 72\ndrwxr-xr-x  6 leejenkins  wheel  192 .')), null);
 });
 
 test('a tool result that merely MENTIONS permission is not a denial', () => {
   const chatter = 'I checked the permission settings and they look fine.';
 
-  assert.equal(denialFrom(toolResult(chatter)), null);
+  assert.equal(denialFromClaude(toolResult(chatter)), null);
 });
 
 test('an assistant event is never a denial, whatever it says', () => {
@@ -76,11 +76,11 @@ test('an assistant event is never a denial, whatever it says', () => {
     message: { role: 'assistant', content: [{ type: 'text', text: REAL_DENIAL }] },
   };
 
-  assert.equal(denialFrom(event), null, 'the model TALKING about a denial is not a denial');
+  assert.equal(denialFromClaude(event), null, 'the model TALKING about a denial is not a denial');
 });
 
 test('a result event is never a denial, whatever it says', () => {
-  assert.equal(denialFrom({ type: 'result', subtype: 'success', result: REAL_DENIAL }), null);
+  assert.equal(denialFromClaude({ type: 'result', subtype: 'success', result: REAL_DENIAL }), null);
 });
 
 /**
@@ -92,13 +92,13 @@ test('a result event is never a denial, whatever it says', () => {
 test('a denial delivered as content PARTS is still recognised', () => {
   const parts = [{ type: 'text', text: REAL_DENIAL }];
 
-  assert.ok(denialFrom(toolResult(parts)), 'array content is not handled');
+  assert.ok(denialFromClaude(toolResult(parts)), 'array content is not handled');
 });
 
 test('malformed events are ignored rather than thrown on', () => {
   for (const junk of [null, undefined, {}, { type: 'user' }, { type: 'user', message: {} }]) {
-    assert.doesNotThrow(() => denialFrom(junk as Record<string, unknown>));
-    assert.equal(denialFrom(junk as Record<string, unknown>), null);
+    assert.doesNotThrow(() => denialFromClaude(junk as Record<string, unknown>));
+    assert.equal(denialFromClaude(junk as Record<string, unknown>), null);
   }
 });
 
@@ -114,7 +114,7 @@ test('the prefix the detector depends on is a named constant', () => {
 
 test('a denial with no recognisable request clause is still a denial', () => {
   const terse = `${DENIAL_PREFIX} Something was blocked and no clause follows.`;
-  const denial = denialFrom(toolResult(terse));
+  const denial = denialFromClaude(toolResult(terse));
 
   assert.ok(denial, 'a denial must be detected even when the detail cannot be parsed');
   assert.equal(denial?.requested, null, 'an unparsed detail must be null, never a guess');

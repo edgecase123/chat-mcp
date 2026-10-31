@@ -35,35 +35,6 @@ export type GateVerdict =
   | { readonly allow: true; readonly reason: 'unknown' | 'unmetered' | 'within-budget' }
   | { readonly allow: false; readonly reason: string; readonly resetsAt?: number };
 
-/** Pull a snapshot out of a raw stream-json event, or null if it is not one. */
-export function parseRateLimitEvent(event: Record<string, unknown>): RateLimitSnapshot | null {
-  if (event.type !== 'rate_limit_event') return null;
-
-  const info = event.rate_limit_info as Record<string, unknown> | undefined;
-
-  if (!info || typeof info !== 'object') return null;
-
-  const raw = (info.unifiedWindows ?? {}) as Record<string, { utilization?: unknown; resetsAt?: unknown }>;
-  const windows: Record<string, WindowState> = {};
-
-  for (const [name, w] of Object.entries(raw)) {
-    if (typeof w?.utilization === 'number') {
-      windows[name] = {
-        utilization: w.utilization,
-        resetsAt: typeof w.resetsAt === 'number' ? w.resetsAt : 0,
-      };
-    }
-  }
-
-  return {
-    status: typeof info.status === 'string' ? info.status : 'unknown',
-    // Absent means we do not know, and we must not assume overage exists.
-    overageAvailable: info.overageStatus === 'allowed',
-    windows,
-    observedAt: Date.now(),
-  };
-}
-
 export class RateLimitGate {
   private snapshot: RateLimitSnapshot | null = null;
 

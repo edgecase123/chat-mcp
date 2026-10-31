@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename, isAbsolute } from 'node:path';
-import { claudeArgs, writeClaudeMcpConfig } from '../../src/supervise/child.js';
+import { claudeArgs, writeClaudeMcpConfig } from '../../src/supervise/drivers/claude.js';
 import { DEFAULT_ALLOWED, builtinsFrom } from '../../src/supervise/grant.js';
 
 /**
@@ -270,4 +270,64 @@ test('every path in the generated command is absolute, because the child has a d
       assert.ok(isAbsolute(a), `argument ${i} is relative and resolves in the CHILD's cwd: ${a}`);
     }
   });
+});
+
+/**
+ * 🛑 THE REGISTRY IS THE WHOLE POINT OF THE SPLIT. Before it,
+ * `startSupervisor` imported `spawnClaude` by name — everything else was
+ * already behind the seam, so that one line was the entire remaining coupling.
+ */
+test('the driver registry knows claude and refuses an unknown name', async () => {
+  const { driverFor, DRIVER_NAMES } = await import('../../src/supervise/drivers/index.js');
+
+  assert.ok(DRIVER_NAMES.includes('claude'), 'the only driver that exists is not registered');
+
+  const claude = driverFor('claude');
+  assert.equal(typeof claude.spawn, 'function');
+
+  // 🛑 The re-dispatch wording travels WITH the driver. A seam test caught it
+  // living above the driver, where it named Claude Code's own flag.
+  assert.equal(typeof claude.redispatchPrompt, 'function');
+
+  // 🛑 A silent fallback would mean asking for Cursor and getting Claude,
+  // which looks exactly like Cursor working.
+  assert.throws(() => driverFor('cursor'), /unknown agent driver "cursor"/);
+});
+
+/**
+ * 🛑 NOTHING ABOVE THE DRIVER DIRECTORY MAY NAME A CLI'S EVENT SHAPES OR FLAGS.
+ * Read from the source text, because a type error cannot catch a string.
+ */
+test('no module above drivers/ knows any CLI event shape or flag', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const { join } = await import('node:path');
+
+  const dir = new URL('../../src/supervise/', import.meta.url).pathname;
+  const files = readdirSync(dir).filter((f) => f.endsWith('.ts'));
+
+  assert.ok(files.length > 5, `expected the supervise modules, found ${files.length}`);
+
+  const forbidden = [
+    "'rate_limit_event'",
+    "'result'",
+    'Permission for this tool use was denied',
+    'stream-json',
+    '--allowedTools',
+  ];
+
+  const leaks: string[] = [];
+
+  for (const file of files) {
+    // Strip comments: the history of these bugs is documented in prose and
+    // that prose is allowed to quote the shapes.
+    const code = readFileSync(join(dir, file), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*\/\/.*$/gm, '');
+
+    for (const needle of forbidden) {
+      if (code.includes(needle)) leaks.push(`${file}: ${needle}`);
+    }
+  }
+
+  assert.deepEqual(leaks, [], 'a CLI specific lives above the driver directory');
 });

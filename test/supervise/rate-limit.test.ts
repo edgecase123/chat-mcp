@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { RateLimitGate, parseRateLimitEvent } from '../../src/supervise/rate-limit.js';
+import { RateLimitGate } from '../../src/supervise/rate-limit.js';
+import { parseClaudeRateLimit as parseRateLimitEvent } from '../../src/supervise/drivers/claude-events.js';
 
 /** What a driver does: parse its own shape, hand over a normalised snapshot. */
 const feed = (g: RateLimitGate, event: Record<string, unknown>): void => {

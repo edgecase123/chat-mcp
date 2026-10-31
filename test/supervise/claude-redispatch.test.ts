@@ -4,7 +4,7 @@ import {
   REQUIRED_CLAUSES,
   missingClauses,
   redispatchPrompt,
-} from '../../src/supervise/redispatch.js';
+} from '../../src/supervise/drivers/claude-redispatch.js';
 import { DEFAULT_ALLOWLIST, EDIT_SCOPES, allowlistWith } from '../../src/supervise/allowlist.js';
 
 /**

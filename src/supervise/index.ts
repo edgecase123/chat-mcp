@@ -1,10 +1,10 @@
 import type { AgentChild, SpawnOptions } from './child.js';
-import { spawnClaude } from './child.js';
+import { driverFor } from './drivers/index.js';
 import { TurnQueue } from './turn-queue.js';
 import { WakeListener, type WakeAck, type WakeEnvelope } from './socket.js';
 import { RateLimitGate } from './rate-limit.js';
 import { DEFAULT_ALLOWED, builtinsFrom, childHandleFor, type ChildGrant } from './grant.js';
-import { writeClaudeMcpConfig } from './child.js';
+import { writeClaudeMcpConfig } from './drivers/claude.js';
 
 /**
  * The supervisor: it owns the loop the harness used to own.
@@ -33,6 +33,14 @@ export interface SupervisorOptions extends SpawnOptions {
 
   /** Allowlist override. Default `DEFAULT_ALLOWED` — lee's narrow list. */
   readonly allowedTools?: readonly string[];
+
+  /**
+   * Which agent CLI to drive. Default `claude`.
+   *
+   * An unknown name THROWS and names what this build has, because a silent
+   * fallback would mean asking for Cursor and getting Claude.
+   */
+  readonly driver?: string;
 
   /** Injected so the supervisor is testable without spawning or spending. */
   readonly spawnChild?: (opts: SpawnOptions) => AgentChild;
@@ -101,7 +109,8 @@ function buildGrant(opts: SupervisorOptions): ChildGrant | undefined {
 
 export async function startSupervisor(opts: SupervisorOptions): Promise<Supervisor> {
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
-  const spawnFn = opts.spawnChild ?? spawnClaude;
+  const driver = driverFor(opts.driver ?? 'claude');
+  const spawnFn = opts.spawnChild ?? driver.spawn;
 
   const grant = opts.grant ?? buildGrant(opts);
   const child = spawnFn({ ...opts, grant });

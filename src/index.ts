@@ -225,6 +225,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .description('Run a supervisor that owns the agent CLI and feeds it arriving messages (chat-mcp#33)')
     .option('--model <model>', 'model for the supervised child')
     .option('--binary <path>', 'path to the agent CLI', 'claude')
+    .option('--driver <name>', 'which agent CLI to drive', 'claude')
     .option('--cwd <dir>', 'working directory for the child')
     .option('--resume <sessionId>', 'resume an existing session')
     .option('--permission-mode <mode>', 'permission mode for the child (default: plan, or acceptEdits when the child may reply)')
@@ -237,6 +238,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         handle,
         model: o.model,
         binary: o.binary,
+        driver: o.driver,
         cwd: o.cwd,
         resumeSessionId: o.resume,
         permissionMode: o.permissionMode,

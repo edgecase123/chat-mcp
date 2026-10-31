@@ -1,5 +1,11 @@
 /**
- * The prompt that re-dispatches a child after lee grants a permission.
+ * The prompt that re-dispatches a CLAUDE CODE child after lee grants a
+ * permission.
+ *
+ * 🛑 THIS IS DRIVER WORDING, NOT A GENERIC TEMPLATE, AND A SEAM TEST CAUGHT IT
+ * SITTING ABOVE THE DRIVER. It names `--allowedTools`, which is Claude Code's
+ * flag. Another CLI needs its own wording, and the 3-of-3 result below is
+ * evidence about THIS CLI only.
  *
  * 🛑 A TEMPLATE WITH A TEST, NOT A STRING AT A CALL SITE, BECAUSE A VAGUE
  * VERSION FAILS BY REFUSING. Measured 2026-10-31 over five live runs:
