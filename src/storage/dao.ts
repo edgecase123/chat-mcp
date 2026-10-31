@@ -167,10 +167,10 @@ export interface RegisterInput {
 export class HandleClaimedError extends Error {
   constructor(
     readonly handle: string,
-    readonly heldByPid: number,
+    readonly heldByPid: number | null,
   ) {
     super(
-      `handle "${handle}" is already held by a live process (pid ${heldByPid}). ` +
+      `handle "${handle}" is already held by a live process (pid ${heldByPid ?? 'unknown'}). ` +
         `Refusing to take it: inbox marks messages read, so one of the two ` +
         `processes would silently consume the other's mail. ` +
         `Use a different --handle, or force the claim if that pid is stale.`,
@@ -188,10 +188,8 @@ export class HandleClaimedError extends Error {
  *   - an incumbent with no pid, because refusing on missing data would lock
  *     the handle permanently — a worse failure than the one this prevents.
  */
-function refuseLiveRival(db: Db, input: RegisterInput): void {
+function refuseLiveRival(input: RegisterInput, incumbent: Agent | null): void {
   if (input.force) return;
-
-  const incumbent = getAgent(db, input.handle);
   if (!incumbent || incumbent.pid == null) return;
   if (incumbent.pid === input.pid) return;
   if (!isProcessAlive(incumbent.pid)) return;
@@ -199,30 +197,76 @@ function refuseLiveRival(db: Db, input: RegisterInput): void {
   throw new HandleClaimedError(input.handle, incumbent.pid);
 }
 
-export function upsertAgent(db: Db, input: RegisterInput): Agent {
-  refuseLiveRival(db, input);
-
+/**
+ * Write the claim, but ONLY if nobody changed the row since we read it.
+ *
+ * 🛑 THIS IS WHY THERE IS NO TRANSACTION. Reading the incumbent and then
+ * writing leaves a window: two processes launching together both read "this
+ * handle is free", both pass the guard, and both write — each believing it
+ * owns the handle. That is the bug this guard removes, surviving the guard.
+ * Found by claude1 reviewing this branch.
+ *
+ * ⚠️ WRAPPING IT IN `BEGIN` WOULD NOT HAVE FIXED IT. SQLite's plain `BEGIN` is
+ * DEFERRED and takes no write lock, so both readers still get inside — proved
+ * in `test/storage/claim-atomicity.test.ts`. `BEGIN IMMEDIATE` would work, but
+ * a compare-and-swap is one statement and needs no lock at all.
+ *
+ * `IS` rather than `=` because the expected pid is often NULL, and `NULL = NULL`
+ * is NULL in SQL.
+ *
+ * Returns false when the row moved under us, which the caller reports as the
+ * conflict it is.
+ */
+export function writeClaim(db: Db, input: RegisterInput, expectedPid: number | null): boolean {
+  // A forced claim is "take it regardless", so it must not also lose the race
+  // to the very row it is overriding.
+  const guard = input.force ? 'WHERE TRUE' : 'WHERE agents.pid IS @expected_pid';
   const now = Date.now();
   const metadata_json = input.metadata ? JSON.stringify(input.metadata) : null;
-  db.prepare(
-    `INSERT INTO agents (handle, display_name, pid, session_id, registered_at, last_seen_at, metadata_json)
-     VALUES (@handle, @display_name, @pid, @session_id, @now, @now, @metadata_json)
-     ON CONFLICT(handle) DO UPDATE SET
-       display_name  = excluded.display_name,
-       pid           = excluded.pid,
-       session_id    = excluded.session_id,
-       last_seen_at  = excluded.last_seen_at,
-       metadata_json = excluded.metadata_json`,
-  ).run({
-    handle: input.handle,
-    display_name: input.display_name ?? null,
-    pid: input.pid,
-    session_id: input.session_id,
-    now,
-    metadata_json,
-  });
+
+  const result = db
+    .prepare(
+      `INSERT INTO agents (handle, display_name, pid, session_id, registered_at, last_seen_at, metadata_json)
+       VALUES (@handle, @display_name, @pid, @session_id, @now, @now, @metadata_json)
+       ON CONFLICT(handle) DO UPDATE SET
+         display_name  = excluded.display_name,
+         pid           = excluded.pid,
+         session_id    = excluded.session_id,
+         last_seen_at  = excluded.last_seen_at,
+         metadata_json = excluded.metadata_json
+       ${guard}`,
+    )
+    .run({
+      handle: input.handle,
+      display_name: input.display_name ?? null,
+      pid: input.pid,
+      session_id: input.session_id,
+      now,
+      metadata_json,
+      // Bound only when the guard clause references it. node:sqlite rejects a
+      // named parameter the statement does not mention.
+      ...(input.force ? {} : { expected_pid: expectedPid }),
+    });
+
+  return Number(result.changes) > 0;
+}
+
+export function upsertAgent(db: Db, input: RegisterInput): Agent {
+  // ONE read, reused by both the liveness guard and the compare-and-swap, so
+  // the value the guard judged is the value the write insists on.
+  const incumbent = getAgent(db, input.handle);
+
+  refuseLiveRival(input, incumbent);
+
+  if (!writeClaim(db, input, incumbent?.pid ?? null)) {
+    // The row moved between the read and the write, so a rival claimed it in
+    // the window. Report the conflict rather than overwriting it.
+    throw new HandleClaimedError(input.handle, getAgent(db, input.handle)?.pid ?? null);
+  }
+
   const agent = getAgent(db, input.handle);
   if (!agent) throw new Error(`Failed to register agent ${input.handle}`);
+
   return agent;
 }
 
