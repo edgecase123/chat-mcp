@@ -147,6 +147,22 @@ function probesFor(root, work, handle) {
 }
 
 const captured = [];
+
+/**
+ * 🛑 EVERY PROBE'S OUTCOME, INCLUDING THE ONES THAT BOUGHT NO PERMIT.
+ *
+ * `captured` holds permits only, so an APPROVED grant whose target did not
+ * move used to exist in console scrollback and nowhere else. That is the
+ * measurement #42 is for — a refusal that survived a well-formed grant — and
+ * it was the row the harness discarded. claude1 found it on this PR.
+ *
+ * 🛑 NOT A CORPUS RECORD, AND NOT UNDER `test/fixtures/`. Writing one would
+ * need a third outcome alongside `refused` and `permitted`, and filing it as
+ * `refused` would make `classify()` answer `refused` for a command under a
+ * grant. That shape is lee's call, so this file only preserves the evidence
+ * until the ruling lands. Nothing reads it.
+ */
+const observations = [];
 const PROBE_LABELS = probesFor('', '', 'x').map((p) => p.label);
 
 if (LIST_ONLY) {
@@ -171,7 +187,16 @@ for (const index of PROBE_LABELS.keys()) {
   execFileSync('git', ['-C', work, 'add', '-A']);
   execFileSync('git', ['-C', work, 'commit', '-q', '-m', 'initial']);
 
-  const probe = probesFor(root, work, handle)[index];
+  const probes = probesFor(root, work, handle);
+
+  // ⚠️ TWO CALLS, ONE ASSUMED LENGTH. `PROBE_LABELS` is built from a
+  // throwaway call with dummy arguments. Nothing makes the roster depend on
+  // those arguments today, and nothing stops it either. claude1 on this PR.
+  if (probes.length !== PROBE_LABELS.length) {
+    throw new Error(`roster is ${PROBE_LABELS.length} probe(s), this call built ${probes.length}`);
+  }
+
+  const probe = probes[index];
 
   console.log(`\n── probe ${index + 1}: ${probe.label}`);
   console.log(`   ${probe.command}`);
@@ -218,7 +243,19 @@ for (const index of PROBE_LABELS.keys()) {
 
     console.log(`   target moved: ${worked}`);
 
-    if (probe.note) console.log(`   ${probe.note()}`);
+    const note = probe.note ? probe.note() : null;
+
+    if (note) console.log(`   ${note}`);
+
+    observations.push({
+      probe: probe.label,
+      attempted: probe.command,
+      approvals: [...answered],
+      grant: grantedAllowlist?.[grantedAllowlist.length - 1] ?? null,
+      targetMoved: worked,
+      note,
+      at: new Date().toISOString(),
+    });
 
     if (worked && grantedAllowlist) {
       captured.push({
@@ -253,5 +290,12 @@ for (const c of captured) console.log(`  ${c.allowlistEntry}`);
 // rebuild silently discarded a record earlier today.
 writeFileSync('test/fixtures/captured-permits.pending.json', `${JSON.stringify(captured, null, 2)}\n`);
 console.log('\nwrote test/fixtures/captured-permits.pending.json');
+
+mkdirSync('measurements', { recursive: true });
+
+const log = `measurements/permit-run-${process.pid}.json`;
+
+writeFileSync(log, `${JSON.stringify(observations, null, 2)}\n`);
+console.log(`wrote ${log} — ${observations.length} observation(s), permits and non-permits alike`);
 
 process.exit(missing.length === 0 ? 0 : 1);
