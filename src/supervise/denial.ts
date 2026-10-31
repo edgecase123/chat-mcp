@@ -92,6 +92,20 @@ function leadingSegment(invocation: string): string {
 }
 
 /**
+ * The bare command inside an allowlist entry, e.g. `Bash(rm x)` -> `rm x`.
+ *
+ * 🛑 THE RE-DISPATCH PROMPT NEEDS THE COMMAND, NOT THE ENTRY, AND NOT THE
+ * PROSE. Measured on run 10: the child was told to attempt `touch in
+ * '<path>'` — the sentence a human reads — so it typed something no grant
+ * covered and was re-blocked while the allowlist was perfectly correct.
+ */
+export function commandFromGrant(grant: string): string | null {
+  const match = /^[A-Za-z_]\w*\((.*)\)$/s.exec(grant.trim());
+
+  return match === null ? null : match[1];
+}
+
+/**
  * Rewrite absolute paths in a command to their resolved form.
  *
  * A path with no existing ancestor is left alone — nothing can be resolved

@@ -8,7 +8,7 @@ import * as dao from '../storage/dao.js';
 import { availableBuiltins, childHandleFor, defaultAllowed, type ChildGrant } from './grant.js';
 import { dirsFor } from './projects.js';
 import { allowlistWith, resolveCwd } from './allowlist.js';
-import { grantFor, grantVariants } from './denial.js';
+import { commandFromGrant, grantFor, grantVariants } from './denial.js';
 import { writeClaudeMcpConfig } from './drivers/claude.js';
 
 /**
@@ -455,7 +455,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
         ),
       },
       driver.redispatchPrompt({
-        grantedCommand: answer.requested,
+        // 🛑 THE COMMAND, NOT THE PROSE. `requested` is a sentence; a child
+        // asked to attempt it types something no grant covers.
+        grantedCommand:
+          (answer.grant === null || answer.grant === undefined
+            ? null
+            : commandFromGrant(answer.grant)) ?? answer.requested,
         followUp: 'Then carry on with the task you were on.',
       }),
     );

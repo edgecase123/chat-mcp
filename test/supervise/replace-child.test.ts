@@ -444,3 +444,49 @@ test("the old child's turn-end does not release the NEW child's queue", async ()
     await sup.stop();
   }
 });
+
+/**
+ * 🛑 THE PROMPT TOLD THE CHILD TO RUN PROSE, AND THE LOOP WAS INVISIBLE
+ * BECAUSE THE ALLOWLIST WAS CORRECT. Measured on run 10: approvals 19 and 20
+ * carried byte-identical, well-formed grants, and the child was re-blocked
+ * anyway — it had been asked to attempt `touch in '<path>'`, which is not a
+ * command anyone can run.
+ *
+ * The two fields are different languages. The allowlist argument already said
+ * so; the prompt argument beside it still passed the prose.
+ */
+test('the re-dispatch prompt names the GRANTED COMMAND, never the prose', async () => {
+  const children: FakeChild[] = [];
+  const handle = `rc-${process.pid}-prose`;
+  const sup = await supervisorFor(handle, children);
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 9,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      approval: {
+        approvalId: 9,
+        decision: 'approve',
+        requested: "touch in '/tmp/x.txt'",
+        grant: 'Bash(touch /tmp/x.txt)',
+        sessionId: 'x',
+      },
+    });
+
+    const prompt = children[1]?.sent.join('\n') ?? '';
+
+    assert.ok(prompt.length > 0, 'the replacement child was sent nothing at all');
+    assert.ok(
+      prompt.includes('touch /tmp/x.txt'),
+      `the prompt never names the real command: ${prompt}`,
+    );
+    assert.ok(
+      !prompt.includes("touch in '"),
+      `the prompt tells the child to run prose: ${prompt}`,
+    );
+  } finally {
+    await sup.stop();
+  }
+});
