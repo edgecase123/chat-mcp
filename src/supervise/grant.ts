@@ -1,4 +1,4 @@
-import { AVAILABLE_BUILTINS, DEFAULT_ALLOWLIST, EXTRA_DIRS } from './allowlist.js';
+import { AVAILABLE_BUILTINS, allowlistFor, defaultDirs } from './allowlist.js';
 
 /**
  * What a supervised child is allowed to be and to do.
@@ -75,11 +75,17 @@ export function builtinsFrom(allowed: readonly string[]): string[] {
   return [...new Set(names)];
 }
 
-/** The default grant's tool surface: lee's narrow allowlist. */
-export const DEFAULT_ALLOWED = DEFAULT_ALLOWLIST;
+/**
+ * The default grant's tool surface for a given set of directories.
+ *
+ * 🛑 A FUNCTION, NOT A CONSTANT. The scopes name the directories, so a
+ * hardcoded list bakes in one agent's trees — and claude1's supervisor
+ * starts somewhere this one never would.
+ */
+export const defaultAllowed = allowlistFor;
 
-/** Directories a default grant may reach beyond the child's cwd. */
-export const DEFAULT_EXTRA_DIRS = EXTRA_DIRS;
+/** Directories a default grant may reach: the launch directory. */
+export const defaultExtraDirs = defaultDirs;
 
 /**
  * Which built-ins must EXIST for this allowlist to mean anything.

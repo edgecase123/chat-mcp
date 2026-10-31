@@ -4,8 +4,12 @@ import { readFileSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename, isAbsolute } from 'node:path';
 import { claudeArgs, writeClaudeMcpConfig } from '../../src/supervise/drivers/claude.js';
-import { DEFAULT_ALLOWED, availableBuiltins, builtinsFrom } from '../../src/supervise/grant.js';
-import { EXTRA_DIRS } from '../../src/supervise/allowlist.js';
+import { availableBuiltins, builtinsFrom } from '../../src/supervise/grant.js';
+import { allowlistFor } from '../../src/supervise/allowlist.js';
+
+const TEST_DIRS = ['/Users/leejenkins/dev/chat-mcp2'];
+const DEFAULT_ALLOWED = allowlistFor(TEST_DIRS);
+
 
 /**
  * 🛑 A SUPERVISED AGENT THAT CANNOT ACT IS A DOORBELL, NOT A BUS.
@@ -39,7 +43,7 @@ const grant = {
   configPath: '/tmp/x.json',
   allowed: DEFAULT_ALLOWED,
   available: availableBuiltins(DEFAULT_ALLOWED),
-  extraDirs: ['/Users/leejenkins/playground'],
+  extraDirs: TEST_DIRS,
 };
 
 test('without a grant the child gets NONE of the four flags', () => {
@@ -151,7 +155,7 @@ test('every Edit scope has a matching reachable directory, and vice versa', () =
     t.slice('Edit('.length, -'/**)'.length),
   );
 
-  assert.deepEqual([...scoped].sort(), [...EXTRA_DIRS].sort());
+  assert.deepEqual([...scoped].sort(), [...TEST_DIRS].sort());
 });
 
 /**
@@ -164,7 +168,7 @@ test('the grant carries directories and the driver renders the flag', () => {
   const idx = args.indexOf('--add-dir');
 
   assert.notEqual(idx, -1, 'the driver never renders the directories');
-  assert.equal(args[idx + 1], '/Users/leejenkins/playground');
+  assert.equal(args[idx + 1], TEST_DIRS[0]);
 
   for (const dir of grant.extraDirs) {
     assert.ok(!dir.startsWith('-'), `a flag leaked into the path list: ${dir}`);

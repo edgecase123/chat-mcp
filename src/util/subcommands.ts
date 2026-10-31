@@ -15,6 +15,7 @@
 export const KNOWN_SUBCOMMANDS: ReadonlySet<string> = new Set([
   'cli',
   'web',
+  'project',
   'send',
   'inbox',
   'list',

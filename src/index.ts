@@ -221,6 +221,55 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     });
 
   program
+    .command('project <action> [handle] [dir]')
+    .description('Register the project directory an agent works in: set | list | forget')
+    .action(async (action: string, handle?: string, dir?: string) => {
+      const { readProjects, registerProject, unregisterProject, projectsPath } = await import(
+        './supervise/projects.js'
+      );
+
+      if (action === 'list') {
+        const { agents } = readProjects();
+        const names = Object.keys(agents);
+
+        if (names.length === 0) {
+          console.log(`no project directories registered (${projectsPath()})`);
+          return;
+        }
+
+        for (const name of names) console.log(`${name}  ${(agents[name] ?? []).join('  ')}`);
+        return;
+      }
+
+      if (action === 'forget') {
+        if (!handle) {
+          console.error('Error: chat-mcp project forget <handle>');
+          process.exit(1);
+        }
+        unregisterProject(handle);
+        console.log(`forgot ${handle}`);
+        return;
+      }
+
+      if (action === 'set') {
+        if (!handle || !dir) {
+          console.error('Error: chat-mcp project set <handle> <dir>');
+          process.exit(1);
+        }
+        try {
+          console.log(`${handle}  ${registerProject(handle, dir).join('  ')}`);
+        } catch (err) {
+          console.error(`chat-mcp: ${err instanceof Error ? err.message : String(err)}`);
+          process.exit(1);
+        }
+        return;
+      }
+
+      console.error(`Error: unknown action "${action}". Use set | list | forget.`);
+      process.exit(1);
+    });
+
+  program
     .command('supervise <handle>')
     .description('Run a supervisor that owns the agent CLI and feeds it arriving messages (chat-mcp#33)')
     .option('--model <model>', 'model for the supervised child')

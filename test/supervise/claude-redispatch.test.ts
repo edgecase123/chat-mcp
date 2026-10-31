@@ -5,7 +5,11 @@ import {
   missingClauses,
   redispatchPrompt,
 } from '../../src/supervise/drivers/claude-redispatch.js';
-import { DEFAULT_ALLOWLIST, EXTRA_DIRS, allowlistWith } from '../../src/supervise/allowlist.js';
+import { allowlistFor, allowlistWith } from '../../src/supervise/allowlist.js';
+
+const TEST_DIRS = ['/Users/leejenkins/dev/chat-mcp2'];
+const DEFAULT_ALLOWLIST = allowlistFor(TEST_DIRS);
+const EXTRA_DIRS = TEST_DIRS;
 
 /**
  * 🛑 A VAGUE RE-DISPATCH PROMPT FAILS BY REFUSING, WHICH LOOKS LIKE A STUBBORN
@@ -112,7 +116,7 @@ test('the allowlist grants what lee asked for, and excludes what he excluded', (
  * the allowlist would silently revoke everything the agent already had.
  */
 test('a grant ADDS to the allowlist and keeps every default', () => {
-  const granted = allowlistWith(['Bash(rm:*)']);
+  const granted = allowlistWith(DEFAULT_ALLOWLIST, ['Bash(rm:*)']);
 
   assert.ok(granted.includes('Bash(rm:*)'), 'the grant is missing');
 
@@ -122,7 +126,7 @@ test('a grant ADDS to the allowlist and keeps every default', () => {
 });
 
 test('a grant does not duplicate something already allowed', () => {
-  const granted = allowlistWith(['Read']);
+  const granted = allowlistWith(DEFAULT_ALLOWLIST, ['Read']);
 
   assert.equal(granted.filter((t) => t === 'Read').length, 1);
 });

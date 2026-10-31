@@ -5,13 +5,8 @@ import { WakeListener, type WakeAck, type WakeEnvelope } from './socket.js';
 import { RateLimitGate } from './rate-limit.js';
 import { openDb } from '../storage/db.js';
 import * as dao from '../storage/dao.js';
-import {
-  DEFAULT_ALLOWED,
-  DEFAULT_EXTRA_DIRS,
-  availableBuiltins,
-  childHandleFor,
-  type ChildGrant,
-} from './grant.js';
+import { availableBuiltins, childHandleFor, defaultAllowed, type ChildGrant } from './grant.js';
+import { dirsFor } from './projects.js';
 import { allowlistWith, resolveCwd } from './allowlist.js';
 import { writeClaudeMcpConfig } from './drivers/claude.js';
 
@@ -112,19 +107,19 @@ export function formatPrompt(envelope: WakeEnvelope): string {
  * never be made equal by forgetting a flag — a child sharing the supervisor's
  * handle consumes the deliveries meant for it (chat-mcp#35).
  */
-function buildGrant(opts: SupervisorOptions): ChildGrant | undefined {
+function buildGrant(opts: SupervisorOptions, dirs: readonly string[]): ChildGrant | undefined {
   if (opts.reply === false) return undefined;
 
   const handle = childHandleFor(opts.handle);
 
-  const allowed = opts.allowedTools ?? DEFAULT_ALLOWED;
+  const allowed = opts.allowedTools ?? defaultAllowed(dirs);
 
   return {
     handle,
     configPath: writeClaudeMcpConfig(handle),
     allowed,
     available: availableBuiltins(allowed),
-    extraDirs: opts.extraDirs ?? DEFAULT_EXTRA_DIRS,
+    extraDirs: [...dirs],
   };
 }
 
@@ -135,13 +130,20 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   // 🛑 THROWS BEFORE ANYTHING SPAWNS. A child's cwd is reachable by
   // definition, so an unvalidated one is a containment hole that no
   // allowlist or directory list can close.
-  const childCwd = resolveCwd(opts.cwd, opts.extraDirs ?? DEFAULT_EXTRA_DIRS);
+  // 🛑 REGISTERED PER HANDLE, AND IT THROWS WHEN NOTHING IS. Two earlier
+  // shapes failed: a hardcoded list named one agent's trees and refused the
+  // other's, and `process.cwd()` silently pointed the child at whatever
+  // terminal the operator happened to be in. The arrangement is already
+  // one clone per agent — claude1 in ~/dev/leagues, claude2 in ~/dev/leagues2
+  // — so the mapping is explicit. lee, 2026-10-31.
+  const dirs = opts.extraDirs ?? dirsFor(opts.handle);
+  const childCwd = resolveCwd(opts.cwd, dirs);
   // Injected in tests; the real one is the shared bus database the web UI
   // already reads.
   const approvalsDb = opts.db ?? openDb();
   const spawnFn = opts.spawnChild ?? driver.spawn;
 
-  const grant = opts.grant ?? buildGrant(opts);
+  const grant = opts.grant ?? buildGrant(opts, dirs);
   const child = spawnFn({ ...opts, cwd: childCwd, grant });
 
   // 🛑 SAID OUT LOUD, both ways. A doorbell that cannot answer and a child
