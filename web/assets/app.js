@@ -16,6 +16,8 @@ const state = {
   messages: [],
   renderedCount: 0, // list length at last render, so a delta gives the unread count
   unreadBelow: 0,   // messages that arrived while the reader was scrolled up
+  openMenuFor: null, // sidebar target whose (...) menu is open. NOT in the DOM:
+                     // renderSidebar() wipes it on every peer status change.
   approvals: [],
   theme: null, // set below
 };
@@ -138,6 +140,7 @@ function renderSidebar() {
         target: p.handle,
         online: p.online,
         active: state.currentTarget === p.handle,
+        kind: 'peer',
       }))),
   ]);
   el.sidebar.appendChild(peersSection);
@@ -152,6 +155,7 @@ function renderSidebar() {
         target: r.name,
         online: true,
         active: state.currentTarget === r.name,
+        kind: 'room',
       }))),
   ]);
   el.sidebar.appendChild(roomsSection);
@@ -177,14 +181,71 @@ function renderSidebar() {
   }
 }
 
-function sidebarItem({ label, target, online, active }) {
+function sidebarItem({ label, target, online, active, kind }) {
+  const open = state.openMenuFor === target;
   return h('div', {
     className: `sidebar__item${online ? ' is-online' : ''}${active ? ' is-active' : ''}`,
     onclick: () => selectTarget(target),
   }, [
     h('span', { className: 'sidebar__item-dot' }),
     h('span', { className: 'sidebar__item-label' }, [label]),
+    h('button', {
+      className: 'sidebar__item-actions',
+      type: 'button',
+      'aria-label': `Actions for ${label}`,
+      'aria-expanded': open ? 'true' : 'false',
+      // Without this the row's own click runs too and switches conversation.
+      onclick: (e) => { e.stopPropagation(); toggleItemMenu(target); },
+    }, ['\u22ef']),
+    open ? itemMenu({ target, kind, label }) : null,
   ]);
+}
+
+function itemMenu({ kind, label }) {
+  const isRoom = kind === 'room';
+  return h('div', {
+    className: 'item-menu',
+    role: 'menu',
+    onclick: (e) => e.stopPropagation(),
+  }, [
+    h('button', {
+      className: 'item-menu__entry is-destructive',
+      type: 'button',
+      role: 'menuitem',
+      disabled: isRoom ? true : null,
+      title: isRoom ? 'Kick removes a PEER from the bus. Choose a peer.' : `Remove ${label} from the bus`,
+      onclick: () => { closeItemMenu(); if (!isRoom) kickPeer(label); },
+    }, ['Kick']),
+  ]);
+}
+
+function toggleItemMenu(target) {
+  state.openMenuFor = state.openMenuFor === target ? null : target;
+  renderSidebar();
+}
+
+function closeItemMenu() {
+  if (state.openMenuFor === null) return;
+  state.openMenuFor = null;
+  renderSidebar();
+}
+
+async function kickPeer(handle) {
+  // Destructive, and one click here where the CLI makes you type it.
+  const ok = window.confirm(
+    `Kick ${handle} from the bus?\n\n`
+    + 'Their agent row, room memberships and read marks are deleted. '
+    + 'Messages they sent stay. A running shim re-registers on its next touch.',
+  );
+  if (!ok) return;
+  try {
+    await api('/api/kick', { method: 'POST', body: JSON.stringify({ handle }) });
+    toast(`kicked ${handle}`, 'info');
+    await fetchWhoami();
+    renderSidebar();
+  } catch (e) {
+    toast(`kick failed: ${e.message}`, 'error');
+  }
 }
 
 function fmtTime(ts) {
@@ -615,6 +676,11 @@ el.messages.addEventListener('scroll', () => {
 });
 
 el.jumpNewest.addEventListener('click', jumpToNewest);
+
+// Anywhere else closes an open (...) menu. The button and the menu both
+// stopPropagation, so this only ever fires for a click outside them.
+document.addEventListener('click', closeItemMenu);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeItemMenu(); });
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'End' || e.ctrlKey || e.metaKey || e.altKey) return;

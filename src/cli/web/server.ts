@@ -231,6 +231,7 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContex
   if (path === '/api/messages' && req.method === 'POST') return handlePostMessage(req, res, ctx);
   if (path === '/api/rooms/join' && req.method === 'POST') return handleRoomJoin(req, res, ctx);
   if (path === '/api/rooms/leave' && req.method === 'POST') return handleRoomLeave(req, res, ctx);
+  if (path === '/api/kick' && req.method === 'POST') return handleKick(req, res, ctx);
   if (path === '/api/approvals' && req.method === 'GET') return handleGetApprovals(res, ctx);
   if (path === '/api/approvals/answer' && req.method === 'POST')
     return handleAnswerApproval(req, res, ctx);
@@ -352,6 +353,21 @@ async function handleRoomLeave(req: IncomingMessage, res: ServerResponse, ctx: R
   if (!body.room) return respondJson(res, { error: 'room required' }, 400);
   const ok = dao.leaveRoom(ctx.db, body.room, ctx.handle);
   respondJson(res, { ok });
+}
+
+/**
+ * The same three refusals the Ink CLI makes at App.tsx, because the web UI
+ * reaches one click where /kick has to be typed. The browser confirms first;
+ * these are the second line, not the only one.
+ */
+async function handleKick(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+  const body = (await readJsonBody(req)) as { handle?: string };
+  const target = body.handle;
+  if (!target) return respondJson(res, { error: 'handle required' }, 400);
+  if (target === ctx.handle) return respondJson(res, { error: 'cannot kick yourself' }, 400);
+  if (target === dao.SYSTEM_HANDLE) return respondJson(res, { error: 'cannot kick system' }, 400);
+  if (!dao.deleteAgent(ctx.db, target)) return respondJson(res, { error: `${target} is not registered` }, 404);
+  respondJson(res, { ok: true });
 }
 
 /**
