@@ -242,9 +242,9 @@ async function install(opts: AdapterInstallOptions): Promise<AdapterResult> {
     `  settings: ${settingsPath}${changed ? '' : ' (already up to date)'}`,
     '',
     'Restart Claude Code (or open a new session) to pick up the PreToolUse hook.',
-    'The gauge stays empty until that session makes its first tool call.',
+    'The gauge reads null until that session makes its first tool call.',
     'Any tool does it, including whoami. Opening the session is not enough.',
-    'After that call, list_agents, whoami and the sidebar CTX column all show it.',
+    'Until then list_agents and whoami report null, and the CLI CTX column shows a dash.',
     scope === 'local' ? 'Note: .claude/settings.local.json is user-local; add it to .gitignore if it is not already.' : '',
   ].filter(Boolean).join('\n');
 
