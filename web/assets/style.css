@@ -755,6 +755,12 @@ html, body {
   opacity: 0.45;
   transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
 }
+/* Twice the 13px base. align-self keeps the taller glyph from dragging the
+   meta row's baseline down with it, which would move the author name. */
+.message__copy {
+  font-size: 26px;
+  align-self: center;
+}
 .message:hover .message__copy,
 .message:hover .message__dismiss,
 .message__copy:focus-visible,
