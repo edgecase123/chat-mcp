@@ -12,6 +12,7 @@ import {
   shouldShowJump,
   suggestionsFor,
   enterShouldSend,
+  menuEntriesFor,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -228,12 +229,13 @@ function sidebarItem({ label, target, online, active, kind, unread = 0 }) {
   ]);
 }
 
-// A peer and a room take different verbs. Kick removes a peer from the bus;
-// a room's equivalent is `/rooms <#room> delete`, which the CLI already has.
 function itemMenu({ kind, label }) {
-  const entries = kind === 'room'
-    ? [menuEntry('Delete', `Delete ${label} for everyone`, () => deleteRoomEntry(label))]
-    : [menuEntry('Kick', `Remove ${label} from the bus`, () => kickPeer(label))];
+  const handlers = {
+    deleteRoom: () => deleteRoomEntry(label),
+    kickPeer: () => kickPeer(label),
+  };
+  const entries = menuEntriesFor(kind, label)
+    .map((e) => menuEntry(e.text, e.title, handlers[e.action]));
   return h('div', {
     className: 'item-menu',
     role: 'menu',

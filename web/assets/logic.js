@@ -128,3 +128,19 @@ export function moveIndex(index, delta, length) {
 
   return (index + delta + length) % length;
 }
+
+/**
+ * A peer and a room take different verbs. Kick removes a peer from the bus;
+ * a room's equivalent is deleting the room for everyone.
+ *
+ * @param {'room' | 'peer'} kind
+ * @param {string} label
+ * @returns {{ text: string, title: string, action: 'deleteRoom' | 'kickPeer' }[]}
+ */
+export function menuEntriesFor(kind, label) {
+  if (kind === 'room') {
+    return [{ text: 'Delete', title: `Delete ${label} for everyone`, action: 'deleteRoom' }];
+  }
+
+  return [{ text: 'Kick', title: `Remove ${label} from the bus`, action: 'kickPeer' }];
+}

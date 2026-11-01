@@ -6,6 +6,7 @@ import {
   enterShouldSend,
   isPinnedToBottom,
   jumpLabel,
+  menuEntriesFor,
   moveIndex,
   nextUnreadBelow,
   shouldShowJump,
@@ -151,4 +152,33 @@ test('the list wraps in both directions', () => {
   assert.equal(moveIndex(0, -1, 3), 2);
   assert.equal(moveIndex(2, 1, 3), 0);
   assert.equal(moveIndex(0, 1, 0), 0, 'an empty list cannot divide by zero');
+});
+
+// ── the entry a sidebar row offers ───────────────────────────────────────
+
+test('🛑 a room offers Delete and NEVER Kick', () => {
+  const entries = menuEntriesFor('room', '#ops');
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].text, 'Delete');
+  assert.equal(entries[0].action, 'deleteRoom');
+  assert.ok(!entries.some((e) => e.text === 'Kick'), 'Kick does not apply to a room');
+});
+
+test('a peer offers Kick and never Delete', () => {
+  const entries = menuEntriesFor('peer', 'alice');
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].text, 'Kick');
+  assert.equal(entries[0].action, 'kickPeer');
+  assert.ok(!entries.some((e) => e.text === 'Delete'), 'a peer is not deletable');
+});
+
+test('each entry names its own target in the title', () => {
+  assert.equal(menuEntriesFor('room', '#gate')[0].title, 'Delete #gate for everyone');
+  assert.equal(menuEntriesFor('peer', 'bob')[0].title, 'Remove bob from the bus');
+});
+
+test('every action maps to a distinct handler key', () => {
+  const actions = [...menuEntriesFor('room', '#ops'), ...menuEntriesFor('peer', 'alice')]
+    .map((e) => e.action);
+  assert.deepEqual(actions, ['deleteRoom', 'kickPeer']);
 });
