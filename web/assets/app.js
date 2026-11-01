@@ -454,7 +454,7 @@ function appendEphemeral() {
         h('span', { className: 'message__from' }, [e.title]),
         h('span', { className: 'message__kind' }, ['NOT SAVED']),
         h('button', {
-          className: 'message__copy',
+          className: 'message__dismiss',
           type: 'button',
           title: `Dismiss ${e.title}`,
           'aria-label': `Dismiss ${e.title}`,

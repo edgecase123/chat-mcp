@@ -739,7 +739,8 @@ html, body {
 }
 
 /* Pushed to the right of the meta row, so it never shifts the author name. */
-.message__copy {
+.message__copy,
+.message__dismiss {
   margin-left: auto;
   flex: none;
   background: none;
@@ -755,10 +756,13 @@ html, body {
   transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
 }
 .message:hover .message__copy,
-.message__copy:focus-visible {
+.message:hover .message__dismiss,
+.message__copy:focus-visible,
+.message__dismiss:focus-visible {
   opacity: 1;
 }
-.message__copy:hover {
+.message__copy:hover,
+.message__dismiss:hover {
   color: var(--accent);
   background: var(--border);
 }
