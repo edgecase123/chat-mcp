@@ -258,6 +258,22 @@ function itemMenu({ kind, label }) {
 }
 
 function menuEntry(entry, action) {
+  // 🛑 A MISSING HANDLER IS A DEAD BUTTON, NOT AN ERROR. onclick closes the
+  // menu before it would throw, so an action added in logic.js and never
+  // wired here reads as "the app is fine". Disabled says otherwise. Not a
+  // throw: one bad key must not blank the sidebar. Found by claude1.
+  if (!action) {
+    console.error(`sidebar menu: no handler for action "${entry.action}"`);
+
+    return h('button', {
+      className: 'item-menu__entry',
+      type: 'button',
+      role: 'menuitem',
+      disabled: true,
+      title: `${entry.text} is not wired up`,
+    }, [entry.text]);
+  }
+
   return h('button', {
     // 🛑 is-destructive is per-entry now. Every entry carried it while Kick
     // and Delete were the only two, so a new neighbour would have rendered
