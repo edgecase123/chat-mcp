@@ -17,6 +17,7 @@ import {
   pushHistory,
   historyStep,
   historyKeyApplies,
+  messageMarkdown,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -367,6 +368,7 @@ function renderMessages({ forceBottom = false } = {}) {
       h('span', { className: 'message__from' }, [m.from_handle]),
       h('span', { className: 'message__time' }, [fmtTime(m.sent_at)]),
       kind !== 'chat' ? h('span', { className: 'message__kind' }, [kind.toUpperCase()]) : null,
+      copyButton(m),
     ]);
     const body = h('div', { className: 'message__body', html: m.body_html || '' });
     el.messages.appendChild(h('li', { className: cls }, [meta, body]));
@@ -383,6 +385,55 @@ function renderMessages({ forceBottom = false } = {}) {
     el.messages.scrollTop = prevScrollTop;
   }
   renderJumpNewest();
+}
+
+function copyButton(m) {
+  const label = `Copy message from ${m.from_handle} as markdown. Hold Shift to include who sent it and when.`;
+
+  return h('button', {
+    className: 'message__copy',
+    type: 'button',
+    title: label,
+    'aria-label': label,
+    onclick: (e) => copyMessage(m, e.shiftKey),
+  }, ['\u29c9']);
+}
+
+async function copyMessage(m, attributed) {
+  const text = messageMarkdown(
+    { from: m.from_handle, time: fmtTime(m.sent_at), body: m.body },
+    { attributed },
+  );
+  try {
+    await writeClipboard(text);
+  } catch (err) {
+    // 🛑 Never a success toast on a failed write. The clipboard is the only
+    // place the result shows, so a wrong toast is undetectable.
+    console.error('copy failed', err);
+    toast('could not copy — clipboard blocked', 'warn');
+
+    return;
+  }
+  toast(attributed ? 'copied with author' : 'copied', 'info');
+}
+
+/** navigator.clipboard needs a secure context. 127.0.0.1 counts as one, but a
+ *  host served over plain http by name does not, so keep the old path. */
+async function writeClipboard(text) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    if (!document.execCommand('copy')) throw new Error('execCommand copy refused');
+  } finally {
+    ta.remove();
+  }
 }
 
 function renderPaneHeader() {

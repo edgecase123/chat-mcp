@@ -13,6 +13,7 @@ import {
   pushHistory,
   historyStep,
   historyKeyApplies,
+  messageMarkdown,
   nextUnreadBelow,
   shouldShowJump,
   suggestionsFor,
@@ -435,4 +436,52 @@ test('a single-line value gives both keys to history', () => {
 test('an out-of-range caret does not throw', () => {
   assert.equal(historyKeyApplies('one', 999, -1), true);
   assert.equal(historyKeyApplies('', 0, 1), true);
+});
+
+// ── the per-message copy button ─────────────────────────────────────────
+
+const MSG = { from: 'claude1', time: '22:42', body: 'Fixed the **gate**. See `logic.js`.' };
+
+test('🛑 a plain copy is the sender\'s own markdown, byte for byte', () => {
+  assert.equal(messageMarkdown(MSG), 'Fixed the **gate**. See `logic.js`.');
+});
+
+test('🛑 a plain copy does NOT trim, because it is the source', () => {
+  assert.equal(messageMarkdown({ ...MSG, body: '  x  \n' }), '  x  \n');
+});
+
+test('Shift adds the author and the time as a markdown line', () => {
+  assert.equal(
+    messageMarkdown(MSG, { attributed: true }),
+    '**claude1** · 22:42\n\nFixed the **gate**. See `logic.js`.',
+  );
+});
+
+test('the attributed form keeps a blank line, so the body is its own block', () => {
+  const out = messageMarkdown(MSG, { attributed: true });
+  assert.ok(out.includes('\n\n'), 'without it the body folds into the heading line');
+});
+
+test('a multi-line body survives, with only its trailing blank lines dropped', () => {
+  assert.equal(
+    messageMarkdown({ ...MSG, body: 'one\ntwo\n\n' }, { attributed: true }),
+    '**claude1** · 22:42\n\none\ntwo',
+  );
+});
+
+test('an empty body still produces a usable attributed block', () => {
+  assert.equal(messageMarkdown({ ...MSG, body: '' }, { attributed: true }), '**claude1** · 22:42\n\n');
+  assert.equal(messageMarkdown({ ...MSG, body: '' }), '');
+});
+
+test('🛑 a body containing markdown is NOT re-escaped', () => {
+  // The body IS markdown. Escaping it would break the thing being copied.
+  const body = '```js\nconst a = 1;\n```';
+  assert.equal(messageMarkdown({ ...MSG, body }), body);
+  assert.ok(messageMarkdown({ ...MSG, body }, { attributed: true }).endsWith(body));
+});
+
+test('a handle with markdown characters is not mangled in the heading', () => {
+  const out = messageMarkdown({ ...MSG, from: 'claude_2' }, { attributed: true });
+  assert.ok(out.startsWith('**claude_2** · 22:42'), 'the handle goes in verbatim');
 });

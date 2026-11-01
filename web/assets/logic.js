@@ -306,3 +306,23 @@ export function historyKeyApplies(value, caret, delta) {
     ? !value.slice(0, pos).includes('\n')
     : !value.slice(pos).includes('\n');
 }
+
+/**
+ * What a message's copy button puts on the clipboard.
+ *
+ * 🛑 THE STORED BODY IS ALREADY MARKDOWN. The browser renders `body_html`,
+ * which the SERVER derives from `body`, so copying the body is the message's
+ * own source rather than a reconstruction of the rendered output.
+ *
+ * `time` is passed in preformatted, so this stays free of the DOM and of the
+ * machine's timezone.
+ *
+ * @param {{ from: string, time: string, body: string }} message
+ * @param {{ attributed?: boolean }} [opts]
+ */
+export function messageMarkdown({ from, time, body }, { attributed = false } = {}) {
+  // Plain copy is byte-exact on purpose: it is what the sender typed.
+  if (!attributed) return body;
+
+  return `**${from}** · ${time}\n\n${body.trimEnd()}`;
+}

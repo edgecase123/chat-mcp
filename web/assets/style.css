@@ -737,3 +737,28 @@ html, body {
   background: var(--code-bg, rgba(127, 127, 127, 0.1));
   overflow-wrap: anywhere;
 }
+
+/* Pushed to the right of the meta row, so it never shifts the author name. */
+.message__copy {
+  margin-left: auto;
+  flex: none;
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--fg-faint);
+  cursor: pointer;
+  /* Visible on a touch screen, which has no hover to reveal it. */
+  opacity: 0.45;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+}
+.message:hover .message__copy,
+.message__copy:focus-visible {
+  opacity: 1;
+}
+.message__copy:hover {
+  color: var(--accent);
+  background: var(--border);
+}
