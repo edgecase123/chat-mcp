@@ -13,6 +13,7 @@ import {
   pushHistory,
   historyStep,
   historyKeyApplies,
+  cheatSheet,
   messageMarkdown,
   nextUnreadBelow,
   shouldShowJump,
@@ -484,4 +485,87 @@ test('🛑 a body containing markdown is NOT re-escaped', () => {
 test('a handle with markdown characters is not mangled in the heading', () => {
   const out = messageMarkdown({ ...MSG, from: 'claude_2' }, { attributed: true });
   assert.ok(out.startsWith('**claude_2** · 22:42'), 'the handle goes in verbatim');
+});
+
+// ── /cheat-sheet ────────────────────────────────────────────────────────
+
+const LABELS = {
+  conversation: 'CONVERSATION',
+  messaging: 'MESSAGING',
+  status: 'STATUS',
+  admin: 'ADMIN — destructive',
+  system: 'SYSTEM',
+};
+// 🛑 SEVERAL CATEGORIES CARRY TWO COMMANDS ON PURPOSE. With one each, a
+// mutant that keeps only the FIRST command per category drops nothing, and
+// the drift guard below passes while detecting nothing. Measured.
+const CMDS = [
+  { name: 'dm', arg: '<peer>', desc: 'open a DM', cat: 'conversation' },
+  { name: 'join', arg: '<#room>', desc: 'join a room', cat: 'conversation' },
+  { name: 'alert', arg: '<target> <text>', desc: 'urgent', cat: 'messaging' },
+  { name: 'dispatch', arg: '<peer> <text>', desc: 'hand over a task', cat: 'messaging' },
+  { name: 'who', arg: '', desc: 'list peers', cat: 'status' },
+  { name: 'kick', arg: '<peer>', desc: 'remove a peer', cat: 'admin' },
+  { name: 'help', arg: '', desc: 'the short list', cat: 'system' },
+  { name: 'cheat-sheet', arg: '', desc: 'this sheet', cat: 'system' },
+];
+
+test('🛑 EVERY command in the table reaches the sheet', () => {
+  const sheet = cheatSheet(CMDS, LABELS);
+  const missing = CMDS.filter((c) => !sheet.includes(`/${c.name}`)).map((c) => c.name);
+  assert.deepEqual(missing, [], 'a hand-written list is what this guards against');
+  assert.equal(CMDS.length, 8, 'and the check is over all eight, not a subset');
+  // The denominator that makes the check meaningful: a category with two.
+  assert.equal(CMDS.filter((c) => c.cat === 'conversation').length, 2);
+});
+
+test('every command carries its argument and its description', () => {
+  const sheet = cheatSheet(CMDS, LABELS);
+  for (const c of CMDS) {
+    if (c.arg) assert.ok(sheet.includes(c.arg), `${c.name} lost its argument`);
+    assert.ok(sheet.includes(c.desc), `${c.name} lost its description`);
+  }
+});
+
+test('commands are grouped under their category heading', () => {
+  const sheet = cheatSheet(CMDS, LABELS);
+  for (const label of Object.values(LABELS)) assert.ok(sheet.includes(label), `${label} missing`);
+  assert.ok(sheet.indexOf('CONVERSATION') < sheet.indexOf('/dm'), 'the heading comes first');
+});
+
+test('a category with no commands prints no empty heading', () => {
+  const sheet = cheatSheet([CMDS[0]!], LABELS);
+  assert.ok(sheet.includes('CONVERSATION'));
+  assert.ok(!sheet.includes('ADMIN'), 'an empty group would be a heading over nothing');
+});
+
+test('🛑 the sheet covers the gestures, which no table can generate', () => {
+  const sheet = cheatSheet(CMDS, LABELS);
+  for (const section of ['COMPOSER', 'MESSAGES', 'SIDEBAR', 'READING']) {
+    assert.ok(sheet.includes(section), `${section} section missing`);
+  }
+});
+
+test('the gesture lines name the keys and the clicks they describe', () => {
+  const sheet = cheatSheet(CMDS, LABELS);
+  for (const token of ['Shift-Enter', 'Tab or Enter', 'Esc', 'End', 'Shift-click', 'Kick', 'Delete']) {
+    assert.ok(sheet.includes(token), `${token} missing`);
+  }
+});
+
+test('🛑 the End line carries its caveat, or it is a half-truth', () => {
+  // End only jumps while the composer is empty; otherwise it moves the caret.
+  const sheet = cheatSheet(CMDS, LABELS);
+  const endLine = sheet.indexOf('End');
+  assert.ok(sheet.slice(endLine, endLine + 220).includes('composer is empty'));
+});
+
+test('the sheet says it is not saved, because nothing else tells you', () => {
+  assert.ok(cheatSheet(CMDS, LABELS).includes('not saved'));
+});
+
+test('an empty command table still produces the gesture half', () => {
+  const sheet = cheatSheet([], LABELS);
+  assert.ok(sheet.includes('COMPOSER'));
+  assert.ok(!sheet.includes('CONVERSATION'), 'no headings without commands');
 });

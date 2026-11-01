@@ -326,3 +326,61 @@ export function messageMarkdown({ from, time, body }, { attributed = false } = {
 
   return `**${from}** · ${time}\n\n${body.trimEnd()}`;
 }
+
+/**
+ * 🛑 GENERATED FROM THE COMMAND TABLE, NOT TYPED OUT. A hand-written list of
+ * commands goes stale the first time one is added and nobody notices.
+ *
+ * The gesture sections below it cannot be generated, so each line was checked
+ * against app.js when written. A test asserts every command name appears.
+ *
+ * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
+ * @param {Record<string, string>} labels category key -> heading
+ */
+export function cheatSheet(commands, labels) {
+  const pad = (s) => s.padEnd(24);
+  const commandBlock = Object.keys(labels)
+    .map((cat) => {
+      const rows = commands
+        .filter((c) => c.cat === cat)
+        .map((c) => '  ' + pad(`/${c.name} ${c.arg}`.trimEnd()) + `— ${c.desc}`);
+
+      return rows.length ? [`  ${labels[cat]}`, ...rows].join('\n') : null;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+
+  return [
+    'CHEAT SHEET',
+    '',
+    'SLASH COMMANDS',
+    commandBlock,
+    '',
+    'COMPOSER',
+    '  ' + pad('Enter') + '— send',
+    '  ' + pad('Shift-Enter') + '— newline, without sending',
+    '  ' + pad('#') + '— complete a peer or room name',
+    '  ' + pad('Tab or Enter') + '— accept the highlighted completion',
+    '  ' + pad('Up / Down') + '— move through the completion list',
+    '  ' + pad('Esc') + '— dismiss the completion list',
+    '  ' + pad('Up / Down') + '— with no list open, step through lines you sent',
+    '',
+    'MESSAGES',
+    '  ' + pad('click the copy icon') + '— copy the message markdown as typed',
+    '  ' + pad('Shift-click it') + '— copy it under the author and the time',
+    '',
+    'SIDEBAR',
+    '  ' + pad('click a row') + '— open that peer or room',
+    '  ' + pad('(3) beside a row') + '— unread messages waiting there',
+    '  ' + pad('... on a peer') + '— Kick, which removes them from the bus',
+    '  ' + pad('... on a room') + '— Delete, which removes it for EVERYONE',
+    '',
+    'READING',
+    '  ' + pad('End') + '— jump to the newest message',
+    '  ' + pad('') + '  only while the composer is empty, because End',
+    '  ' + pad('') + '  otherwise moves the caret',
+    '  ' + pad('the jump badge') + '— appears when messages arrive below the view',
+    '',
+    'This sheet is not saved. It disappears when you switch away.',
+  ].join('\n');
+}

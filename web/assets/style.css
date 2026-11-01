@@ -762,3 +762,24 @@ html, body {
   color: var(--accent);
   background: var(--border);
 }
+
+/* A client-only panel. Dashed, so it never reads as something a peer sent. */
+.message.is-ephemeral {
+  border: 1px dashed var(--border-strong);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+.message.is-ephemeral .message__kind {
+  background: var(--border);
+  color: var(--fg-faint);
+}
+.message__pre {
+  margin: 4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}

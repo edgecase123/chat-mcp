@@ -18,6 +18,7 @@ import {
   historyStep,
   historyKeyApplies,
   messageMarkdown,
+  cheatSheet,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -38,6 +39,9 @@ const state = {
   unreadBelow: 0,   // messages that arrived while the reader was scrolled up
   suggest: null,     // { items, index, kind, token } while the composer popover is open
   history: { entries: [], index: null, draft: null },
+  // 🛑 NOT in `messages`. refresh() reassigns that wholesale on every wake,
+  // so anything parked there vanishes the moment a peer says something.
+  ephemeral: [],
   openMenuFor: null, // sidebar target whose (...) menu is open. NOT in the DOM:
                      // renderSidebar() wipes it on every peer status change.
   approvals: [],
@@ -351,11 +355,15 @@ function renderMessages({ forceBottom = false } = {}) {
   el.messages.innerHTML = '';
   if (!state.currentTarget) {
     el.messages.appendChild(h('div', { className: 'messages__empty' }, ['Select a peer or room from the sidebar.']));
+    // 🛑 BEFORE the return. /cheat-sheet works with no target selected, and
+    // an early return here is what would have swallowed it.
+    appendEphemeral();
     resetStreamPosition();
     return;
   }
   if (state.messages.length === 0) {
     el.messages.appendChild(h('div', { className: 'messages__empty' }, ['No messages yet.']));
+    appendEphemeral();
     resetStreamPosition();
     return;
   }
@@ -374,6 +382,7 @@ function renderMessages({ forceBottom = false } = {}) {
     el.messages.appendChild(h('li', { className: cls }, [meta, body]));
   }
   state.renderedCount = state.messages.length;
+  appendEphemeral();
 
   // Jump INSTANT, never animated: a smooth scroll on room open reads as the
   // view sliding away on its own. Scrolled up, we hold position instead and
@@ -436,6 +445,37 @@ async function writeClipboard(text) {
   }
 }
 
+/** Client-only panels, rendered as TEXT. There is no server-side markdown
+ *  pass for these, and text children mean no innerHTML and nothing to escape. */
+function appendEphemeral() {
+  for (const e of state.ephemeral) {
+    el.messages.appendChild(h('li', { className: 'message is-ephemeral' }, [
+      h('div', { className: 'message__meta' }, [
+        h('span', { className: 'message__from' }, [e.title]),
+        h('span', { className: 'message__kind' }, ['NOT SAVED']),
+        h('button', {
+          className: 'message__copy',
+          type: 'button',
+          title: `Dismiss ${e.title}`,
+          'aria-label': `Dismiss ${e.title}`,
+          onclick: () => dismissEphemeral(e.id),
+        }, ['\u00d7']),
+      ]),
+      h('pre', { className: 'message__pre' }, [e.text]),
+    ]));
+  }
+}
+
+function showEphemeral(title, text) {
+  state.ephemeral = [...state.ephemeral, { id: `eph-${Date.now()}`, title, text }];
+  renderMessages({ forceBottom: true });
+}
+
+function dismissEphemeral(id) {
+  state.ephemeral = state.ephemeral.filter((e) => e.id !== id);
+  renderMessages();
+}
+
 function renderPaneHeader() {
   el.composerInput.disabled = false;
   el.composerSend.disabled = false;
@@ -462,6 +502,7 @@ function renderPaneHeader() {
 
 async function selectTarget(target) {
   state.currentTarget = target;
+  state.ephemeral = [];
   renderSidebar();
   renderPaneHeader();
   try {
@@ -666,6 +707,7 @@ const COMMANDS = [
   { name: 'delete', arg: '<#room>', desc: 'delete a room and its messages, for everyone', suggest: 'room', cat: 'admin' },
 
   { name: 'help', arg: '', desc: 'this list', cat: 'system' },
+  { name: 'cheat-sheet', arg: '', desc: 'every command and gesture, in the stream', cat: 'system' },
 ];
 
 // Grouped, because a flat list of thirteen reads as thirteen unrelated things.
@@ -823,6 +865,10 @@ async function tryDispatchSlashCommand(input) {
     }
     case 'help': {
       toast(HELP_TEXT, 'info');
+      return true;
+    }
+    case 'cheat-sheet': {
+      showEphemeral('/cheat-sheet', cheatSheet(COMMANDS, CATEGORY_LABELS));
       return true;
     }
     // Same wire as a normal send, only the kind differs. The recipient's
