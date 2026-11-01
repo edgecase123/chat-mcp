@@ -226,6 +226,18 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContex
   const path = url.pathname;
 
   // API routes
+  // 🛑 CSRF. Binding to 127.0.0.1 keeps other MACHINES out, not other SITES:
+  // any page the operator visits can POST here, and readJsonBody ignores
+  // Content-Type, so `text/plain` is a CORS-simple request with no preflight.
+  // The attacker cannot read the reply and does not need to — /api/kick and
+  // /api/rooms/delete destroy data on the way in.
+  // A cross-site request always carries Origin; a same-page fetch carries a
+  // matching one; a typed navigation carries none.
+  const origin = req.headers.origin;
+  if (origin !== undefined && origin !== `http://${req.headers.host}`) {
+    return respondJson(res, { error: 'cross-origin request refused' }, 403);
+  }
+
   if (path === '/api/whoami') return handleWhoami(res, ctx);
   if (path === '/api/messages' && req.method === 'GET') return handleGetMessages(url, res, ctx);
   if (path === '/api/messages' && req.method === 'POST') return handlePostMessage(req, res, ctx);
