@@ -287,7 +287,7 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
     handle: ctx.handle,
     session_id: me?.session_id,
     peers,
-    rooms: myRooms,
+    rooms: myRooms.map((r) => ({ ...r, unread: dao.roomUnreadCount(ctx.db, r.name, ctx.handle) })),
     discoverRooms,
     version: VERSION,
   });
@@ -308,6 +308,11 @@ function handleGetMessages(url: URL, res: ServerResponse, ctx: RouteContext): vo
       return respondJson(res, { error: 'not a member of room' }, 403);
     }
     rows = recentRoomMessages(ctx.db, target, limit, beforeId);
+    // 🛑 WITHOUT THIS THE SIDEBAR BADGE NEVER CLEARS. Reading a room is what
+    // marks it read, and nothing else on the web path did. advanceRoomRead
+    // takes MAX(), so paging back through history cannot rewind it.
+    const newest = rows.reduce((max, r) => Math.max(max, r.id), 0);
+    if (newest > 0) dao.advanceRoomRead(ctx.db, target, ctx.handle, newest);
   } else {
     // DM between me and target peer.
     rows = recentDmMessages(ctx.db, ctx.handle, target, limit, beforeId);

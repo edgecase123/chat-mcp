@@ -158,6 +158,7 @@ function renderSidebar() {
         online: true,
         active: state.currentTarget === r.name,
         kind: 'room',
+        unread: r.unread ?? 0,
       }))),
   ]);
   el.sidebar.appendChild(roomsSection);
@@ -183,7 +184,7 @@ function renderSidebar() {
   }
 }
 
-function sidebarItem({ label, target, online, active, kind }) {
+function sidebarItem({ label, target, online, active, kind, unread = 0 }) {
   const open = state.openMenuFor === target;
   return h('div', {
     className: `sidebar__item${online ? ' is-online' : ''}${active ? ' is-active' : ''}`,
@@ -191,6 +192,7 @@ function sidebarItem({ label, target, online, active, kind }) {
   }, [
     h('span', { className: 'sidebar__item-dot' }),
     h('span', { className: 'sidebar__item-label' }, [label]),
+    unread > 0 ? h('span', { className: 'sidebar__item-unread' }, [`(${unread})`]) : null,
     h('button', {
       className: 'sidebar__item-actions',
       type: 'button',
@@ -400,6 +402,10 @@ async function selectTarget(target) {
     state.messages = [];
   }
   renderMessages({ forceBottom: true });
+  // The fetch above marked the room read server-side. Pull the counts back so
+  // the badge clears now rather than at the next inbound message.
+  await fetchWhoami();
+  renderSidebar();
 }
 
 async function refresh() {

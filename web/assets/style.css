@@ -176,6 +176,11 @@ html, body {
   transition: background 120ms, color 120ms;
   user-select: none;
 }
+.sidebar__item-unread {
+  color: var(--accent);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 .sidebar__item-actions {
   margin-left: auto;
   padding: 0 4px;
