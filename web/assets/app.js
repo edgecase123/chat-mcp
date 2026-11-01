@@ -1,5 +1,20 @@
 // chat-mcp web UI — vanilla ES module, no build step.
 //
+// 🛑 THE DECISIONS LIVE IN ./logic.js, NOT HERE. This file owns the DOM and
+// the events; anything that can be decided from values alone is imported, so
+// it can be tested without a DOM. See chat-mcp#52.
+import {
+  acceptReopens,
+  isPinnedToBottom,
+  jumpLabel,
+  moveIndex,
+  nextUnreadBelow,
+  shouldShowJump,
+  suggestionsFor,
+  enterShouldSend,
+  menuEntriesFor,
+} from './logic.js';
+//
 // State model: single `state` object holds handle, current target, peers,
 // rooms, and the messages for the current view. Every mutation goes through
 // the render() function which reconciles by innerHTML-replacing the sidebar
@@ -214,12 +229,13 @@ function sidebarItem({ label, target, online, active, kind, unread = 0 }) {
   ]);
 }
 
-// A peer and a room take different verbs. Kick removes a peer from the bus;
-// a room's equivalent is `/rooms <#room> delete`, which the CLI already has.
 function itemMenu({ kind, label }) {
-  const entries = kind === 'room'
-    ? [menuEntry('Delete', `Delete ${label} for everyone`, () => deleteRoomEntry(label))]
-    : [menuEntry('Kick', `Remove ${label} from the bus`, () => kickPeer(label))];
+  const handlers = {
+    deleteRoom: () => deleteRoomEntry(label),
+    kickPeer: () => kickPeer(label),
+  };
+  const entries = menuEntriesFor(kind, label)
+    .map((e) => menuEntry(e.text, e.title, handlers[e.action]));
   return h('div', {
     className: 'item-menu',
     role: 'menu',
@@ -292,20 +308,13 @@ function fmtTime(ts) {
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-// A position this close to the end counts as the bottom. A fractional
-// scrollHeight makes an equality test false when it looks true.
-const BOTTOM_TOLERANCE_PX = 24;
-
-// How far up counts as "reading history" rather than "glancing back". One
-// viewport, floored, so a short window does not arm it on a nudge.
-const JUMP_VISIBLE_AFTER_PX = 240;
-
-function distanceFromBottom() {
-  return el.messages.scrollHeight - el.messages.scrollTop - el.messages.clientHeight;
-}
-
-function isPinnedToBottom() {
-  return distanceFromBottom() <= BOTTOM_TOLERANCE_PX;
+/** The one place the DOM's geometry is read. Everything downstream is pure. */
+function streamGeometry() {
+  return {
+    scrollTop: el.messages.scrollTop,
+    scrollHeight: el.messages.scrollHeight,
+    clientHeight: el.messages.clientHeight,
+  };
 }
 
 function jumpToNewest() {
@@ -315,13 +324,9 @@ function jumpToNewest() {
 }
 
 function renderJumpNewest() {
-  const n = state.unreadBelow;
-  const farUp = distanceFromBottom() > Math.max(JUMP_VISIBLE_AFTER_PX, el.messages.clientHeight);
-  el.jumpNewest.hidden = n === 0 && !farUp;
+  el.jumpNewest.hidden = !shouldShowJump(state.unreadBelow, streamGeometry());
   if (el.jumpNewest.hidden) return;
-  const label = n > 0
-    ? `${n} new message${n === 1 ? '' : 's'} \u2193  (End)`
-    : 'Jump to newest \u2193  (End)';
+  const label = jumpLabel(state.unreadBelow);
   if (el.jumpNewest.textContent !== label) el.jumpNewest.textContent = label;
 }
 
@@ -333,7 +338,7 @@ function resetStreamPosition() {
 
 function renderMessages({ forceBottom = false } = {}) {
   // Measured BEFORE the wipe below destroys both of them.
-  const wasPinned = forceBottom || isPinnedToBottom();
+  const wasPinned = forceBottom || isPinnedToBottom(streamGeometry());
   const prevScrollTop = el.messages.scrollTop;
   const arrived = Math.max(0, state.messages.length - state.renderedCount);
 
@@ -366,12 +371,11 @@ function renderMessages({ forceBottom = false } = {}) {
   // Jump INSTANT, never animated: a smooth scroll on room open reads as the
   // view sliding away on its own. Scrolled up, we hold position instead and
   // offer the jump, so reading is never interrupted.
+  state.unreadBelow = nextUnreadBelow(state.unreadBelow, arrived, wasPinned);
   if (wasPinned) {
-    state.unreadBelow = 0;
     el.messages.scrollTo({ top: el.messages.scrollHeight, behavior: 'instant' });
   } else {
     el.messages.scrollTop = prevScrollTop;
-    state.unreadBelow += arrived;
   }
   renderJumpNewest();
 }
@@ -620,37 +624,6 @@ const HELP_TEXT = Object.keys(CATEGORY_LABELS)
 
 // ── Composer suggestions ────────────────────────────────────────────────
 
-/**
- * What to offer for the current input, or null for nothing.
- * Two cases: the command name itself, and the argument of a command that
- * takes one. Anything that is not a lone slash-line suggests nothing, so
- * ordinary typing is never interrupted.
- */
-function suggestionsFor(value) {
-  if (!value.startsWith('/') || value.includes('\n')) return null;
-  const m = value.match(/^\/(\S*)(\s+)?(.*)$/);
-  if (!m) return null;
-  const [, name, space, rest] = m;
-
-  if (!space) {
-    const items = COMMANDS
-      .filter((c) => c.name.startsWith(name.toLowerCase()))
-      .map((c) => ({ insert: `/${c.name}${c.arg ? ' ' : ''}`, name: `/${c.name}`, arg: c.arg, desc: c.desc, cat: c.cat }));
-    return items.length ? { items, index: 0, kind: 'command' } : null;
-  }
-
-  const cmd = COMMANDS.find((c) => c.name === name.toLowerCase());
-  if (!cmd || !cmd.suggest || rest.includes(' ')) return null;
-  const peers = state.peers.filter((p) => p.handle !== state.handle).map((p) => p.handle);
-  const rooms = [...state.rooms.map((r) => r.name), ...state.discoverRooms.map((r) => r.name)];
-  const pool = cmd.suggest === 'peer' ? peers : cmd.suggest === 'room' ? rooms : [...peers, ...rooms];
-  const q = rest.toLowerCase().replace(/^#/, '');
-  const items = [...new Set(pool)]
-    .filter((h) => h.toLowerCase().replace(/^#/, '').startsWith(q))
-    .map((h) => ({ insert: `/${cmd.name} ${h}`, name: h, arg: '', desc: cmd.suggest }));
-  return items.length ? { items, index: 0, kind: 'arg' } : null;
-}
-
 function renderSuggest() {
   const s = state.suggest;
   el.suggest.innerHTML = '';
@@ -680,7 +653,11 @@ function renderSuggest() {
 }
 
 function updateSuggest() {
-  state.suggest = suggestionsFor(el.composerInput.value);
+  state.suggest = suggestionsFor(el.composerInput.value, {
+    commands: COMMANDS,
+    peers: state.peers.filter((p) => p.handle !== state.handle).map((p) => p.handle),
+    rooms: [...state.rooms.map((r) => r.name), ...state.discoverRooms.map((r) => r.name)],
+  });
   renderSuggest();
 }
 
@@ -692,7 +669,7 @@ function closeSuggest() {
 
 function moveSuggest(delta) {
   const s = state.suggest;
-  s.index = (s.index + delta + s.items.length) % s.items.length;
+  s.index = moveIndex(s.index, delta, s.items.length);
   renderSuggest();
 }
 
@@ -705,7 +682,7 @@ function acceptSuggestion(i) {
   el.composerInput.focus();
   // Only a command that TAKES an argument reopens, to offer it. "/help"
   // reopening on itself is what left Enter unable to send.
-  if (item.insert.endsWith(' ')) updateSuggest();
+  if (acceptReopens(item.insert)) updateSuggest();
 }
 
 /** Returns true if the input was consumed as a command (do not send).
@@ -828,7 +805,7 @@ el.composerInput.addEventListener('keydown', (ev) => {
       // would insert. Enter has to send, or a finished command is stuck until
       // you type a space. "/who" still reaches "/whoami" with ArrowDown,
       // because that item's insert differs from the input.
-      const done = state.suggest.items[state.suggest.index].insert === el.composerInput.value;
+      const done = enterShouldSend(state.suggest, el.composerInput.value);
       if (!done) {
         ev.preventDefault();
         return acceptSuggestion();
@@ -923,7 +900,7 @@ async function boot() {
 
 // Scrolling back down by hand is the same intent as pressing the jump.
 el.messages.addEventListener('scroll', () => {
-  if (state.unreadBelow !== 0 && isPinnedToBottom()) state.unreadBelow = 0;
+  if (state.unreadBelow !== 0 && isPinnedToBottom(streamGeometry())) state.unreadBelow = 0;
   // Every scroll, not just the ones that clear unread: the badge also has to
   // appear when you scroll up with nothing new waiting.
   renderJumpNewest();
