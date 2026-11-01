@@ -215,13 +215,14 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   process.on('SIGTERM', () => shutdown(143));
 }
 
-interface RouteContext {
+/** Exported for tests: they drive `route` through a real http server. */
+export interface RouteContext {
   handle: string;
   db: Db;
   sseClients: Set<ServerResponse>;
 }
 
-async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+export async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const path = url.pathname;
 
