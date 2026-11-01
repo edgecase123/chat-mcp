@@ -9,7 +9,8 @@ import { ensureSocketDir, socketPathFor } from '../util/paths.js';
  * for an agent that is running nothing. A supervisor is a live process with an
  * address, so the mailbox stops being necessary — and it was never reliable.
  * Measured on 2026-10-16 (edgecase123/chat-mcp#33), chokidar on the notify
- * file with the same options `NotifyBus` uses:
+ * file with the options `NotifyBus` used AT THE TIME. It polls now, partly
+ * because of this measurement:
  *
  *   writes: 10   watch events: 2   LOST SIGNALS: 8
  *   file holds only: {"id":10}

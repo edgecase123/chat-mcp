@@ -566,6 +566,23 @@ export function roomUnread(
   return rows.map(toMessage);
 }
 
+/**
+ * How many unread, without materialising them. `roomUnread` caps its rows,
+ * so its length is a page size, not a count — a sidebar badge reading 50
+ * when 300 are waiting is worse than no badge.
+ */
+export function roomUnreadCount(db: Db, room: string, handle: string): number {
+  const read = db.prepare(
+    `SELECT last_read_id FROM room_reads WHERE room_name = ? AND handle = ?`,
+  ).get(room, handle) as unknown as { last_read_id: number } | undefined;
+  const since = read?.last_read_id ?? 0;
+  const row = db.prepare(
+    `SELECT COUNT(*) AS n FROM messages WHERE to_handle = ? AND id > ?`,
+  ).get(room, since) as unknown as { n: number };
+
+  return Number(row.n);
+}
+
 export function advanceRoomRead(
   db: Db,
   room: string,

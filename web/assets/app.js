@@ -14,6 +14,11 @@ const state = {
   discoverRooms: [],
   currentTarget: null, // e.g. "#poker" or "@alice"
   messages: [],
+  renderedCount: 0, // list length at last render, so a delta gives the unread count
+  unreadBelow: 0,   // messages that arrived while the reader was scrolled up
+  suggest: null,     // { items, index, kind, token } while the composer popover is open
+  openMenuFor: null, // sidebar target whose (...) menu is open. NOT in the DOM:
+                     // renderSidebar() wipes it on every peer status change.
   approvals: [],
   theme: null, // set below
 };
@@ -26,6 +31,8 @@ const el = {
   paneTitle: document.getElementById('pane-title'),
   paneMeta: document.getElementById('pane-meta'),
   messages: document.getElementById('messages'),
+  jumpNewest: document.getElementById('jump-newest'),
+  suggest: document.getElementById('composer-suggest'),
   approvals: document.getElementById('approvals'),
   composer: document.getElementById('composer'),
   composerInput: document.getElementById('composer-input'),
@@ -88,12 +95,21 @@ async function fetchMessages(target) {
   if (!target) { state.messages = []; return; }
   const messages = await api(`/api/messages?target=${encodeURIComponent(target)}&limit=200`);
   state.messages = messages;
+
+  // Marking read is a separate POST on purpose: a mutation on the GET above
+  // would fire from an <img> tag on any page the operator visits.
+  if (target.startsWith('#') && messages.length > 0) {
+    const newest = messages.reduce((max, m) => Math.max(max, m.id), 0);
+    try {
+      await api('/api/rooms/read', { method: 'POST', body: JSON.stringify({ room: target, up_to_id: newest }) });
+    } catch { /* the badge is stale until the next open; not worth a toast */ }
+  }
 }
 
-async function sendMessage(target, body) {
+async function sendMessage(target, body, kind = 'chat') {
   return api('/api/messages', {
     method: 'POST',
-    body: JSON.stringify({ target, body }),
+    body: JSON.stringify({ target, body, kind }),
   });
 }
 
@@ -135,6 +151,7 @@ function renderSidebar() {
         target: p.handle,
         online: p.online,
         active: state.currentTarget === p.handle,
+        kind: 'peer',
       }))),
   ]);
   el.sidebar.appendChild(peersSection);
@@ -149,6 +166,8 @@ function renderSidebar() {
         target: r.name,
         online: true,
         active: state.currentTarget === r.name,
+        kind: 'room',
+        unread: r.unread ?? 0,
       }))),
   ]);
   el.sidebar.appendChild(roomsSection);
@@ -174,14 +193,97 @@ function renderSidebar() {
   }
 }
 
-function sidebarItem({ label, target, online, active }) {
+function sidebarItem({ label, target, online, active, kind, unread = 0 }) {
+  const open = state.openMenuFor === target;
   return h('div', {
     className: `sidebar__item${online ? ' is-online' : ''}${active ? ' is-active' : ''}`,
     onclick: () => selectTarget(target),
   }, [
     h('span', { className: 'sidebar__item-dot' }),
     h('span', { className: 'sidebar__item-label' }, [label]),
+    unread > 0 ? h('span', { className: 'sidebar__item-unread' }, [`(${unread})`]) : null,
+    h('button', {
+      className: 'sidebar__item-actions',
+      type: 'button',
+      'aria-label': `Actions for ${label}`,
+      'aria-expanded': open ? 'true' : 'false',
+      // Without this the row's own click runs too and switches conversation.
+      onclick: (e) => { e.stopPropagation(); toggleItemMenu(target); },
+    }, ['\u22ef']),
+    open ? itemMenu({ target, kind, label }) : null,
   ]);
+}
+
+// A peer and a room take different verbs. Kick removes a peer from the bus;
+// a room's equivalent is `/rooms <#room> delete`, which the CLI already has.
+function itemMenu({ kind, label }) {
+  const entries = kind === 'room'
+    ? [menuEntry('Delete', `Delete ${label} for everyone`, () => deleteRoomEntry(label))]
+    : [menuEntry('Kick', `Remove ${label} from the bus`, () => kickPeer(label))];
+  return h('div', {
+    className: 'item-menu',
+    role: 'menu',
+    onclick: (e) => e.stopPropagation(),
+  }, entries);
+}
+
+function menuEntry(text, title, action) {
+  return h('button', {
+    className: 'item-menu__entry is-destructive',
+    type: 'button',
+    role: 'menuitem',
+    title,
+    onclick: () => { closeItemMenu(); action(); },
+  }, [text]);
+}
+
+async function deleteRoomEntry(room) {
+  const ok = window.confirm(
+    `Delete ${room}?\n\n`
+    + 'The room, every membership and every message ever sent to it are '
+    + 'deleted for EVERYONE, not just you. This cannot be undone.',
+  );
+  if (!ok) return;
+  try {
+    await api('/api/rooms/delete', { method: 'POST', body: JSON.stringify({ room }) });
+    toast(`deleted ${room}`, 'info');
+    if (state.currentTarget === room) state.currentTarget = null;
+    await fetchWhoami();
+    renderSidebar();
+    renderPaneHeader();
+    renderMessages({ forceBottom: true });
+  } catch (e) {
+    toast(`delete failed: ${e.message}`, 'error');
+  }
+}
+
+function toggleItemMenu(target) {
+  state.openMenuFor = state.openMenuFor === target ? null : target;
+  renderSidebar();
+}
+
+function closeItemMenu() {
+  if (state.openMenuFor === null) return;
+  state.openMenuFor = null;
+  renderSidebar();
+}
+
+async function kickPeer(handle) {
+  // Destructive, and one click here where the CLI makes you type it.
+  const ok = window.confirm(
+    `Kick ${handle} from the bus?\n\n`
+    + 'Their agent row, room memberships and read marks are deleted. '
+    + 'Messages they sent stay. A running shim re-registers on its next touch.',
+  );
+  if (!ok) return;
+  try {
+    await api('/api/kick', { method: 'POST', body: JSON.stringify({ handle }) });
+    toast(`kicked ${handle}`, 'info');
+    await fetchWhoami();
+    renderSidebar();
+  } catch (e) {
+    toast(`kick failed: ${e.message}`, 'error');
+  }
 }
 
 function fmtTime(ts) {
@@ -190,14 +292,60 @@ function fmtTime(ts) {
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-function renderMessages() {
+// A position this close to the end counts as the bottom. A fractional
+// scrollHeight makes an equality test false when it looks true.
+const BOTTOM_TOLERANCE_PX = 24;
+
+// How far up counts as "reading history" rather than "glancing back". One
+// viewport, floored, so a short window does not arm it on a nudge.
+const JUMP_VISIBLE_AFTER_PX = 240;
+
+function distanceFromBottom() {
+  return el.messages.scrollHeight - el.messages.scrollTop - el.messages.clientHeight;
+}
+
+function isPinnedToBottom() {
+  return distanceFromBottom() <= BOTTOM_TOLERANCE_PX;
+}
+
+function jumpToNewest() {
+  el.messages.scrollTo({ top: el.messages.scrollHeight, behavior: 'instant' });
+  state.unreadBelow = 0;
+  renderJumpNewest();
+}
+
+function renderJumpNewest() {
+  const n = state.unreadBelow;
+  const farUp = distanceFromBottom() > Math.max(JUMP_VISIBLE_AFTER_PX, el.messages.clientHeight);
+  el.jumpNewest.hidden = n === 0 && !farUp;
+  if (el.jumpNewest.hidden) return;
+  const label = n > 0
+    ? `${n} new message${n === 1 ? '' : 's'} \u2193  (End)`
+    : 'Jump to newest \u2193  (End)';
+  if (el.jumpNewest.textContent !== label) el.jumpNewest.textContent = label;
+}
+
+function resetStreamPosition() {
+  state.renderedCount = 0;
+  state.unreadBelow = 0;
+  renderJumpNewest();
+}
+
+function renderMessages({ forceBottom = false } = {}) {
+  // Measured BEFORE the wipe below destroys both of them.
+  const wasPinned = forceBottom || isPinnedToBottom();
+  const prevScrollTop = el.messages.scrollTop;
+  const arrived = Math.max(0, state.messages.length - state.renderedCount);
+
   el.messages.innerHTML = '';
   if (!state.currentTarget) {
     el.messages.appendChild(h('div', { className: 'messages__empty' }, ['Select a peer or room from the sidebar.']));
+    resetStreamPosition();
     return;
   }
   if (state.messages.length === 0) {
     el.messages.appendChild(h('div', { className: 'messages__empty' }, ['No messages yet.']));
+    resetStreamPosition();
     return;
   }
   for (const m of state.messages) {
@@ -213,9 +361,19 @@ function renderMessages() {
     const body = h('div', { className: 'message__body', html: m.body_html || '' });
     el.messages.appendChild(h('li', { className: cls }, [meta, body]));
   }
-  // Jump to newest. INSTANT, never animated: this runs on every room open,
-  // and a smooth scroll there reads as the view sliding away on its own.
-  el.messages.scrollTo({ top: el.messages.scrollHeight, behavior: 'instant' });
+  state.renderedCount = state.messages.length;
+
+  // Jump INSTANT, never animated: a smooth scroll on room open reads as the
+  // view sliding away on its own. Scrolled up, we hold position instead and
+  // offer the jump, so reading is never interrupted.
+  if (wasPinned) {
+    state.unreadBelow = 0;
+    el.messages.scrollTo({ top: el.messages.scrollHeight, behavior: 'instant' });
+  } else {
+    el.messages.scrollTop = prevScrollTop;
+    state.unreadBelow += arrived;
+  }
+  renderJumpNewest();
 }
 
 function renderPaneHeader() {
@@ -252,7 +410,11 @@ async function selectTarget(target) {
     console.error('fetchMessages failed', e);
     state.messages = [];
   }
-  renderMessages();
+  renderMessages({ forceBottom: true });
+  // The fetch above marked the room read server-side. Pull the counts back so
+  // the badge clears now rather than at the next inbound message.
+  await fetchWhoami();
+  renderSidebar();
 }
 
 async function refresh() {
@@ -374,32 +536,177 @@ function renderApprovals() {
 
 // ── Slash commands ───────────────────────────────────────────────────────
 
-/** Small transient toast for command output. Sits over the message pane
- *  and fades after ~2.5s. Preferred over alert() for anything non-blocking. */
+// 2.5s was not enough to read /help, and it timed out mid-read with no way
+// to stop it. Pointing at it now holds it open indefinitely.
+const TOAST_MS = 7000;
+// Short, because you have just finished reading it.
+const TOAST_AFTER_HOVER_MS = 1200;
+
+function armToastDismiss(el, ms) {
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('is-visible'), ms);
+}
+
+/** Transient toast for command output. Sits over the message pane, holds
+ *  while the pointer is inside it, and scrolls when the content is tall. */
 function toast(msg, kind = 'info') {
   let el = document.getElementById('toast');
   if (!el) {
     el = document.createElement('div');
     el.id = 'toast';
+    // ⚠️ `.toast` had pointer-events: none, so these could never fire. The
+    // CSS now lets it take the pointer, which is what makes holding possible.
+    el.addEventListener('mouseenter', () => {
+      el._held = true;
+      el.classList.add('is-held');
+      clearTimeout(el._t);
+    });
+    el.addEventListener('mouseleave', () => {
+      el._held = false;
+      el.classList.remove('is-held');
+      armToastDismiss(el, TOAST_AFTER_HOVER_MS);
+    });
     document.body.appendChild(el);
   }
   el.textContent = msg;
-  el.className = `toast is-${kind}`;
+  // Rebuilt, so the held state has to be carried over: a toast replaced while
+  // the pointer is inside it would otherwise lose its outline and its hold.
+  el.className = `toast is-${kind}${el._held ? ' is-held' : ''}`;
   el.classList.add('is-visible');
-  clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove('is-visible'), 2500);
+  el.scrollTop = 0;
+  if (!el._held) armToastDismiss(el, TOAST_MS);
 }
 
-const HELP_TEXT = [
-  '/dm <peer>      — open a DM',
-  '/join <#room>   — join a room (auto-creates)',
-  '/leave          — leave the current room',
-  '/back           — return to no-target home',
-  '/who            — list peers',
-  '/rooms          — list rooms you belong to',
-  '/whoami         — show your own handle',
-  '/help           — this list',
-].join('\n');
+// 🛑 ONE table. The suggestion popover and /help both read it, and the switch
+// in tryDispatchSlashCommand is the only other place a command name appears.
+// A hand-kept help string drifted from the dispatcher is the bug this avoids.
+const CATEGORY_LABELS = {
+  conversation: 'CONVERSATION',
+  messaging: 'MESSAGING',
+  status: 'STATUS',
+  admin: 'ADMIN — destructive',
+  system: 'SYSTEM',
+};
+
+const COMMANDS = [
+  { name: 'dm', arg: '<peer>', desc: 'open a DM', suggest: 'peer', cat: 'conversation' },
+  { name: 'join', arg: '<#room>', desc: 'join a room (auto-creates)', suggest: 'room', cat: 'conversation' },
+  { name: 'leave', arg: '', desc: 'leave the current room', cat: 'conversation' },
+  { name: 'back', arg: '', desc: 'return to no-target home', cat: 'conversation' },
+
+  { name: 'dispatch', arg: '<peer> <text>', desc: 'hand a task to a peer', suggest: 'peer', cat: 'messaging' },
+  { name: 'broadcast', arg: '<#room> <text>', desc: 'hand a task to a room', suggest: 'room', cat: 'messaging' },
+  { name: 'alert', arg: '<target> <text>', desc: 'urgent — surfaces in their alert lane', suggest: 'any', cat: 'messaging' },
+
+  { name: 'who', arg: '', desc: 'list peers and their status', cat: 'status' },
+  { name: 'rooms', arg: '', desc: 'list rooms you belong to', cat: 'status' },
+  { name: 'whoami', arg: '', desc: 'show your own handle', cat: 'status' },
+
+  { name: 'kick', arg: '<peer>', desc: 'remove a peer from the bus', suggest: 'peer', cat: 'admin' },
+  { name: 'delete', arg: '<#room>', desc: 'delete a room and its messages, for everyone', suggest: 'room', cat: 'admin' },
+
+  { name: 'help', arg: '', desc: 'this list', cat: 'system' },
+];
+
+// Grouped, because a flat list of thirteen reads as thirteen unrelated things.
+const HELP_TEXT = Object.keys(CATEGORY_LABELS)
+  .map((cat) => {
+    const rows = COMMANDS.filter((c) => c.cat === cat)
+      .map((c) => '  ' + `/${c.name} ${c.arg}`.trimEnd().padEnd(22) + `— ${c.desc}`);
+    return rows.length ? [CATEGORY_LABELS[cat], ...rows].join('\n') : null;
+  })
+  .filter(Boolean)
+  .join('\n\n');
+
+// ── Composer suggestions ────────────────────────────────────────────────
+
+/**
+ * What to offer for the current input, or null for nothing.
+ * Two cases: the command name itself, and the argument of a command that
+ * takes one. Anything that is not a lone slash-line suggests nothing, so
+ * ordinary typing is never interrupted.
+ */
+function suggestionsFor(value) {
+  if (!value.startsWith('/') || value.includes('\n')) return null;
+  const m = value.match(/^\/(\S*)(\s+)?(.*)$/);
+  if (!m) return null;
+  const [, name, space, rest] = m;
+
+  if (!space) {
+    const items = COMMANDS
+      .filter((c) => c.name.startsWith(name.toLowerCase()))
+      .map((c) => ({ insert: `/${c.name}${c.arg ? ' ' : ''}`, name: `/${c.name}`, arg: c.arg, desc: c.desc, cat: c.cat }));
+    return items.length ? { items, index: 0, kind: 'command' } : null;
+  }
+
+  const cmd = COMMANDS.find((c) => c.name === name.toLowerCase());
+  if (!cmd || !cmd.suggest || rest.includes(' ')) return null;
+  const peers = state.peers.filter((p) => p.handle !== state.handle).map((p) => p.handle);
+  const rooms = [...state.rooms.map((r) => r.name), ...state.discoverRooms.map((r) => r.name)];
+  const pool = cmd.suggest === 'peer' ? peers : cmd.suggest === 'room' ? rooms : [...peers, ...rooms];
+  const q = rest.toLowerCase().replace(/^#/, '');
+  const items = [...new Set(pool)]
+    .filter((h) => h.toLowerCase().replace(/^#/, '').startsWith(q))
+    .map((h) => ({ insert: `/${cmd.name} ${h}`, name: h, arg: '', desc: cmd.suggest }));
+  return items.length ? { items, index: 0, kind: 'arg' } : null;
+}
+
+function renderSuggest() {
+  const s = state.suggest;
+  el.suggest.innerHTML = '';
+  el.suggest.hidden = !s;
+  if (!s) return;
+  let shownCat = null;
+  s.items.forEach((item, i) => {
+    // Only while listing COMMANDS. An argument list is one kind of thing.
+    if (s.kind === 'command' && item.cat && item.cat !== shownCat) {
+      shownCat = item.cat;
+      el.suggest.appendChild(h('div', { className: 'composer-suggest__cat' }, [CATEGORY_LABELS[item.cat]]));
+    }
+    el.suggest.appendChild(h('div', {
+      className: `composer-suggest__row${i === s.index ? ' is-active' : ''}`,
+      role: 'option',
+      'aria-selected': i === s.index ? 'true' : 'false',
+      // mousedown, not click: click fires after the textarea has already
+      // lost focus, and blur closes the popover first.
+      onmousedown: (e) => { e.preventDefault(); acceptSuggestion(i); },
+    }, [
+      h('span', { className: 'composer-suggest__name' }, [item.name]),
+      item.arg ? h('span', { className: 'composer-suggest__arg' }, [item.arg]) : null,
+      h('span', { className: 'composer-suggest__desc' }, [item.desc]),
+    ]));
+  });
+  el.suggest.appendChild(h('div', { className: 'composer-suggest__hint' }, ['Tab or Enter to accept · Esc to dismiss']));
+}
+
+function updateSuggest() {
+  state.suggest = suggestionsFor(el.composerInput.value);
+  renderSuggest();
+}
+
+function closeSuggest() {
+  if (!state.suggest) return;
+  state.suggest = null;
+  renderSuggest();
+}
+
+function moveSuggest(delta) {
+  const s = state.suggest;
+  s.index = (s.index + delta + s.items.length) % s.items.length;
+  renderSuggest();
+}
+
+function acceptSuggestion(i) {
+  const s = state.suggest;
+  if (!s) return;
+  const item = s.items[i ?? s.index];
+  el.composerInput.value = item.insert;
+  closeSuggest();
+  el.composerInput.focus();
+  // Only a command that TAKES an argument reopens, to offer it. "/help"
+  // reopening on itself is what left Enter unable to send.
+  if (item.insert.endsWith(' ')) updateSuggest();
+}
 
 /** Returns true if the input was consumed as a command (do not send).
  *  Returns false to fall through to normal message send. */
@@ -463,6 +770,35 @@ async function tryDispatchSlashCommand(input) {
       toast(HELP_TEXT, 'info');
       return true;
     }
+    // Same wire as a normal send, only the kind differs. The recipient's
+    // client is what makes a dispatch a hand-off and an alert loud.
+    case 'dispatch':
+    case 'broadcast':
+    case 'alert': {
+      const target = args[0];
+      const text = args.slice(1).join(' ');
+      if (!target || !text) { toast(`usage: /${cmd} <target> <text>`, 'warn'); return true; }
+      if (cmd === 'broadcast' && !target.startsWith('#')) { toast('/broadcast takes a #room', 'warn'); return true; }
+      if (cmd === 'dispatch' && target.startsWith('#')) { toast('/dispatch takes a peer — use /broadcast for a room', 'warn'); return true; }
+      try {
+        await sendMessage(target, text, cmd === 'alert' ? 'alert' : 'dispatch');
+        toast(`sent to ${target}`, 'info');
+        await refresh();
+      } catch (e) { toast(`${cmd} failed: ${e.message}`, 'error'); }
+      return true;
+    }
+    case 'kick': {
+      const peer = args[0];
+      if (!peer) { toast('usage: /kick <peer>', 'warn'); return true; }
+      await kickPeer(peer);
+      return true;
+    }
+    case 'delete': {
+      const room = args[0];
+      if (!room || !room.startsWith('#')) { toast('usage: /delete #room', 'warn'); return true; }
+      await deleteRoomEntry(room);
+      return true;
+    }
     default:
       toast(`unknown command: /${cmd}   (try /help)`, 'warn');
       return true;
@@ -475,9 +811,33 @@ el.composerInput.addEventListener('input', () => {
   // Auto-grow up to CSS max-height.
   el.composerInput.style.height = 'auto';
   el.composerInput.style.height = el.composerInput.scrollHeight + 'px';
+  updateSuggest();
 });
 
+el.composerInput.addEventListener('blur', closeSuggest);
+
 el.composerInput.addEventListener('keydown', (ev) => {
+  // 🛑 Ahead of the Enter-sends rule below, or accepting a suggestion would
+  // send the half-typed command instead.
+  if (state.suggest) {
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); return moveSuggest(1); }
+    if (ev.key === 'ArrowUp') { ev.preventDefault(); return moveSuggest(-1); }
+    if (ev.key === 'Escape') { ev.preventDefault(); return closeSuggest(); }
+    if (ev.key === 'Tab' || (ev.key === 'Enter' && !ev.shiftKey)) {
+      // 🛑 Nothing left to complete: the input ALREADY equals what accepting
+      // would insert. Enter has to send, or a finished command is stuck until
+      // you type a space. "/who" still reaches "/whoami" with ArrowDown,
+      // because that item's insert differs from the input.
+      const done = state.suggest.items[state.suggest.index].insert === el.composerInput.value;
+      if (!done) {
+        ev.preventDefault();
+        return acceptSuggestion();
+      }
+      closeSuggest();
+      if (ev.key === 'Tab') { ev.preventDefault(); return; }
+      // Enter falls through to the send rule below.
+    }
+  }
   if (ev.key === 'Enter' && !ev.shiftKey) {
     ev.preventDefault();
     el.composer.requestSubmit();
@@ -486,6 +846,7 @@ el.composerInput.addEventListener('keydown', (ev) => {
 
 el.composer.addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  closeSuggest();
   const body = el.composerInput.value.trim();
   if (!body) return;
   el.composerSend.disabled = true;
@@ -556,8 +917,45 @@ async function boot() {
   renderSidebar();
   renderPaneHeader();
   renderApprovals();
-  renderMessages();
+  renderMessages({ forceBottom: true });
   connectSse();
 }
+
+// Scrolling back down by hand is the same intent as pressing the jump.
+el.messages.addEventListener('scroll', () => {
+  if (state.unreadBelow !== 0 && isPinnedToBottom()) state.unreadBelow = 0;
+  // Every scroll, not just the ones that clear unread: the badge also has to
+  // appear when you scroll up with nothing new waiting.
+  renderJumpNewest();
+});
+
+el.jumpNewest.addEventListener('click', jumpToNewest);
+
+// Anywhere else closes an open (...) menu. The button and the menu both
+// stopPropagation, so this only ever fires for a click outside them.
+document.addEventListener('click', closeItemMenu);
+// 🛑 ONE LADDER, ONE HANDLER. Escape means "back out of the innermost thing",
+// and focusing the composer is the outermost case of that. Split across two
+// handlers it would close a menu AND move focus on the same keystroke.
+//
+// The composer's own keydown handles the popover case and stops there, so by
+// the time this runs the popover is already dealt with.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (state.suggest) return;          // the composer handler owns this one
+  if (state.openMenuFor !== null) { closeItemMenu(); return; }
+  // ⚠️ Deliberately does NOT clear the input. Escape must never discard a
+  // draft, and focusing a field that is already focused is a harmless no-op.
+  el.composerInput.focus();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'End' || e.ctrlKey || e.metaKey || e.altKey) return;
+  // End is a caret key in the composer. Only claim it when there is no text
+  // for the caret to move through.
+  if (document.activeElement === el.composerInput && el.composerInput.value !== '') return;
+  e.preventDefault();
+  jumpToNewest();
+});
 
 boot();

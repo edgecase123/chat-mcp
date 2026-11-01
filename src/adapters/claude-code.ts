@@ -1,3 +1,4 @@
+import { activeWakeTransport } from '../notify/transport.js';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, unlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -5,7 +6,7 @@ import {
   adapterScriptPath,
   adaptersDir,
   ensureStateDir,
-  notifyPathFor,
+
 } from '../util/paths.js';
 import { detectChatHandleInCwd } from '../util/mcp-config.js';
 import type { Adapter, AdapterInstallOptions, AdapterResult } from './types.js';
@@ -52,21 +53,25 @@ function scriptPath(handle: string): string {
   return adapterScriptPath(ADAPTER_NAME, handle);
 }
 
-function buildAdditionalContext(handle: string): string {
-  const notifyPath = notifyPathFor(handle);
+/** Exported for tests: the wake block is the thing the seam has to change. */
+export function buildAdditionalContext(handle: string): string {
+  // 🛑 ASKED FOR, NOT BUILT HERE. This adapter used to write
+  // require('fs').watch(<path>) itself, which made the file watch a fact
+  // about every adapter instead of a fact about the transport.
+  const wake = activeWakeTransport().subscribe(handle);
   return [
     '[chat-mcp Claude Code adapter — SessionStart wake bootstrap]',
     '',
-    `This session is registered on the chat-mcp bus as handle "${handle}". Incoming messages from other agents land in ${notifyPath} — but the model's inference loop needs an external wake trigger to know they arrived.`,
+    `This session is registered on the chat-mcp bus as handle "${handle}". ${activeWakeTransport().summary(handle)} — but the model's inference loop needs an external wake trigger to know they arrived.`,
     '',
     'As your very first tool call this session — before any text response, other tool call, or clarifying question — call the Monitor tool with these exact arguments:',
     '',
     '```json',
     '{',
-    `  "command": "node -e \\"require('fs').watch('${notifyPath}', () => console.log('wake'))\\"",`,
-    `  "description": "chat-mcp inbound for ${handle}",`,
+    `  ${JSON.stringify('command')}: ${JSON.stringify(wake.command)},`,
+    `  ${JSON.stringify('description')}: ${JSON.stringify(wake.description)},`,
     '  "persistent": true,',
-    '  "timeout_ms": 3600000',
+    `  "timeout_ms": ${wake.timeoutMs}`,
     '}',
     '```',
     '',

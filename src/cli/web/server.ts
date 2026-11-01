@@ -74,9 +74,12 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
     }
   });
 
+  // Assigned once the socket is bound, below. Every request is served after
+  // that, so the guard never sees 0.
+  let boundPort = 0;
   const server = createServer(async (req, res) => {
     try {
-      await route(req, res, { handle, db, sseClients });
+      await route(req, res, { handle, db, sseClients, port: boundPort });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (!res.headersSent) {
@@ -94,6 +97,7 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   // preferred port is taken (e.g. another chat-mcp web is already running).
   const PREFERRED_PORT = 3737;
   const actualPort = await listenWithFallback(server, opts.port, PREFERRED_PORT);
+  boundPort = actualPort;
   const url = `http://127.0.0.1:${actualPort}/`;
 
   const banner = [
@@ -162,8 +166,9 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   /**
    * 🛑 A POLL, NOT A FILE WATCH, AND THAT IS THE POINT.
    *
-   * The SSE `wake` event above is driven by `NotifyBus`, which is chokidar on
-   * the notify file — the mechanism measured on #33 at 8 of 10 signals LOST.
+   * The SSE `wake` event above is driven by `NotifyBus`, which POLLS the
+   * notify file. It used to be a watch, and that watch was measured on #33 at
+   * 8 of 10 signals LOST.
    * For a chat message a dropped signal costs latency, because the next wake
    * re-syncs everything. For an approval it costs correctness: the card never
    * appears, and a supervised agent sits blocked while the operator sees
@@ -215,22 +220,63 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   process.on('SIGTERM', () => shutdown(143));
 }
 
-interface RouteContext {
+/** Exported for tests: they drive `route` through a real http server. */
+export interface RouteContext {
   handle: string;
   db: Db;
   sseClients: Set<ServerResponse>;
+  /**
+   * The loopback port this server bound to. 🛑 EVERY ORIGIN CHECK IS DERIVED
+   * FROM THIS, never from the request. A value taken off the request is a
+   * value the attacker chose.
+   */
+  port: number;
 }
 
-async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+/** The only hosts a loopback server should ever answer to. */
+function allowedHosts(port: number): string[] {
+  return [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`];
+}
+
+function allowedOrigins(port: number): string[] {
+  return allowedHosts(port).map((h) => `http://${h}`);
+}
+
+export async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const path = url.pathname;
 
   // API routes
+  // 🛑 DNS REBINDING FIRST, because it defeats an Origin check on its own.
+  // An attacker who points evil.com at 127.0.0.1 makes the browser send
+  // Host: evil.com AND Origin: http://evil.com. Compared against each other
+  // they MATCH, and the request is genuinely same-origin, so the attacker
+  // reads the replies too. Comparing against a FIXED list built from the
+  // bound port is what makes that fail.
+  if (!allowedHosts(ctx.port).includes(req.headers.host ?? '')) {
+    return respondJson(res, { error: 'unexpected host' }, 403);
+  }
+
+  // 🛑 Then cross-site POSTs. readJsonBody ignores Content-Type, so
+  // `text/plain` is a CORS-simple request with no preflight.
+  //
+  // ⚠️ A CROSS-SITE REQUEST DOES NOT ALWAYS CARRY ORIGIN. A plain GET
+  // subresource — <img>, <script>, <link> — sends none. So this check alone
+  // cannot protect anything that mutates on a GET, and nothing on a GET path
+  // here may mutate. Marking a room read is a POST for exactly that reason.
+  const origin = req.headers.origin;
+  if (origin !== undefined && !allowedOrigins(ctx.port).includes(origin)) {
+    return respondJson(res, { error: 'cross-origin request refused' }, 403);
+  }
+
   if (path === '/api/whoami') return handleWhoami(res, ctx);
   if (path === '/api/messages' && req.method === 'GET') return handleGetMessages(url, res, ctx);
   if (path === '/api/messages' && req.method === 'POST') return handlePostMessage(req, res, ctx);
   if (path === '/api/rooms/join' && req.method === 'POST') return handleRoomJoin(req, res, ctx);
   if (path === '/api/rooms/leave' && req.method === 'POST') return handleRoomLeave(req, res, ctx);
+  if (path === '/api/kick' && req.method === 'POST') return handleKick(req, res, ctx);
+  if (path === '/api/rooms/delete' && req.method === 'POST') return handleRoomDelete(req, res, ctx);
+  if (path === '/api/rooms/read' && req.method === 'POST') return handleRoomRead(req, res, ctx);
   if (path === '/api/approvals' && req.method === 'GET') return handleGetApprovals(res, ctx);
   if (path === '/api/approvals/answer' && req.method === 'POST')
     return handleAnswerApproval(req, res, ctx);
@@ -272,7 +318,7 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
     handle: ctx.handle,
     session_id: me?.session_id,
     peers,
-    rooms: myRooms,
+    rooms: myRooms.map((r) => ({ ...r, unread: dao.roomUnreadCount(ctx.db, r.name, ctx.handle) })),
     discoverRooms,
     version: VERSION,
   });
@@ -352,6 +398,57 @@ async function handleRoomLeave(req: IncomingMessage, res: ServerResponse, ctx: R
   if (!body.room) return respondJson(res, { error: 'room required' }, 400);
   const ok = dao.leaveRoom(ctx.db, body.room, ctx.handle);
   respondJson(res, { ok });
+}
+
+/**
+ * 🛑 A POST, THOUGH IT READS LIKE A READ. It advances the caller's read
+ * watermark, and a mutation on a GET is reachable from an <img> tag on any
+ * page, which sends no Origin for the guard to catch.
+ *
+ * advanceRoomRead takes MAX(), so paging back through history cannot rewind
+ * it.
+ */
+async function handleRoomRead(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+  const body = (await readJsonBody(req)) as { room?: string; up_to_id?: number };
+  const room = body.room;
+  if (!room || typeof body.up_to_id !== 'number') {
+    return respondJson(res, { error: 'room and up_to_id required' }, 400);
+  }
+  if (!dao.isRoomMember(ctx.db, room, ctx.handle)) {
+    return respondJson(res, { error: `you are not a member of ${room}` }, 403);
+  }
+  dao.advanceRoomRead(ctx.db, room, ctx.handle, body.up_to_id);
+  respondJson(res, { ok: true });
+}
+
+/**
+ * dao.deleteRoom states that authorization is the caller's concern. The shim
+ * tool checks membership; this is the other caller, so it checks too.
+ */
+async function handleRoomDelete(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+  const body = (await readJsonBody(req)) as { room?: string };
+  const room = body.room;
+  if (!room) return respondJson(res, { error: 'room required' }, 400);
+  if (!dao.isRoomMember(ctx.db, room, ctx.handle)) {
+    return respondJson(res, { error: `you are not a member of ${room}` }, 403);
+  }
+  if (!dao.deleteRoom(ctx.db, room)) return respondJson(res, { error: `${room} does not exist` }, 404);
+  respondJson(res, { ok: true });
+}
+
+/**
+ * The same three refusals the Ink CLI makes at App.tsx, because the web UI
+ * reaches one click where /kick has to be typed. The browser confirms first;
+ * these are the second line, not the only one.
+ */
+async function handleKick(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+  const body = (await readJsonBody(req)) as { handle?: string };
+  const target = body.handle;
+  if (!target) return respondJson(res, { error: 'handle required' }, 400);
+  if (target === ctx.handle) return respondJson(res, { error: 'cannot kick yourself' }, 400);
+  if (target === dao.SYSTEM_HANDLE) return respondJson(res, { error: 'cannot kick system' }, 400);
+  if (!dao.deleteAgent(ctx.db, target)) return respondJson(res, { error: `${target} is not registered` }, 404);
+  respondJson(res, { ok: true });
 }
 
 /**
