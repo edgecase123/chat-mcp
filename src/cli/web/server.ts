@@ -166,8 +166,9 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   /**
    * 🛑 A POLL, NOT A FILE WATCH, AND THAT IS THE POINT.
    *
-   * The SSE `wake` event above is driven by `NotifyBus`, which is chokidar on
-   * the notify file — the mechanism measured on #33 at 8 of 10 signals LOST.
+   * The SSE `wake` event above is driven by `NotifyBus`, which POLLS the
+   * notify file. It used to be a watch, and that watch was measured on #33 at
+   * 8 of 10 signals LOST.
    * For a chat message a dropped signal costs latency, because the next wake
    * re-syncs everything. For an approval it costs correctness: the card never
    * appears, and a supervised agent sits blocked while the operator sees

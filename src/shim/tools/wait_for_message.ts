@@ -10,7 +10,7 @@ export function installWaitForMessage(server: McpServer, ctx: ShimContext): void
     {
       title: 'Block until a message arrives',
       description:
-        'Block until at least one message arrives addressed to you, or the timeout expires. Returned messages are marked as read. Use this when you are actively awaiting a reply — fs.watch-driven, so wake-up latency is ~1-5ms. Default timeout is 25s to stay under most MCP client tool-call limits.',
+        'Block until at least one message arrives addressed to you, or the timeout expires. Returned messages are marked as read. Use this when you are actively awaiting a reply — poll-driven, so wake-up latency is 150ms-2s depending on how busy the bus is. Default timeout is 25s to stay under most MCP client tool-call limits.',
       inputSchema: {
         timeout_s: z
           .number()
