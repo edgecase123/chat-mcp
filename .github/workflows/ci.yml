@@ -1,0 +1,27 @@
+# The suite's verdict used to depend on whether the local tree happened to
+# have dist/ built (#46). Running it from a clean clone is what stops the
+# answer being a local one.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # `npm ci` runs `prepare`, which builds. Kept explicit anyway so a
+      # failure here reads as "the build broke", not "a test failed".
+      - run: npm ci
+      - run: npm run build
+
+      - run: npx tsc --noEmit
+      - run: npm test
