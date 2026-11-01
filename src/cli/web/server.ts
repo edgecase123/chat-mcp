@@ -13,7 +13,7 @@ import * as dao from '../../storage/dao.js';
 import type { MessageKind } from '../../storage/dao.js';
 import { assertRoomName } from '../../util/naming.js';
 import { renderBodyToHtml } from './render.js';
-import { buildHints, defaultRoots, resolveHintQuery } from './file-hints.js';
+import { buildHints, defaultRoots, realContainedDir, resolveHintQuery } from './file-hints.js';
 
 const VERSION = '0.4.4';
 
@@ -645,11 +645,17 @@ async function handleFileHints(url: URL, res: ServerResponse): Promise<void> {
   const query = resolveHintQuery(url.searchParams.get('q') ?? '', defaultRoots());
   if (!query) return respondJson(res, { hints: [] });
 
+  // 🛑 The lexical containment in resolveHintQuery is not enough: a symlink
+  // inside the root reads as textually inside and readdir follows it. This
+  // resolves both sides, and is also where a path that does not exist yet
+  // refuses, which is the normal case while typing.
+  const dirAbs = await realContainedDir(query);
+  if (!dirAbs) return respondJson(res, { hints: [] });
+
   let dirents: Dirent[];
   try {
-    dirents = await readdir(query.dirAbs, { withFileTypes: true });
+    dirents = await readdir(dirAbs, { withFileTypes: true });
   } catch {
-    // A path that does not exist yet is the normal case while typing.
     return respondJson(res, { hints: [] });
   }
 
