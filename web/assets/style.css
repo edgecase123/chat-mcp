@@ -460,12 +460,65 @@ html, body {
 
 /* Composer */
 .composer {
+  position: relative;
   display: flex;
   gap: 8px;
   align-items: flex-end;
   padding: 12px 20px;
   border-top: 1px solid var(--border);
   background: var(--bg-elevated);
+}
+.composer-suggest {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 100%;
+  z-index: 6;
+  /* Eight commands plus the hint, so the full set fits without scrolling.
+     Longer lists (peers, rooms) scroll. */
+  max-height: 304px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 24%);
+}
+.composer-suggest__row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.composer-suggest__row.is-active {
+  background: var(--bg-inset);
+}
+.composer-suggest__name {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.composer-suggest__arg {
+  color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.composer-suggest__desc {
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-size: 12px;
+  text-align: right;
+}
+.composer-suggest__hint {
+  padding: 4px 10px 6px;
+  color: var(--fg-faint);
+  font-size: 11px;
 }
 .composer__input {
   flex: 1;

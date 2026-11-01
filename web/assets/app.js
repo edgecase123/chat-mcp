@@ -16,6 +16,7 @@ const state = {
   messages: [],
   renderedCount: 0, // list length at last render, so a delta gives the unread count
   unreadBelow: 0,   // messages that arrived while the reader was scrolled up
+  suggest: null,     // { items, index, kind, token } while the composer popover is open
   openMenuFor: null, // sidebar target whose (...) menu is open. NOT in the DOM:
                      // renderSidebar() wipes it on every peer status change.
   approvals: [],
@@ -31,6 +32,7 @@ const el = {
   paneMeta: document.getElementById('pane-meta'),
   messages: document.getElementById('messages'),
   jumpNewest: document.getElementById('jump-newest'),
+  suggest: document.getElementById('composer-suggest'),
   approvals: document.getElementById('approvals'),
   composer: document.getElementById('composer'),
   composerInput: document.getElementById('composer-input'),
@@ -522,16 +524,105 @@ function toast(msg, kind = 'info') {
   el._t = setTimeout(() => el.classList.remove('is-visible'), 2500);
 }
 
-const HELP_TEXT = [
-  '/dm <peer>      — open a DM',
-  '/join <#room>   — join a room (auto-creates)',
-  '/leave          — leave the current room',
-  '/back           — return to no-target home',
-  '/who            — list peers',
-  '/rooms          — list rooms you belong to',
-  '/whoami         — show your own handle',
-  '/help           — this list',
-].join('\n');
+// 🛑 ONE table. The suggestion popover and /help both read it, and the switch
+// in tryDispatchSlashCommand is the only other place a command name appears.
+// A hand-kept help string drifted from the dispatcher is the bug this avoids.
+const COMMANDS = [
+  { name: 'dm', arg: '<peer>', desc: 'open a DM', suggest: 'peer' },
+  { name: 'join', arg: '<#room>', desc: 'join a room (auto-creates)', suggest: 'room' },
+  { name: 'leave', arg: '', desc: 'leave the current room' },
+  { name: 'back', arg: '', desc: 'return to no-target home' },
+  { name: 'who', arg: '', desc: 'list peers' },
+  { name: 'rooms', arg: '', desc: 'list rooms you belong to' },
+  { name: 'whoami', arg: '', desc: 'show your own handle' },
+  { name: 'help', arg: '', desc: 'this list' },
+];
+
+const HELP_TEXT = COMMANDS
+  .map((c) => `/${c.name} ${c.arg}`.trimEnd().padEnd(16) + `— ${c.desc}`)
+  .join('\n');
+
+// ── Composer suggestions ────────────────────────────────────────────────
+
+/**
+ * What to offer for the current input, or null for nothing.
+ * Two cases: the command name itself, and the argument of a command that
+ * takes one. Anything that is not a lone slash-line suggests nothing, so
+ * ordinary typing is never interrupted.
+ */
+function suggestionsFor(value) {
+  if (!value.startsWith('/') || value.includes('\n')) return null;
+  const m = value.match(/^\/(\S*)(\s+)?(.*)$/);
+  if (!m) return null;
+  const [, name, space, rest] = m;
+
+  if (!space) {
+    const items = COMMANDS
+      .filter((c) => c.name.startsWith(name.toLowerCase()))
+      .map((c) => ({ insert: `/${c.name}${c.arg ? ' ' : ''}`, name: `/${c.name}`, arg: c.arg, desc: c.desc }));
+    return items.length ? { items, index: 0, kind: 'command' } : null;
+  }
+
+  const cmd = COMMANDS.find((c) => c.name === name.toLowerCase());
+  if (!cmd || !cmd.suggest || rest.includes(' ')) return null;
+  const pool = cmd.suggest === 'peer'
+    ? state.peers.filter((p) => p.handle !== state.handle).map((p) => p.handle)
+    : [...state.rooms.map((r) => r.name), ...state.discoverRooms.map((r) => r.name)];
+  const q = rest.toLowerCase().replace(/^#/, '');
+  const items = [...new Set(pool)]
+    .filter((h) => h.toLowerCase().replace(/^#/, '').startsWith(q))
+    .map((h) => ({ insert: `/${cmd.name} ${h}`, name: h, arg: '', desc: cmd.suggest }));
+  return items.length ? { items, index: 0, kind: 'arg' } : null;
+}
+
+function renderSuggest() {
+  const s = state.suggest;
+  el.suggest.innerHTML = '';
+  el.suggest.hidden = !s;
+  if (!s) return;
+  s.items.forEach((item, i) => {
+    el.suggest.appendChild(h('div', {
+      className: `composer-suggest__row${i === s.index ? ' is-active' : ''}`,
+      role: 'option',
+      'aria-selected': i === s.index ? 'true' : 'false',
+      // mousedown, not click: click fires after the textarea has already
+      // lost focus, and blur closes the popover first.
+      onmousedown: (e) => { e.preventDefault(); acceptSuggestion(i); },
+    }, [
+      h('span', { className: 'composer-suggest__name' }, [item.name]),
+      item.arg ? h('span', { className: 'composer-suggest__arg' }, [item.arg]) : null,
+      h('span', { className: 'composer-suggest__desc' }, [item.desc]),
+    ]));
+  });
+  el.suggest.appendChild(h('div', { className: 'composer-suggest__hint' }, ['Tab or Enter to accept · Esc to dismiss']));
+}
+
+function updateSuggest() {
+  state.suggest = suggestionsFor(el.composerInput.value);
+  renderSuggest();
+}
+
+function closeSuggest() {
+  if (!state.suggest) return;
+  state.suggest = null;
+  renderSuggest();
+}
+
+function moveSuggest(delta) {
+  const s = state.suggest;
+  s.index = (s.index + delta + s.items.length) % s.items.length;
+  renderSuggest();
+}
+
+function acceptSuggestion(i) {
+  const s = state.suggest;
+  if (!s) return;
+  el.composerInput.value = s.items[i ?? s.index].insert;
+  closeSuggest();
+  el.composerInput.focus();
+  // Accepting "/dm " should offer the peers straight away.
+  updateSuggest();
+}
 
 /** Returns true if the input was consumed as a command (do not send).
  *  Returns false to fall through to normal message send. */
@@ -607,9 +698,23 @@ el.composerInput.addEventListener('input', () => {
   // Auto-grow up to CSS max-height.
   el.composerInput.style.height = 'auto';
   el.composerInput.style.height = el.composerInput.scrollHeight + 'px';
+  updateSuggest();
 });
 
+el.composerInput.addEventListener('blur', closeSuggest);
+
 el.composerInput.addEventListener('keydown', (ev) => {
+  // 🛑 Ahead of the Enter-sends rule below, or accepting a suggestion would
+  // send the half-typed command instead.
+  if (state.suggest) {
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); return moveSuggest(1); }
+    if (ev.key === 'ArrowUp') { ev.preventDefault(); return moveSuggest(-1); }
+    if (ev.key === 'Escape') { ev.preventDefault(); return closeSuggest(); }
+    if (ev.key === 'Tab' || (ev.key === 'Enter' && !ev.shiftKey)) {
+      ev.preventDefault();
+      return acceptSuggestion();
+    }
+  }
   if (ev.key === 'Enter' && !ev.shiftKey) {
     ev.preventDefault();
     el.composer.requestSubmit();
@@ -618,6 +723,7 @@ el.composerInput.addEventListener('keydown', (ev) => {
 
 el.composer.addEventListener('submit', async (ev) => {
   ev.preventDefault();
+  closeSuggest();
   const body = el.composerInput.value.trim();
   if (!body) return;
   el.composerSend.disabled = true;
