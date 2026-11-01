@@ -201,22 +201,47 @@ function sidebarItem({ label, target, online, active, kind }) {
   ]);
 }
 
+// A peer and a room take different verbs. Kick removes a peer from the bus;
+// a room's equivalent is `/rooms <#room> delete`, which the CLI already has.
 function itemMenu({ kind, label }) {
-  const isRoom = kind === 'room';
+  const entries = kind === 'room'
+    ? [menuEntry('Delete', `Delete ${label} for everyone`, () => deleteRoomEntry(label))]
+    : [menuEntry('Kick', `Remove ${label} from the bus`, () => kickPeer(label))];
   return h('div', {
     className: 'item-menu',
     role: 'menu',
     onclick: (e) => e.stopPropagation(),
-  }, [
-    h('button', {
-      className: 'item-menu__entry is-destructive',
-      type: 'button',
-      role: 'menuitem',
-      disabled: isRoom ? true : null,
-      title: isRoom ? 'Kick removes a PEER from the bus. Choose a peer.' : `Remove ${label} from the bus`,
-      onclick: () => { closeItemMenu(); if (!isRoom) kickPeer(label); },
-    }, ['Kick']),
-  ]);
+  }, entries);
+}
+
+function menuEntry(text, title, action) {
+  return h('button', {
+    className: 'item-menu__entry is-destructive',
+    type: 'button',
+    role: 'menuitem',
+    title,
+    onclick: () => { closeItemMenu(); action(); },
+  }, [text]);
+}
+
+async function deleteRoomEntry(room) {
+  const ok = window.confirm(
+    `Delete ${room}?\n\n`
+    + 'The room, every membership and every message ever sent to it are '
+    + 'deleted for EVERYONE, not just you. This cannot be undone.',
+  );
+  if (!ok) return;
+  try {
+    await api('/api/rooms/delete', { method: 'POST', body: JSON.stringify({ room }) });
+    toast(`deleted ${room}`, 'info');
+    if (state.currentTarget === room) state.currentTarget = null;
+    await fetchWhoami();
+    renderSidebar();
+    renderPaneHeader();
+    renderMessages({ forceBottom: true });
+  } catch (e) {
+    toast(`delete failed: ${e.message}`, 'error');
+  }
 }
 
 function toggleItemMenu(target) {

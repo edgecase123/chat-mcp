@@ -232,6 +232,7 @@ async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContex
   if (path === '/api/rooms/join' && req.method === 'POST') return handleRoomJoin(req, res, ctx);
   if (path === '/api/rooms/leave' && req.method === 'POST') return handleRoomLeave(req, res, ctx);
   if (path === '/api/kick' && req.method === 'POST') return handleKick(req, res, ctx);
+  if (path === '/api/rooms/delete' && req.method === 'POST') return handleRoomDelete(req, res, ctx);
   if (path === '/api/approvals' && req.method === 'GET') return handleGetApprovals(res, ctx);
   if (path === '/api/approvals/answer' && req.method === 'POST')
     return handleAnswerApproval(req, res, ctx);
@@ -353,6 +354,21 @@ async function handleRoomLeave(req: IncomingMessage, res: ServerResponse, ctx: R
   if (!body.room) return respondJson(res, { error: 'room required' }, 400);
   const ok = dao.leaveRoom(ctx.db, body.room, ctx.handle);
   respondJson(res, { ok });
+}
+
+/**
+ * dao.deleteRoom states that authorization is the caller's concern. The shim
+ * tool checks membership; this is the other caller, so it checks too.
+ */
+async function handleRoomDelete(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+  const body = (await readJsonBody(req)) as { room?: string };
+  const room = body.room;
+  if (!room) return respondJson(res, { error: 'room required' }, 400);
+  if (!dao.isRoomMember(ctx.db, room, ctx.handle)) {
+    return respondJson(res, { error: `you are not a member of ${room}` }, 403);
+  }
+  if (!dao.deleteRoom(ctx.db, room)) return respondJson(res, { error: `${room} does not exist` }, 404);
+  respondJson(res, { ok: true });
 }
 
 /**
