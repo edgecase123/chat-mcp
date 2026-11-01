@@ -140,7 +140,13 @@ export function tokenize(input: string): Token[] {
         let contentEnd = close;
         if (input[contentEnd - 1] === '\n') contentEnd -= 1;
         flush();
-        tokens.push({ kind: 'code-block', value: input.slice(contentStart, contentEnd), lang });
+        // ⚠️ The key is OMITTED, not set to undefined, when there is no tag.
+        // Three deepEqual tests compare the token object, and an extra
+        // `lang: undefined` fails them for a difference nobody can see.
+        const code = input.slice(contentStart, contentEnd);
+        tokens.push(lang === undefined
+          ? { kind: 'code-block', value: code }
+          : { kind: 'code-block', value: code, lang });
         i = close + 3;
         continue;
       }

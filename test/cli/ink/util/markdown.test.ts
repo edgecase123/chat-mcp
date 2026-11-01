@@ -49,8 +49,14 @@ test('fenced code block (inline form — CLI input cannot carry newlines)', () =
   ]);
 });
 
-test('fenced code block with lang tag', () => {
+test('fenced code block KEEPS its lang tag, so the web renderer can highlight it', () => {
   assert.deepEqual(tokenize('```js\nconst x = 1;\n```'), [
+    { kind: 'code-block', value: 'const x = 1;', lang: 'js' },
+  ]);
+});
+
+test('a fence with no lang tag carries no lang key at all', () => {
+  assert.deepEqual(tokenize('```\nconst x = 1;\n```'), [
     { kind: 'code-block', value: 'const x = 1;' },
   ]);
 });
