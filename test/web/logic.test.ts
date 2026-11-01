@@ -165,31 +165,89 @@ test('the list wraps in both directions', () => {
 
 // ── the entry a sidebar row offers ───────────────────────────────────────
 
+const ROOM = menuEntriesFor('room', '#ops');
+const PEER = menuEntriesFor('peer', 'alice');
+const texts = (entries: { text: string }[]) => entries.map((e) => e.text);
+
 test('🛑 a room offers Delete and NEVER Kick', () => {
-  const entries = menuEntriesFor('room', '#ops');
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].text, 'Delete');
-  assert.equal(entries[0].action, 'deleteRoom');
-  assert.ok(!entries.some((e) => e.text === 'Kick'), 'Kick does not apply to a room');
+  assert.deepEqual(texts(ROOM), ['Broadcast…', 'Alert…', 'Copy name', 'Leave', 'Delete']);
+  assert.ok(!texts(ROOM).includes('Kick'), 'Kick does not apply to a room');
 });
 
-test('a peer offers Kick and never Delete', () => {
-  const entries = menuEntriesFor('peer', 'alice');
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].text, 'Kick');
-  assert.equal(entries[0].action, 'kickPeer');
-  assert.ok(!entries.some((e) => e.text === 'Delete'), 'a peer is not deletable');
+test('🛑 a peer offers Kick, and never Delete or Leave', () => {
+  assert.deepEqual(texts(PEER), ['Dispatch…', 'Alert…', 'Copy handle', 'Kick']);
+  assert.ok(!texts(PEER).includes('Delete'), 'a peer is not deletable');
+  assert.ok(!texts(PEER).includes('Leave'), 'a DM is not a membership');
+});
+
+test('🛑 a room BROADCASTS and a peer DISPATCHES. The verbs never cross.', () => {
+  assert.ok(!texts(ROOM).includes('Dispatch…'), 'a room does not take the peer verb');
+  assert.ok(!texts(PEER).includes('Broadcast…'), 'a peer does not take the room verb');
+});
+
+/**
+ * 🛑 EXACTLY ONE DESTRUCTIVE ENTRY, AND IT IS LAST.
+ *
+ * Kick and Delete used to be the ONLY entries, so the menu could not be
+ * opened into anything else. Now that they have neighbours, last position is
+ * what keeps a mis-click off them, and the CSS rules a line above whatever
+ * carries this flag.
+ */
+test('exactly one destructive entry per kind, and it is the last one', () => {
+  for (const [kind, entries] of [['room', ROOM], ['peer', PEER]] as const) {
+    const flagged = entries.filter((e) => e.destructive);
+    assert.equal(flagged.length, 1, `${kind} must mark exactly one entry destructive`);
+    assert.equal(entries.at(-1), flagged[0], `${kind}'s destructive entry must be last`);
+  }
+});
+
+/** ⚠️ The ellipsis is the only thing telling you nothing will be sent. */
+test('an entry carries a prefill if and only if its label ends in an ellipsis', () => {
+  for (const e of [...ROOM, ...PEER]) {
+    assert.equal(
+      Boolean(e.prefill),
+      e.text.endsWith('…'),
+      `"${e.text}" must say in its label whether it opens in the composer`,
+    );
+  }
+});
+
+test('a prefill is a complete command line, already targeted, with a trailing space', () => {
+  const prefills = Object.fromEntries(
+    [...ROOM, ...PEER].filter((e) => e.prefill).map((e) => [e.text + e.prefill!.split(' ')[1], e.prefill]),
+  );
+  assert.deepEqual(prefills, {
+    'Broadcast…#ops': '/broadcast #ops ',
+    'Alert…#ops': '/alert #ops ',
+    'Dispatch…alice': '/dispatch alice ',
+    'Alert…alice': '/alert alice ',
+  });
+});
+
+/**
+ * ⚠️ THE CROSS-FILE DRIFT THIS CANNOT SEE. The command table is in app.js,
+ * so renaming `/dispatch` there leaves this prefill pointing at a command
+ * that no longer exists and nothing throws. This pins the three names so the
+ * rename breaks a test instead of only the feature.
+ */
+test('every prefill names one of the three commands a menu is allowed to open', () => {
+  const used = [...ROOM, ...PEER].filter((e) => e.prefill).map((e) => e.prefill!.split(' ')[0]);
+  assert.equal(used.length, 4, 'four prefill entries across the two menus');
+  assert.deepEqual([...new Set(used)].sort(), ['/alert', '/broadcast', '/dispatch']);
 });
 
 test('each entry names its own target in the title', () => {
-  assert.equal(menuEntriesFor('room', '#gate')[0].title, 'Delete #gate for everyone');
-  assert.equal(menuEntriesFor('peer', 'bob')[0].title, 'Remove bob from the bus');
+  assert.equal(menuEntriesFor('room', '#gate').at(-1)!.title, 'Delete #gate for everyone');
+  assert.equal(menuEntriesFor('peer', 'bob').at(-1)!.title, 'Remove bob from the bus');
+  assert.ok(menuEntriesFor('room', '#gate')[0]!.title.includes('#gate'));
 });
 
-test('every action maps to a distinct handler key', () => {
-  const actions = [...menuEntriesFor('room', '#ops'), ...menuEntriesFor('peer', 'alice')]
-    .map((e) => e.action);
-  assert.deepEqual(actions, ['deleteRoom', 'kickPeer']);
+/** Every action must reach a handler, and app.js keys them by this string. */
+test('every action is one app.js has a handler for', () => {
+  const known = ['prefill', 'copyName', 'leaveRoom', 'deleteRoom', 'kickPeer'];
+  for (const e of [...ROOM, ...PEER]) {
+    assert.ok(known.includes(e.action), `no handler key for "${e.action}"`);
+  }
 });
 
 // ── "#" name type-ahead, for peers AND rooms ────────────────────────────

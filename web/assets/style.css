@@ -205,7 +205,7 @@ html, body {
   top: 100%;
   right: 8px;
   z-index: 5;
-  min-width: 132px;
+  min-width: 148px;
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -230,6 +230,14 @@ html, body {
 }
 .item-menu__entry.is-destructive:hover:not(:disabled) {
   color: var(--danger);
+}
+/* The destructive entry is last and ruled off, so a mis-click lands on a
+   neighbour rather than on Kick or Delete. :not(:first-child) keeps the rule
+   off a menu that is only the destructive entry. */
+.item-menu__entry.is-destructive:not(:first-child) {
+  margin-top: 4px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
 }
 .item-menu__entry:disabled {
   color: var(--fg-faint);
