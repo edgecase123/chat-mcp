@@ -243,26 +243,95 @@ function sidebarItem({ label, target, online, active, kind, unread = 0 }) {
 
 function itemMenu({ kind, label }) {
   const handlers = {
+    prefill: (e) => prefillComposer(e.prefill),
+    copyName: () => copyTargetName(label),
+    leaveRoom: () => leaveRoomEntry(label),
     deleteRoom: () => deleteRoomEntry(label),
     kickPeer: () => kickPeer(label),
   };
-  const entries = menuEntriesFor(kind, label)
-    .map((e) => menuEntry(e.text, e.title, handlers[e.action]));
+
   return h('div', {
     className: 'item-menu',
     role: 'menu',
     onclick: (e) => e.stopPropagation(),
-  }, entries);
+  }, menuEntriesFor(kind, label).map((e) => menuEntry(e, handlers[e.action])));
 }
 
-function menuEntry(text, title, action) {
+function menuEntry(entry, action) {
+  // 🛑 A MISSING HANDLER IS A DEAD BUTTON, NOT AN ERROR. onclick closes the
+  // menu before it would throw, so an action added in logic.js and never
+  // wired here reads as "the app is fine". Disabled says otherwise. Not a
+  // throw: one bad key must not blank the sidebar. Found by claude1.
+  if (!action) {
+    console.error(`sidebar menu: no handler for action "${entry.action}"`);
+
+    return h('button', {
+      className: 'item-menu__entry',
+      type: 'button',
+      role: 'menuitem',
+      disabled: true,
+      title: `${entry.text} is not wired up`,
+    }, [entry.text]);
+  }
+
   return h('button', {
-    className: 'item-menu__entry is-destructive',
+    // 🛑 is-destructive is per-entry now. Every entry carried it while Kick
+    // and Delete were the only two, so a new neighbour would have rendered
+    // in the danger colour and read as destructive.
+    className: `item-menu__entry${entry.destructive ? ' is-destructive' : ''}`,
     type: 'button',
     role: 'menuitem',
-    title,
-    onclick: () => { closeItemMenu(); action(); },
-  }, [text]);
+    title: entry.title,
+    onclick: () => { closeItemMenu(); action(entry); },
+  }, [entry.text]);
+}
+
+/**
+ * Opens a command in the composer rather than running it.
+ *
+ * 🛑 NOTHING IS SENT. The menu cannot know the message text, and a window
+ * .prompt would lose name completion, sent-line history and Shift-Enter.
+ * Ruled by lee.
+ *
+ * Replaces whatever is there: the menu is a fresh start, and appending to a
+ * half-typed line produces a command in the middle of a sentence.
+ */
+function prefillComposer(text) {
+  el.composerInput.value = text;
+  el.composerInput.focus();
+  el.composerInput.setSelectionRange(text.length, text.length);
+  // The composer's own input handler drives the completion list, and setting
+  // .value does not fire it.
+  el.composerInput.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+async function copyTargetName(label) {
+  try {
+    await writeClipboard(label);
+    toast(`copied ${label}`, 'info');
+  } catch (e) {
+    // Never a success toast on a failed write; the clipboard is unreadable
+    // from here, so the toast is the only thing that could mislead.
+    toast(`copy failed: ${e.message}`, 'error');
+  }
+}
+
+/**
+ * Leaves a room from its own row, which the `/leave` command cannot do —
+ * that one acts on the CURRENT target, so leaving another room meant
+ * switching to it first.
+ */
+async function leaveRoomEntry(room) {
+  try {
+    await api('/api/rooms/leave', { method: 'POST', body: JSON.stringify({ room }) });
+    // Only the room you were IN leaves you with nothing to look at.
+    if (state.currentTarget === room) state.currentTarget = null;
+    toast(`left ${room}`, 'info');
+    await fetchWhoami();
+    renderSidebar(); renderPaneHeader(); renderMessages();
+  } catch (e) {
+    toast(`leave failed: ${e.message}`, 'error');
+  }
 }
 
 async function deleteRoomEntry(room) {

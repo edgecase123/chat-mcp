@@ -141,19 +141,81 @@ export function moveIndex(index, delta, length) {
 }
 
 /**
- * A peer and a room take different verbs. Kick removes a peer from the bus;
- * a room's equivalent is deleting the room for everyone.
+ * Commands a sidebar menu may open in the composer.
+ *
+ * ⚠️ NOT DERIVED FROM THE COMMAND TABLE, which lives in app.js. A rename
+ * there leaves a prefill here pointing at a command that no longer exists,
+ * and nothing fails. The test below pins these three names so the rename at
+ * least breaks a test; grep this file when renaming a command.
+ */
+const MENU_COMMANDS = { dispatch: 'dispatch', broadcast: 'broadcast', alert: 'alert' };
+
+/**
+ * What the `...` menu on a sidebar row offers.
+ *
+ * 🛑 THE DESTRUCTIVE ENTRY IS LAST AND THERE IS EXACTLY ONE. It used to be
+ * the only entry, so the menu could not be opened by accident into anything
+ * but Kick or Delete. Now that it has neighbours, position is what keeps a
+ * mis-click off it.
+ *
+ * A peer and a room take different verbs throughout: dispatch against
+ * broadcast, kick against delete. Leave has no peer equivalent, because a DM
+ * is not a membership.
+ *
+ * An entry carrying `prefill` writes that text into the composer and sends
+ * nothing. Its label ends in an ellipsis to say so.
  *
  * @param {'room' | 'peer'} kind
  * @param {string} label
- * @returns {{ text: string, title: string, action: 'deleteRoom' | 'kickPeer' }[]}
+ * @returns {{ text: string, title: string, action: string, prefill?: string,
+ *             destructive?: boolean }[]}
  */
 export function menuEntriesFor(kind, label) {
   if (kind === 'room') {
-    return [{ text: 'Delete', title: `Delete ${label} for everyone`, action: 'deleteRoom' }];
+    return [
+      {
+        text: 'Broadcast\u2026',
+        title: `Hand a task to everyone in ${label}`,
+        action: 'prefill',
+        prefill: `/${MENU_COMMANDS.broadcast} ${label} `,
+      },
+      {
+        text: 'Alert\u2026',
+        title: `Send ${label} something urgent`,
+        action: 'prefill',
+        prefill: `/${MENU_COMMANDS.alert} ${label} `,
+      },
+      { text: 'Copy name', title: `Copy ${label} to the clipboard`, action: 'copyName' },
+      {
+        text: 'Leave',
+        title: `Leave ${label}. It stays for everyone else.`,
+        action: 'leaveRoom',
+      },
+      {
+        text: 'Delete',
+        title: `Delete ${label} for everyone`,
+        action: 'deleteRoom',
+        destructive: true,
+      },
+    ];
   }
 
-  return [{ text: 'Kick', title: `Remove ${label} from the bus`, action: 'kickPeer' }];
+  return [
+    {
+      text: 'Dispatch\u2026',
+      title: `Hand a task to ${label}`,
+      action: 'prefill',
+      prefill: `/${MENU_COMMANDS.dispatch} ${label} `,
+    },
+    {
+      text: 'Alert\u2026',
+      title: `Send ${label} something urgent`,
+      action: 'prefill',
+      prefill: `/${MENU_COMMANDS.alert} ${label} `,
+    },
+    { text: 'Copy handle', title: `Copy ${label} to the clipboard`, action: 'copyName' },
+    { text: 'Kick', title: `Remove ${label} from the bus`, action: 'kickPeer', destructive: true },
+  ];
 }
 
 /** Chars a handle or room name can contain, so the token ends where one does. */
@@ -372,8 +434,10 @@ export function cheatSheet(commands, labels) {
     'SIDEBAR',
     '  ' + pad('click a row') + '— open that peer or room',
     '  ' + pad('(3) beside a row') + '— unread messages waiting there',
-    '  ' + pad('... on a peer') + '— Kick, which removes them from the bus',
-    '  ' + pad('... on a room') + '— Delete, which removes it for EVERYONE',
+    '  ' + pad('... on a peer') + '— Dispatch, Alert, Copy handle, Kick',
+    '  ' + pad('... on a room') + '— Broadcast, Alert, Copy name, Leave, Delete',
+    '  ' + pad('an entry ending "..."') + '— opens in the composer, sends nothing',
+    '  ' + pad('the entry below the rule') + ' — destructive, and asks first',
     '',
     'READING',
     '  ' + pad('End') + '— jump to the newest message',
