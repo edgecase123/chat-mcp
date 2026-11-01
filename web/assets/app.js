@@ -925,7 +925,20 @@ el.jumpNewest.addEventListener('click', jumpToNewest);
 // Anywhere else closes an open (...) menu. The button and the menu both
 // stopPropagation, so this only ever fires for a click outside them.
 document.addEventListener('click', closeItemMenu);
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeItemMenu(); });
+// 🛑 ONE LADDER, ONE HANDLER. Escape means "back out of the innermost thing",
+// and focusing the composer is the outermost case of that. Split across two
+// handlers it would close a menu AND move focus on the same keystroke.
+//
+// The composer's own keydown handles the popover case and stops there, so by
+// the time this runs the popover is already dealt with.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (state.suggest) return;          // the composer handler owns this one
+  if (state.openMenuFor !== null) { closeItemMenu(); return; }
+  // ⚠️ Deliberately does NOT clear the input. Escape must never discard a
+  // draft, and focusing a field that is already focused is a harmless no-op.
+  el.composerInput.focus();
+});
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'End' || e.ctrlKey || e.metaKey || e.altKey) return;
