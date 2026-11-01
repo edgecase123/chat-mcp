@@ -755,11 +755,22 @@ html, body {
   opacity: 0.45;
   transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
 }
-/* Twice the 13px base. align-self keeps the taller glyph from dragging the
-   meta row's baseline down with it, which would move the author name. */
+/* Twice the 13px base, in a box the size of the row.
+   🛑 align-self FIXES THE BASELINE, NOT THE HEIGHT. .message__meta sets no
+   height and no min-height, so a flex line is as tall as its tallest item
+   however that item is aligned. A 26px glyph with 2px padding made the button
+   the tallest thing in the row and grew EVERY message in the stream.
+   The fixed height holds the row; overflow: visible lets the glyph exceed it.
+   Caught by claude1, ruled by lee. */
 .message__copy {
   font-size: 26px;
   align-self: center;
+  height: 17px;
+  padding: 0 4px;
+  overflow: visible;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .message:hover .message__copy,
 .message:hover .message__dismiss,
