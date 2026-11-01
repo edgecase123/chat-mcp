@@ -285,8 +285,16 @@ function fmtTime(ts) {
 // scrollHeight makes an equality test false when it looks true.
 const BOTTOM_TOLERANCE_PX = 24;
 
+// How far up counts as "reading history" rather than "glancing back". One
+// viewport, floored, so a short window does not arm it on a nudge.
+const JUMP_VISIBLE_AFTER_PX = 240;
+
+function distanceFromBottom() {
+  return el.messages.scrollHeight - el.messages.scrollTop - el.messages.clientHeight;
+}
+
 function isPinnedToBottom() {
-  return el.messages.scrollHeight - el.messages.scrollTop - el.messages.clientHeight <= BOTTOM_TOLERANCE_PX;
+  return distanceFromBottom() <= BOTTOM_TOLERANCE_PX;
 }
 
 function jumpToNewest() {
@@ -297,8 +305,13 @@ function jumpToNewest() {
 
 function renderJumpNewest() {
   const n = state.unreadBelow;
-  el.jumpNewest.hidden = n === 0;
-  if (n > 0) el.jumpNewest.textContent = `${n} new message${n === 1 ? '' : 's'} \u2193  (End)`;
+  const farUp = distanceFromBottom() > Math.max(JUMP_VISIBLE_AFTER_PX, el.messages.clientHeight);
+  el.jumpNewest.hidden = n === 0 && !farUp;
+  if (el.jumpNewest.hidden) return;
+  const label = n > 0
+    ? `${n} new message${n === 1 ? '' : 's'} \u2193  (End)`
+    : 'Jump to newest \u2193  (End)';
+  if (el.jumpNewest.textContent !== label) el.jumpNewest.textContent = label;
 }
 
 function resetStreamPosition() {
@@ -800,10 +813,10 @@ async function boot() {
 
 // Scrolling back down by hand is the same intent as pressing the jump.
 el.messages.addEventListener('scroll', () => {
-  if (state.unreadBelow !== 0 && isPinnedToBottom()) {
-    state.unreadBelow = 0;
-    renderJumpNewest();
-  }
+  if (state.unreadBelow !== 0 && isPinnedToBottom()) state.unreadBelow = 0;
+  // Every scroll, not just the ones that clear unread: the badge also has to
+  // appear when you scroll up with nothing new waiting.
+  renderJumpNewest();
 });
 
 el.jumpNewest.addEventListener('click', jumpToNewest);
