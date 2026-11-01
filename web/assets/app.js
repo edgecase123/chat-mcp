@@ -521,20 +521,45 @@ function renderApprovals() {
 
 // ── Slash commands ───────────────────────────────────────────────────────
 
-/** Small transient toast for command output. Sits over the message pane
- *  and fades after ~2.5s. Preferred over alert() for anything non-blocking. */
+// 2.5s was not enough to read /help, and it timed out mid-read with no way
+// to stop it. Pointing at it now holds it open indefinitely.
+const TOAST_MS = 7000;
+// Short, because you have just finished reading it.
+const TOAST_AFTER_HOVER_MS = 1200;
+
+function armToastDismiss(el, ms) {
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.classList.remove('is-visible'), ms);
+}
+
+/** Transient toast for command output. Sits over the message pane, holds
+ *  while the pointer is inside it, and scrolls when the content is tall. */
 function toast(msg, kind = 'info') {
   let el = document.getElementById('toast');
   if (!el) {
     el = document.createElement('div');
     el.id = 'toast';
+    // ⚠️ `.toast` had pointer-events: none, so these could never fire. The
+    // CSS now lets it take the pointer, which is what makes holding possible.
+    el.addEventListener('mouseenter', () => {
+      el._held = true;
+      el.classList.add('is-held');
+      clearTimeout(el._t);
+    });
+    el.addEventListener('mouseleave', () => {
+      el._held = false;
+      el.classList.remove('is-held');
+      armToastDismiss(el, TOAST_AFTER_HOVER_MS);
+    });
     document.body.appendChild(el);
   }
   el.textContent = msg;
-  el.className = `toast is-${kind}`;
+  // Rebuilt, so the held state has to be carried over: a toast replaced while
+  // the pointer is inside it would otherwise lose its outline and its hold.
+  el.className = `toast is-${kind}${el._held ? ' is-held' : ''}`;
   el.classList.add('is-visible');
-  clearTimeout(el._t);
-  el._t = setTimeout(() => el.classList.remove('is-visible'), 2500);
+  el.scrollTop = 0;
+  if (!el._held) armToastDismiss(el, TOAST_MS);
 }
 
 // 🛑 ONE table. The suggestion popover and /help both read it, and the switch
