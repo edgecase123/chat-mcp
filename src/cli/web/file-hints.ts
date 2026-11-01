@@ -41,6 +41,12 @@ export interface HintRoots {
 export function resolveHintQuery(token: string, { cwd, home }: HintRoots): HintQuery | null {
   if (token.includes('\0')) return null;
   // An absolute token has no root to be contained by.
+  //
+  // ⚠️ REDUNDANT WITH THE CONTAINMENT TEST BELOW, AND KEPT ON PURPOSE.
+  // path.resolve ignores the root when the tail is absolute, so isInside
+  // already refuses these. Measured: removing EITHER guard alone leaves the
+  // absolute tests green, and removing BOTH fails them. It stays because it
+  // refuses at the cheapest point and says so in one line.
   if (token.startsWith('/')) return null;
 
   const tilde = token === '~' || token.startsWith('~/');

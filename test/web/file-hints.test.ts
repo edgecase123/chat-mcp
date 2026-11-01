@@ -33,6 +33,10 @@ test('the rebuild keeps the shape the user typed, so accepting does not rewrite 
 test('🛑 an ABSOLUTE token is refused. There is no root to contain it.', () => {
   assert.equal(q('/etc/passwd'), null);
   assert.equal(q('/'), null);
+  // ⚠️ TWO GUARDS COVER THIS, so no single mutant can fail this test. The
+  // explicit startsWith check and the containment test each refuse it alone.
+  // Measured 2026-11-01: removing BOTH is what turns this red.
+  assert.equal(q('/proj/src/'), null, 'refused even when it names the root itself');
 });
 
 test('🛑 a token cannot climb OUT of the project folder', () => {
