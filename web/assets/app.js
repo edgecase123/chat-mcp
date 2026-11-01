@@ -14,6 +14,8 @@ const state = {
   discoverRooms: [],
   currentTarget: null, // e.g. "#poker" or "@alice"
   messages: [],
+  renderedCount: 0, // list length at last render, so a delta gives the unread count
+  unreadBelow: 0,   // messages that arrived while the reader was scrolled up
   approvals: [],
   theme: null, // set below
 };
@@ -26,6 +28,7 @@ const el = {
   paneTitle: document.getElementById('pane-title'),
   paneMeta: document.getElementById('pane-meta'),
   messages: document.getElementById('messages'),
+  jumpNewest: document.getElementById('jump-newest'),
   approvals: document.getElementById('approvals'),
   composer: document.getElementById('composer'),
   composerInput: document.getElementById('composer-input'),
@@ -190,14 +193,47 @@ function fmtTime(ts) {
   return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-function renderMessages() {
+// A position this close to the end counts as the bottom. A fractional
+// scrollHeight makes an equality test false when it looks true.
+const BOTTOM_TOLERANCE_PX = 24;
+
+function isPinnedToBottom() {
+  return el.messages.scrollHeight - el.messages.scrollTop - el.messages.clientHeight <= BOTTOM_TOLERANCE_PX;
+}
+
+function jumpToNewest() {
+  el.messages.scrollTo({ top: el.messages.scrollHeight, behavior: 'instant' });
+  state.unreadBelow = 0;
+  renderJumpNewest();
+}
+
+function renderJumpNewest() {
+  const n = state.unreadBelow;
+  el.jumpNewest.hidden = n === 0;
+  if (n > 0) el.jumpNewest.textContent = `${n} new message${n === 1 ? '' : 's'} \u2193  (End)`;
+}
+
+function resetStreamPosition() {
+  state.renderedCount = 0;
+  state.unreadBelow = 0;
+  renderJumpNewest();
+}
+
+function renderMessages({ forceBottom = false } = {}) {
+  // Measured BEFORE the wipe below destroys both of them.
+  const wasPinned = forceBottom || isPinnedToBottom();
+  const prevScrollTop = el.messages.scrollTop;
+  const arrived = Math.max(0, state.messages.length - state.renderedCount);
+
   el.messages.innerHTML = '';
   if (!state.currentTarget) {
     el.messages.appendChild(h('div', { className: 'messages__empty' }, ['Select a peer or room from the sidebar.']));
+    resetStreamPosition();
     return;
   }
   if (state.messages.length === 0) {
     el.messages.appendChild(h('div', { className: 'messages__empty' }, ['No messages yet.']));
+    resetStreamPosition();
     return;
   }
   for (const m of state.messages) {
@@ -213,9 +249,19 @@ function renderMessages() {
     const body = h('div', { className: 'message__body', html: m.body_html || '' });
     el.messages.appendChild(h('li', { className: cls }, [meta, body]));
   }
-  // Jump to newest. INSTANT, never animated: this runs on every room open,
-  // and a smooth scroll there reads as the view sliding away on its own.
-  el.messages.scrollTo({ top: el.messages.scrollHeight, behavior: 'instant' });
+  state.renderedCount = state.messages.length;
+
+  // Jump INSTANT, never animated: a smooth scroll on room open reads as the
+  // view sliding away on its own. Scrolled up, we hold position instead and
+  // offer the jump, so reading is never interrupted.
+  if (wasPinned) {
+    state.unreadBelow = 0;
+    el.messages.scrollTo({ top: el.messages.scrollHeight, behavior: 'instant' });
+  } else {
+    el.messages.scrollTop = prevScrollTop;
+    state.unreadBelow += arrived;
+  }
+  renderJumpNewest();
 }
 
 function renderPaneHeader() {
@@ -252,7 +298,7 @@ async function selectTarget(target) {
     console.error('fetchMessages failed', e);
     state.messages = [];
   }
-  renderMessages();
+  renderMessages({ forceBottom: true });
 }
 
 async function refresh() {
@@ -556,8 +602,27 @@ async function boot() {
   renderSidebar();
   renderPaneHeader();
   renderApprovals();
-  renderMessages();
+  renderMessages({ forceBottom: true });
   connectSse();
 }
+
+// Scrolling back down by hand is the same intent as pressing the jump.
+el.messages.addEventListener('scroll', () => {
+  if (state.unreadBelow !== 0 && isPinnedToBottom()) {
+    state.unreadBelow = 0;
+    renderJumpNewest();
+  }
+});
+
+el.jumpNewest.addEventListener('click', jumpToNewest);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'End' || e.ctrlKey || e.metaKey || e.altKey) return;
+  // End is a caret key in the composer. Only claim it when there is no text
+  // for the caret to move through.
+  if (document.activeElement === el.composerInput && el.composerInput.value !== '') return;
+  e.preventDefault();
+  jumpToNewest();
+});
 
 boot();

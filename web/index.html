@@ -26,7 +26,13 @@
            a supervised agent is STOPPED until one of these is answered, so it
            outranks anything being said. -->
       <section class="approvals" id="approvals" aria-live="assertive" aria-label="Pending approvals" hidden></section>
-      <ol class="messages" id="messages" aria-live="polite" aria-relevant="additions"></ol>
+      <div class="pane__stream" id="messages-stream">
+        <ol class="messages" id="messages" aria-live="polite" aria-relevant="additions"></ol>
+        <!-- Overlaid, not a flex row: a row appearing would shift the history
+             the reader is in the middle of, which is the interruption this
+             whole affordance exists to prevent. -->
+        <button id="jump-newest" class="jump-newest" type="button" hidden></button>
+      </div>
       <form id="composer" class="composer">
         <textarea id="composer-input" class="composer__input" placeholder="Type a message. Shift-Enter for newline." rows="1" disabled></textarea>
         <button type="submit" id="composer-send" class="composer__send" disabled>Send</button>
