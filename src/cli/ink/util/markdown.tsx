@@ -6,7 +6,7 @@ export type Token =
   | { kind: 'bold'; value: string }
   | { kind: 'italic'; value: string }
   | { kind: 'code'; value: string }
-  | { kind: 'code-block'; value: string }
+  | { kind: 'code-block'; value: string; lang?: string }
   | { kind: 'link'; label: string; url: string }
   | { kind: 'table'; header: string[]; rows: string[][] };
 
@@ -127,13 +127,20 @@ export function tokenize(input: string): Token[] {
         // there's a newline before the first close (```lang\ncode\n```),
         // treat that first line as an optional language tag and skip it.
         let contentStart = i + 3;
+        let lang: string | undefined;
         const firstNl = input.indexOf('\n', contentStart);
-        if (firstNl >= 0 && firstNl < close) contentStart = firstNl + 1;
+        if (firstNl >= 0 && firstNl < close) {
+          // That first line is the language tag. It was discarded before, so
+          // a ```php block arrived indistinguishable from a plain one.
+          const tag = input.slice(contentStart, firstNl).trim();
+          if (/^[A-Za-z0-9+#_-]{1,20}$/.test(tag)) lang = tag.toLowerCase();
+          contentStart = firstNl + 1;
+        }
         // Strip a trailing newline right before the close.
         let contentEnd = close;
         if (input[contentEnd - 1] === '\n') contentEnd -= 1;
         flush();
-        tokens.push({ kind: 'code-block', value: input.slice(contentStart, contentEnd) });
+        tokens.push({ kind: 'code-block', value: input.slice(contentStart, contentEnd), lang });
         i = close + 3;
         continue;
       }

@@ -396,6 +396,34 @@ html, body {
   background: none;
   padding: 0;
 }
+/* highlight.js, mapped onto the design tokens so it follows the theme
+   instead of shipping a second palette. */
+.message__body .hljs-comment,
+.message__body .hljs-quote { color: var(--fg-faint); font-style: italic; }
+.message__body .hljs-keyword,
+.message__body .hljs-selector-tag,
+.message__body .hljs-literal,
+.message__body .hljs-doctag { color: var(--accent); font-weight: 600; }
+.message__body .hljs-string,
+.message__body .hljs-meta .hljs-string { color: var(--self); }
+.message__body .hljs-number,
+.message__body .hljs-symbol,
+.message__body .hljs-bullet { color: var(--dispatch, var(--accent)); }
+.message__body .hljs-title,
+.message__body .hljs-title.function_,
+.message__body .hljs-section { color: var(--fg); font-weight: 600; }
+.message__body .hljs-variable,
+.message__body .hljs-template-variable,
+.message__body .hljs-attr,
+.message__body .hljs-attribute { color: var(--fg); }
+.message__body .hljs-type,
+.message__body .hljs-built_in,
+.message__body .hljs-class .hljs-title { color: var(--accent); }
+.message__body .hljs-deletion { color: var(--danger); }
+.message__body .hljs-addition { color: var(--self); }
+.message__body .hljs-emphasis { font-style: italic; }
+.message__body .hljs-strong { font-weight: 700; }
+
 .message__body strong { font-weight: 600; }
 .message__body em { font-style: italic; }
 .message__body a {
