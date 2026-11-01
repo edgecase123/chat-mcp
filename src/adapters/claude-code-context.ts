@@ -242,7 +242,9 @@ async function install(opts: AdapterInstallOptions): Promise<AdapterResult> {
     `  settings: ${settingsPath}${changed ? '' : ' (already up to date)'}`,
     '',
     'Restart Claude Code (or open a new session) to pick up the PreToolUse hook.',
-    'From that session forward, every tool call reports an estimated gauge to chat-mcp.',
+    'The gauge stays empty until that session makes its first tool call.',
+    'Any tool does it, including whoami. Opening the session is not enough.',
+    'After that call, list_agents, whoami and the sidebar CTX column all show it.',
     scope === 'local' ? 'Note: .claude/settings.local.json is user-local; add it to .gitignore if it is not already.' : '',
   ].filter(Boolean).join('\n');
 
