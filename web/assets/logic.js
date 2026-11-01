@@ -240,3 +240,69 @@ export function mentionSuggestionsFor(value, caret, ctx) {
 function bareName(handle) {
   return handle.replace(/^#/, '');
 }
+
+/** The CLI's ring size, mirrored so both surfaces forget at the same point. */
+export const HISTORY_CAP = 100;
+
+/** @typedef {{ entries: string[], index: number | null, draft: string | null }} History */
+
+/** Consecutive duplicates collapse, because sending the same line twice is
+ *  one thing to recall, not two. */
+export function pushHistory(entries, line, cap = HISTORY_CAP) {
+  const trimmed = line.trim();
+  if (!trimmed) return entries;
+
+  const next = entries[entries.length - 1] === trimmed ? entries : [...entries, trimmed];
+
+  return next.length > cap ? next.slice(next.length - cap) : next;
+}
+
+/**
+ * One step through the ring. `delta` is -1 for older and +1 for newer.
+ *
+ * 🛑 THE FIRST PRESS SAVES THE DRAFT. Without it, reaching for an old line
+ * destroys the one you were writing, and stepping back down cannot restore it.
+ *
+ * Returns null when nothing should change, so the caller needs no guards.
+ *
+ * @param {History} hist
+ * @param {number} delta
+ * @param {string} current what the composer holds right now
+ * @returns {{ index: number | null, draft: string | null, value: string } | null}
+ */
+export function historyStep({ entries, index, draft }, delta, current) {
+  if (delta < 0) {
+    if (entries.length === 0) return null;
+    if (index === null) {
+      const newest = entries.length - 1;
+
+      return { index: newest, draft: current, value: entries[newest] };
+    }
+    if (index === 0) return null;
+
+    return { index: index - 1, draft, value: entries[index - 1] };
+  }
+
+  if (index === null) return null;
+  // Past the newest entry is the draft you were writing, not an entry.
+  if (index >= entries.length - 1) return { index: null, draft: null, value: draft ?? '' };
+
+  return { index: index + 1, draft, value: entries[index + 1] };
+}
+
+/**
+ * 🛑 THE CLI COMPOSER IS ONE LINE AND THIS ONE IS NOT. Shift-Enter makes a
+ * newline, so taking ArrowUp unconditionally would stop the caret moving
+ * between lines. History only claims the key at the edge it would leave.
+ *
+ * @param {string} value
+ * @param {number} caret
+ * @param {number} delta -1 for older, +1 for newer
+ */
+export function historyKeyApplies(value, caret, delta) {
+  const pos = Math.max(0, Math.min(caret, value.length));
+
+  return delta < 0
+    ? !value.slice(0, pos).includes('\n')
+    : !value.slice(pos).includes('\n');
+}
