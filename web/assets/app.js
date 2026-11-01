@@ -630,11 +630,13 @@ function moveSuggest(delta) {
 function acceptSuggestion(i) {
   const s = state.suggest;
   if (!s) return;
-  el.composerInput.value = s.items[i ?? s.index].insert;
+  const item = s.items[i ?? s.index];
+  el.composerInput.value = item.insert;
   closeSuggest();
   el.composerInput.focus();
-  // Accepting "/dm " should offer the peers straight away.
-  updateSuggest();
+  // Only a command that TAKES an argument reopens, to offer it. "/help"
+  // reopening on itself is what left Enter unable to send.
+  if (item.insert.endsWith(' ')) updateSuggest();
 }
 
 /** Returns true if the input was consumed as a command (do not send).
@@ -724,8 +726,18 @@ el.composerInput.addEventListener('keydown', (ev) => {
     if (ev.key === 'ArrowUp') { ev.preventDefault(); return moveSuggest(-1); }
     if (ev.key === 'Escape') { ev.preventDefault(); return closeSuggest(); }
     if (ev.key === 'Tab' || (ev.key === 'Enter' && !ev.shiftKey)) {
-      ev.preventDefault();
-      return acceptSuggestion();
+      // 🛑 Nothing left to complete: the input ALREADY equals what accepting
+      // would insert. Enter has to send, or a finished command is stuck until
+      // you type a space. "/who" still reaches "/whoami" with ArrowDown,
+      // because that item's insert differs from the input.
+      const done = state.suggest.items[state.suggest.index].insert === el.composerInput.value;
+      if (!done) {
+        ev.preventDefault();
+        return acceptSuggestion();
+      }
+      closeSuggest();
+      if (ev.key === 'Tab') { ev.preventDefault(); return; }
+      // Enter falls through to the send rule below.
     }
   }
   if (ev.key === 'Enter' && !ev.shiftKey) {
