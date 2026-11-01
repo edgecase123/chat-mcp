@@ -288,30 +288,53 @@ test('a caret past the end of the value does not throw', () => {
 
 // ── Enter on a mention, which the whole-value rule cannot answer ─────────
 
-test('🛑 Enter SENDS once the typed token already names the active item', () => {
-  const s = mentionSuggestionsFor('#claude1', 8, MENTION_CTX)!;
-  assert.equal(s.items[s.index].name, 'claude1');
-  assert.equal(enterShouldSend(s, '#claude1'), true, 'otherwise Enter re-accepts forever');
+test('🛑 Enter SENDS once the typed token IS the name, trigger included', () => {
+  const s = mentionSuggestionsFor('#gate', 5, MENTION_CTX)!;
+  assert.equal(s.items[s.index].name, '#gate');
+  assert.equal(enterShouldSend(s, '#gate'), true, 'otherwise Enter re-accepts forever');
 });
 
 test('Enter ACCEPTS a half-typed name', () => {
-  const s = mentionSuggestionsFor('#clau', 5, MENTION_CTX)!;
-  assert.equal(enterShouldSend(s, '#clau'), false);
+  assert.equal(enterShouldSend(mentionSuggestionsFor('#gat', 4, MENTION_CTX)!, '#gat'), false);
+  assert.equal(enterShouldSend(mentionSuggestionsFor('#clau', 5, MENTION_CTX)!, '#clau'), false);
+});
+
+test('🛑 A FULLY TYPED PEER STILL COMPLETES, because its "#" must come off', () => {
+  // The defect this pins: comparing the BARE name made "#gate" send with a
+  // stray "#" when gate was a peer, while "#clau" completed to "claude1" with
+  // none. How much you had typed decided what got sent.
+  const ctx = { peers: ['gate'], rooms: [] };
+  const s = mentionSuggestionsFor('#gate', 5, ctx)!;
+  assert.equal(s.items[0].insert, 'gate ', 'the completion drops the trigger');
+  assert.equal(enterShouldSend(s, '#gate'), false, 'so there IS something left to do');
+});
+
+test('a room and a peer of the same name diverge, and both are right', () => {
+  const asRoom = mentionSuggestionsFor('#gate', 5, { peers: [], rooms: ['#gate'] })!;
+  const asPeer = mentionSuggestionsFor('#gate', 5, { peers: ['gate'], rooms: [] })!;
+  assert.equal(enterShouldSend(asRoom, '#gate'), true, 'the # is part of the room name');
+  assert.equal(enterShouldSend(asPeer, '#gate'), false, 'the # was only a trigger');
+});
+
+test('a mistyped case completes rather than sending, so the name is normalised', () => {
+  const s = mentionSuggestionsFor('#GATE', 5, MENTION_CTX)!;
+  assert.equal(s.items[0].insert, '#gate ');
+  assert.equal(enterShouldSend(s, '#GATE'), false);
 });
 
 test('🛑 the whole-value test would have been WRONG here, which is the point', () => {
   // The insert carries the rest of the line, so it never equals the value.
-  const s = mentionSuggestionsFor('hey #claude1', 12, MENTION_CTX)!;
-  assert.notEqual(s.items[s.index].insert, 'hey #claude1', 'insert differs from value');
-  assert.equal(enterShouldSend(s, 'hey #claude1'), true, 'and Enter must still send');
+  const s = mentionSuggestionsFor('hey #gate', 9, MENTION_CTX)!;
+  assert.notEqual(s.items[s.index].insert, 'hey #gate', 'insert differs from value');
+  assert.equal(enterShouldSend(s, 'hey #gate'), true, 'and Enter must still send');
 });
 
 test('after ArrowDown, Enter completes the newly active name instead', () => {
-  // "claude" is an exact match AND a prefix of "claude1", which is the only
+  // "#gate" is an exact match AND a prefix of "#gateway", which is the only
   // shape where the active item can stop being the typed one.
-  const s = mentionSuggestionsFor('#claude', 7, { peers: ['claude', 'claude1'], rooms: [] })!;
-  assert.equal(enterShouldSend(s, '#claude'), true, 'the exact match sends');
+  const s = mentionSuggestionsFor('#gate', 5, { peers: [], rooms: ['#gate', '#gateway'] })!;
+  assert.equal(enterShouldSend(s, '#gate'), true, 'the exact match sends');
   s.index = moveIndex(s.index, 1, s.items.length);
-  assert.equal(s.items[s.index].name, 'claude1');
-  assert.equal(enterShouldSend(s, '#claude'), false, 'claude1 is not what is typed');
+  assert.equal(s.items[s.index].name, '#gateway');
+  assert.equal(enterShouldSend(s, '#gate'), false, '#gateway is not what is typed');
 });

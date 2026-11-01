@@ -115,10 +115,14 @@ export function enterShouldSend(suggest, value) {
   const item = suggest.items[suggest.index];
 
   // 🛑 A MENTION CANNOT USE THE WHOLE-VALUE TEST. Its insert carries the rest
-  // of the line, so "hey #ali" never equals "@alice" and Enter would re-accept
-  // forever — the stuck-command bug this rule was written to fix, returning
-  // through the rule itself. Compare the TOKEN instead.
-  if (suggest.kind === 'mention') return suggest.query === item.name.replace(/^#/, '').toLowerCase();
+  // of the line, so "hey #ali" never equals "alice" and Enter would re-accept
+  // forever. That is the stuck-command bug this rule was written to fix,
+  // returning through the rule itself. Compare the TYPED TOKEN instead.
+  //
+  // 🛑 THE TOKEN INCLUDES THE "#". Comparing the bare name let "#gate" send
+  // with a stray "#" when gate was a PEER, while "#clau" completed to
+  // "claude1" with none. How much you had typed decided what got sent.
+  if (suggest.kind === 'mention') return suggest.typed === item.name;
 
   return item.insert === value;
 }
@@ -229,7 +233,7 @@ export function mentionSuggestionsFor(value, caret, ctx) {
       };
     });
 
-  return items.length ? { items, index: 0, kind: 'mention', query: q } : null;
+  return items.length ? { items, index: 0, kind: 'mention', typed: `#${token.query}` } : null;
 }
 
 /** A room's own "#" is part of its name; the trigger "#" is not. */
