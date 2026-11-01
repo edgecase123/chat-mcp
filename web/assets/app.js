@@ -95,6 +95,15 @@ async function fetchMessages(target) {
   if (!target) { state.messages = []; return; }
   const messages = await api(`/api/messages?target=${encodeURIComponent(target)}&limit=200`);
   state.messages = messages;
+
+  // Marking read is a separate POST on purpose: a mutation on the GET above
+  // would fire from an <img> tag on any page the operator visits.
+  if (target.startsWith('#') && messages.length > 0) {
+    const newest = messages.reduce((max, m) => Math.max(max, m.id), 0);
+    try {
+      await api('/api/rooms/read', { method: 'POST', body: JSON.stringify({ room: target, up_to_id: newest }) });
+    } catch { /* the badge is stale until the next open; not worth a toast */ }
+  }
 }
 
 async function sendMessage(target, body, kind = 'chat') {

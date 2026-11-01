@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { createServer, type Server } from 'node:http';
+import { createServer, request as httpRequest, type Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { migrate } from '../../../src/storage/db.js';
 import * as dao from '../../../src/storage/dao.js';
@@ -31,10 +31,12 @@ async function harness(handle = 'operator'): Promise<Harness> {
   for (const h of [handle, 'peer-a', 'peer-b']) {
     dao.upsertAgent(db, { handle: h, pid: 1, session_id: h, display_name: h, metadata: {} });
   }
-  const ctx: RouteContext = { handle, db, sseClients: new Set() };
+  // Assigned after listen; every request is served after that.
+  const ctx: RouteContext = { handle, db, sseClients: new Set(), port: 0 };
   const server = createServer((req, res) => { void route(req, res, ctx); });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
+  ctx.port = port;
 
   return { db, server, origin: `http://127.0.0.1:${port}` };
 }
@@ -45,6 +47,36 @@ function close(h: Harness): void {
   h.server.closeAllConnections();
   h.server.close();
   h.db.close();
+}
+
+/**
+ * 🛑 RAW, BECAUSE fetch() CANNOT SET `Host`. It is a forbidden header name and
+ * undici drops it silently, so a rebinding test written with fetch quietly
+ * tests the Origin check instead and passes for the wrong reason.
+ */
+function raw(
+  h: Harness,
+  opts: { path: string; method?: string; host?: string; origin?: string; body?: string },
+): Promise<{ status: number; body: string }> {
+  const { port } = new URL(h.origin);
+  const headers: Record<string, string> = {};
+  if (opts.host !== undefined) headers.Host = opts.host;
+  if (opts.origin !== undefined) headers.Origin = opts.origin;
+
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      { host: '127.0.0.1', port: Number(port), path: opts.path, method: opts.method ?? 'GET', headers },
+      (res) => {
+        let text = '';
+        res.setEncoding('utf8');
+        res.on('data', (c: string) => { text += c; });
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: text }));
+      },
+    );
+    req.on('error', reject);
+    if (opts.body !== undefined) req.write(opts.body);
+    req.end();
+  });
 }
 
 async function post(h: Harness, path: string, body: unknown, origin?: string): Promise<Response> {
@@ -90,6 +122,48 @@ test('the guard reads Origin, not Content-Type: text/plain is refused too', asyn
 
   assert.equal(res.status, 403);
   assert.notEqual(dao.getAgent(h.db, 'peer-a'), null);
+  close(h);
+});
+
+test('🚨 DNS REBINDING: a matching Host and Origin pair is still refused', async () => {
+  const h = await harness();
+  // An attacker who points evil.example at 127.0.0.1 makes the browser send
+  // BOTH headers as evil.example. Compared against each other they match,
+  // and the request is genuinely same-origin, so replies are readable too.
+  const evil = `evil.example:${new URL(h.origin).port}`;
+  const res = await raw(h, {
+    path: '/api/kick', method: 'POST',
+    host: evil, origin: `http://${evil}`,
+    body: JSON.stringify({ handle: 'peer-a' }),
+  });
+
+  assert.equal(res.status, 403);
+  assert.match(res.body, /unexpected host/);
+  assert.notEqual(dao.getAgent(h.db, 'peer-a'), null, 'rebinding kicked the agent');
+  close(h);
+});
+
+test('a rebound GET is refused too, though it carries no Origin to check', async () => {
+  const h = await harness();
+  const evil = `evil.example:${new URL(h.origin).port}`;
+  // An <img> or <script> load sends no Origin at all, so only the Host
+  // check can stop this one.
+  const res = await raw(h, { path: '/api/whoami', host: evil });
+
+  assert.equal(res.status, 403);
+  close(h);
+});
+
+test('localhost is accepted as well as 127.0.0.1, since both reach the same server', async () => {
+  const h = await harness();
+  const port = new URL(h.origin).port;
+  const res = await raw(h, {
+    path: '/api/kick', method: 'POST',
+    host: `localhost:${port}`, origin: `http://localhost:${port}`,
+    body: JSON.stringify({ handle: 'nobody' }),
+  });
+
+  assert.equal(res.status, 404, 'a legitimate localhost caller was blocked');
   close(h);
 });
 
