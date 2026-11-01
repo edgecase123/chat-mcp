@@ -384,3 +384,77 @@ export function cheatSheet(commands, labels) {
     'This sheet is not saved. It disappears when you switch away.',
   ].join('\n');
 }
+
+/** Path chars. Includes "/" and "~", which the "#" token deliberately excludes. */
+const PATH_BODY = /[A-Za-z0-9._~\-/]/;
+
+/**
+ * The `@path` token under the caret, or null.
+ *
+ * 🛑 "@" IS FOR FILE PATHS AND "#" IS FOR NAMES. Ruled by lee. The two tokens
+ * must not both answer, or accepting one inserts the other's text.
+ *
+ * Same two rules as the "#" token: the trigger opens a word, and the token
+ * runs to the end of that word rather than stopping at the caret.
+ *
+ * @param {string} value
+ * @param {number} caret
+ * @returns {{ query: string, start: number, end: number } | null}
+ */
+export function atTokenAt(value, caret) {
+  if (value.startsWith('/') && !value.includes('\n')) return null;
+
+  const pos = Math.max(0, Math.min(caret, value.length));
+  const upto = value.slice(0, pos);
+  const at = upto.lastIndexOf('@');
+  if (at < 0) return null;
+
+  const before = at === 0 ? '' : upto[at - 1];
+  if (before !== '' && !/\s/.test(before)) return null;
+
+  let end = at + 1;
+  while (end < value.length && PATH_BODY.test(value[end])) end += 1;
+  if (end < pos) return null;
+
+  return { query: value.slice(at + 1, pos), start: at, end };
+}
+
+/**
+ * Turns the server's hints into composer items.
+ *
+ * Each hint's `value` already carries its own "@" and its directory, so it
+ * replaces the whole token rather than being appended to it.
+ *
+ * 🛑 A DIRECTORY GETS NO TRAILING SPACE, so accepting it reopens the list and
+ * you keep drilling down. A file gets one, because it is finished.
+ *
+ * @param {{ value: string, kind: 'dir' | 'file' }[]} hints
+ * @param {string} value
+ * @param {number} caret
+ */
+export function pathSuggestionsFor(hints, value, caret) {
+  const token = atTokenAt(value, caret);
+  if (!token || hints.length === 0) return null;
+
+  const tail = value.slice(token.end);
+
+  const items = hints.map((hint) => {
+    const dir = hint.kind === 'dir';
+    const pad = dir || /^\s/.test(tail) ? '' : ' ';
+    const head = value.slice(0, token.start) + hint.value + pad;
+
+    // 🛑 reopen is EXPLICIT, not sniffed from a trailing space. A directory
+    // inserts no space, so acceptReopens would close the list and the
+    // drill-down would stop at the first level.
+    return {
+      insert: head + tail,
+      caret: head.length,
+      name: hint.value,
+      arg: '',
+      desc: hint.kind,
+      reopen: dir,
+    };
+  });
+
+  return { items, index: 0, kind: 'path', typed: `@${token.query}` };
+}

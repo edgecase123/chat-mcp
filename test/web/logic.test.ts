@@ -13,8 +13,10 @@ import {
   pushHistory,
   historyStep,
   historyKeyApplies,
+  atTokenAt,
   cheatSheet,
   messageMarkdown,
+  pathSuggestionsFor,
   nextUnreadBelow,
   shouldShowJump,
   suggestionsFor,
@@ -568,4 +570,89 @@ test('an empty command table still produces the gesture half', () => {
   const sheet = cheatSheet([], LABELS);
   assert.ok(sheet.includes('COMPOSER'));
   assert.ok(!sheet.includes('CONVERSATION'), 'no headings without commands');
+});
+
+// ── "@" file path hints ─────────────────────────────────────────────────
+
+const HINTS = [
+  { value: '@src/', kind: 'dir' as const },
+  { value: '@setup.ts', kind: 'file' as const },
+];
+const pathAccept = (value: string, caret: number, hints = HINTS) => {
+  const s = pathSuggestionsFor(hints, value, caret);
+
+  return s && { items: s.items.map((i) => ({ insert: i.insert, caret: i.caret, reopen: i.reopen })), typed: s.typed };
+};
+
+test('🛑 "@" is for PATHS and "#" is for NAMES. Neither answers the other.', () => {
+  assert.equal(atTokenAt('see #src', 8), null, 'a # token is not a path token');
+  assert.notEqual(atTokenAt('see @src', 8), null);
+});
+
+test('🛑 an email address does not open the file list', () => {
+  assert.equal(atTokenAt('a@b.com', 7), null, 'the @ must OPEN a word');
+  assert.equal(atTokenAt('mail lee@here', 13), null);
+});
+
+test('a slash line is a command line, so "@" stays inert there', () => {
+  assert.equal(atTokenAt('/dm @src', 8), null);
+});
+
+test('a path token keeps slashes, dots and a leading tilde', () => {
+  assert.deepEqual(atTokenAt('@~/dev/le', 9), { query: '~/dev/le', start: 0, end: 9 });
+  assert.deepEqual(atTokenAt('@web/assets/a.js', 16), { query: 'web/assets/a.js', start: 0, end: 16 });
+});
+
+test('the token runs to the end of the word, so accepting leaves no orphan', () => {
+  assert.equal(pathAccept('see @s now', 6)!.items[0]!.insert, 'see @src/ now');
+});
+
+test('🛑 a DIRECTORY reopens the list and gets NO trailing space', () => {
+  // Without this you cannot drill past the first level.
+  const dir = pathAccept('see @s', 6)!.items[0]!;
+  assert.equal(dir.insert, 'see @src/');
+  assert.equal(dir.reopen, true);
+});
+
+test('🛑 a FILE does not reopen, and DOES get a trailing space', () => {
+  const file = pathAccept('see @s', 6)!.items[1]!;
+  assert.equal(file.insert, 'see @setup.ts ');
+  assert.equal(file.reopen, false, 'reopening on a finished file is the /help stuck bug');
+});
+
+test('completing before an existing space does not leave two', () => {
+  const file = pathAccept('see @s now', 6)!.items[1]!;
+  assert.equal(file.insert, 'see @setup.ts now');
+  assert.ok(!file.insert.includes('  '));
+});
+
+test('the caret lands after the inserted path', () => {
+  const dir = pathAccept('see @s now', 6)!.items[0]!;
+  assert.equal(dir.insert.slice(0, dir.caret), 'see @src/');
+});
+
+test('no hints means no popover, rather than an empty one', () => {
+  assert.equal(pathSuggestionsFor([], 'see @zzz', 8), null);
+});
+
+test('a hint already carries its own directory, so a nested accept is not doubled', () => {
+  const nested = [{ value: '@web/assets/logic.js', kind: 'file' as const }];
+  assert.equal(pathAccept('see @web/assets/lo', 18, nested)!.items[0]!.insert, 'see @web/assets/logic.js ');
+});
+
+test('🛑 Enter SENDS once the line already equals the top hint, so it never sticks', () => {
+  // A path keeps the WHOLE-VALUE rule, unlike a mention. The insert carries
+  // no trailing space for a directory, so it can equal the value exactly.
+  const s = pathSuggestionsFor(HINTS, 'see @src/', 9)!;
+  assert.equal(s.items[0]!.insert, 'see @src/', 'accepting would change nothing');
+  assert.equal(enterShouldSend(s, 'see @src/'), true, 'so Enter must send, not re-accept');
+});
+
+test('Enter ACCEPTS while the path is still half-typed', () => {
+  assert.equal(enterShouldSend(pathSuggestionsFor(HINTS, 'see @s', 6)!, 'see @s'), false);
+});
+
+test('Tab is what drills into a directory, and it reopens to show the next level', () => {
+  const dir = pathSuggestionsFor(HINTS, 'see @src/', 9)!.items[0]!;
+  assert.equal(dir.reopen, true, 'Enter sends, Tab keeps going');
 });
