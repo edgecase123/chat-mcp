@@ -14,6 +14,9 @@ import {
   enterShouldSend,
   menuEntriesFor,
   mentionSuggestionsFor,
+  pushHistory,
+  historyStep,
+  historyKeyApplies,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -33,6 +36,7 @@ const state = {
   renderedCount: 0, // list length at last render, so a delta gives the unread count
   unreadBelow: 0,   // messages that arrived while the reader was scrolled up
   suggest: null,     // { items, index, kind, token } while the composer popover is open
+  history: { entries: [], index: null, draft: null },
   openMenuFor: null, // sidebar target whose (...) menu is open. NOT in the DOM:
                      // renderSidebar() wipes it on every peer status change.
   approvals: [],
@@ -677,6 +681,22 @@ function moveSuggest(delta) {
   renderSuggest();
 }
 
+function applyHistory({ index, draft, value }) {
+  state.history.index = index;
+  state.history.draft = draft;
+  el.composerInput.value = value;
+  el.composerInput.setSelectionRange(value.length, value.length);
+  el.composerInput.style.height = 'auto';
+  el.composerInput.style.height = el.composerInput.scrollHeight + 'px';
+  closeSuggest();
+}
+
+/** Typing, sending or dismissing all mean you are no longer browsing. */
+function leaveHistory() {
+  state.history.index = null;
+  state.history.draft = null;
+}
+
 function acceptSuggestion(i) {
   const s = state.suggest;
   if (!s) return;
@@ -795,6 +815,9 @@ el.composerInput.addEventListener('input', () => {
   // Auto-grow up to CSS max-height.
   el.composerInput.style.height = 'auto';
   el.composerInput.style.height = el.composerInput.scrollHeight + 'px';
+  // applyHistory sets .value directly, which fires no input event, so this
+  // only runs for a real keystroke.
+  leaveHistory();
   updateSuggest();
 });
 
@@ -806,7 +829,8 @@ el.composerInput.addEventListener('keydown', (ev) => {
   if (state.suggest) {
     if (ev.key === 'ArrowDown') { ev.preventDefault(); return moveSuggest(1); }
     if (ev.key === 'ArrowUp') { ev.preventDefault(); return moveSuggest(-1); }
-    if (ev.key === 'Escape') { ev.preventDefault(); return closeSuggest(); }
+    // The popover owns the arrows while it is open, same as the CLI.
+    if (ev.key === 'Escape') { ev.preventDefault(); leaveHistory(); return closeSuggest(); }
     // 🛑 These move the caret WITHOUT firing input, so the open list would
     // still describe the token the caret just left, and Tab would splice the
     // name at the old offsets.
@@ -825,6 +849,14 @@ el.composerInput.addEventListener('keydown', (ev) => {
       if (ev.key === 'Tab') { ev.preventDefault(); return; }
       // Enter falls through to the send rule below.
     }
+  } else if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
+    const delta = ev.key === 'ArrowUp' ? -1 : 1;
+    const caret = el.composerInput.selectionStart ?? 0;
+    if (historyKeyApplies(el.composerInput.value, caret, delta)) {
+      const step = historyStep(state.history, delta, el.composerInput.value);
+      // Nothing to recall, so leave the key to the browser.
+      if (step) { ev.preventDefault(); return applyHistory(step); }
+    }
   }
   if (ev.key === 'Enter' && !ev.shiftKey) {
     ev.preventDefault();
@@ -837,6 +869,8 @@ el.composer.addEventListener('submit', async (ev) => {
   closeSuggest();
   const body = el.composerInput.value.trim();
   if (!body) return;
+  state.history.entries = pushHistory(state.history.entries, body);
+  leaveHistory();
   el.composerSend.disabled = true;
   try {
     // Slash commands dispatch client-side without hitting sendMessage.

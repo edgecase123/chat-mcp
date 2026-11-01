@@ -10,6 +10,9 @@ import {
   mentionSuggestionsFor,
   mentionTokenAt,
   moveIndex,
+  pushHistory,
+  historyStep,
+  historyKeyApplies,
   nextUnreadBelow,
   shouldShowJump,
   suggestionsFor,
@@ -337,4 +340,99 @@ test('after ArrowDown, Enter completes the newly active name instead', () => {
   s.index = moveIndex(s.index, 1, s.items.length);
   assert.equal(s.items[s.index].name, '#gateway');
   assert.equal(enterShouldSend(s, '#gate'), false, '#gateway is not what is typed');
+});
+
+// ── ArrowUp through sent-line history ───────────────────────────────────
+
+const ring = (...lines: string[]) => lines.reduce((e, l) => pushHistory(e, l), [] as string[]);
+type Hist = { entries: string[]; index: number | null; draft: string | null };
+const H = (entries: string[], index: number | null = null, draft: string | null = null): Hist =>
+  ({ entries, index, draft });
+
+test('consecutive duplicates collapse, because they are one thing to recall', () => {
+  assert.deepEqual(ring('a', 'b', 'b', 'b', 'c'), ['a', 'b', 'c']);
+  assert.deepEqual(ring('a', 'b', 'a'), ['a', 'b', 'a'], 'only CONSECUTIVE ones collapse');
+});
+
+test('a blank or whitespace-only line is never recorded', () => {
+  assert.deepEqual(ring('a', '   ', '', '\n', 'b'), ['a', 'b']);
+});
+
+test('a line is stored trimmed', () => {
+  assert.deepEqual(ring('  padded  '), ['padded']);
+});
+
+test('the ring drops the OLDEST once it is full', () => {
+  let e: string[] = [];
+  for (let i = 0; i < 105; i += 1) e = pushHistory(e, `line${i}`, 100);
+  assert.equal(e.length, 100);
+  assert.equal(e[0], 'line5', 'the first five are gone');
+  assert.equal(e[99], 'line104', 'the newest is last');
+});
+
+test('🛑 the FIRST ArrowUp saves the draft you were writing', () => {
+  const step = historyStep(H(ring('one', 'two')), -1, 'half a sentence')!;
+  assert.equal(step.value, 'two', 'newest entry first');
+  assert.equal(step.draft, 'half a sentence', 'losing this is the bug');
+  assert.equal(step.index, 1);
+});
+
+test('ArrowUp walks back to the oldest and stops there', () => {
+  const entries = ring('one', 'two', 'three');
+  let h = H(entries);
+  const seen: string[] = [];
+  for (let i = 0; i < 5; i += 1) {
+    const step = historyStep(h, -1, '');
+    if (!step) break;
+    seen.push(step.value);
+    h = { entries, index: step.index, draft: step.draft };
+  }
+  assert.deepEqual(seen, ['three', 'two', 'one'], 'and the 4th press returns null');
+});
+
+test('🛑 ArrowDown past the newest RESTORES the draft, not an empty box', () => {
+  const entries = ring('one');
+  const up = historyStep(H(entries), -1, 'my draft')!;
+  const down = historyStep({ entries, index: up.index, draft: up.draft }, 1, 'one')!;
+  assert.equal(down.value, 'my draft');
+  assert.equal(down.index, null, 'and we are no longer browsing');
+  assert.equal(down.draft, null);
+});
+
+test('ArrowDown restores an EMPTY draft as empty, not as the oldest entry', () => {
+  const entries = ring('one');
+  const up = historyStep(H(entries), -1, '')!;
+  const down = historyStep({ entries, index: up.index, draft: up.draft }, 1, 'one')!;
+  assert.equal(down.value, '', 'the box you started with was empty');
+});
+
+test('ArrowDown does nothing when you were not browsing', () => {
+  assert.equal(historyStep(H(ring('one')), 1, 'typing'), null);
+});
+
+test('ArrowUp does nothing on an empty ring, so the key stays the browser\'s', () => {
+  assert.equal(historyStep(H([]), -1, 'typing'), null);
+});
+
+// ── the multi-line guard the CLI composer never needed ──────────────────
+
+test('🛑 ArrowUp does NOT claim the key when there is a line above the caret', () => {
+  // Shift-Enter makes newlines here, so the caret must still move between them.
+  assert.equal(historyKeyApplies('one\ntwo', 5, -1), false, 'caret on line 2');
+  assert.equal(historyKeyApplies('one\ntwo', 2, -1), true, 'caret on line 1');
+});
+
+test('ArrowDown does NOT claim the key when there is a line below the caret', () => {
+  assert.equal(historyKeyApplies('one\ntwo', 2, 1), false, 'caret on line 1');
+  assert.equal(historyKeyApplies('one\ntwo', 5, 1), true, 'caret on the last line');
+});
+
+test('a single-line value gives both keys to history', () => {
+  assert.equal(historyKeyApplies('one line', 4, -1), true);
+  assert.equal(historyKeyApplies('one line', 4, 1), true);
+});
+
+test('an out-of-range caret does not throw', () => {
+  assert.equal(historyKeyApplies('one', 999, -1), true);
+  assert.equal(historyKeyApplies('', 0, 1), true);
 });
