@@ -7,6 +7,8 @@ import {
   isPinnedToBottom,
   jumpLabel,
   menuEntriesFor,
+  mentionSuggestionsFor,
+  mentionTokenAt,
   moveIndex,
   nextUnreadBelow,
   shouldShowJump,
@@ -181,4 +183,135 @@ test('every action maps to a distinct handler key', () => {
   const actions = [...menuEntriesFor('room', '#ops'), ...menuEntriesFor('peer', 'alice')]
     .map((e) => e.action);
   assert.deepEqual(actions, ['deleteRoom', 'kickPeer']);
+});
+
+// ── "#" name type-ahead, for peers AND rooms ────────────────────────────
+
+const MENTION_CTX = {
+  // Deliberately out of order, and gatebot shares a prefix with #gate.
+  peers: ['claude2', 'claude1', 'leejenkins', 'gatebot'],
+  rooms: ['#leagues', '#gate'],
+};
+// What the composer would hold after accepting the top item.
+const accept = (value: string, caret: number) => {
+  const s = mentionSuggestionsFor(value, caret, MENTION_CTX);
+
+  return s && { insert: s.items[0].insert, caret: s.items[0].caret, names: s.items.map((i) => i.name) };
+};
+
+test('🛑 "@" NEVER triggers. It is reserved for relative file paths.', () => {
+  assert.equal(mentionTokenAt('@clau', 5), null);
+  assert.equal(accept('tell @clau now', 10), null);
+  assert.equal(accept('@', 1), null);
+});
+
+test('🛑 a bare word NEVER opens the list, so ordinary typing is not interrupted', () => {
+  assert.equal(mentionTokenAt('Hi clau', 7), null);
+  assert.equal(accept('Hi clau', 7), null);
+});
+
+test('🛑 a "#" inside a word does not open the list', () => {
+  assert.equal(mentionTokenAt('I like C#', 9), null, 'the trigger must OPEN a word');
+  assert.equal(mentionTokenAt('issue3#4', 8), null);
+});
+
+test('"#" alone lists every room and every peer', () => {
+  assert.deepEqual(accept('#', 1)!.names,
+    ['#gate', '#leagues', 'claude1', 'claude2', 'gatebot', 'leejenkins']);
+});
+
+test('the order does not depend on bus join order', () => {
+  const a = mentionSuggestionsFor('#', 1, { peers: ['b', 'a'], rooms: ['#z', '#y'] })!;
+  assert.deepEqual(a.items.map((i) => i.name), ['#y', '#z', 'a', 'b'], 'rooms first, each group sorted');
+});
+
+test('a prefix narrows across both pools', () => {
+  assert.deepEqual(accept('#clau', 5)!.names, ['claude1', 'claude2']);
+  assert.deepEqual(accept('#gat', 4)!.names, ['#gate', 'gatebot'], 'a room and a peer can both match');
+});
+
+test('a prefix that matches nothing returns null, not an empty list', () => {
+  assert.equal(accept('#zzz', 4), null);
+});
+
+test('🛑 a room keeps its own "#", and a peer does NOT gain one', () => {
+  assert.equal(accept('#gat', 4)!.insert, '#gate ', 'the # is part of the room name');
+  assert.equal(accept('#clau', 5)!.insert, 'claude1 ', 'the # was only a trigger');
+});
+
+test('🛑 accepting mid-token consumes the WHOLE word, leaving no orphan letters', () => {
+  // Caret sits inside "clau", between the a and the u.
+  assert.equal(accept('tell #clau now', 9)!.insert, 'tell claude1 now');
+});
+
+test('🛑 completing before an existing space does not leave two spaces', () => {
+  const r = accept('tell #clau now', 10)!;
+  assert.equal(r.insert, 'tell claude1 now');
+  assert.ok(!r.insert.includes('  '), 'a doubled space is the bug this guards');
+});
+
+test('the caret lands after the inserted name, not at the end of the line', () => {
+  const r = accept('tell #clau now', 10)!;
+  assert.equal(r.caret, 'tell claude1'.length, 'so you can keep typing where you were');
+  assert.equal(r.insert.slice(0, r.caret), 'tell claude1');
+});
+
+test('a trailing space is added when the name ends the line', () => {
+  assert.equal(accept('tell #clau', 10)!.insert, 'tell claude1 ');
+});
+
+test('🛑 a completed name no longer offers itself, so the popover closes', () => {
+  assert.equal(mentionTokenAt('tell claude1 ', 13), null, 'no trigger left in the line');
+  assert.equal(accept('tell #gate ', 11), null, 'the caret is past the word');
+});
+
+test('🛑 a slash line is a COMMAND line, and the command path WINS', () => {
+  // The precedence app.js uses: command first, mention only on null.
+  const pick = (v: string, caret: number) =>
+    suggestionsFor(v, CTX) ?? mentionSuggestionsFor(v, caret, MENTION_CTX);
+
+  assert.equal(pick('/dm ali', 7)!.kind, 'arg', 'the command owns its own argument');
+  assert.equal(pick('/dm #clau', 9), null, 'a # inside a command never becomes a mention');
+  assert.equal(mentionTokenAt('/dm #clau', 9), null, 'the rule lives in the pure function');
+  assert.equal(pick('#clau', 5)!.kind, 'mention', 'and a non-slash line falls through');
+});
+
+test('duplicate handles are listed once', () => {
+  const s = mentionSuggestionsFor('#c', 2, { peers: ['claude1', 'claude1'], rooms: [] });
+  assert.deepEqual(s!.items.map((i) => i.name), ['claude1']);
+});
+
+test('a caret past the end of the value does not throw', () => {
+  assert.equal(accept('#clau', 999)!.insert, 'claude1 ');
+  assert.equal(mentionTokenAt('', 5), null);
+});
+
+// ── Enter on a mention, which the whole-value rule cannot answer ─────────
+
+test('🛑 Enter SENDS once the typed token already names the active item', () => {
+  const s = mentionSuggestionsFor('#claude1', 8, MENTION_CTX)!;
+  assert.equal(s.items[s.index].name, 'claude1');
+  assert.equal(enterShouldSend(s, '#claude1'), true, 'otherwise Enter re-accepts forever');
+});
+
+test('Enter ACCEPTS a half-typed name', () => {
+  const s = mentionSuggestionsFor('#clau', 5, MENTION_CTX)!;
+  assert.equal(enterShouldSend(s, '#clau'), false);
+});
+
+test('🛑 the whole-value test would have been WRONG here, which is the point', () => {
+  // The insert carries the rest of the line, so it never equals the value.
+  const s = mentionSuggestionsFor('hey #claude1', 12, MENTION_CTX)!;
+  assert.notEqual(s.items[s.index].insert, 'hey #claude1', 'insert differs from value');
+  assert.equal(enterShouldSend(s, 'hey #claude1'), true, 'and Enter must still send');
+});
+
+test('after ArrowDown, Enter completes the newly active name instead', () => {
+  // "claude" is an exact match AND a prefix of "claude1", which is the only
+  // shape where the active item can stop being the typed one.
+  const s = mentionSuggestionsFor('#claude', 7, { peers: ['claude', 'claude1'], rooms: [] })!;
+  assert.equal(enterShouldSend(s, '#claude'), true, 'the exact match sends');
+  s.index = moveIndex(s.index, 1, s.items.length);
+  assert.equal(s.items[s.index].name, 'claude1');
+  assert.equal(enterShouldSend(s, '#claude'), false, 'claude1 is not what is typed');
 });

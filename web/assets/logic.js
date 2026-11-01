@@ -112,8 +112,15 @@ export function suggestionsFor(value, ctx) {
  */
 export function enterShouldSend(suggest, value) {
   if (!suggest) return true;
+  const item = suggest.items[suggest.index];
 
-  return suggest.items[suggest.index].insert === value;
+  // 🛑 A MENTION CANNOT USE THE WHOLE-VALUE TEST. Its insert carries the rest
+  // of the line, so "hey #ali" never equals "@alice" and Enter would re-accept
+  // forever — the stuck-command bug this rule was written to fix, returning
+  // through the rule itself. Compare the TOKEN instead.
+  if (suggest.kind === 'mention') return suggest.query === item.name.replace(/^#/, '').toLowerCase();
+
+  return item.insert === value;
 }
 
 /** Accepting only reopens for a command that TAKES an argument. "/help"
@@ -143,4 +150,89 @@ export function menuEntriesFor(kind, label) {
   }
 
   return [{ text: 'Kick', title: `Remove ${label} from the bus`, action: 'kickPeer' }];
+}
+
+/** Chars a handle or room name can contain, so the token ends where one does. */
+const MENTION_BODY = /[A-Za-z0-9._-]/;
+
+/**
+ * 🛑 "#" IS THE ONLY NAME TRIGGER. "@" is reserved for relative file paths.
+ * A peer and a room share one pool, because a name is a name to the person
+ * typing it.
+ *
+ * 🛑 THE TRIGGER MUST OPEN A WORD, NOT SIT INSIDE ONE, or a C# or an issue
+ * reference opens the list on every keystroke after it.
+ *
+ * 🛑 THE TOKEN EXTENDS PAST THE CARET to the end of the word. Measured while
+ * writing this: querying only the text to the LEFT completes "tell #cla|u now"
+ * to "tell claude1 u now" and leaves an orphan "u" behind.
+ *
+ * @param {string} value
+ * @param {number} caret
+ * @returns {{ query: string, start: number, end: number } | null}
+ */
+export function mentionTokenAt(value, caret) {
+  // A command line belongs to suggestionsFor, in full. Leaving this to the
+  // caller let "/dm #clau" complete through the mention path instead.
+  if (value.startsWith('/') && !value.includes('\n')) return null;
+
+  const pos = Math.max(0, Math.min(caret, value.length));
+  const upto = value.slice(0, pos);
+  const at = upto.lastIndexOf('#');
+  if (at < 0) return null;
+
+  const before = at === 0 ? '' : upto[at - 1];
+  if (before !== '' && !/\s/.test(before)) return null;
+
+  let end = at + 1;
+  while (end < value.length && MENTION_BODY.test(value[end])) end += 1;
+  if (end < pos) return null;
+
+  return { query: value.slice(at + 1, pos), start: at, end };
+}
+
+/**
+ * The peer or room completion for the token under the caret.
+ *
+ * A room name already carries its own "#" and keeps it. A peer handle does
+ * not, so the "#" was only a trigger and is dropped on accept. A bare "#"
+ * lists everything, so it is a name picker.
+ *
+ * @param {string} value
+ * @param {number} caret
+ * @param {{ peers: string[], rooms: string[] }} ctx
+ */
+export function mentionSuggestionsFor(value, caret, ctx) {
+  const token = mentionTokenAt(value, caret);
+  if (!token) return null;
+
+  const q = token.query.toLowerCase();
+  const tail = value.slice(token.end);
+  // Only pad when nothing follows, so completing before a space does not
+  // leave two of them.
+  const pad = /^\s/.test(tail) ? '' : ' ';
+
+  const sorted = (xs) => [...xs].sort((a, b) => a.localeCompare(b));
+  // Rooms first, then peers. Deterministic inside each group so the top item
+  // does not depend on bus join order.
+  const items = [...new Set([...sorted(ctx.rooms), ...sorted(ctx.peers)])]
+    .filter((h) => bareName(h).toLowerCase().startsWith(q))
+    .map((h) => {
+      const head = value.slice(0, token.start) + h + pad;
+
+      return {
+        insert: head + tail,
+        caret: head.length,
+        name: h,
+        arg: '',
+        desc: h.startsWith('#') ? 'room' : 'peer',
+      };
+    });
+
+  return items.length ? { items, index: 0, kind: 'mention', query: q } : null;
+}
+
+/** A room's own "#" is part of its name; the trigger "#" is not. */
+function bareName(handle) {
+  return handle.replace(/^#/, '');
 }

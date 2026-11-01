@@ -13,6 +13,7 @@ import {
   suggestionsFor,
   enterShouldSend,
   menuEntriesFor,
+  mentionSuggestionsFor,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -624,6 +625,8 @@ const HELP_TEXT = Object.keys(CATEGORY_LABELS)
 
 // ── Composer suggestions ────────────────────────────────────────────────
 
+const CARET_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End']);
+
 function renderSuggest() {
   const s = state.suggest;
   el.suggest.innerHTML = '';
@@ -653,11 +656,12 @@ function renderSuggest() {
 }
 
 function updateSuggest() {
-  state.suggest = suggestionsFor(el.composerInput.value, {
-    commands: COMMANDS,
-    peers: state.peers.filter((p) => p.handle !== state.handle).map((p) => p.handle),
-    rooms: [...state.rooms.map((r) => r.name), ...state.discoverRooms.map((r) => r.name)],
-  });
+  const value = el.composerInput.value;
+  const peers = state.peers.filter((p) => p.handle !== state.handle).map((p) => p.handle);
+  const rooms = [...state.rooms.map((r) => r.name), ...state.discoverRooms.map((r) => r.name)];
+  // A slash line is a command line. Only when it is not do @ and # mean a name.
+  state.suggest = suggestionsFor(value, { commands: COMMANDS, peers, rooms })
+    ?? mentionSuggestionsFor(value, el.composerInput.selectionStart ?? value.length, { peers, rooms });
   renderSuggest();
 }
 
@@ -680,6 +684,9 @@ function acceptSuggestion(i) {
   el.composerInput.value = item.insert;
   closeSuggest();
   el.composerInput.focus();
+  // A mention completes mid-sentence, so the caret belongs where the name
+  // ended, not at the end of the line.
+  if (item.caret != null) el.composerInput.setSelectionRange(item.caret, item.caret);
   // Only a command that TAKES an argument reopens, to offer it. "/help"
   // reopening on itself is what left Enter unable to send.
   if (acceptReopens(item.insert)) updateSuggest();
@@ -800,6 +807,10 @@ el.composerInput.addEventListener('keydown', (ev) => {
     if (ev.key === 'ArrowDown') { ev.preventDefault(); return moveSuggest(1); }
     if (ev.key === 'ArrowUp') { ev.preventDefault(); return moveSuggest(-1); }
     if (ev.key === 'Escape') { ev.preventDefault(); return closeSuggest(); }
+    // 🛑 These move the caret WITHOUT firing input, so the open list would
+    // still describe the token the caret just left, and Tab would splice the
+    // name at the old offsets.
+    if (CARET_KEYS.has(ev.key)) return closeSuggest();
     if (ev.key === 'Tab' || (ev.key === 'Enter' && !ev.shiftKey)) {
       // 🛑 Nothing left to complete: the input ALREADY equals what accepting
       // would insert. Enter has to send, or a finished command is stuck until
