@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile, stat, writeFile, unlink, mkdir } from 'node:fs/promises';
+import { readFile, readdir, stat, writeFile, unlink, mkdir } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, normalize, resolve } from 'node:path';
@@ -12,6 +13,7 @@ import * as dao from '../../storage/dao.js';
 import type { MessageKind } from '../../storage/dao.js';
 import { assertRoomName } from '../../util/naming.js';
 import { renderBodyToHtml } from './render.js';
+import { buildHints, defaultRoots, realContainedDir, resolveHintQuery } from './file-hints.js';
 
 const VERSION = '0.4.4';
 
@@ -280,6 +282,7 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   if (path === '/api/approvals' && req.method === 'GET') return handleGetApprovals(res, ctx);
   if (path === '/api/approvals/answer' && req.method === 'POST')
     return handleAnswerApproval(req, res, ctx);
+  if (path === '/api/files' && req.method === 'GET') return handleFileHints(url, res);
   if (path === '/api/events') return handleSseStream(req, res, ctx);
 
   // Static assets
@@ -624,6 +627,41 @@ function toMessage(r: MessageRow): dao.Message {
 /** Attach pre-rendered HTML so the client doesn't need a markdown lib. */
 function hydrateForClient(m: dao.Message): dao.Message & { body_html: string } {
   return { ...m, body_html: renderBodyToHtml(m.body) };
+}
+
+/**
+ * `@`-path hints for the web composer.
+ *
+ * 🛑 THIS IS A DIRECTORY-LISTING ENDPOINT, so the containment in
+ * resolveHintQuery is the whole security of it. A refused token answers with an
+ * empty list rather than an error, because telling a caller WHICH paths are
+ * refused is itself a probe.
+ *
+ * Read-only on a GET, which is required: route()'s Origin check cannot see a
+ * cross-site <img> or <script>, so nothing on a GET path may mutate. The Host
+ * check is what keeps this off evil.com.
+ */
+async function handleFileHints(url: URL, res: ServerResponse): Promise<void> {
+  const query = resolveHintQuery(url.searchParams.get('q') ?? '', defaultRoots());
+  if (!query) return respondJson(res, { hints: [] });
+
+  // 🛑 The lexical containment in resolveHintQuery is not enough: a symlink
+  // inside the root reads as textually inside and readdir follows it. This
+  // resolves both sides, and is also where a path that does not exist yet
+  // refuses, which is the normal case while typing.
+  const dirAbs = await realContainedDir(query);
+  if (!dirAbs) return respondJson(res, { hints: [] });
+
+  let dirents: Dirent[];
+  try {
+    dirents = await readdir(dirAbs, { withFileTypes: true });
+  } catch {
+    return respondJson(res, { hints: [] });
+  }
+
+  const entries = dirents.map((d) => ({ name: d.name, isDirectory: d.isDirectory() }));
+
+  return respondJson(res, { hints: buildHints(entries, query) });
 }
 
 // ── Browser launcher ─────────────────────────────────────────────────────

@@ -19,6 +19,8 @@ import {
   historyKeyApplies,
   messageMarkdown,
   cheatSheet,
+  atTokenAt,
+  pathSuggestionsFor,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -754,11 +756,50 @@ function renderSuggest() {
 
 function updateSuggest() {
   const value = el.composerInput.value;
+  const caret = el.composerInput.selectionStart ?? value.length;
   const peers = state.peers.filter((p) => p.handle !== state.handle).map((p) => p.handle);
   const rooms = [...state.rooms.map((r) => r.name), ...state.discoverRooms.map((r) => r.name)];
-  // A slash line is a command line. Only when it is not do @ and # mean a name.
-  state.suggest = suggestionsFor(value, { commands: COMMANDS, peers, rooms })
-    ?? mentionSuggestionsFor(value, el.composerInput.selectionStart ?? value.length, { peers, rooms });
+  // A slash line is a command line. Only when it is not does # mean a name.
+  const sync = suggestionsFor(value, { commands: COMMANDS, peers, rooms })
+    ?? mentionSuggestionsFor(value, caret, { peers, rooms });
+  if (sync) {
+    state.suggest = sync;
+    renderSuggest();
+
+    return;
+  }
+  // "@" needs the server, because the browser cannot read the disk.
+  if (!atTokenAt(value, caret)) {
+    state.suggest = null;
+    renderSuggest();
+
+    return;
+  }
+  // Deliberately NOT cleared first. Clearing here makes the popover blink
+  // shut on every keystroke while the next listing is in flight.
+  requestHints(value, caret);
+}
+
+// 🛑 A STALE REPLY MUST NOT LAND. Each keystroke starts a request, and they
+// can finish out of order, so the newest sequence number wins and the value
+// is re-checked. Without this, typing fast shows hints for a path you have
+// already moved past, and Tab then splices THAT path in.
+let hintSeq = 0;
+
+async function requestHints(value, caret) {
+  const seq = hintSeq + 1;
+  hintSeq = seq;
+  const token = atTokenAt(value, caret);
+  let hints = [];
+  try {
+    const body = await api(`/api/files?q=${encodeURIComponent(token.query)}`);
+    hints = body.hints ?? [];
+  } catch (e) {
+    console.error('file hints failed', e);
+  }
+  if (seq !== hintSeq) return;
+  if (el.composerInput.value !== value) return;
+  state.suggest = pathSuggestionsFor(hints, value, caret);
   renderSuggest();
 }
 
@@ -800,9 +841,11 @@ function acceptSuggestion(i) {
   // A mention completes mid-sentence, so the caret belongs where the name
   // ended, not at the end of the line.
   if (item.caret != null) el.composerInput.setSelectionRange(item.caret, item.caret);
-  // Only a command that TAKES an argument reopens, to offer it. "/help"
+  // A path item says so for itself: a directory reopens to offer its
+  // contents, and it inserts no trailing space for acceptReopens to find.
+  // Otherwise, only a command that TAKES an argument reopens. "/help"
   // reopening on itself is what left Enter unable to send.
-  if (acceptReopens(item.insert)) updateSuggest();
+  if (item.reopen ?? acceptReopens(item.insert)) updateSuggest();
 }
 
 /** Returns true if the input was consumed as a command (do not send).
