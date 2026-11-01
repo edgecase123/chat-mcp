@@ -17,6 +17,8 @@ import {
   pushHistory,
   historyStep,
   historyKeyApplies,
+  messageMarkdown,
+  cheatSheet,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -37,6 +39,9 @@ const state = {
   unreadBelow: 0,   // messages that arrived while the reader was scrolled up
   suggest: null,     // { items, index, kind, token } while the composer popover is open
   history: { entries: [], index: null, draft: null },
+  // 🛑 NOT in `messages`. refresh() reassigns that wholesale on every wake,
+  // so anything parked there vanishes the moment a peer says something.
+  ephemeral: [],
   openMenuFor: null, // sidebar target whose (...) menu is open. NOT in the DOM:
                      // renderSidebar() wipes it on every peer status change.
   approvals: [],
@@ -350,11 +355,15 @@ function renderMessages({ forceBottom = false } = {}) {
   el.messages.innerHTML = '';
   if (!state.currentTarget) {
     el.messages.appendChild(h('div', { className: 'messages__empty' }, ['Select a peer or room from the sidebar.']));
+    // 🛑 BEFORE the return. /cheat-sheet works with no target selected, and
+    // an early return here is what would have swallowed it.
+    appendEphemeral();
     resetStreamPosition();
     return;
   }
   if (state.messages.length === 0) {
     el.messages.appendChild(h('div', { className: 'messages__empty' }, ['No messages yet.']));
+    appendEphemeral();
     resetStreamPosition();
     return;
   }
@@ -367,11 +376,13 @@ function renderMessages({ forceBottom = false } = {}) {
       h('span', { className: 'message__from' }, [m.from_handle]),
       h('span', { className: 'message__time' }, [fmtTime(m.sent_at)]),
       kind !== 'chat' ? h('span', { className: 'message__kind' }, [kind.toUpperCase()]) : null,
+      copyButton(m),
     ]);
     const body = h('div', { className: 'message__body', html: m.body_html || '' });
     el.messages.appendChild(h('li', { className: cls }, [meta, body]));
   }
   state.renderedCount = state.messages.length;
+  appendEphemeral();
 
   // Jump INSTANT, never animated: a smooth scroll on room open reads as the
   // view sliding away on its own. Scrolled up, we hold position instead and
@@ -383,6 +394,86 @@ function renderMessages({ forceBottom = false } = {}) {
     el.messages.scrollTop = prevScrollTop;
   }
   renderJumpNewest();
+}
+
+function copyButton(m) {
+  const label = `Copy message from ${m.from_handle} as markdown. Hold Shift to include who sent it and when.`;
+
+  return h('button', {
+    className: 'message__copy',
+    type: 'button',
+    title: label,
+    'aria-label': label,
+    onclick: (e) => copyMessage(m, e.shiftKey),
+  }, ['\u29c9']);
+}
+
+async function copyMessage(m, attributed) {
+  const text = messageMarkdown(
+    { from: m.from_handle, time: fmtTime(m.sent_at), body: m.body },
+    { attributed },
+  );
+  try {
+    await writeClipboard(text);
+  } catch (err) {
+    // 🛑 Never a success toast on a failed write. The clipboard is the only
+    // place the result shows, so a wrong toast is undetectable.
+    console.error('copy failed', err);
+    toast('could not copy — clipboard blocked', 'warn');
+
+    return;
+  }
+  toast(attributed ? 'copied with author' : 'copied', 'info');
+}
+
+/** navigator.clipboard needs a secure context. 127.0.0.1 counts as one, but a
+ *  host served over plain http by name does not, so keep the old path. */
+async function writeClipboard(text) {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    if (!document.execCommand('copy')) throw new Error('execCommand copy refused');
+  } finally {
+    ta.remove();
+  }
+}
+
+/** Client-only panels, rendered as TEXT. There is no server-side markdown
+ *  pass for these, and text children mean no innerHTML and nothing to escape. */
+function appendEphemeral() {
+  for (const e of state.ephemeral) {
+    el.messages.appendChild(h('li', { className: 'message is-ephemeral' }, [
+      h('div', { className: 'message__meta' }, [
+        h('span', { className: 'message__from' }, [e.title]),
+        h('span', { className: 'message__kind' }, ['NOT SAVED']),
+        h('button', {
+          className: 'message__dismiss',
+          type: 'button',
+          title: `Dismiss ${e.title}`,
+          'aria-label': `Dismiss ${e.title}`,
+          onclick: () => dismissEphemeral(e.id),
+        }, ['\u00d7']),
+      ]),
+      h('pre', { className: 'message__pre' }, [e.text]),
+    ]));
+  }
+}
+
+function showEphemeral(title, text) {
+  state.ephemeral = [...state.ephemeral, { id: `eph-${Date.now()}`, title, text }];
+  renderMessages({ forceBottom: true });
+}
+
+function dismissEphemeral(id) {
+  state.ephemeral = state.ephemeral.filter((e) => e.id !== id);
+  renderMessages();
 }
 
 function renderPaneHeader() {
@@ -411,6 +502,7 @@ function renderPaneHeader() {
 
 async function selectTarget(target) {
   state.currentTarget = target;
+  state.ephemeral = [];
   renderSidebar();
   renderPaneHeader();
   try {
@@ -615,6 +707,7 @@ const COMMANDS = [
   { name: 'delete', arg: '<#room>', desc: 'delete a room and its messages, for everyone', suggest: 'room', cat: 'admin' },
 
   { name: 'help', arg: '', desc: 'this list', cat: 'system' },
+  { name: 'cheat-sheet', arg: '', desc: 'every command and gesture, in the stream', cat: 'system' },
 ];
 
 // Grouped, because a flat list of thirteen reads as thirteen unrelated things.
@@ -772,6 +865,10 @@ async function tryDispatchSlashCommand(input) {
     }
     case 'help': {
       toast(HELP_TEXT, 'info');
+      return true;
+    }
+    case 'cheat-sheet': {
+      showEphemeral('/cheat-sheet', cheatSheet(COMMANDS, CATEGORY_LABELS));
       return true;
     }
     // Same wire as a normal send, only the kind differs. The recipient's
