@@ -513,6 +513,14 @@ html, body {
   background: var(--bg-elevated);
   box-shadow: 0 6px 20px rgb(0 0 0 / 24%);
 }
+.composer-suggest__cat {
+  padding: 8px 10px 3px;
+  color: var(--fg-faint);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.composer-suggest__cat:first-child { padding-top: 2px; }
 .composer-suggest__row {
   display: flex;
   align-items: baseline;

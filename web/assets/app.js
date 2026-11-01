@@ -97,10 +97,10 @@ async function fetchMessages(target) {
   state.messages = messages;
 }
 
-async function sendMessage(target, body) {
+async function sendMessage(target, body, kind = 'chat') {
   return api('/api/messages', {
     method: 'POST',
-    body: JSON.stringify({ target, body }),
+    body: JSON.stringify({ target, body, kind }),
   });
 }
 
@@ -565,20 +565,43 @@ function toast(msg, kind = 'info') {
 // 🛑 ONE table. The suggestion popover and /help both read it, and the switch
 // in tryDispatchSlashCommand is the only other place a command name appears.
 // A hand-kept help string drifted from the dispatcher is the bug this avoids.
+const CATEGORY_LABELS = {
+  conversation: 'CONVERSATION',
+  messaging: 'MESSAGING',
+  status: 'STATUS',
+  admin: 'ADMIN — destructive',
+  system: 'SYSTEM',
+};
+
 const COMMANDS = [
-  { name: 'dm', arg: '<peer>', desc: 'open a DM', suggest: 'peer' },
-  { name: 'join', arg: '<#room>', desc: 'join a room (auto-creates)', suggest: 'room' },
-  { name: 'leave', arg: '', desc: 'leave the current room' },
-  { name: 'back', arg: '', desc: 'return to no-target home' },
-  { name: 'who', arg: '', desc: 'list peers' },
-  { name: 'rooms', arg: '', desc: 'list rooms you belong to' },
-  { name: 'whoami', arg: '', desc: 'show your own handle' },
-  { name: 'help', arg: '', desc: 'this list' },
+  { name: 'dm', arg: '<peer>', desc: 'open a DM', suggest: 'peer', cat: 'conversation' },
+  { name: 'join', arg: '<#room>', desc: 'join a room (auto-creates)', suggest: 'room', cat: 'conversation' },
+  { name: 'leave', arg: '', desc: 'leave the current room', cat: 'conversation' },
+  { name: 'back', arg: '', desc: 'return to no-target home', cat: 'conversation' },
+
+  { name: 'dispatch', arg: '<peer> <text>', desc: 'hand a task to a peer', suggest: 'peer', cat: 'messaging' },
+  { name: 'broadcast', arg: '<#room> <text>', desc: 'hand a task to a room', suggest: 'room', cat: 'messaging' },
+  { name: 'alert', arg: '<target> <text>', desc: 'urgent — surfaces in their alert lane', suggest: 'any', cat: 'messaging' },
+
+  { name: 'who', arg: '', desc: 'list peers and their status', cat: 'status' },
+  { name: 'rooms', arg: '', desc: 'list rooms you belong to', cat: 'status' },
+  { name: 'whoami', arg: '', desc: 'show your own handle', cat: 'status' },
+
+  { name: 'kick', arg: '<peer>', desc: 'remove a peer from the bus', suggest: 'peer', cat: 'admin' },
+  { name: 'delete', arg: '<#room>', desc: 'delete a room and its messages, for everyone', suggest: 'room', cat: 'admin' },
+
+  { name: 'help', arg: '', desc: 'this list', cat: 'system' },
 ];
 
-const HELP_TEXT = COMMANDS
-  .map((c) => `/${c.name} ${c.arg}`.trimEnd().padEnd(16) + `— ${c.desc}`)
-  .join('\n');
+// Grouped, because a flat list of thirteen reads as thirteen unrelated things.
+const HELP_TEXT = Object.keys(CATEGORY_LABELS)
+  .map((cat) => {
+    const rows = COMMANDS.filter((c) => c.cat === cat)
+      .map((c) => '  ' + `/${c.name} ${c.arg}`.trimEnd().padEnd(22) + `— ${c.desc}`);
+    return rows.length ? [CATEGORY_LABELS[cat], ...rows].join('\n') : null;
+  })
+  .filter(Boolean)
+  .join('\n\n');
 
 // ── Composer suggestions ────────────────────────────────────────────────
 
@@ -597,15 +620,15 @@ function suggestionsFor(value) {
   if (!space) {
     const items = COMMANDS
       .filter((c) => c.name.startsWith(name.toLowerCase()))
-      .map((c) => ({ insert: `/${c.name}${c.arg ? ' ' : ''}`, name: `/${c.name}`, arg: c.arg, desc: c.desc }));
+      .map((c) => ({ insert: `/${c.name}${c.arg ? ' ' : ''}`, name: `/${c.name}`, arg: c.arg, desc: c.desc, cat: c.cat }));
     return items.length ? { items, index: 0, kind: 'command' } : null;
   }
 
   const cmd = COMMANDS.find((c) => c.name === name.toLowerCase());
   if (!cmd || !cmd.suggest || rest.includes(' ')) return null;
-  const pool = cmd.suggest === 'peer'
-    ? state.peers.filter((p) => p.handle !== state.handle).map((p) => p.handle)
-    : [...state.rooms.map((r) => r.name), ...state.discoverRooms.map((r) => r.name)];
+  const peers = state.peers.filter((p) => p.handle !== state.handle).map((p) => p.handle);
+  const rooms = [...state.rooms.map((r) => r.name), ...state.discoverRooms.map((r) => r.name)];
+  const pool = cmd.suggest === 'peer' ? peers : cmd.suggest === 'room' ? rooms : [...peers, ...rooms];
   const q = rest.toLowerCase().replace(/^#/, '');
   const items = [...new Set(pool)]
     .filter((h) => h.toLowerCase().replace(/^#/, '').startsWith(q))
@@ -618,7 +641,13 @@ function renderSuggest() {
   el.suggest.innerHTML = '';
   el.suggest.hidden = !s;
   if (!s) return;
+  let shownCat = null;
   s.items.forEach((item, i) => {
+    // Only while listing COMMANDS. An argument list is one kind of thing.
+    if (s.kind === 'command' && item.cat && item.cat !== shownCat) {
+      shownCat = item.cat;
+      el.suggest.appendChild(h('div', { className: 'composer-suggest__cat' }, [CATEGORY_LABELS[item.cat]]));
+    }
     el.suggest.appendChild(h('div', {
       className: `composer-suggest__row${i === s.index ? ' is-active' : ''}`,
       role: 'option',
@@ -724,6 +753,35 @@ async function tryDispatchSlashCommand(input) {
     }
     case 'help': {
       toast(HELP_TEXT, 'info');
+      return true;
+    }
+    // Same wire as a normal send, only the kind differs. The recipient's
+    // client is what makes a dispatch a hand-off and an alert loud.
+    case 'dispatch':
+    case 'broadcast':
+    case 'alert': {
+      const target = args[0];
+      const text = args.slice(1).join(' ');
+      if (!target || !text) { toast(`usage: /${cmd} <target> <text>`, 'warn'); return true; }
+      if (cmd === 'broadcast' && !target.startsWith('#')) { toast('/broadcast takes a #room', 'warn'); return true; }
+      if (cmd === 'dispatch' && target.startsWith('#')) { toast('/dispatch takes a peer — use /broadcast for a room', 'warn'); return true; }
+      try {
+        await sendMessage(target, text, cmd === 'alert' ? 'alert' : 'dispatch');
+        toast(`sent to ${target}`, 'info');
+        await refresh();
+      } catch (e) { toast(`${cmd} failed: ${e.message}`, 'error'); }
+      return true;
+    }
+    case 'kick': {
+      const peer = args[0];
+      if (!peer) { toast('usage: /kick <peer>', 'warn'); return true; }
+      await kickPeer(peer);
+      return true;
+    }
+    case 'delete': {
+      const room = args[0];
+      if (!room || !room.startsWith('#')) { toast('usage: /delete #room', 'warn'); return true; }
+      await deleteRoomEntry(room);
       return true;
     }
     default:
