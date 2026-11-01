@@ -265,6 +265,11 @@ html, body {
   padding: 8px 0;
   animation: msg-in 160ms ease-out;
 }
+/* Between messages only, so the first one does not get a stray rule under
+   the pane header. --border is the soft token; --border-strong is not. */
+.message + .message {
+  border-top: 1px solid var(--border);
+}
 @keyframes msg-in {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: none; }
@@ -279,6 +284,9 @@ html, body {
 .message__from {
   font-weight: 600;
   color: var(--accent);
+  /* 40% over the 12px meta row. The row is align-items: baseline, so the
+     timestamp and the kind badge stay on the same baseline as this grows. */
+  font-size: 1.4em;
 }
 .message.is-self .message__from {
   color: var(--self);
