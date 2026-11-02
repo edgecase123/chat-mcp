@@ -1,6 +1,6 @@
 import { createServer, connect, type Server, type Socket } from 'node:net';
-import { existsSync, unlinkSync } from 'node:fs';
-import { ensureSocketDir, socketPathFor } from '../util/paths.js';
+import { chmodSync, existsSync, unlinkSync } from 'node:fs';
+import { SOCKET_MODE, ensureSocketDir, socketPathFor } from '../util/paths.js';
 
 /**
  * Direct delivery to a running supervisor.
@@ -152,6 +152,12 @@ export class WakeListener {
         resolve();
       });
     });
+
+    // 🛑 listen() CREATES THE FILE AT THE UMASK MODE, so this can only follow
+    // it and a window exists in between. The 0700 socket DIRECTORY is what
+    // covers that window; this is the second layer, and it is what `stat`
+    // shows an auditor.
+    chmodSync(path, SOCKET_MODE);
 
     const listener = new WakeListener(server, path);
     for (const s of open) listener.open.add(s);

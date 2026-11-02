@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,7 +9,9 @@ import { join } from 'node:path';
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-sock-'));
 
 const { WakeListener, deliverToSupervisor } = await import('../../src/supervise/socket.js');
-const { socketPathFor } = await import('../../src/util/paths.js');
+const { socketPathFor, socketDir, SOCKET_MODE, SOCKET_DIR_MODE } = await import(
+  '../../src/util/paths.js'
+);
 
 const env = (id: number, body = 'hello') => ({ id, to: 'claude2', from: 'claude1', ts: 1, body });
 
@@ -199,4 +202,85 @@ test('a supervisor that never answers times out instead of blocking the sender',
     for (const s of held) s.destroy();
     await new Promise<void>((r) => server.close(() => r()));
   }
+});
+
+// ── the socket's permissions ────────────────────────────────────────────
+
+const modeOf = (p: string) => statSync(p).mode & 0o777;
+
+/**
+ * 🛑 A PERMISSIVE UMASK IS THE WHOLE POINT OF THIS FIXTURE.
+ *
+ * Until this guard existed, the socket's mode came from the launching
+ * shell's umask and nothing in the code set it. Under the usual 022 it
+ * happened to be 755, which is why nobody noticed. Binding under 000 is what
+ * makes the difference between "the code sets it" and "the environment did"
+ * visible at all.
+ */
+test('🚨 the socket is 0600 even when the umask would have made it 0777', async () => {
+  const prev = process.umask(0o000);
+  try {
+    const l = await WakeListener.bind('perms', () => ({ ok: true, queued: 'sent' }));
+    try {
+      assert.equal(modeOf(socketPathFor('perms')), SOCKET_MODE);
+    } finally {
+      await l.close();
+    }
+  } finally {
+    process.umask(prev);
+  }
+});
+
+/**
+ * 🛑 THE NEGATIVE CONTROL. Without it, a 0600 socket proves nothing — a
+ * restrictive umask in whatever runs this suite would produce the same
+ * number with the chmod deleted. This binds a PLAIN socket in the same
+ * directory under the same umask and shows it comes out wide open.
+ */
+test('a plain socket in the same dir under the same umask is 0777, so the fixture discriminates', async () => {
+  const prev = process.umask(0o000);
+  const path = join(socketDir(), 'control');
+  try {
+    const srv = createServer();
+    await new Promise<void>((res) => srv.listen(path, res));
+    try {
+      assert.equal(modeOf(path), 0o777, 'the umask really is permissive here');
+    } finally {
+      await new Promise<void>((res) => srv.close(() => res()));
+    }
+  } finally {
+    process.umask(prev);
+  }
+});
+
+/**
+ * 🛑 THE DIRECTORY IS THE RACE-CLOSER. `listen()` creates the socket at the
+ * umask mode and the chmod can only follow it. A 0700 directory denies
+ * traversal for the whole of that window, so it is the control that actually
+ * holds, and the socket's own mode is the second layer.
+ */
+test('🚨 the socket DIRECTORY is 0700, which is what covers the window before the chmod', async () => {
+  const prev = process.umask(0o000);
+  try {
+    const l = await WakeListener.bind('perms-dir', () => ({ ok: true, queued: 'sent' }));
+    try {
+      assert.equal(modeOf(socketDir()), SOCKET_DIR_MODE);
+    } finally {
+      await l.close();
+    }
+  } finally {
+    process.umask(prev);
+  }
+});
+
+/** ⚠️ An ALREADY EXISTING directory keeps its old mode — mkdir does not fix
+ *  one it did not create, so an existing install must be repaired too. */
+test('a socket dir that already exists wide open is tightened, not left alone', async () => {
+  const { chmodSync, mkdirSync } = await import('node:fs');
+  const { ensureSocketDir } = await import('../../src/util/paths.js');
+  mkdirSync(socketDir(), { recursive: true });
+  chmodSync(socketDir(), 0o777);
+  assert.equal(modeOf(socketDir()), 0o777, 'the fixture is actually wide open before the call');
+  ensureSocketDir();
+  assert.equal(modeOf(socketDir()), SOCKET_DIR_MODE);
 });
