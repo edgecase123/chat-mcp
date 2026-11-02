@@ -324,6 +324,42 @@ export function pendingInbox(db: Db, query: InboxQuery): Message[] {
   return rows.map(toMessage);
 }
 
+/**
+ * How many DMs are waiting for `handle`.
+ *
+ * 🛑 MUST MIRROR `pendingInbox`'s filter. They are read together — the count
+ * goes in a wake payload and the agent decides from it whether to call
+ * `inbox` — so a count that includes what the read excludes sends an agent
+ * looking for a message that is not there.
+ */
+export function pendingInboxCount(db: Db, to: string): number {
+  const row = db.prepare(
+    `SELECT COUNT(*) AS n FROM messages WHERE to_handle = ? AND read_at IS NULL`,
+  ).get(to) as unknown as { n: number };
+
+  return Number(row.n);
+}
+
+/**
+ * Everything waiting for `handle`, across every channel.
+ *
+ * 🛑 ONE NOTIFY FILE PER HANDLE, SO ONE COUNT. An earlier cut dispatched on the
+ * target's `#` prefix and counted that channel alone. A room send then reported
+ * 1 while a DM also waited, which licensed the agent to skip the read — and the
+ * DM was gone, because this very message had overwritten the file.
+ *
+ * A per-channel count is worse than no count: absent means "read if you care",
+ * and 1 means "there is nothing else".
+ */
+export function totalUnreadFor(db: Db, handle: string): number {
+  let total = pendingInboxCount(db, handle);
+  for (const room of myRooms(db, handle)) {
+    total += roomUnreadCount(db, room.name, handle);
+  }
+
+  return total;
+}
+
 export function markRead(db: Db, ids: number[]): void {
   if (ids.length === 0) return;
   const now = Date.now();
@@ -546,6 +582,10 @@ function hydrateRoomFromRow(db: Db, row: RoomRow): Room {
  * Unread messages for a (room, handle) pair. Uses the per-member watermark
  * so each member reads independently. Does NOT advance the watermark —
  * call `advanceRoomRead` after presenting the messages.
+ *
+ * 🛑 THE CALLER'S OWN POSTS ARE EXCLUDED. `room_send` does not advance the
+ * sender's watermark, while the web UI and the CLI both do, so without this
+ * an agent got its own message back as unread and paid to read it again.
  */
 export function roomUnread(
   db: Db,
@@ -559,10 +599,10 @@ export function roomUnread(
   const since = read?.last_read_id ?? 0;
   const rows = db.prepare(
     `SELECT * FROM messages
-     WHERE to_handle = ? AND id > ?
+     WHERE to_handle = ? AND id > ? AND from_handle != ?
      ORDER BY id ASC
      LIMIT ?`,
-  ).all(room, since, Math.min(Math.max(limit, 1), 500)) as unknown as MessageRow[];
+  ).all(room, since, handle, Math.min(Math.max(limit, 1), 500)) as unknown as MessageRow[];
   return rows.map(toMessage);
 }
 
@@ -577,8 +617,11 @@ export function roomUnreadCount(db: Db, room: string, handle: string): number {
   ).get(room, handle) as unknown as { last_read_id: number } | undefined;
   const since = read?.last_read_id ?? 0;
   const row = db.prepare(
-    `SELECT COUNT(*) AS n FROM messages WHERE to_handle = ? AND id > ?`,
-  ).get(room, since) as unknown as { n: number };
+    // Must carry the SAME filter as `roomUnread`, or the sidebar badge reads
+    // one number and opening the room produces another.
+    `SELECT COUNT(*) AS n FROM messages
+     WHERE to_handle = ? AND id > ? AND from_handle != ?`,
+  ).get(room, since, handle) as unknown as { n: number };
 
   return Number(row.n);
 }

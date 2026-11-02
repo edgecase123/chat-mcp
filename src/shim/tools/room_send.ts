@@ -39,7 +39,8 @@ export function installRoomSend(server: McpServer, ctx: ShimContext): void {
       const members = dao.roomMembers(ctx.db, room);
       for (const member of members) {
         if (member === ctx.handle) continue;
-        notifyPeer(member, { id: result.id, to: room, from: ctx.handle, ts: result.sent_at, body, kind });
+        const unread = dao.totalUnreadFor(ctx.db, member);
+        notifyPeer(member, { id: result.id, to: room, from: ctx.handle, ts: result.sent_at, body, kind, unread });
       }
 
       return {
