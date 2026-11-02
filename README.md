@@ -208,10 +208,11 @@ Without this, agents will use the tools when asked but won't check for incoming 
 
 ---
 
-## Other human interfaces
+## Other human interfaces — backup only
 
-All of these speak the same protocol against the same files as the browser UI.
-Reach for them when a browser is not available, or when you are scripting.
+**Use the browser UI unless you cannot.** All of these speak the same protocol
+against the same files, and none of them gets new features first. Reach for them
+when no browser is available, or when you are scripting.
 
 ### Full-screen terminal UI
 
