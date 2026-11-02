@@ -324,6 +324,34 @@ export function pendingInbox(db: Db, query: InboxQuery): Message[] {
   return rows.map(toMessage);
 }
 
+/**
+ * How many DMs are waiting for `handle`.
+ *
+ * 🛑 MUST MIRROR `pendingInbox`'s filter. They are read together — the count
+ * goes in a wake payload and the agent decides from it whether to call
+ * `inbox` — so a count that includes what the read excludes sends an agent
+ * looking for a message that is not there.
+ */
+export function pendingInboxCount(db: Db, to: string): number {
+  const row = db.prepare(
+    `SELECT COUNT(*) AS n FROM messages WHERE to_handle = ? AND read_at IS NULL`,
+  ).get(to) as unknown as { n: number };
+
+  return Number(row.n);
+}
+
+/**
+ * Everything waiting for `handle`, whether the target was a room or a DM.
+ *
+ * Rooms and DMs track read state two different ways — a per-member watermark
+ * versus `read_at` — so a caller that wants one number cannot pick for itself.
+ */
+export function unreadFor(db: Db, handle: string, target: string): number {
+  return target.startsWith('#')
+    ? roomUnreadCount(db, target, handle)
+    : pendingInboxCount(db, handle);
+}
+
 export function markRead(db: Db, ids: number[]): void {
   if (ids.length === 0) return;
   const now = Date.now();

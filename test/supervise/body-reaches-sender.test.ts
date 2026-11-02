@@ -209,7 +209,7 @@ const KIND_EXEMPT = new Map<string, string>([
     'room-join system notice, no caller kind',
   ],
   [
-    'src/cli/web/server.ts :: notifyPeer(member, { id: result.system_message.id, to: body.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });',
+    'src/cli/web/server.ts :: notifyPeer(member, { id: result.system_message.id, to: body.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body, unread });',
     'room-join system notice, no caller kind',
   ],
   [

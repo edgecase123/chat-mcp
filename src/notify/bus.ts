@@ -49,6 +49,18 @@ export interface NotifyEnvelope {
    * the exact layer built to deliver it faster.
    */
   kind?: string;
+  /**
+   * How many messages are waiting for the recipient, INCLUDING this one.
+   *
+   * 🛑 THIS IS WHAT LETS A WOKEN AGENT SKIP THE INBOX CALL ENTIRELY. `1` means
+   * the body in this payload is everything waiting, so reading is pure cost.
+   * Above `1` the agent must read, because the notify file is OVERWRITTEN on
+   * each write and the earlier messages are no longer in it.
+   *
+   * ⚠️ ABSENT means UNKNOWN, never zero. The CLI and one-shot senders do not
+   * set it, so an agent that sees no `unread` must read if it cares.
+   */
+  unread?: number;
 }
 
 /**
