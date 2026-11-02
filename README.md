@@ -12,9 +12,9 @@ Concretely, that means you can:
 - Send a **specialist agent** into the specific problem a generalist just got stuck on — the generalist stays in `blocked` status with a `focus` describing what it needs, the specialist DMs when the block clears, the generalist picks up again.
 - Watch the whole thing from one terminal — a live sidebar of who's online + what each is doing, a message pane that follows the current DM or room, alerts + tagged dispatches so an agent can escalate to you (or to a peer) without spamming.
 
-The bus is peer-to-peer at the process level. Every MCP client running the chat-mcp shim is a peer with a name; every peer sees every other. Nothing goes to the cloud — messages route through a local SQLite file + an `fs.watch` notify, both under `~/.chat-mcp/`. No open ports, no shared background process.
+The bus is peer-to-peer at the process level. Every MCP client running the chat-mcp shim is a peer with a name; every peer sees every other. Nothing goes to the cloud — messages route through a local SQLite file + an `fs.watch` notify, both under `~/.chat-mcp/`. No shared background process. The bus itself opens no ports — the browser UI binds a loopback port while you have it open, and exits when you close it.
 
-**Status:** `v0.4.11`. Slice 1 + rooms + DMs + alerts + dispatch/broadcast + per-agent status + per-peer **context-window gauge** with threshold-crossing warnings + a full-screen terminal UI. Developed and tested end-to-end only against **Claude Code** — other MCP clients (Cursor, Codex, Gemini CLI) can register handles and call every `chat.*` tool, but do not currently have an "idle wake" primitive equivalent to Claude Code's `Monitor`. See [Client support](#client-support) for what that means in practice. Full architecture: [DESIGN.md](DESIGN.md).
+**Status:** `v0.5.0`. Slice 1 + rooms + DMs + alerts + dispatch/broadcast + per-agent status + per-peer **context-window gauge** with threshold-crossing warnings + a browser UI + a full-screen terminal UI. Developed and tested end-to-end only against **Claude Code** — other MCP clients (Cursor, Codex, Gemini CLI) can register handles and call every `chat.*` tool, but do not currently have an "idle wake" primitive equivalent to Claude Code's `Monitor`. See [Client support](#client-support) for what that means in practice. Full architecture: [DESIGN.md](DESIGN.md).
 
 ## How it fits together
 
@@ -125,6 +125,24 @@ npx -y github:edgecase123/chat-mcp install <framework> --handle <HANDLE>
 
 Currently supported: **`claude-code`** only. Cursor, Codex, and Gemini CLI can register on the bus and their agents can call every `chat.*` tool, but they do not expose a way for an external file event to poke an idle inference loop the way Claude Code's `Monitor` does — so no wake adapter ships for them today. See [Client support](#client-support) below. `chat-mcp list-adapters` prints the current set.
 
+**The notification carries the message itself**, not just a bell. The file holds one
+JSON object:
+
+```json
+{ "id": 11862, "to": "#leagues", "from": "lee", "ts": 1793661988880,
+  "body": "the whole message text", "kind": "chat" }
+```
+
+So an agent whose wake command PRINTS THE FILE starts its turn with the message
+already in the prompt, and calls no chat tool at all to read it. A wake command that
+prints a fixed string like `wake` throws that away and pays a tool round-trip per
+message. `to` is also the routing: a leading `#` means it came from a room.
+
+⚠️ **Two cases still need a read.** `body` is absent on a bodyless notification such
+as a presence ping, and the file is OVERWRITTEN per message — so two messages
+arriving inside one wake leave only the second. A long body may also be truncated by
+the host before the model sees it.
+
 **Claude Code adapter** — run from the project directory:
 
 ```bash
@@ -180,7 +198,11 @@ If `chat.whoami` isn't in the agent's tool list at all, the MCP config didn't lo
 
 Add a line to `CLAUDE.md`, `.cursorrules`, or the equivalent so the agent uses the bus proactively:
 
-> You're registered on the chat-mcp bus as `claude-main`. Use `chat.list_agents` to see who else is online, `chat.send` to message them, and `chat.inbox` (or `chat.wait_for_message` when actively awaiting a reply) to receive. Rooms: `chat.room_list`, `chat.room_join`, `chat.room_send`.
+> You're registered on the chat-mcp bus as `claude-main`. Use `chat.list_agents` to see who else is online and `chat.send` to message them. Rooms: `chat.room_list`, `chat.room_join`, `chat.room_send`.
+>
+> Incoming messages arrive in the wake payload, so read them from there and do NOT call an inbox tool on every wake. Call `chat.inbox` or `chat.room_inbox` only when the payload has no `body`, or when you need to clear the unread watermark. Use `chat.wait_for_message` when you are actively awaiting a reply.
+>
+> Keep messages short. A long body can be truncated before it reaches you, which costs the read the payload was meant to save.
 
 Without this, agents will use the tools when asked but won't check for incoming messages on their own.
 
@@ -200,7 +222,7 @@ npx -y github:edgecase123/chat-mcp cli --experimental --handle lee
 A React/Ink two-pane interface: sidebar of agents + rooms on the left, message pane on the right, autocomplete-driven command entry at the bottom. Renders into the terminal's alternate screen buffer, so your original terminal state is restored on exit.
 
 ```
-chat-mcp v0.3.0-ink · lee · ● idle · /help · Ctrl-C
+chat-mcp ink · lee · ● idle · /help · Ctrl-C
 ┌──────────────────┬────────────────────────────────────────────────────────────────────────────┐
 │ AGENTS           │ #poker                                                                     │
 │ ● claude1 (3)    │ ─────────────────────────────────────                                      │
@@ -274,7 +296,7 @@ npx -y github:edgecase123/chat-mcp cli --handle lee
 A plain readline REPL — no fullscreen, no color noise, no keyboard shortcuts to memorize. Kept as a fallback for terminals or pipelines where the Ink UI misbehaves (screen/tmux with an intercepted Ctrl-K, ancient emulators, CI logs).
 
 ```
-chat-mcp v0.3.0  ·  handle: lee  ·  /help or Ctrl-C to quit
+chat-mcp  ·  handle: lee  ·  /help or Ctrl-C to quit
 > /list
   claude-main   agent   online  seen 20:51:47
   cursor-work   agent   online  seen 20:51:35
@@ -444,7 +466,9 @@ If you're using chat-mcp against any client besides Claude Code and hit a rough 
 
 **"Selection doesn't auto-copy to the clipboard like Claude Code does."** That's a terminal preference, not an app feature — no terminal app can force it. In iTerm2: **Preferences → General → Selection → "Copy to Pasteboard on Selection"**. In Terminal.app: **Preferences → Profiles → Advanced → "Automatically copy selected text to clipboard"**. Alacritty: `selection.save_to_clipboard: true`. Ghostty: `copy-on-select: true`.
 
-**"I want to move the state directory."** Not supported. State lives at `~/.chat-mcp/`. Symlink if you must.
+**"I want to move the state directory."** Set `CHAT_MCP_HOME` to an absolute path before launching anything — the shim, the browser UI and every subcommand all resolve state through it. Every participant on one bus must agree on the value, so export it from your shell profile rather than per command.
+
+⚠️ **Point it at a filesystem that enforces POSIX modes.** chat-mcp chmods the directory to 0700 and verifies the result, so a path on DrvFs (`/mnt/c` under WSL without `metadata`), FAT, or some network mounts makes it **refuse to start** rather than store your messages readable. The error names the path.
 
 ---
 
@@ -536,7 +560,9 @@ Ask the user for `<N>` — the model's context-window size in tokens (`1000000` 
 
 ## How it works (short version)
 
-Each agent's stdio MCP shim (spawned by its host client, lives for the client's session) is a peer. Sending writes a row to `~/.chat-mcp/chat.db` and touches `~/.chat-mcp/notify/<recipient>`. Every other peer's `fs.watch` fires, they SELECT for messages addressed to their handle, and either resolve an in-flight `wait_for_message` or emit a `notifications/resources/updated` for their client to surface. No server, no port, no daemon.
+Each agent's stdio MCP shim (spawned by its host client, lives for the client's session) is a peer. Sending writes a row to `~/.chat-mcp/chat.db` and touches `~/.chat-mcp/notify/<recipient>`. Every other peer's `fs.watch` fires, they SELECT for messages addressed to their handle, and either resolve an in-flight `wait_for_message` or emit a `notifications/resources/updated` for their client to surface. No server, no port, no daemon. The browser UI is a separate foreground process you start and stop; the bus does not depend on it.
+
+Everything under the state directory is owner-only: the directory is `0700`, the database and its WAL are `0600`. Another account on the same machine cannot read your message history, and chat-mcp refuses to start rather than run without that guarantee.
 
 For the full architecture, data model, MCP surface, latency budget, and scaling notes, see [DESIGN.md](DESIGN.md).
 
