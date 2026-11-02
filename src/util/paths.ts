@@ -1,6 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { mkdirSync, chmodSync, existsSync, statSync, unlinkSync } from 'node:fs';
+import { mkdirSync, chmodSync, existsSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import type { Stats } from 'node:fs';
 
 export function stateDir(): string {
   const override = process.env.CHAT_MCP_HOME;
@@ -103,9 +104,58 @@ export function adapterScriptPath(framework: string, handle: string): string {
   return join(adaptersDir(), `${framework}-${handle}.sh`);
 }
 
+/** Owner-only, so no other local account may traverse into the state dir. */
+export const STATE_DIR_MODE = 0o700;
+
+/** Owner-only read+write, for every file the bus stores under that dir. */
+export const STATE_FILE_MODE = 0o600;
+
+/**
+ * 🛑 A chmod CAN SUCCEED AND CHANGE NOTHING, so read the mode back.
+ *
+ * On WSL a `CHAT_MCP_HOME` under `/mnt/c` sits on DrvFs, which carries no
+ * POSIX mode unless the mount says `metadata`. `chmodSync` there returns
+ * success. Without this read-back the whole fix reports green while every
+ * message stays readable.
+ *
+ * win32 is exempt because modes are not enforceable there at all — its
+ * protection is the ACL inherited from the user profile directory.
+ */
+export function chmodVerified(path: string, mode: number, stat: (p: string) => Stats = statSync) {
+  chmodSync(path, mode);
+  if (process.platform === 'win32') return;
+
+  const got = stat(path).mode & 0o777;
+  if (got === mode) return;
+
+  throw new Error(
+    `chmod on ${path} did not take: asked for ${mode.toString(8)}, got ${got.toString(8)}. ` +
+      'A filesystem that ignores modes cannot hold this. Move CHAT_MCP_HOME onto one that can, ' +
+      'or mount it with POSIX metadata.',
+  );
+}
+
+/** Write a file nobody else on the host may read. */
+export function writePrivateFileSync(path: string, data: string, flag?: string) {
+  writeFileSync(path, data, flag ? { mode: STATE_FILE_MODE, flag } : { mode: STATE_FILE_MODE });
+  // 🛑 The `mode` above applies on CREATE only, and is masked by the umask.
+  // Every file that predates this guard needs the explicit chmod.
+  chmodSync(path, STATE_FILE_MODE);
+}
+
+/**
+ * 🛑 THE DIRECTORY MODE IS THE WHOLE FIX. Every per-file mode below is a
+ * second layer.
+ *
+ * It is the only control that reaches files no code path will ever chmod:
+ * the SQLite WAL and shm, a stale `chat.db.bak-*`, anything a future feature
+ * drops in here. Denying traversal covers them without naming them.
+ */
 export function ensureStateDir(): string {
   const dir = stateDir();
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  chmodVerified(dir, STATE_DIR_MODE);
+
   return dir;
 }
 

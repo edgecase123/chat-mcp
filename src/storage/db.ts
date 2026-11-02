@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
-import { dbPath, ensureStateDir } from '../util/paths.js';
+import { chmodSync, existsSync } from 'node:fs';
+import { dbPath, ensureStateDir, STATE_FILE_MODE } from '../util/paths.js';
 
 export type Db = DatabaseSync;
 
@@ -238,5 +239,22 @@ export function openDb(): Db {
   db.exec('PRAGMA synchronous = NORMAL');
   db.exec('PRAGMA foreign_keys = ON');
   migrate(db);
+  tightenDbFiles();
+
   return db;
+}
+
+/**
+ * 🛑 THE WAL IS THE FILE WORTH READING. It holds the newest messages, SQLite
+ * creates it itself at the umask mode, and no caller ever names it. A 0600
+ * database beside a 0644 WAL discloses the traffic that matters most.
+ *
+ * Not durable on its own: SQLite may re-create the WAL at the umask mode
+ * after a checkpoint. The 0700 state directory is what actually holds.
+ */
+function tightenDbFiles(): void {
+  for (const suffix of ['', '-wal', '-shm']) {
+    const path = `${dbPath()}${suffix}`;
+    if (existsSync(path)) chmodSync(path, STATE_FILE_MODE);
+  }
 }
