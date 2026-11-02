@@ -119,18 +119,58 @@ test('🚨 the database, its WAL and its shm are all 0600 after open', async () 
   }
 });
 
-/** A notify file leaks the handle it is named for and the message metadata. */
-test('🚨 a notify file is 0600, including one that already existed at 0644', async () => {
+/**
+ * A notify file leaks the handle it is named for and the message metadata.
+ *
+ * 🛑 EACH WRITE SITE GETS ITS OWN TEST, AND EACH RE-LOOSENS THE FILE FIRST.
+ * Two earlier cuts were vacuous. One called `writePrivateFileSync` directly and
+ * proved the helper rather than any caller. The next drove `touch()` but let
+ * the CONSTRUCTOR's own chmod satisfy the assertion, so it stayed green with
+ * `touch()` reverted.
+ */
+test('🚨 the NotifyBus constructor leaves its notify file 0600', async () => {
   const { ensureNotifyDir } = await import('../../src/util/paths.js');
-  const { writePrivateFileSync } = await import('../../src/util/paths.js');
+  const { NotifyBus } = await import('../../src/notify/bus.js');
 
   ensureNotifyDir();
-  const path = notifyPathFor('perms');
+  const path = notifyPathFor('perms-ctor');
   writeFileSync(path, 'pre-existing');
   chmodSync(path, 0o644);
   assert.equal(modeOf(path), 0o644, 'the fixture really is group-readable first');
 
-  writePrivateFileSync(path, 'payload');
+  new NotifyBus('perms-ctor');
+
+  assert.equal(modeOf(path), STATE_FILE_MODE);
+});
+
+test('🚨 touch() leaves its notify file 0600', async () => {
+  const { ensureNotifyDir } = await import('../../src/util/paths.js');
+  const { NotifyBus } = await import('../../src/notify/bus.js');
+
+  ensureNotifyDir();
+  const path = notifyPathFor('perms-touch');
+  const bus = new NotifyBus('perms-touch');
+
+  // 🛑 AFTER the constructor, so its chmod cannot satisfy this assertion.
+  chmodSync(path, 0o644);
+  assert.equal(modeOf(path), 0o644, 'the fixture is group-readable going into touch()');
+
+  bus.touch({ id: 1, from: 'claude1', body: 'payload' });
+
+  assert.equal(modeOf(path), STATE_FILE_MODE);
+});
+
+test('🚨 notifyPeer leaves the recipient notify file 0600', async () => {
+  const { ensureNotifyDir } = await import('../../src/util/paths.js');
+  const { notifyPeer } = await import('../../src/notify/bus.js');
+
+  ensureNotifyDir();
+  const path = notifyPathFor('perms-peer');
+  writeFileSync(path, 'pre-existing');
+  chmodSync(path, 0o644);
+  assert.equal(modeOf(path), 0o644, 'the fixture really is group-readable first');
+
+  notifyPeer('perms-peer', { id: 1, from: 'claude1', body: 'payload' });
 
   assert.equal(modeOf(path), STATE_FILE_MODE);
 });
