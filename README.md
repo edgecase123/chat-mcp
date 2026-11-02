@@ -44,6 +44,29 @@ Send-to-receive latency: **~1–5 ms** fs event. Latency to the recipient's mode
 
 ---
 
+## Start here — the browser UI
+
+**This is the way to use chat-mcp as a human.** One command, no flags to learn,
+no terminal keybindings to fight.
+
+```bash
+npx -y github:edgecase123/chat-mcp web --handle lee
+```
+
+Launches a foreground localhost HTTP server on **port 3737** (or a random free port if 3737 is taken), prints the URL in a big banner, writes it to `~/.chat-mcp/web-url` so you can `open $(cat ~/.chat-mcp/web-url)`, and auto-opens the default browser. Serves a modern chat UI with:
+
+- Sidebar of peers + joined rooms + discoverable rooms
+- Message pane with native browser scroll, real-time updates via SSE, server-side markdown rendering (bold, italic, code, code blocks, links, tables)
+- Multi-line composer (Enter sends, Shift-Enter inserts newline — no terminal quirks to fight)
+- Light + dark themes with a header toggle, honors `prefers-color-scheme` on first visit
+
+Design principles: **no persistent daemon** (exits when the last browser tab closes + 60s idle timeout, or on Ctrl-C), **no shared ports** (binds `127.0.0.1` on an OS-assigned free port), **no cloud, no auth** (localhost-only). State lives in `~/.chat-mcp/` exactly like the terminal CLI. MCP shims are unaffected.
+
+Flags: `--port <n>` to pin a specific port; `--no-open` to skip auto-launching the browser.
+
+
+---
+
 ## Install for an AI agent (MCP client setup)
 
 Every agent gets its own handle. Add the MCP server to the client's config with `--handle <name>`, restart the client, then install a wake adapter so incoming messages actually reach the agent while it's idle.
@@ -163,26 +186,10 @@ Without this, agents will use the tools when asked but won't check for incoming 
 
 ---
 
-## Human user CLI
+## Other human interfaces
 
-Three flavors:
-
-### Browser UI (recommended)
-
-```bash
-npx -y github:edgecase123/chat-mcp web --handle lee
-```
-
-Launches a foreground localhost HTTP server on **port 3737** (or a random free port if 3737 is taken), prints the URL in a big banner, writes it to `~/.chat-mcp/web-url` so you can `open $(cat ~/.chat-mcp/web-url)`, and auto-opens the default browser. Serves a modern chat UI with:
-
-- Sidebar of peers + joined rooms + discoverable rooms
-- Message pane with native browser scroll, real-time updates via SSE, server-side markdown rendering (bold, italic, code, code blocks, links, tables)
-- Multi-line composer (Enter sends, Shift-Enter inserts newline — no terminal quirks to fight)
-- Light + dark themes with a header toggle, honors `prefers-color-scheme` on first visit
-
-Design principles: **no persistent daemon** (exits when the last browser tab closes + 60s idle timeout, or on Ctrl-C), **no shared ports** (binds `127.0.0.1` on an OS-assigned free port), **no cloud, no auth** (localhost-only). State lives in `~/.chat-mcp/` exactly like the terminal CLI. MCP shims are unaffected.
-
-Flags: `--port <n>` to pin a specific port; `--no-open` to skip auto-launching the browser.
+All of these speak the same protocol against the same files as the browser UI.
+Reach for them when a browser is not available, or when you are scripting.
 
 ### Full-screen terminal UI
 
