@@ -1,5 +1,5 @@
-import { writeFileSync, existsSync, unlinkSync, statSync } from 'node:fs';
-import { ensureNotifyDir, notifyPathFor } from '../util/paths.js';
+import { existsSync, unlinkSync, statSync } from 'node:fs';
+import { ensureNotifyDir, notifyPathFor, writePrivateFileSync } from '../util/paths.js';
 
 type Callback = () => void;
 
@@ -60,7 +60,7 @@ export interface NotifyEnvelope {
 export function notifyPeer(handle: string, envelope?: NotifyEnvelope): void {
   ensureNotifyDir();
   const payload = envelope ? JSON.stringify(envelope) : String(Date.now());
-  writeFileSync(notifyPathFor(handle), payload);
+  writePrivateFileSync(notifyPathFor(handle), payload);
 
   // 🛑 ALSO hand it straight to a supervisor, if one is listening.
   //
@@ -138,7 +138,7 @@ export class NotifyBus {
     this.path = notifyPathFor(handle);
 
     try {
-      writeFileSync(this.path, '', { flag: 'a' });
+      writePrivateFileSync(this.path, '', 'a');
     } catch {
       // Best-effort; subsequent touch() calls will create it
     }
@@ -226,7 +226,7 @@ export class NotifyBus {
    */
   touch(envelope?: NotifyEnvelope): void {
     const payload = envelope ? JSON.stringify(envelope) : String(Date.now());
-    writeFileSync(this.path, payload);
+    writePrivateFileSync(this.path, payload);
   }
 
   subscribe(cb: Callback): () => void {
