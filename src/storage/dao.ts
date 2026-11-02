@@ -546,6 +546,10 @@ function hydrateRoomFromRow(db: Db, row: RoomRow): Room {
  * Unread messages for a (room, handle) pair. Uses the per-member watermark
  * so each member reads independently. Does NOT advance the watermark —
  * call `advanceRoomRead` after presenting the messages.
+ *
+ * 🛑 THE CALLER'S OWN POSTS ARE EXCLUDED. `room_send` does not advance the
+ * sender's watermark, while the web UI and the CLI both do, so without this
+ * an agent got its own message back as unread and paid to read it again.
  */
 export function roomUnread(
   db: Db,
@@ -559,10 +563,10 @@ export function roomUnread(
   const since = read?.last_read_id ?? 0;
   const rows = db.prepare(
     `SELECT * FROM messages
-     WHERE to_handle = ? AND id > ?
+     WHERE to_handle = ? AND id > ? AND from_handle != ?
      ORDER BY id ASC
      LIMIT ?`,
-  ).all(room, since, Math.min(Math.max(limit, 1), 500)) as unknown as MessageRow[];
+  ).all(room, since, handle, Math.min(Math.max(limit, 1), 500)) as unknown as MessageRow[];
   return rows.map(toMessage);
 }
 
@@ -577,8 +581,11 @@ export function roomUnreadCount(db: Db, room: string, handle: string): number {
   ).get(room, handle) as unknown as { last_read_id: number } | undefined;
   const since = read?.last_read_id ?? 0;
   const row = db.prepare(
-    `SELECT COUNT(*) AS n FROM messages WHERE to_handle = ? AND id > ?`,
-  ).get(room, since) as unknown as { n: number };
+    // Must carry the SAME filter as `roomUnread`, or the sidebar badge reads
+    // one number and opening the room produces another.
+    `SELECT COUNT(*) AS n FROM messages
+     WHERE to_handle = ? AND id > ? AND from_handle != ?`,
+  ).get(room, since, handle) as unknown as { n: number };
 
   return Number(row.n);
 }
