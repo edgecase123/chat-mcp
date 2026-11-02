@@ -31,7 +31,7 @@ test('🚨 one waiting DM counts as 1, so the agent can skip the inbox', () => {
   try {
     dao.insertMessage(db, { from: 'other', to: 'me', body: 'hello' });
 
-    assert.equal(dao.unreadFor(db, 'me', 'me'), 1);
+    assert.equal(dao.totalUnreadFor(db, 'me'), 1);
   } finally {
     db.close();
   }
@@ -44,14 +44,15 @@ test('🚨 two waiting DMs count as 2, which is what forces the read', () => {
     dao.insertMessage(db, { from: 'other', to: 'me', body: 'first' });
     dao.insertMessage(db, { from: 'other', to: 'me', body: 'second' });
 
-    assert.equal(dao.unreadFor(db, 'me', 'me'), 2);
+    assert.equal(dao.totalUnreadFor(db, 'me'), 2);
   } finally {
     db.close();
   }
 });
 
 /**
- * 🛑 THE COUNT AND `pendingInbox` MUST AGREE. The count goes in the payload and
+ * 🛑 THE COUNT AND `pendingInbox` MUST AGREE. The fixture joins no rooms, so
+ * the total IS the DM count here. The count goes in the payload and
  * the agent decides from it, so a count that includes what the read excludes
  * sends the agent after a message that is not there.
  */
@@ -63,8 +64,8 @@ test('🚨 the DM count equals what pendingInbox returns', () => {
     const first = dao.pendingInbox(db, { to: 'me' });
     dao.markRead(db, [first[0]!.id]);
 
-    assert.equal(dao.unreadFor(db, 'me', 'me'), dao.pendingInbox(db, { to: 'me' }).length);
-    assert.equal(dao.unreadFor(db, 'me', 'me'), 2);
+    assert.equal(dao.totalUnreadFor(db, 'me'), dao.pendingInbox(db, { to: 'me' }).length);
+    assert.equal(dao.totalUnreadFor(db, 'me'), 2);
   } finally {
     db.close();
   }
@@ -78,14 +79,14 @@ test('🚨 a read DM stops counting, so the number can reach the skip case again
     dao.markRead(db, dao.pendingInbox(db, { to: 'me' }).map((m) => m.id));
     dao.insertMessage(db, { from: 'other', to: 'me', body: 'new' });
 
-    assert.equal(dao.unreadFor(db, 'me', 'me'), 1);
+    assert.equal(dao.totalUnreadFor(db, 'me'), 1);
   } finally {
     db.close();
   }
 });
 
-/** A `#` target routes to the room watermark, not to `read_at`. */
-test('🚨 unreadFor routes a room target to the room count', () => {
+/** A room message with no DMs waiting reaches the skip case on its own. */
+test('🚨 one waiting room message counts as 1', () => {
   const db = bus();
 
   try {
@@ -97,10 +98,71 @@ test('🚨 unreadFor routes a room target to the room count', () => {
 
     dao.insertMessage(db, { from: 'other', to: '#r', body: 'room msg' });
 
-    assert.equal(dao.unreadFor(db, 'me', '#r'), 1);
-    // 🛑 The DM path must NOT see it. A room message is not a DM, and a
-    // picker that fell through to `read_at` would count it here.
-    assert.equal(dao.unreadFor(db, 'me', 'me'), 0);
+    assert.equal(dao.totalUnreadFor(db, 'me'), 1);
+  } finally {
+    db.close();
+  }
+});
+
+/**
+ * 🛑 ONE NOTIFY FILE PER HANDLE, SO ONE COUNT ACROSS EVERY CHANNEL.
+ *
+ * A per-channel count is WORSE than no count. A room send that reports
+ * `unread=1` while a DM also waits licenses the agent to skip the read, and
+ * the DM is lost — the notify file was overwritten by this very message.
+ *
+ * Found by claude1 reviewing 2ca8b10, reproduced at runtime before fixing.
+ */
+test('🚨 unread spans DMs AND rooms, because one file carries both', () => {
+  const db = bus();
+
+  try {
+    for (const h of ['me', 'other']) dao.joinRoom(db, '#r', h);
+    const newest = db
+      .prepare("SELECT COALESCE(MAX(id), 0) AS n FROM messages WHERE to_handle = '#r'")
+      .get() as unknown as { n: number };
+    for (const h of ['me', 'other']) dao.advanceRoomRead(db, '#r', h, Number(newest.n));
+
+    dao.insertMessage(db, { from: 'other', to: 'me', body: 'a DM waits' });
+    dao.insertMessage(db, { from: 'other', to: '#r', body: 'a room message waits' });
+
+    // Two are waiting, so the agent MUST read whichever send wrote the file.
+    assert.equal(dao.totalUnreadFor(db, 'me'), 2);
+  } finally {
+    db.close();
+  }
+});
+
+test('🚨 a second room adds to the same total', () => {
+  const db = bus();
+
+  try {
+    for (const room of ['#r', '#s']) {
+      for (const h of ['me', 'other']) dao.joinRoom(db, room, h);
+      const newest = db
+        .prepare('SELECT COALESCE(MAX(id), 0) AS n FROM messages WHERE to_handle = ?')
+        .get(room) as unknown as { n: number };
+      for (const h of ['me', 'other']) dao.advanceRoomRead(db, room, h, Number(newest.n));
+    }
+
+    dao.insertMessage(db, { from: 'other', to: '#r', body: 'one' });
+    dao.insertMessage(db, { from: 'other', to: '#s', body: 'two' });
+
+    assert.equal(dao.totalUnreadFor(db, 'me'), 2);
+  } finally {
+    db.close();
+  }
+});
+
+/** A room the handle is not in must not contribute. */
+test('🚨 a room I am not a member of is not counted', () => {
+  const db = bus();
+
+  try {
+    dao.joinRoom(db, '#theirs', 'other');
+    dao.insertMessage(db, { from: 'other', to: '#theirs', body: 'not mine' });
+
+    assert.equal(dao.totalUnreadFor(db, 'me'), 0);
   } finally {
     db.close();
   }

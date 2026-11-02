@@ -371,7 +371,7 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
     dao.advanceRoomRead(ctx.db, room, ctx.handle, sent.id);
     for (const member of dao.roomMembers(ctx.db, room)) {
       if (member === ctx.handle) continue;
-      const unread = dao.unreadFor(ctx.db, member, room);
+      const unread = dao.totalUnreadFor(ctx.db, member);
       notifyPeer(member, { id: sent.id, to: room, from: ctx.handle, ts: sent.sent_at, body: bodyText, kind, unread });
     }
     respondJson(res, { id: sent.id, sent_at: sent.sent_at });
@@ -381,7 +381,7 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
       return respondJson(res, { error: `unknown peer: ${peer}` }, 404);
     }
     const sent = dao.insertMessage(ctx.db, { from: ctx.handle, to: peer, body: bodyText, kind });
-    const unread = dao.unreadFor(ctx.db, peer, peer);
+    const unread = dao.totalUnreadFor(ctx.db, peer);
     notifyPeer(peer, { id: sent.id, to: peer, from: ctx.handle, ts: sent.sent_at, body: bodyText, kind, unread });
     respondJson(res, { id: sent.id, sent_at: sent.sent_at });
   }
@@ -396,7 +396,7 @@ async function handleRoomJoin(req: IncomingMessage, res: ServerResponse, ctx: Ro
   if (result.was_new_member && result.system_message) {
     for (const member of dao.roomMembers(ctx.db, body.room)) {
       if (member === ctx.handle) continue;
-      const unread = dao.unreadFor(ctx.db, member, body.room);
+      const unread = dao.totalUnreadFor(ctx.db, member);
       notifyPeer(member, { id: result.system_message.id, to: body.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body, unread });
     }
   }

@@ -35,7 +35,7 @@ export function installSend(server: McpServer, ctx: ShimContext): void {
       }
       dao.touchLastSeen(ctx.db, ctx.handle);
       const result = dao.insertMessage(ctx.db, { from: ctx.handle, to, body, kind });
-      const unread = dao.unreadFor(ctx.db, to, to);
+      const unread = dao.totalUnreadFor(ctx.db, to);
       notifyPeer(to, { id: result.id, to, from: ctx.handle, ts: result.sent_at, body, kind, unread });
       return {
         content: [

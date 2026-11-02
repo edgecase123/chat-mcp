@@ -341,15 +341,23 @@ export function pendingInboxCount(db: Db, to: string): number {
 }
 
 /**
- * Everything waiting for `handle`, whether the target was a room or a DM.
+ * Everything waiting for `handle`, across every channel.
  *
- * Rooms and DMs track read state two different ways — a per-member watermark
- * versus `read_at` — so a caller that wants one number cannot pick for itself.
+ * 🛑 ONE NOTIFY FILE PER HANDLE, SO ONE COUNT. An earlier cut dispatched on the
+ * target's `#` prefix and counted that channel alone. A room send then reported
+ * 1 while a DM also waited, which licensed the agent to skip the read — and the
+ * DM was gone, because this very message had overwritten the file.
+ *
+ * A per-channel count is worse than no count: absent means "read if you care",
+ * and 1 means "there is nothing else".
  */
-export function unreadFor(db: Db, handle: string, target: string): number {
-  return target.startsWith('#')
-    ? roomUnreadCount(db, target, handle)
-    : pendingInboxCount(db, handle);
+export function totalUnreadFor(db: Db, handle: string): number {
+  let total = pendingInboxCount(db, handle);
+  for (const room of myRooms(db, handle)) {
+    total += roomUnreadCount(db, room.name, handle);
+  }
+
+  return total;
 }
 
 export function markRead(db: Db, ids: number[]): void {
