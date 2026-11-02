@@ -426,6 +426,8 @@ export function cheatSheet(commands, labels) {
     '  ' + pad('Up / Down') + '— move through the completion list',
     '  ' + pad('Esc') + '— dismiss the completion list',
     '  ' + pad('Up / Down') + '— with no list open, step through lines you sent',
+    '  ' + pad('drop a file on the window') + ' — insert its path at the caret',
+    '  ' + pad('') + '    relative to the project folder, "~/" under home',
     '',
     'MESSAGES',
     '  ' + pad('click the copy icon') + '— copy the message markdown as typed',
@@ -521,4 +523,104 @@ export function pathSuggestionsFor(hints, value, caret) {
   });
 
   return { items, index: 0, kind: 'path', typed: `@${token.query}` };
+}
+
+/**
+ * The paths carried by a drag, newest browsers first.
+ *
+ * 🛑 THE FILE LIST CANNOT ANSWER THIS. `DataTransfer.files` yields `File`
+ * objects, and a `File` exposes `.name` and no path at all — that is a
+ * deliberate browser privacy boundary, not an oversight. The full path
+ * arrives only in the drag's `text/uri-list`, which Finder and VS Code set
+ * as `file:///...` URLs.
+ *
+ * Per RFC 2483 a uri-list is one URI per line and a line opening with "#" is
+ * a comment. Anything that is not a `file:` URL is dropped: a drag from a
+ * browser carries `https:` and there is no path in it.
+ *
+ * @param {string} uriList the drag's text/uri-list payload
+ * @returns {string[]} absolute paths, decoded
+ */
+export function pathsFromUriList(uriList) {
+  return (uriList || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    // 🛑 NO SEPARATE "#" COMMENT FILTER. RFC 2483 says a line opening with
+    // "#" is a comment, and one is unreachable here: a line cannot both open
+    // with "#" and open with "file://". A filter for it was written, could
+    // not be killed by any mutant, and was removed rather than kept as a
+    // guard that cannot fire.
+    .filter((line) => line.toLowerCase().startsWith('file://'))
+    .map(pathFromFileUri)
+    .filter((path) => path !== null);
+}
+
+/**
+ * `file:///a/b` and `file://localhost/a/b` both mean `/a/b`.
+ *
+ * ⚠️ A HOST THAT IS NOT THIS MACHINE IS REFUSED. `file://server/share` is a
+ * remote path and inserting it as a local one would be a lie.
+ */
+function pathFromFileUri(uri) {
+  const rest = uri.slice('file://'.length);
+  const slash = rest.indexOf('/');
+  if (slash < 0) return null;
+
+  const host = rest.slice(0, slash);
+  if (host !== '' && host.toLowerCase() !== 'localhost') return null;
+
+  try {
+    return decodeURIComponent(rest.slice(slash));
+  } catch {
+    // A malformed percent-escape is not a path. Dropping it beats inserting
+    // a mangled one.
+    return null;
+  }
+}
+
+/**
+ * What a dropped path becomes in the composer.
+ *
+ * Ruled by lee: relative to the project folder when it can be, `~/` when it
+ * is under home, and the absolute path when it is under neither.
+ *
+ * 🛑 THE PROJECT FOLDER IS TESTED FIRST AND THE ORDER IS LOAD-BEARING. The
+ * project folder is normally INSIDE home, so testing home first would turn
+ * every project file into a `~/dev/...` path and the `@` hints would
+ * disagree with the drop for the same file.
+ *
+ * @param {string} abs an absolute path
+ * @param {{ cwd: string, home: string }} roots
+ */
+export function droppedPathValue(abs, { cwd, home }) {
+  const underCwd = relativeTo(abs, cwd);
+  if (underCwd !== null) return underCwd === '' ? '.' : underCwd;
+
+  const underHome = relativeTo(abs, home);
+  if (underHome !== null) return underHome === '' ? '~' : `~/${underHome}`;
+
+  return abs;
+}
+
+/** The part of `abs` below `root`, or null when it is not under it. */
+function relativeTo(abs, root) {
+  if (!root) return null;
+  const base = root.endsWith('/') ? root.slice(0, -1) : root;
+  if (abs === base) return '';
+  // 🛑 The trailing slash is what stops "/proj-other" matching "/proj".
+  if (!abs.startsWith(`${base}/`)) return null;
+
+  return abs.slice(base.length + 1);
+}
+
+/**
+ * The text a drop inserts, for one or many files.
+ *
+ * ⚠️ SEPARATED BY A SPACE AND NOT QUOTED. A path containing a space is
+ * therefore ambiguous when several are dropped at once. The composer is
+ * prose read by a person rather than a shell, so this is a known limit and
+ * not a bug to work around with quoting nobody asked for.
+ */
+export function dropInsertText(paths, roots) {
+  return paths.map((p) => droppedPathValue(p, roots)).join(' ');
 }
