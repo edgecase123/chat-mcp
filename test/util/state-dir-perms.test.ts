@@ -194,18 +194,29 @@ test('🚨 touch() leaves its notify file 0600', async () => {
  */
 test("🚨 no file but paths.ts builds a '.chat-mcp' path of its own", async () => {
   const { execFileSync } = await import('node:child_process');
+  const { readFileSync } = await import('node:fs');
   const root = new URL('../../src', import.meta.url).pathname;
 
-  const hits = execFileSync('grep', ['-rn', "\\.chat-mcp", root], { encoding: 'utf8' })
+  const files = execFileSync('grep', ['-rl', '--include=*.ts', "\\.chat-mcp", root], {
+    encoding: 'utf8',
+  })
     .split('\n')
-    .filter((line) => line.length > 0)
-    // A comment or an error message may name the path; only code that BUILDS
-    // one is the defect, and every such line goes through join() or a literal
-    // concatenation with homedir().
-    .filter((line) => /homedir\(\)/.test(line))
-    .filter((line) => !line.includes('/util/paths.ts'));
+    .filter((f) => f.length > 0 && !f.endsWith('/util/paths.ts'));
 
-  assert.deepEqual(hits, [], `these build their own state path:\n${hits.join('\n')}`);
+  // 🛑 PER FILE, NOT PER LINE. A line-scoped grep is escaped by a two-line
+  // `const base = homedir()` followed by a join on the next line. claude1
+  // raised that after the first cut shipped.
+  const offenders = files.filter((f) => {
+    const src = readFileSync(f, 'utf8');
+
+    return src.includes('homedir(') && /['"`]\.chat-mcp/.test(src);
+  });
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `these reach ~/.chat-mcp without stateDir():\n${offenders.join('\n')}`,
+  );
 });
 
 test('🚨 notifyPeer leaves the recipient notify file 0600', async () => {
