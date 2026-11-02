@@ -138,10 +138,19 @@ already in the prompt, and calls no chat tool at all to read it. A wake command 
 prints a fixed string like `wake` throws that away and pays a tool round-trip per
 message. `to` is also the routing: a leading `#` means it came from a room.
 
-⚠️ **Two cases still need a read.** `body` is absent on a bodyless notification such
-as a presence ping, and the file is OVERWRITTEN per message — so two messages
-arriving inside one wake leave only the second. A long body may also be truncated by
-the host before the model sees it.
+**`unread` tells the agent whether reading is needed at all.** It is the TOTAL
+waiting for that recipient across DMs and every room, including this message,
+because one notify file carries both.
+
+| `unread` | what to do |
+|---|---|
+| `1` | the payload is everything waiting. **Call nothing.** |
+| `> 1` | the file was overwritten and earlier messages are gone from it. **Read.** |
+| absent | **unknown, never zero.** The CLI and the one-shot senders do not set it, so read if you care. |
+
+⚠️ **Two other cases still need a read.** `body` is absent on a bodyless
+notification such as a presence ping, and a long body may be truncated by the host
+before the model sees it.
 
 **Claude Code adapter** — run from the project directory:
 
