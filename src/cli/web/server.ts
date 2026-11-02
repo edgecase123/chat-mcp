@@ -1,7 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile, readdir, stat, writeFile, unlink, mkdir } from 'node:fs/promises';
+import { readFile, readdir, stat, writeFile, unlink } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
-import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -12,6 +11,7 @@ import { answerAndNotify } from '../../supervise/answer.js';
 import * as dao from '../../storage/dao.js';
 import type { MessageKind } from '../../storage/dao.js';
 import { assertRoomName } from '../../util/naming.js';
+import { ensureStateDir, stateDir } from '../../util/paths.js';
 import { renderBodyToHtml } from './render.js';
 import { buildHints, defaultRoots, realContainedDir, resolveHintQuery } from './file-hints.js';
 
@@ -19,8 +19,12 @@ const VERSION = '0.4.4';
 
 /** Well-known path where the currently-running server writes its URL so
  *  scripts + follow-up shell commands can find it without scraping stdout.
- *  Example use: `open $(cat ~/.chat-mcp/web-url)` */
-const WEB_URL_FILE = join(homedir(), '.chat-mcp', 'web-url');
+ *  Example use: `open $(cat ~/.chat-mcp/web-url)`
+ *
+ *  Goes through `stateDir()`, so CHAT_MCP_HOME moves it with everything else.
+ *  A hardcoded `~/.chat-mcp` created a SECOND state directory at the umask
+ *  mode, outside the 0700 guarantee. */
+const WEB_URL_FILE = join(stateDir(), 'web-url');
 
 /** Where the static web assets live at runtime. Ships alongside the compiled
  *  server; we assume `dist/cli/web/server.js` and `web/` are siblings under
@@ -121,7 +125,7 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
 
   // Write URL to a well-known path so external scripts can find it.
   try {
-    await mkdir(dirname(WEB_URL_FILE), { recursive: true });
+    ensureStateDir();
     await writeFile(WEB_URL_FILE, url + '\n');
   } catch { /* best-effort */ }
 

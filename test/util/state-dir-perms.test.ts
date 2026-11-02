@@ -104,15 +104,39 @@ test('chmodVerified is silent when the mode landed', () => {
  * SQLite creates it itself at the umask mode. A 0600 database beside a 0644
  * WAL still discloses the newest traffic.
  */
+/**
+ * 🛑 BOTH HALVES ARE LOAD-BEARING, because the three files reach `openDb` in
+ * two different states and one guard cannot cover both.
+ *
+ * `chat.db` SURVIVES a close, so it is re-loosened to 0644 — that is the
+ * pre-existing install the ticket is about. `-wal` and `-shm` are DELETED on a
+ * clean close and re-created by SQLite at the umask mode, so `umask 000` is
+ * what stops the environment satisfying the assertion for them.
+ *
+ * Without the umask half this test passed with `tightenDbFiles()` deleted
+ * under `umask 077`. Measured, and found by claude1 reviewing the branch.
+ */
 test('🚨 the database, its WAL and its shm are all 0600 after open', async () => {
   const { openDb } = await import('../../src/storage/db.js');
-  const db = openDb();
+  const paths = ['', '-wal', '-shm'].map((suffix) => `${dbPath()}${suffix}`);
+  const [main, wal, shm] = paths as [string, string, string];
+
+  openDb().close();
+
+  assert.ok(existsSync(main), 'chat.db survived the close, so re-loosening it is possible');
+  chmodSync(main, 0o644);
+  assert.equal(modeOf(main), 0o644, 'chat.db is group-readable going into the re-open');
+  // 🛑 Print the denominator: these two are gone, so ONLY the umask protects
+  // them and a `chmod` here would be a no-op on a path that does not exist.
+  assert.equal(existsSync(wal), false, '-wal is absent, so SQLite re-creates it');
+  assert.equal(existsSync(shm), false, '-shm is absent, so SQLite re-creates it');
+
+  const db = withUmask(0o000, () => openDb());
 
   try {
-    for (const suffix of ['', '-wal', '-shm']) {
-      const path = `${dbPath()}${suffix}`;
-      assert.ok(existsSync(path), `${suffix || 'chat.db'} exists, so the assertion is not vacuous`);
-      assert.equal(modeOf(path), STATE_FILE_MODE, `${suffix || 'chat.db'} is owner-only`);
+    for (const path of paths) {
+      assert.ok(existsSync(path), `${path} exists, so the assertion is not vacuous`);
+      assert.equal(modeOf(path), STATE_FILE_MODE, `${path} is owner-only`);
     }
   } finally {
     db.close();
@@ -158,6 +182,30 @@ test('🚨 touch() leaves its notify file 0600', async () => {
   bus.touch({ id: 1, from: 'claude1', body: 'payload' });
 
   assert.equal(modeOf(path), STATE_FILE_MODE);
+});
+
+/**
+ * 🛑 `stateDir()` IS THE ONLY PLACE THAT MAY NAME `.chat-mcp`.
+ *
+ * `web-url` was built with `join(homedir(), '.chat-mcp', …)`, so under
+ * CHAT_MCP_HOME it created a SECOND state directory at the umask mode and
+ * nothing chmodded it. A per-file mode cannot catch that class; only the
+ * single chokepoint can. Found by claude1 reviewing this branch.
+ */
+test("🚨 no file but paths.ts builds a '.chat-mcp' path of its own", async () => {
+  const { execFileSync } = await import('node:child_process');
+  const root = new URL('../../src', import.meta.url).pathname;
+
+  const hits = execFileSync('grep', ['-rn', "\\.chat-mcp", root], { encoding: 'utf8' })
+    .split('\n')
+    .filter((line) => line.length > 0)
+    // A comment or an error message may name the path; only code that BUILDS
+    // one is the defect, and every such line goes through join() or a literal
+    // concatenation with homedir().
+    .filter((line) => /homedir\(\)/.test(line))
+    .filter((line) => !line.includes('/util/paths.ts'));
+
+  assert.deepEqual(hits, [], `these build their own state path:\n${hits.join('\n')}`);
 });
 
 test('🚨 notifyPeer leaves the recipient notify file 0600', async () => {
