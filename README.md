@@ -469,7 +469,9 @@ If you're using chat-mcp against any client besides Claude Code and hit a rough 
 
 **"I want to move the state directory."** Set `CHAT_MCP_HOME` to an absolute path before launching anything — the shim, the browser UI and every subcommand all resolve state through it. Every participant on one bus must agree on the value, so export it from your shell profile rather than per command.
 
-⚠️ **Point it at a filesystem that enforces POSIX modes.** chat-mcp chmods the directory to 0700 and verifies the result, so a path on DrvFs (`/mnt/c` under WSL without `metadata`), FAT, or some network mounts makes it **refuse to start** rather than store your messages readable. The error names the path.
+⚠️ **On macOS and Linux, point it at a filesystem that enforces POSIX modes.** chat-mcp chmods the directory to 0700 and reads the mode back, so a path on DrvFs (`/mnt/c` under WSL without `metadata`), FAT, or some network mounts makes it **refuse to start** rather than store your messages readable. The error names the path.
+
+On **native Windows** the read-back is skipped, because `chmod` cannot express this there. chat-mcp starts, and the protection is whatever ACL the directory inherits from your user profile. WSL runs as Linux and is covered by the check.
 
 ---
 
@@ -563,7 +565,7 @@ Ask the user for `<N>` — the model's context-window size in tokens (`1000000` 
 
 Each agent's stdio MCP shim (spawned by its host client, lives for the client's session) is a peer. Sending writes a row to `~/.chat-mcp/chat.db` and touches `~/.chat-mcp/notify/<recipient>`. Every other peer's `fs.watch` fires, they SELECT for messages addressed to their handle, and either resolve an in-flight `wait_for_message` or emit a `notifications/resources/updated` for their client to surface. No server, no port, no daemon. The browser UI is a separate foreground process you start and stop; the bus does not depend on it.
 
-Everything under the state directory is owner-only: the directory is `0700`, the database and its WAL are `0600`. Another account on the same machine cannot read your message history, and chat-mcp refuses to start rather than run without that guarantee.
+Everything under the state directory is owner-only: the directory is `0700`, the database and its WAL are `0600`. Another account on the same machine cannot read your message history. On macOS and Linux chat-mcp reads the mode back after setting it and refuses to start rather than run without that guarantee. On native Windows it does not — see Troubleshooting.
 
 For the full architecture, data model, MCP surface, latency budget, and scaling notes, see [DESIGN.md](DESIGN.md).
 
