@@ -231,18 +231,21 @@ or hidden. What differs is finish:
 | | browser UI | terminal UI |
 |---|---|---|
 | gets new features first | yes | no |
-| layout survives any content | yes | **no — see below** |
+| layout survives any content | yes | **no — wide tables, see below** |
 | needs a width to be usable | no | yes |
 
-**Known rough edges in the terminal UI, measured rather than assumed:**
+**One known rough edge, measured rather than assumed:**
 
-- **Wide characters overflow the pane.** The wrap counts UTF-16 code units at
-  every step, not display columns, so CJK text draws at double its budget.
-  Measured at a 40-column budget: `你好` repeated 30 times leaves the wrap 80
-  columns wide. Repairing any single comparison does not move that number.
-- **A markdown table row is left unwrapped on purpose**, so the table tokenizer
-  can see it. At the same 40-column budget a 71-column row comes through, and
-  the row budget counts it as one line however many it draws.
+- **A markdown table wider than the pane overflows it.** A `|…|` row is handed
+  to the Markdown tokenizer whole, because wrapping it would break the pipe
+  count. So at a 40-column budget a 71-column row comes through unwrapped, and
+  the row budget counts it as one line however many it draws. Keep tables
+  narrow, or read them in the browser.
+
+**Fixed, and noted because it was the headline complaint:** wide characters no
+longer overflow. The wrap compared and sliced by UTF-16 code units, so CJK text
+drew at double its budget — `你好` repeated 30 times reached 80 columns against
+a 40-column budget. It now measures display width throughout.
 
 ### Full-screen terminal UI
 
