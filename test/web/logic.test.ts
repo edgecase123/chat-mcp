@@ -17,6 +17,8 @@ import {
   cheatSheet,
   commandBlock,
   dashColumn,
+  skillTokenAt,
+  skillSuggestionsFor,
   messageMarkdown,
   pathSuggestionsFor,
   nextUnreadBelow,
@@ -991,3 +993,74 @@ test('a newline is not a path space', () => {
   assert.equal(atTokenAt('@~/a\nb', 6), null);
 });
 
+
+// ── "/skill" addressed to a peer ────────────────────────────────────────
+
+const PEERS = ['claude1', 'claude2', 'leejenkins'];
+const SKILLS = {
+  claude1: [
+    { name: 'pr-writing', source: 'leagues' },
+    { name: 'comms-style', source: 'user' },
+    { name: 'playwright-best-practices', source: 'plugin' },
+  ],
+  claude2: [{ name: 'db-schema', source: 'leagues2' }],
+};
+const sctx = { peers: PEERS, skills: SKILLS };
+
+test('🛑 a bare slash line stays a CLIENT command and yields no skills', () => {
+  // `/help` is this client's command. If both answered, accepting one would
+  // insert the other's text — the same collision "@" and "#" were split over.
+  //
+  // ⚠️ THE MECHANISM IS THE PEER LOOKUP, not a startsWith('/') check. A
+  // handle must start alphanumeric, so "/help" can never match a peer. This
+  // test cannot distinguish the two, and the redundant check was removed.
+  assert.equal(skillSuggestionsFor('/help', 5, sctx), null);
+  assert.equal(skillTokenAt('/pr-w', 5, PEERS), null);
+  // The denominator: the same query DOES complete once a peer is addressed.
+  assert.ok(skillSuggestionsFor('claude1 /pr-w', 13, sctx));
+});
+
+test('a slash after an addressed peer completes that peer’s skills', () => {
+  const s = skillSuggestionsFor('claude1 /pr-w', 13, sctx);
+  assert.equal(s.items.length, 1);
+  assert.equal(s.items[0].insert, 'claude1 /pr-writing ');
+  assert.equal(s.items[0].desc, 'leagues', 'the row must say where the skill came from');
+});
+
+test('🛑 the skills offered are the TARGET peer’s, never this client’s', () => {
+  // claude1 has pr-writing and claude2 does not. Offering a union is the
+  // defect: the skill would not resolve for the agent it was sent to.
+  assert.equal(skillSuggestionsFor('claude2 /pr-w', 13, sctx), null);
+  assert.ok(skillSuggestionsFor('claude1 /pr-w', 13, sctx));
+  // And a peer with no reported skills offers nothing rather than everything.
+  assert.equal(skillSuggestionsFor('leejenkins /pr', 14, sctx), null);
+});
+
+test('a bare slash lists every skill the peer has, so it is a picker', () => {
+  const s = skillSuggestionsFor('claude1 /', 9, sctx);
+  assert.equal(s.items.length, 3);
+  assert.deepEqual(s.items.map((i) => i.desc), ['leagues', 'user', 'plugin']);
+});
+
+test('🛑 only the FIRST word addresses a peer, so a slash in prose is prose', () => {
+  assert.equal(skillSuggestionsFor('tell claude1 /pr-w', 18, sctx), null);
+  assert.equal(skillSuggestionsFor('see http://x/pr-w', 17, sctx), null);
+});
+
+test('🛑 the token extends past the caret, or an accept orphans the tail', () => {
+  // The "#" token learned this: querying only the text LEFT of the caret
+  // completes "claude1 /pr-w|riting" to "/pr-writing riting". The token runs
+  // to the end of the word, so a mid-word accept consumes the whole word.
+  const s = skillSuggestionsFor('claude1 /pr-writing', 13, sctx);
+  assert.equal(s.items[0].insert, 'claude1 /pr-writing ', 'a tail was orphaned');
+  assert.ok(!s.items[0].insert.includes('riting riting'));
+});
+
+test('an unknown handle does not turn a slash into a skill', () => {
+  assert.equal(skillSuggestionsFor('nobody /pr-w', 12, sctx), null);
+});
+
+test('the inserted text keeps whatever followed the token', () => {
+  const s = skillSuggestionsFor('claude1 /pr-w make a PR', 13, sctx);
+  assert.equal(s.items[0].insert, 'claude1 /pr-writing make a PR');
+});

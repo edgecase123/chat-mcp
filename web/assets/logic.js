@@ -507,6 +507,79 @@ export function cheatSheet(commands, labels) {
   ].join('\n');
 }
 
+/** Skill-name chars. No "/", because the "/" is the trigger and not body. */
+const SKILL_BODY = /[A-Za-z0-9:._-]/;
+
+/**
+ * The `/skill` token under the caret, when the line ADDRESSES a peer.
+ *
+ * 🛑 THE ADDRESSED PEER IS WHAT DISTINGUISHES THIS FROM A SLASH COMMAND.
+ * `/help` at the start of a line is a command to this client. `claude1 /help`
+ * is a skill for claude1 to run, and the two must not both answer or
+ * accepting one inserts the other's text.
+ *
+ * @param {string} value
+ * @param {number} caret
+ * @param {string[]} peers handles that may be addressed
+ * @returns {{ query: string, start: number, end: number, peer: string } | null}
+ */
+export function skillTokenAt(value, caret, peers) {
+  if (value.includes('\n')) return null;
+
+  // 🛑 THE PEER LOOKUP IS WHAT KEEPS "/help" A CLIENT COMMAND. A leading "/"
+  // needs no separate guard: `HANDLE_RE` in util/naming.ts requires a handle
+  // to start alphanumeric, so a first word beginning "/" can never match a
+  // peer. An explicit startsWith('/') check here was unreachable — measured,
+  // removing it failed no test and no input can reach it.
+  //
+  // The peer must also be the FIRST word, so a "/" later in prose stays prose.
+  const lead = value.match(/^(\S+)\s/);
+  if (!lead) return null;
+  const peer = peers.find((h) => h === lead[1]);
+  if (!peer) return null;
+
+  const pos = Math.max(0, Math.min(caret, value.length));
+  const at = value.slice(0, pos).lastIndexOf('/');
+  if (at < 0) return null;
+  if (!/\s/.test(value[at - 1] ?? '')) return null;
+
+  let end = at + 1;
+  while (end < value.length && SKILL_BODY.test(value[end])) end += 1;
+  if (end < pos) return null;
+
+  return { query: value.slice(at + 1, pos), start: at, end, peer };
+}
+
+/**
+ * Skill completions for the token under the caret, or null.
+ *
+ * `skills` is keyed by handle because the set is the TARGET agent's, not this
+ * client's — it depends on the directory that agent runs in.
+ *
+ * @param {string} value
+ * @param {number} caret
+ * @param {{ peers: string[], skills: Record<string, {name: string, source: string}[]> }} ctx
+ */
+export function skillSuggestionsFor(value, caret, ctx) {
+  const token = skillTokenAt(value, caret, ctx.peers);
+  if (!token) return null;
+
+  const q = token.query.toLowerCase();
+  const tail = value.slice(token.end);
+  const pad = /^\s/.test(tail) ? '' : ' ';
+  const pool = ctx.skills[token.peer] ?? [];
+
+  const items = pool
+    .filter((sk) => sk.name.toLowerCase().startsWith(q))
+    .map((sk) => {
+      const head = value.slice(0, token.start) + `/${sk.name}` + pad;
+
+      return { insert: head + tail, caret: head.length, name: `/${sk.name}`, arg: '', desc: sk.source };
+    });
+
+  return items.length ? { items, index: 0, kind: 'skill', typed: `/${token.query}` } : null;
+}
+
 /** Path chars. Includes "/" and "~", which the "#" token deliberately excludes. */
 const PATH_BODY = /[A-Za-z0-9._~\-/]/;
 
