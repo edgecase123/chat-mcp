@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { join } from 'node:path';
-import { ensureStateDir, stateDir } from '../util/paths.js';
+import { ensureStateDir, stateDir, writePrivateFileSync } from '../util/paths.js';
 
 /**
  * Which project directory each agent works in.
@@ -77,7 +77,7 @@ export function registerProject(handle: string, dir: string): string[] {
   const agents = { ...config.agents, [handle]: [...new Set([...existing, abs])] };
 
   ensureStateDir();
-  writeFileSync(projectsPath(), `${JSON.stringify({ agents }, null, 2)}\n`, 'utf8');
+  writePrivateFileSync(projectsPath(), `${JSON.stringify({ agents }, null, 2)}\n`);
 
   return agents[handle] as string[];
 }
@@ -89,7 +89,7 @@ export function unregisterProject(handle: string): void {
   delete agents[handle];
 
   ensureStateDir();
-  writeFileSync(projectsPath(), `${JSON.stringify({ agents }, null, 2)}\n`, 'utf8');
+  writePrivateFileSync(projectsPath(), `${JSON.stringify({ agents }, null, 2)}\n`);
 }
 
 /**

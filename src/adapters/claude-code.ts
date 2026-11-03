@@ -4,9 +4,8 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   adapterScriptPath,
-  adaptersDir,
+  ensureAdaptersDir,
   ensureStateDir,
-
 } from '../util/paths.js';
 import { detectChatHandleInCwd } from '../util/mcp-config.js';
 import type { Adapter, AdapterInstallOptions, AdapterResult } from './types.js';
@@ -211,8 +210,10 @@ async function install(opts: AdapterInstallOptions): Promise<AdapterResult> {
   const script = scriptPath(opts.handle);
 
   ensureStateDir();
-  mkdirSync(adaptersDir(), { recursive: true });
+  ensureAdaptersDir();
   writeFileSync(script, buildScript(opts.handle));
+  // 🛑 0755 READS AS EXPOSED AND IS NOT. The 0700 `adapters` directory above
+  // denies traversal, so the exec bit reaches nobody. Ruled: scripts stay 0755.
   chmodSync(script, 0o755);
 
   const settings = readSettings(settingsPath);
