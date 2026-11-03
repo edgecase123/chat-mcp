@@ -389,6 +389,10 @@ test('a malformed room name is refused, not quietly treated as a DM', async () =
     const res = await post(h, '/api/messages/clear', { target: '#Ops' }, h.origin);
 
     assert.equal(res.status, 400);
+    // ⚠️ The STATUS alone cannot tell the branches apart — `target required`
+    // is also a 400. Without this, a regression routing `#Ops` to the
+    // no-target branch stays green.
+    assert.match((await res.json() as { error: string }).error, /is not a valid room name/);
     assert.equal(countTo(h, '#ops'), before);
   } finally {
     close(h);
