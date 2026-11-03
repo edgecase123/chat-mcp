@@ -897,6 +897,29 @@ test('🚨 a bare word with no slash does not swallow the next word', () => {
   assert.equal(atTokenAt('@src more words', 15), null);
 });
 
+/**
+ * 🛑 THE "/" MUST ARRIVE BEFORE THE FIRST SPACE. An earlier cut searched the
+ * whole typed string, so a mention qualified on a slash four words later and
+ * swallowed the sentence behind it. Found by claude1, and the previous guard
+ * could not see it — `@claude1 are you there` has no slash anywhere.
+ */
+test('🚨 a mention followed by a path does NOT become one token', () => {
+  assert.equal(atTokenAt('@claude1 look in src/foo', 24), null);
+  assert.equal(atTokenAt('@claude1 see web/assets/app.js please', 37), null);
+});
+
+/**
+ * ⚠️ A PATH FOLLOWED BY PROSE IS THE RESIDUAL, and it is bounded rather than
+ * fixed. Text alone cannot tell "a space inside a filename" from "a space
+ * ending a path" while it is still being typed. The damage stops at the hint
+ * lookup: no entry starts with a space, so nothing is offered and Tab is inert.
+ */
+test('🚨 a path then prose yields NO suggestions, so Tab cannot rewrite the line', () => {
+  const v = '@src/ more words';
+  assert.notEqual(atTokenAt(v, v.length), null, 'the token does extend — this is the residual');
+  assert.equal(pathSuggestionsFor([], v, v.length), null, 'and it offers nothing');
+});
+
 test('several spaces inside one path are all kept', () => {
   const v = '@~/a b/c d e.png';
   assert.equal(atTokenAt(v, v.length)!.query, '~/a b/c d e.png');

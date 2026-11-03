@@ -493,7 +493,14 @@ export function atTokenAt(value, caret) {
     // would become one token and every mention would break. A path has a
     // separator; a handle does not.
     const typed = value.slice(at + 1, pos);
-    if (!typed.includes('/')) return null;
+    // 🛑 THE "/" MUST ARRIVE BEFORE THE FIRST SPACE, not anywhere in the text.
+    // Searching the whole string let "@claude1 look in src/foo" qualify on a
+    // slash four words later, so a mention swallowed the sentence behind it.
+    // Path-ness has to be established by the time the first space is reached.
+    // Found by claude1 reviewing the first cut.
+    const firstSpace = typed.search(/[ \t]/);
+    const head = firstSpace < 0 ? typed : typed.slice(0, firstSpace);
+    if (!head.includes('/')) return null;
     if (!/^[ \t]*$/.test(value.slice(end, pos).replace(PATH_BODY_RUN, ' '))) return null;
 
     // The caret is the end. A path with spaces has no unambiguous end while
