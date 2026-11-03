@@ -1,9 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { migrate } from '../../src/storage/db.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// 🛑 BEFORE any import that resolves a state path. See replace-child.test.ts.
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-turnend-'));
+
+const { migrate } = await import('../../src/storage/db.js');
+const { startSupervisor } = await import('../../src/supervise/index.js');
 import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
-import { startSupervisor } from '../../src/supervise/index.js';
 
 /**
  * 🛑 THE SUPERVISOR KNOWS WHEN A TURN ENDS AND WOULD NOT TELL ANYONE.
