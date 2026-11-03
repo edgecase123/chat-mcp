@@ -21,6 +21,9 @@ import {
   cheatSheet,
   atTokenAt,
   pathSuggestionsFor,
+  pathsFromUriList,
+  dropInsertText,
+  dropNameText,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -47,6 +50,9 @@ const state = {
   openMenuFor: null, // sidebar target whose (...) menu is open. NOT in the DOM:
                      // renderSidebar() wipes it on every peer status change.
   approvals: [],
+  // The project folder and home, from /api/whoami. A dropped file's path is
+  // shown relative to these.
+  roots: null,
   theme: null, // set below
 };
 
@@ -115,6 +121,7 @@ async function fetchWhoami() {
   state.peers = data.peers;
   state.rooms = data.rooms;
   state.discoverRooms = data.discoverRooms;
+  state.roots = data.roots ?? null;
   el.myHandle.textContent = `${data.handle} · v${data.version}`;
 }
 
@@ -1128,6 +1135,96 @@ function connectSse() {
 
 // ── Boot ─────────────────────────────────────────────────────────────────
 
+// ── dropping a file onto the window ─────────────────────────────────────
+
+/**
+ * 🛑 THE PATH IS IN text/uri-list, NOT IN dataTransfer.files.
+ *
+ * A dropped `File` exposes `.name` and no path — a browser privacy boundary,
+ * not an oversight. Finder and VS Code also put `file:///...` URLs on the
+ * drag, and that is the only place a full path appears.
+ *
+ * 🛑 dragover MUST preventDefault or no drop event fires at all. That is the
+ * commonest reason a drop handler looks dead.
+ */
+function wireFileDrop() {
+  let depth = 0;
+
+  // dragenter/dragleave fire for every child element the pointer crosses, so
+  // a plain toggle flickers. Counting is what makes the highlight stable.
+  window.addEventListener('dragenter', (e) => {
+    if (!carriesFiles(e)) return;
+    depth += 1;
+    el.app.classList.add('is-dropping');
+  });
+
+  window.addEventListener('dragleave', () => {
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) el.app.classList.remove('is-dropping');
+  });
+
+  window.addEventListener('dragover', (e) => {
+    if (!carriesFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+  });
+
+  window.addEventListener('drop', (e) => {
+    depth = 0;
+    el.app.classList.remove('is-dropping');
+    if (!carriesFiles(e)) return;
+    // Without this the browser NAVIGATES to the dropped file and the page is
+    // gone, unsent message and all.
+    e.preventDefault();
+    insertDroppedPaths(e.dataTransfer);
+  });
+}
+
+/** A drag from a browser carries text and no files; it has no path to give. */
+function carriesFiles(e) {
+  return Array.from(e.dataTransfer?.types ?? []).includes('Files');
+}
+
+function insertDroppedPaths(dt) {
+  const paths = pathsFromUriList(dt.getData('text/uri-list') || dt.getData('text/plain'));
+
+  if (paths.length === 0) {
+    // 🛑 THE NAME IS WHAT A FILE DROP ACTUALLY CARRIES, so insert that rather
+    // than nothing. A warning over an empty composer left the gesture looking
+    // broken when it had delivered everything the browser allows.
+    const names = Array.from(dt.files ?? []).map((f) => f.name);
+    if (names.length === 0) {
+      toast('nothing droppable in that drop', 'warn');
+
+      return;
+    }
+
+    insertAtCaret(`${dropNameText(names)} `);
+    toast('name only — the browser does not reveal the path', 'info');
+
+    return;
+  }
+
+  insertAtCaret(`${dropInsertText(paths, state.roots ?? { cwd: '', home: '' })} `);
+}
+
+/**
+ * Inserts at the caret rather than replacing, because a drop lands in the
+ * middle of a half-written message and replacing would eat it.
+ */
+function insertAtCaret(text) {
+  const input = el.composerInput;
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? start;
+  input.value = input.value.slice(0, start) + text + input.value.slice(end);
+  input.focus();
+  const caret = start + text.length;
+  input.setSelectionRange(caret, caret);
+  // The composer's own input handler drives the completion list, and setting
+  // .value does not fire it.
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 async function boot() {
   initTheme();
   try {
@@ -1149,6 +1246,7 @@ async function boot() {
   renderPaneHeader();
   renderApprovals();
   renderMessages({ forceBottom: true });
+  wireFileDrop();
   connectSse();
 }
 

@@ -21,6 +21,10 @@ import {
   shouldShowJump,
   suggestionsFor,
 // @ts-expect-error — plain JS with JSDoc types, deliberately not compiled.
+  pathsFromUriList,
+  droppedPathValue,
+  dropInsertText,
+  dropNameText,
 } from '../../web/assets/logic.js';
 
 /**
@@ -713,4 +717,154 @@ test('Enter ACCEPTS while the path is still half-typed', () => {
 test('Tab is what drills into a directory, and it reopens to show the next level', () => {
   const dir = pathSuggestionsFor(HINTS, 'see @src/', 9)!.items[0]!;
   assert.equal(dir.reopen, true, 'Enter sends, Tab keeps going');
+});
+
+// ── a dropped file's path ───────────────────────────────────────────────
+
+const ROOTS = { cwd: '/Users/lee/dev/proj', home: '/Users/lee' };
+
+/**
+ * 🛑 THE FILE LIST CANNOT ANSWER THIS, which is the whole reason this
+ * function exists. `DataTransfer.files` yields `File` objects and a `File`
+ * exposes `.name` and no path — a browser privacy boundary. The path is in
+ * `text/uri-list` or it is nowhere.
+ */
+test('a file: URL yields its decoded path', () => {
+  assert.deepEqual(pathsFromUriList('file:///Users/lee/a.ts'), ['/Users/lee/a.ts']);
+});
+
+test('a percent-escaped space is decoded, because real paths have spaces', () => {
+  assert.deepEqual(pathsFromUriList('file:///Users/lee/a%20b.ts'), ['/Users/lee/a b.ts']);
+});
+
+test('several lines give several paths, in order', () => {
+  assert.deepEqual(pathsFromUriList('file:///a\r\nfile:///b'), ['/a', '/b']);
+});
+
+/**
+ * ⚠️ RFC 2483 comments are skipped by the file: test, not by a rule of their
+ * own. A line cannot open with both "#" and "file://", so a dedicated
+ * comment filter is unreachable — one was written, no mutant could kill it,
+ * and it was deleted.
+ */
+test('a comment line and a blank line are skipped', () => {
+  assert.deepEqual(pathsFromUriList('# a comment\n\nfile:///a'), ['/a']);
+  assert.deepEqual(pathsFromUriList('#file:///looks-like-one\nfile:///a'), ['/a']);
+});
+
+test('🛑 a drag from a BROWSER carries no path and yields nothing', () => {
+  assert.deepEqual(pathsFromUriList('https://example.com/x.ts'), []);
+  assert.deepEqual(pathsFromUriList(''), []);
+});
+
+test('"file://localhost/a" is this machine and means "/a"', () => {
+  assert.deepEqual(pathsFromUriList('file://localhost/a'), ['/a']);
+});
+
+/** 🛑 A REMOTE host is NOT a local path, and inserting it as one would lie. */
+test('file://server/share is refused rather than turned into a local path', () => {
+  assert.deepEqual(pathsFromUriList('file://server/share'), []);
+});
+
+test('a malformed percent-escape is dropped, not inserted mangled', () => {
+  assert.deepEqual(pathsFromUriList('file:///a%ZZ'), []);
+});
+
+// ── what it becomes in the composer ─────────────────────────────────────
+
+test('a file in the project folder becomes a relative path', () => {
+  assert.equal(droppedPathValue('/Users/lee/dev/proj/src/x.ts', ROOTS), 'src/x.ts');
+});
+
+test('a file under home but outside the project gets "~/"', () => {
+  assert.equal(droppedPathValue('/Users/lee/notes.md', ROOTS), '~/notes.md');
+});
+
+test('a file under neither root keeps its absolute path', () => {
+  assert.equal(droppedPathValue('/etc/hosts', ROOTS), '/etc/hosts');
+});
+
+/**
+ * 🛑 THE ORDER IS LOAD-BEARING AND THIS IS THE TEST THAT PINS IT.
+ *
+ * The project folder sits INSIDE home, so testing home first turns every
+ * project file into "~/dev/proj/..." and the drop disagrees with what the
+ * "@" hints insert for the very same file.
+ */
+test('🛑 the project folder wins over home, because it is INSIDE home', () => {
+  assert.equal(droppedPathValue('/Users/lee/dev/proj/a.ts', ROOTS), 'a.ts');
+  assert.notEqual(droppedPathValue('/Users/lee/dev/proj/a.ts', ROOTS), '~/dev/proj/a.ts');
+});
+
+/** 🛑 A string prefix is not containment — the trailing slash is the guard. */
+test('a sibling folder sharing a prefix is NOT treated as inside', () => {
+  assert.equal(droppedPathValue('/Users/lee/dev/proj-other/z.ts', ROOTS), '~/dev/proj-other/z.ts');
+});
+
+test('the roots themselves resolve to "." and "~"', () => {
+  assert.equal(droppedPathValue('/Users/lee/dev/proj', ROOTS), '.');
+  assert.equal(droppedPathValue('/Users/lee', ROOTS), '~');
+});
+
+test('a trailing slash on a root does not produce a leading slash', () => {
+  assert.equal(droppedPathValue('/Users/lee/dev/proj/x', { cwd: '/Users/lee/dev/proj/', home: '/Users/lee' }), 'x');
+});
+
+/** ⚠️ With no roots yet, an absolute path is still better than nothing. */
+test('with empty roots the absolute path is inserted unchanged', () => {
+  assert.equal(droppedPathValue('/a/b.ts', { cwd: '', home: '' }), '/a/b.ts');
+});
+
+test('several files insert as one space-separated line', () => {
+  assert.equal(
+    dropInsertText(['/Users/lee/dev/proj/a.ts', '/Users/lee/n.md', '/etc/hosts'], ROOTS),
+    'a.ts ~/n.md /etc/hosts',
+  );
+});
+
+/**
+ * 🛑 lee's OWN CASE, verbatim. A real Finder drag of this file carried no
+ * `text/uri-list`, so the composer stayed empty and a warning fired. The name
+ * is all the browser gives, so the name is what gets inserted.
+ */
+test('🚨 a dropped name with spaces is inserted, quoted', () => {
+  assert.equal(
+    dropNameText(['Screenshot 2026-10-20 at 7.15.09 PM.png']),
+    '"Screenshot 2026-10-20 at 7.15.09 PM.png"',
+  );
+});
+
+test('a name with no space is inserted bare', () => {
+  assert.equal(dropNameText(['notes.md']), 'notes.md');
+});
+
+/**
+ * ⚠️ THE QUOTING IS WHAT KEEPS TWO NAMES SEPARABLE. Unquoted, "a b.png c.png"
+ * could be two files or three.
+ */
+test('🚨 several names stay separable, each quoted only if it needs it', () => {
+  assert.equal(dropNameText(['a b.png', 'c.png']), '"a b.png" c.png');
+});
+
+test('no names produces an empty string rather than a stray quote', () => {
+  assert.equal(dropNameText([]), '');
+});
+
+/** A tab counts as whitespace, so it must trigger the quoting too. */
+test('a name containing a tab is quoted', () => {
+  assert.equal(dropNameText(['a\tb.png']), '"a\tb.png"');
+});
+
+/**
+ * 🛑 A FILENAME MAY CONTAIN A DOUBLE QUOTE. `touch 'two "q" .png'` succeeds on
+ * macOS, verified. Quoting without escaping closes the token early and the
+ * pair becomes unreadable. Raised by claude1 reviewing 3c044cf.
+ */
+test('🚨 an embedded quote is escaped, so the pair stays readable', () => {
+  assert.equal(dropNameText(['two "q" .png', 'plain.png']), '"two \\"q\\" .png" plain.png');
+});
+
+/** A quote with no space still needs the quoting, or the escape has no fence. */
+test('🚨 a name with a quote but no space is quoted too', () => {
+  assert.equal(dropNameText(['a"b.png']), '"a\\"b.png"');
 });

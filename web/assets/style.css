@@ -812,3 +812,16 @@ html, body {
   overflow-wrap: anywhere;
   color: var(--fg);
 }
+
+/* A drag carrying files is over the window. Inset rather than a border, so
+   nothing in the layout moves and no scrollbar appears mid-drag. */
+.app-shell.is-dropping::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  border: 2px dashed var(--accent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}

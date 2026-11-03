@@ -328,6 +328,10 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
     rooms: myRooms.map((r) => ({ ...r, unread: dao.roomUnreadCount(ctx.db, r.name, ctx.handle) })),
     discoverRooms,
     version: VERSION,
+    // The two roots a dropped file path is shown relative to. The page
+    // already lists directories under both through /api/files, so this adds
+    // no reach it did not have.
+    roots: defaultRoots(),
   });
 }
 
