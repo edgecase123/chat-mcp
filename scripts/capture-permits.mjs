@@ -303,6 +303,8 @@ for (const index of PROBE_LABELS.keys()) {
 
   const sup = await startSupervisor({
     handle,
+    // One handle PER PROBE, so a 6-probe run used to leak 6.
+    ephemeral: true,
     extraDirs: [root],
     allowedTools: startingAllowlist,
     log: () => undefined,

@@ -151,6 +151,8 @@ console.log(`cwd=${childCwd}  idle gap=${IDLE_GAP_MS / 1000}s\n`);
 const sup = await startSupervisor({
   handle: HANDLE,
   cwd: childCwd,
+  // Throwaway handle. Without this it stays on the bus after the run.
+  ephemeral: true,
   // Tap the raw stream so turn COUNT is observed, not inferred from a reply.
   spawnChild: (opts) => {
     const child = spawnClaude(opts);
