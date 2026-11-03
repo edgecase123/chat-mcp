@@ -454,6 +454,9 @@ export function cheatSheet(commands, labels) {
 /** Path chars. Includes "/" and "~", which the "#" token deliberately excludes. */
 const PATH_BODY = /[A-Za-z0-9._~\-/]/;
 
+/** The same class as a run, for checking a gap holds only path chars and spaces. */
+const PATH_BODY_RUN = /[A-Za-z0-9._~\-/]+/g;
+
 /**
  * The `@path` token under the caret, or null.
  *
@@ -480,7 +483,30 @@ export function atTokenAt(value, caret) {
 
   let end = at + 1;
   while (end < value.length && PATH_BODY.test(value[end])) end += 1;
-  if (end < pos) return null;
+
+  if (end < pos) {
+    // 🛑 A SPACE ENDS THE TOKEN UNLESS IT IS INSIDE A PATH. Every macOS
+    // screenshot is "Screenshot <date> at <time>.png", so the space arrives
+    // right after the first word anyone types and the popover closed on it.
+    //
+    // 🛑 THE "/" IS WHAT MAKES THIS SAFE. Without it "@claude1 are you there"
+    // would become one token and every mention would break. A path has a
+    // separator; a handle does not.
+    const typed = value.slice(at + 1, pos);
+    // 🛑 THE "/" MUST ARRIVE BEFORE THE FIRST SPACE, not anywhere in the text.
+    // Searching the whole string let "@claude1 look in src/foo" qualify on a
+    // slash four words later, so a mention swallowed the sentence behind it.
+    // Path-ness has to be established by the time the first space is reached.
+    // Found by claude1 reviewing the first cut.
+    const firstSpace = typed.search(/[ \t]/);
+    const head = firstSpace < 0 ? typed : typed.slice(0, firstSpace);
+    if (!head.includes('/')) return null;
+    if (!/^[ \t]*$/.test(value.slice(end, pos).replace(PATH_BODY_RUN, ' '))) return null;
+
+    // The caret is the end. A path with spaces has no unambiguous end while
+    // it is still being typed, so anything after the caret stays put.
+    return { query: typed, start: at, end: pos };
+  }
 
   return { query: value.slice(at + 1, pos), start: at, end };
 }

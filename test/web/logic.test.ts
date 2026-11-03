@@ -868,3 +868,73 @@ test('🚨 an embedded quote is escaped, so the pair stays readable', () => {
 test('🚨 a name with a quote but no space is quoted too', () => {
   assert.equal(dropNameText(['a"b.png']), '"a\\"b.png"');
 });
+
+/**
+ * 🛑 lee's OWN CASE. Every macOS screenshot is "Screenshot <date> at <time>",
+ * so the space lands right after the first word anyone types. The popover
+ * closed on it, which made "keep typing to narrow" unfollowable on exactly
+ * the files the 30-item cap hides.
+ */
+test('🚨 a space inside a PATH keeps the token alive', () => {
+  const v = '@~/Desktop/Screenshot 2026-11-01';
+  assert.deepEqual(atTokenAt(v, v.length), {
+    query: '~/Desktop/Screenshot 2026-11-01',
+    start: 0,
+    end: v.length,
+  });
+});
+
+/**
+ * 🛑 THE NEGATIVE CONTROL, AND IT IS THE WHOLE SAFETY ARGUMENT. Without the
+ * "/" precondition this becomes one token and every mention breaks.
+ */
+test('🚨 a space after a HANDLE still ends the token', () => {
+  assert.equal(atTokenAt('@claude1 are you there', 22), null);
+  assert.equal(atTokenAt('@claude1 are', 12), null);
+});
+
+test('🚨 a bare word with no slash does not swallow the next word', () => {
+  assert.equal(atTokenAt('@src more words', 15), null);
+});
+
+/**
+ * 🛑 THE "/" MUST ARRIVE BEFORE THE FIRST SPACE. An earlier cut searched the
+ * whole typed string, so a mention qualified on a slash four words later and
+ * swallowed the sentence behind it. Found by claude1, and the previous guard
+ * could not see it — `@claude1 are you there` has no slash anywhere.
+ */
+test('🚨 a mention followed by a path does NOT become one token', () => {
+  assert.equal(atTokenAt('@claude1 look in src/foo', 24), null);
+  assert.equal(atTokenAt('@claude1 see web/assets/app.js please', 37), null);
+});
+
+/**
+ * ⚠️ A PATH FOLLOWED BY PROSE IS THE RESIDUAL, and it is bounded rather than
+ * fixed. Text alone cannot tell "a space inside a filename" from "a space
+ * ending a path" while it is still being typed. The damage stops at the hint
+ * lookup: no entry starts with a space, so nothing is offered and Tab is inert.
+ */
+test('🚨 a path then prose yields NO suggestions, so Tab cannot rewrite the line', () => {
+  const v = '@src/ more words';
+  assert.notEqual(atTokenAt(v, v.length), null, 'the token does extend — this is the residual');
+  assert.equal(pathSuggestionsFor([], v, v.length), null, 'and it offers nothing');
+});
+
+test('several spaces inside one path are all kept', () => {
+  const v = '@~/a b/c d e.png';
+  assert.equal(atTokenAt(v, v.length)!.query, '~/a b/c d e.png');
+});
+
+/** The caret is the end, so text after it is left alone. */
+test('🚨 the token ends at the CARET, so a trailing word survives an accept', () => {
+  const v = '@~/Desktop/Screen shot.png and more';
+  const t = atTokenAt(v, 26)!;
+  assert.equal(t.query, '~/Desktop/Screen shot.png');
+  assert.equal(t.end, 26, 'the tail is not swallowed');
+});
+
+/** A path typed before a newline must not reach across it. */
+test('a newline is not a path space', () => {
+  assert.equal(atTokenAt('@~/a\nb', 6), null);
+});
+
