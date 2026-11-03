@@ -36,6 +36,16 @@ export interface SupervisorOptions extends SpawnOptions {
    */
   readonly reply?: boolean;
 
+  /**
+   * Delete this handle's `agents` row when `stop()` runs. Default false.
+   *
+   * 🛑 OPT-IN, BECAUSE A REAL SESSION STOPPING IS NOT THE SAME EVENT. The
+   * handle-claim path is built on the row being present, so a supervisor that
+   * always deregistered would free a handle a live operator still holds.
+   * Throwaway harnesses opt in; `chat-mcp supervise` does not.
+   */
+  readonly ephemeral?: boolean;
+
   /** Allowlist override. Default `DEFAULT_ALLOWED` — lee's narrow list. */
   readonly allowedTools?: readonly string[];
 
@@ -563,6 +573,9 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     async stop(): Promise<void> {
       await listener.close();
       child.kill();
+      // Registration happens in the CHILD, via the shim. So this deletes a row
+      // this process did not write, which is why it is opt-in and not default.
+      if (opts.ephemeral === true) dao.deleteAgent(approvalsDb, opts.handle);
     },
   };
 }

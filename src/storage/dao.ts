@@ -716,6 +716,44 @@ export function allRoomsUnread(db: Db, handle: string, limit = 50): Message[] {
 // ─────────────────────────────────────────────────────────────
 
 /**
+ * Split the named handles into what may be pruned, what is live, and what is
+ * not registered at all.
+ *
+ * 🛑 ONLINE IS THE ONE STATE PRUNING MUST REFUSE. Freeing a live agent's handle
+ * lets a second process claim it, and `inbox` marks messages read — so one of
+ * the two would silently consume the other's mail.
+ */
+export function partitionPrunable(
+  db: Db,
+  handles: readonly string[],
+): { prunable: string[]; online: string[]; absent: string[] } {
+  const byHandle = new Map(listAgents(db, true).map((a) => [a.handle, a]));
+  const prunable: string[] = [];
+  const online: string[] = [];
+  const absent: string[] = [];
+  for (const h of handles) {
+    const agent = byHandle.get(h);
+    if (agent === undefined) absent.push(h);
+    else if (agent.online) online.push(h);
+    else prunable.push(h);
+  }
+
+  return { prunable, online, absent };
+}
+
+/**
+ * Delete the named agents, returning the handles that actually existed.
+ *
+ * 🛑 EXACT NAMES ONLY, NEVER A PREFIX. `perm-` reads as a safe pattern until a
+ * real peer's handle starts with it, and freeing a live agent's handle lets
+ * another process claim it. Reporting what was deleted rather than what was
+ * asked for is what makes a typo visible.
+ */
+export function pruneAgents(db: Db, handles: readonly string[]): string[] {
+  return handles.filter((h) => deleteAgent(db, h));
+}
+
+/**
  * Remove an agent from the bus. Deletes:
  *   - the agents row
  *   - every room_members row for this handle

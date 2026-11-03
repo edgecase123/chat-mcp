@@ -62,6 +62,8 @@ console.log(`attempting ${OPERATIONS.length} operations; NO approval is needed\n
 
 const sup = await startSupervisor({
   handle: HANDLE,
+  // Throwaway handle. Without this it stays on the bus after the run.
+  ephemeral: true,
   extraDirs: [root],
   allowedTools: ['Read', 'Glob', 'Grep', 'mcp__chat__send', 'mcp__chat__room_send'],
   log: (line) => console.log(`    ${line}`),

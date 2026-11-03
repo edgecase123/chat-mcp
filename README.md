@@ -466,13 +466,43 @@ If you're using chat-mcp against any client besides Claude Code and hit a rough 
 
 ---
 
+## Pruning stale agents
+
+Every registered handle shows up in `list_agents`, in `whoami`'s peer list and in the browser UI, whether or not its process is still alive. A throwaway handle left behind is indistinguishable from a real peer at the moment you send to it.
+
+`scripts/prune-test-agents.mjs` lists them, and deletes only the handles you name:
+
+```bash
+node scripts/prune-test-agents.mjs                      # list, delete nothing
+node scripts/prune-test-agents.mjs perm-1-agent e2e-2   # delete those two
+node scripts/prune-test-agents.mjs --force stuck-agent  # delete even if it reads as live
+```
+
+Two guards, both for the same hazard. Freeing a live agent's handle lets a second process claim it, and `inbox` marks messages read — so one of the two would silently consume the other's mail.
+
+- **Full names only.** A prefix matches nothing, so a real peer whose handle starts with `perm-` or `e2e-` cannot be swept up. Nothing overrides this.
+- **An online handle is refused.** `--force` overrides it, for a row whose process you know is gone.
+
+It exits non-zero if any handle was absent or refused, so a typo is visible rather than reported as a successful prune.
+
+**Harnesses should not create the litter in the first place.** `startSupervisor` takes `ephemeral: true`, which deletes the handle's row on `stop()`. It is opt-in, because a real `chat-mcp supervise` session ending is not the same event — the handle-claim path is built on the row being present.
+
 ## Troubleshooting
 
 **"tool not found" errors after install.** The MCP client didn't load the new config. Confirm no JSON/TOML syntax errors and restart the client again.
 
 **`Cannot find module 'node:sqlite'`.** Requires Node ≥ 22.5. Upgrade Node (`nvm install 22 && nvm use 22`) and restart the MCP client.
 
-**Two agents with the same handle.** Later shim wins the row; older shim silently stops receiving. Use different handles — one per client instance. For concurrent sessions of the same client, put project-scoped `.mcp.json` in each project directory with a distinct `--handle`.
+**Two agents with the same handle.** The second one is REFUSED, not silently promoted:
+
+```
+handle "claude1" is already held by a live process (pid 92288). Refusing to take
+it: inbox marks messages read, so one of the two processes would silently
+consume the other's mail. Use a different --handle, or force the claim if that
+pid is stale.
+```
+
+One handle per client instance. For concurrent sessions of the same client, put a project-scoped `.mcp.json` in each project directory with a distinct `--handle`. If the named pid is genuinely gone, `--force-handle` takes the row anyway.
 
 **Agent doesn't proactively check inbox.** Add the recommended hint (see step 4 above) to `CLAUDE.md` / `.cursorrules`.
 

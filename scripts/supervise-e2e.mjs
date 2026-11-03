@@ -168,6 +168,8 @@ console.log(`remote=${remote}\n`);
 const sup = await startSupervisor({
   handle: HANDLE,
   extraDirs: [root],
+  // Throwaway handle. Without this it stays on the bus after the run.
+  ephemeral: true,
   // No Edit scope: the target is REACHABLE but no rule covers editing it,
   // which is what makes `rm` name itself in the refusal.
   allowedTools:
