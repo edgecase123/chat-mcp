@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { migrate } from '../../src/storage/db.js';
 import * as dao from '../../src/storage/dao.js';
+import { deadPid } from '../support/dead-pid.js';
 
 /**
  * 🛑 A PRUNE THAT MATCHES BY PREFIX CAN DELETE A REAL HANDLE. `perm-` looks
@@ -104,10 +105,14 @@ test('🚨 every live harness passes ephemeral: true', () => {
  * read for whichever of the two reads first.
  */
 test('🚨 an online handle is held back, not pruned', () => {
+  const dead = deadPid();
+  assert.equal(dao.isProcessAlive(dead), false, 'the fixture pid must really be dead');
+  assert.equal(dao.isProcessAlive(process.pid), true, 'and this process must really be live');
+
   const db = new DatabaseSync(':memory:');
   migrate(db);
   dao.upsertAgent(db, { handle: 'live', pid: process.pid, session_id: 'l', display_name: 'l', metadata: {} });
-  dao.upsertAgent(db, { handle: 'dead', pid: 2, session_id: 'd', display_name: 'd', metadata: {} });
+  dao.upsertAgent(db, { handle: 'dead', pid: dead, session_id: 'd', display_name: 'd', metadata: {} });
 
   const p = dao.partitionPrunable(db, ['live', 'dead', 'never-existed']);
 
@@ -119,10 +124,13 @@ test('🚨 an online handle is held back, not pruned', () => {
 
 /** The negative control: with nothing live, everything registered is prunable. */
 test('🚨 a fully dead set is entirely prunable', () => {
+  const dead = deadPid();
+  assert.equal(dao.isProcessAlive(dead), false, 'the fixture pid must really be dead');
+
   const db = new DatabaseSync(':memory:');
   migrate(db);
   for (const h of ['d1', 'd2']) {
-    dao.upsertAgent(db, { handle: h, pid: 2, session_id: h, display_name: h, metadata: {} });
+    dao.upsertAgent(db, { handle: h, pid: dead, session_id: h, display_name: h, metadata: {} });
   }
 
   const p = dao.partitionPrunable(db, ['d1', 'd2']);
