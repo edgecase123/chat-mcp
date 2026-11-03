@@ -15,9 +15,22 @@ const { fileWatchTransport } = await import('../../src/notify/transport.js');
  * literal and the other tests regex-match it. Neither can tell you it RUNS, or
  * that it emits one line per message. Only spawning it can.
  */
-/** SIGKILL the group and never throw, so cleanup cannot mask a real failure. */
+/**
+ * Kill the whole process GROUP, never throw.
+ *
+ * 🛑 `child.kill()` REACHES THE SHELL ONLY. These children are `sh -c "node
+ * -e ..."`, so if the shell forks rather than execs, killing it orphans the
+ * node watcher — and that watcher holds this process's stdout pipe open, so
+ * `node --test` never exits and the file hangs instead of failing. SIGKILL
+ * makes it worse, because a shell cannot forward a signal it never receives.
+ *
+ * Spawning detached puts the child in its own group, and a negative pid
+ * signals every member of it.
+ */
 function kill(child: ReturnType<typeof spawn> | null): void {
-  try { child?.kill('SIGKILL'); } catch { /* already gone */ }
+  if (!child?.pid) return;
+  try { process.kill(-child.pid, 'SIGKILL'); } catch { /* group already gone */ }
+  try { child.kill('SIGKILL'); } catch { /* already gone */ }
 }
 
 async function wakesFor(writes: string[]): Promise<string[]> {
@@ -26,7 +39,7 @@ async function wakesFor(writes: string[]): Promise<string[]> {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, '');
 
-  const child = spawn('sh', ['-c', sub.command], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn('sh', ['-c', sub.command], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   const lines: string[] = [];
   child.stdout.on('data', (b: Buffer) => {
     for (const l of b.toString().split('\n')) if (l.trim()) lines.push(l.trim());
@@ -118,7 +131,7 @@ async function probeCount(handle: string, armed: boolean): Promise<number> {
   writeFileSync(sub.endpoint!, '');
 
   const child = armed
-    ? spawn('sh', ['-c', sub.command], { stdio: 'ignore', detached: false })
+    ? spawn('sh', ['-c', sub.command], { stdio: 'ignore', detached: true })
     : null;
   await new Promise((r) => setTimeout(r, 400));
 
@@ -150,7 +163,7 @@ test('🛑 a PREFIX handle does not count its sibling, measured not reasoned', {
   writeFileSync(rw2.endpoint!, '');
 
   // Only the SIBLING is armed. A prefix-matching probe for `pfx` would see it.
-  const child = spawn('sh', ['-c', rw2.command], { stdio: 'ignore' });
+  const child = spawn('sh', ['-c', rw2.command], { stdio: 'ignore', detached: true });
   await new Promise((r) => setTimeout(r, 400));
 
   const count = await new Promise<string>((resolve) => {
