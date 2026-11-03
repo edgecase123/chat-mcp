@@ -629,14 +629,9 @@ export function safeRoomAdvanceId(
 /**
  * 🛑 `since_id` WITHOUT A ROOM IS INCOHERENT, NOT MERELY UNHELPFUL.
  *
- * Message ids are global; watermarks are per room. So one id floors every room
- * at once. Measured on a two-room fixture: a caller wanting ONE message got
- * five, from a room it never named, and the gap rule refused to advance either
- * watermark — so it paid for all five and consumed none. That is the exact cost
- * `since_id` exists to remove.
- *
- * A known message id belongs to one known room. Demanding the room is the fix;
- * a per-room gap test would only make the waste correct.
+ * Ids are global; watermarks are per room. One id floors every room, so the
+ * caller is served messages from rooms it never named. A per-room gap test
+ * would only make that waste correct — a known id belongs to one known room.
  */
 export function assertRoomInboxQuery(room: string | undefined, sinceId: number | undefined): void {
   if (sinceId !== undefined && room === undefined) {

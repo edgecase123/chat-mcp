@@ -152,12 +152,8 @@ test('🚨 the count honours since_id too, so the badge cannot disagree with the
 });
 
 /**
- * 🛑 AN UNSCOPED `since_id` IS REFUSED, NOT HONOURED.
- *
- * Found by claude2 on PR 75. Ids are global and watermarks are per room, so one
- * id floors every room. Reproduced on a two-room fixture: a caller wanting ONE
- * message got five, from a room it never named, and the gap rule refused to
- * advance either watermark — paid for five, consumed none.
+ * 🛑 AN UNSCOPED `since_id` IS REFUSED, NOT HONOURED. One id floors every room,
+ * so a caller wanting one message was served five, from a room it never named.
  */
 test('🚨 since_id without a room is refused', () => {
   assert.throws(
