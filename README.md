@@ -498,10 +498,11 @@ It exits non-zero if any handle was absent or refused, so a typo is visible rath
 ```
 handle "claude1" is already held by a live process (pid 92288). Refusing to take
 it: inbox marks messages read, so one of the two processes would silently
-consume the other's mail.
+consume the other's mail. Use a different --handle, or force the claim if that
+pid is stale.
 ```
 
-Use a different handle — one per client instance. For concurrent sessions of the same client, put a project-scoped `.mcp.json` in each project directory with a distinct `--handle`. If the named pid is genuinely gone, `--force-handle` takes the row anyway.
+One handle per client instance. For concurrent sessions of the same client, put a project-scoped `.mcp.json` in each project directory with a distinct `--handle`. If the named pid is genuinely gone, `--force-handle` takes the row anyway.
 
 **Agent doesn't proactively check inbox.** Add the recommended hint (see step 4 above) to `CLAUDE.md` / `.cursorrules`.
 

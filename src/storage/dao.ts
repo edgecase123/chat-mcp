@@ -716,17 +716,6 @@ export function allRoomsUnread(db: Db, handle: string, limit = 50): Message[] {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Remove an agent from the bus. Deletes:
- *   - the agents row
- *   - every room_members row for this handle
- *   - every room_reads row for this handle
- * Does NOT delete messages the agent authored or received — those become
- * orphaned references (rendered fine; the sender label just names a peer
- * that no longer exists). A running shim for the handle will re-register
- * on its next touch; kick again if that happens.
- * No-op (returns false) if the handle isn't registered.
- */
-/**
  * Split the named handles into what may be pruned, what is live, and what is
  * not registered at all.
  *
@@ -764,6 +753,17 @@ export function pruneAgents(db: Db, handles: readonly string[]): string[] {
   return handles.filter((h) => deleteAgent(db, h));
 }
 
+/**
+ * Remove an agent from the bus. Deletes:
+ *   - the agents row
+ *   - every room_members row for this handle
+ *   - every room_reads row for this handle
+ * Does NOT delete messages the agent authored or received — those become
+ * orphaned references (rendered fine; the sender label just names a peer
+ * that no longer exists). A running shim for the handle will re-register
+ * on its next touch; kick again if that happens.
+ * No-op (returns false) if the handle isn't registered.
+ */
 export function deleteAgent(db: Db, handle: string): boolean {
   const info = db.prepare('DELETE FROM agents WHERE handle = ?').run(handle);
   db.prepare('DELETE FROM room_members WHERE handle = ?').run(handle);
