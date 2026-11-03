@@ -23,6 +23,7 @@ import {
   pathSuggestionsFor,
   pathsFromUriList,
   dropInsertText,
+  dropNameText,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -1188,16 +1189,18 @@ function insertDroppedPaths(dt) {
   const paths = pathsFromUriList(dt.getData('text/uri-list') || dt.getData('text/plain'));
 
   if (paths.length === 0) {
-    // 🛑 NEVER SILENT. A composer that does not change is indistinguishable
-    // from a broken handler, and a drag that carries no file: URL is a real
-    // case rather than a bug.
+    // 🛑 THE NAME IS WHAT A FILE DROP ACTUALLY CARRIES, so insert that rather
+    // than nothing. A warning over an empty composer left the gesture looking
+    // broken when it had delivered everything the browser allows.
     const names = Array.from(dt.files ?? []).map((f) => f.name);
-    toast(
-      names.length
-        ? `no path in that drop — the browser gave only the name: ${names.join(', ')}`
-        : 'no file path in that drop',
-      'warn',
-    );
+    if (names.length === 0) {
+      toast('nothing droppable in that drop', 'warn');
+
+      return;
+    }
+
+    insertAtCaret(`${dropNameText(names)} `);
+    toast('name only — the browser does not reveal the path', 'info');
 
     return;
   }

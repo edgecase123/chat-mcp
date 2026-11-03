@@ -621,6 +621,22 @@ function relativeTo(abs, root) {
  * prose read by a person rather than a shell, so this is a known limit and
  * not a bug to work around with quoting nobody asked for.
  */
+/**
+ * The text a drop inserts when the browser handed over no path.
+ *
+ * 🛑 A BROWSER FILE DROP CARRIES `File.name` AND NOTHING ELSE. Measured on a
+ * real Finder drag of "Screenshot 2026-10-20 at 7.15.09 PM.png": no
+ * `text/uri-list`, no `text/plain`, so there is no path to insert and there
+ * never will be from that gesture.
+ *
+ * ⚠️ QUOTED WHEN IT CONTAINS A SPACE, unlike `dropInsertText`. A name is the
+ * whole token here, so two unquoted names with spaces cannot be told apart.
+ * A path keeps its directory separators to lean on and does not need this.
+ */
+export function dropNameText(names) {
+  return names.map((name) => (/\s/.test(name) ? `"${name}"` : name)).join(' ');
+}
+
 export function dropInsertText(paths, roots) {
   return paths.map((p) => droppedPathValue(p, roots)).join(' ');
 }

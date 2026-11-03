@@ -24,6 +24,7 @@ import {
   pathsFromUriList,
   droppedPathValue,
   dropInsertText,
+  dropNameText,
 } from '../../web/assets/logic.js';
 
 /**
@@ -819,4 +820,37 @@ test('several files insert as one space-separated line', () => {
     dropInsertText(['/Users/lee/dev/proj/a.ts', '/Users/lee/n.md', '/etc/hosts'], ROOTS),
     'a.ts ~/n.md /etc/hosts',
   );
+});
+
+/**
+ * 🛑 lee's OWN CASE, verbatim. A real Finder drag of this file carried no
+ * `text/uri-list`, so the composer stayed empty and a warning fired. The name
+ * is all the browser gives, so the name is what gets inserted.
+ */
+test('🚨 a dropped name with spaces is inserted, quoted', () => {
+  assert.equal(
+    dropNameText(['Screenshot 2026-10-20 at 7.15.09 PM.png']),
+    '"Screenshot 2026-10-20 at 7.15.09 PM.png"',
+  );
+});
+
+test('a name with no space is inserted bare', () => {
+  assert.equal(dropNameText(['notes.md']), 'notes.md');
+});
+
+/**
+ * ⚠️ THE QUOTING IS WHAT KEEPS TWO NAMES SEPARABLE. Unquoted, "a b.png c.png"
+ * could be two files or three.
+ */
+test('🚨 several names stay separable, each quoted only if it needs it', () => {
+  assert.equal(dropNameText(['a b.png', 'c.png']), '"a b.png" c.png');
+});
+
+test('no names produces an empty string rather than a stray quote', () => {
+  assert.equal(dropNameText([]), '');
+});
+
+/** A tab counts as whitespace, so it must trigger the quoting too. */
+test('a name containing a tab is quoted', () => {
+  assert.equal(dropNameText(['a\tb.png']), '"a\tb.png"');
 });
