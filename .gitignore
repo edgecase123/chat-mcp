@@ -5,3 +5,13 @@ measurements/
 .DS_Store
 .env
 .idea/
+
+# Obsidian. NO leading slash: a vault opened on a SUBFOLDER writes its config
+# there, so `/.obsidian/` would match the repo root only.
+#
+# `.trash/` is the one that matters — it holds notes Obsidian has deleted, and
+# committing it publishes content someone chose to remove.
+.obsidian/
+.trash/
+.obsidian.vimrc
+*.canvas
