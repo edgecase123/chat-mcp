@@ -52,6 +52,14 @@ function scriptPath(handle: string): string {
   return adapterScriptPath(ADAPTER_NAME, handle);
 }
 
+/**
+ * 🛑 A HOST FACT, AND IT BELONGS HERE RATHER THAN IN THE TRANSPORT. Monitor
+ * silently caps a deadline at 30 minutes. A transport asking for an hour had
+ * that hour printed into the hook, so the watch died at half its advertised
+ * life — and a dead watcher is indistinguishable from a quiet queue.
+ */
+const MONITOR_MAX_TIMEOUT_MS = 1_800_000;
+
 /** Exported for tests: the wake block is the thing the seam has to change. */
 export function buildAdditionalContext(handle: string): string {
   // 🛑 ASKED FOR, NOT BUILT HERE. This adapter used to write
@@ -63,15 +71,23 @@ export function buildAdditionalContext(handle: string): string {
     '',
     `This session is registered on the chat-mcp bus as handle "${handle}". ${activeWakeTransport().summary(handle)} — but the model's inference loop needs an external wake trigger to know they arrived.`,
     '',
-    `FIRST, count the watchers already running: \`ps -axo command= | grep -c '^node -e.*${wake.endpoint ?? ''}'\`. 🛑 **A non-zero answer means one is ALREADY armed and you must NOT arm a second.** This hook re-fires on every /clear and does not kill the old watcher, so a duplicate doubles the inbox calls per message and the extra one always returns empty. The \`^node\` anchor is load-bearing: without it the count also matches the watcher's parent shell and its own grep.`,
-    '',
-    'If that count is zero, then as your very first tool call this session — before any text response, other tool call, or clarifying question — call the Monitor tool with these exact arguments:',
+    ...(wake.probeCommand
+      ? [
+          `FIRST, count the watchers already running: \`${wake.probeCommand}\`. 🛑 **A non-zero answer means one is ALREADY armed and you must NOT arm a second.** This hook re-fires on every /clear and does not kill the old watcher, so a duplicate doubles the inbox calls per message and the extra one always returns empty.`,
+          '',
+          'That count is your first tool call. If it is zero, then arm the watch next — before any text response, any other tool call, or any clarifying question — by calling the Monitor tool with these exact arguments:',
+        ]
+      : [
+          '🛑 FIRST, establish whether a watch for this handle is already armed in this session, and do NOT arm a second one if it is. This hook re-fires on every /clear and does not kill the old watcher.',
+          '',
+          'If none is armed, do that next — before any text response, any other tool call, or any clarifying question — by calling the Monitor tool with these exact arguments:',
+        ]),
     '',
     '```json',
     '{',
     `  ${JSON.stringify('command')}: ${JSON.stringify(wake.command)},`,
     `  ${JSON.stringify('description')}: ${JSON.stringify(wake.description)},`,
-    `  "timeout_ms": ${wake.timeoutMs}`,
+    `  "timeout_ms": ${Math.min(wake.timeoutMs, MONITOR_MAX_TIMEOUT_MS)}`,
     '}',
     '```',
     '',

@@ -83,16 +83,80 @@ test('🛑 the duplicate check comes BEFORE the block it guards', () => {
   assert.ok(check < block, `check at ${check} must precede the json block at ${block}`);
   assert.match(text, /\/clear/, 'the reason has to name the trigger or it reads as optional');
   assert.match(text, /must NOT arm a second/);
-  assert.match(text, /If that count is zero, then as your very first tool call/);
+  // 🛑 THE COUNT IS THE FIRST TOOL CALL NOW, so the hook must not still claim
+  // the Monitor is. It said "your very first tool call" while asking for a
+  // `ps` run before it, which is two different first things.
+  assert.match(text, /That count is your first tool call/);
+  assert.doesNotMatch(text, /as your very first tool call/);
 });
 
-test('🛑 the duplicate-check command anchors on ^node, or it counts itself', () => {
-  // Measured: without the anchor the count also matches the watcher's parent
-  // shell and the grep process, so a first-ever session reads 2 and declines
-  // to arm anything at all.
-  const text = buildAdditionalContext('claude2');
-  assert.match(text, /grep -c '\^node -e\.\*/);
-  assert.match(text, /The `\^node` anchor is load-bearing/);
+test('the file-watch transport supplies a probe at all', () => {
+  const probe = fileWatchTransport.subscribe('claude2').probeCommand;
+  assert.ok(probe, 'without one the adapter has nothing to print');
+  // 🛑 THIS IS NOT THE SEAM GUARD. For the file watch, a probe rebuilt from
+  // `endpoint` is byte-identical to the transport's own, so an `includes`
+  // check here passes either way. Measured against the pre-fix file. The seam
+  // guard is the test below, which uses a probe that cannot be rebuilt.
+  assert.ok(buildAdditionalContext('claude2').includes(probe!));
+});
+
+test('🛑 THE SEAM: the probe comes from the TRANSPORT, not rebuilt from `endpoint`', () => {
+  // transport.ts says adapters "must not reconstruct the command from it".
+  // This transport has an endpoint AND a probe that no reconstruction could
+  // produce, so rebuilding is visible here and nowhere else.
+  registerWakeTransport({
+    id: 'probe-seam',
+    summary: (h: string) => `wakes for ${h}`,
+    subscribe: (h: string) => ({
+      kind: 'process' as const,
+      command: `listen --handle ${h}`,
+      description: `wake for ${h}`,
+      timeoutMs: 1234,
+      endpoint: `/tmp/seam/${h}`,
+      probeCommand: `count-listeners --handle ${h}`,
+    }),
+  });
+  const text = withTransport('probe-seam', () => buildAdditionalContext('alice'));
+
+  assert.match(text, /count-listeners --handle alice/, 'the transport\'s probe is missing');
+  assert.doesNotMatch(text, /ps -axo/, 'the adapter rebuilt a file-watch probe');
+  assert.doesNotMatch(text, /\^node/);
+});
+
+test('🛑 the probe anchors on ^node, or it counts the shell and itself', () => {
+  // Measured on this machine: without the anchor the count reads 2 where one
+  // watcher is mine, because the watcher's parent shell matches too. The agent
+  // then sees "already armed" and never arms anything.
+  const probe = fileWatchTransport.subscribe('claude2').probeCommand!;
+  assert.match(probe, /grep -c '\^node -e\.\*/);
+  assert.match(probe, /\/claude2'$/, 'the probe must name THIS handle, not any node watcher');
+});
+
+test('🛑 a transport with NO probe gets no invented one', () => {
+  registerWakeTransport(FAKE);
+  const text = withTransport('test-socket', () => buildAdditionalContext('alice'));
+
+  assert.doesNotMatch(text, /ps -axo/, 'a file-watch probe leaked into a socket transport');
+  assert.doesNotMatch(text, /\^node/);
+  // It must still forbid a duplicate, just without a command it cannot write.
+  assert.match(text, /do NOT arm a second one/);
+});
+
+test('🛑 the adapter CLAMPS to the host cap, and the transport keeps asking', () => {
+  // The transport's request and the host's limit are different facts. Monitor
+  // caps at 30 minutes; printing an unclamped hour is what killed the watch.
+  assert.equal(fileWatchTransport.subscribe('claude2').timeoutMs, 3_600_000);
+
+  const json = buildAdditionalContext('claude2').split('```json')[1]?.split('```')[0] ?? '';
+  assert.equal((JSON.parse(json) as { timeout_ms: number }).timeout_ms, 1_800_000);
+});
+
+test('a request BELOW the cap is printed unchanged', () => {
+  // The denominator for the clamp: it must not pin every transport to 30m.
+  registerWakeTransport(FAKE);
+  const text = withTransport('test-socket', () => buildAdditionalContext('alice'));
+  const json = text.split('```json')[1]?.split('```')[0] ?? '';
+  assert.equal((JSON.parse(json) as { timeout_ms: number }).timeout_ms, 1234);
 });
 
 test('an unknown transport name falls back rather than leaving a host with no wake', () => {

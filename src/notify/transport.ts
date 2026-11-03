@@ -27,6 +27,10 @@ export interface WakeSubscription {
   /** Where wakes land, when the transport has such a place. Adapters may
    *  mention it; they must not reconstruct the command from it. */
   readonly endpoint?: string;
+  /** Shell command printing how many watchers for THIS handle are already
+   *  running, or undefined when the transport cannot count them. Only the
+   *  transport knows its own mechanism, so only it can write this. */
+  readonly probeCommand?: string;
 }
 
 export interface WakeTransport {
@@ -36,11 +40,9 @@ export interface WakeTransport {
   readonly subscribe: (handle: string) => WakeSubscription;
 }
 
-// 🛑 MATCHES THE HOST'S CAP, AND IS NOT A PREFERENCE. Monitor silently caps a
-// deadline at 30 minutes, so asking for an hour printed an hour into the hook
-// and the watch still died at half the advertised life. A dead watcher is
-// indistinguishable from a quiet queue, which is the failure this value had.
-const MONITOR_MAX_MS = 1_800_000;
+// What this transport ASKS for. A host that cannot keep it this long clamps
+// it — see the adapter. Naming a host's limit here would invert the seam.
+const HOUR_MS = 3_600_000;
 
 /**
  * The wake command: print the message, and drop only a repeat of the same id.
@@ -79,7 +81,8 @@ export const fileWatchTransport: WakeTransport = {
       kind: 'process',
       command: watchCommand(path),
       description: `chat-mcp inbound for ${handle}`,
-      timeoutMs: MONITOR_MAX_MS,
+      probeCommand: `ps -axo command= | grep -c '^node -e.*${path}'`,
+      timeoutMs: HOUR_MS,
       endpoint: path,
     };
   },
