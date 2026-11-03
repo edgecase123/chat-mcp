@@ -389,18 +389,7 @@ export function messageMarkdown({ from, time, body }, { attributed = false } = {
   return `**${from}** · ${time}\n\n${body.trimEnd()}`;
 }
 
-/**
- * 🛑 GENERATED FROM THE COMMAND TABLE, NOT TYPED OUT. A hand-written list of
- * commands goes stale the first time one is added and nobody notices.
- *
- * 🛑 BOTH `/help` AND `/cheat-sheet` PRINT THIS. One builder, two surfaces —
- * a toast and the stream. A second builder is how one new command ends up
- * described two different ways depending on which you typed. A test asserts
- * the sheet embeds this block verbatim.
- *
- * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
- * @param {Record<string, string>} labels category key -> heading
- */
+/** `/name <arg>`, with the space dropped when a command takes no argument. */
 export function commandUsage(command) {
   return `/${command.name} ${command.arg}`.trimEnd();
 }
@@ -418,6 +407,22 @@ export function dashColumn(labels) {
   return labels.length ? Math.max(...labels.map((l) => l.length)) + 1 : 0;
 }
 
+/**
+ * 🛑 GENERATED FROM THE COMMAND TABLE, NOT TYPED OUT. A hand-written list of
+ * commands goes stale the first time one is added and nobody notices.
+ *
+ * 🛑 BOTH `/help` AND `/cheat-sheet` PRINT THIS. One builder, two surfaces —
+ * a toast and the stream. A second builder is how one new command ends up
+ * described two different ways depending on which you typed. A test asserts
+ * the two surfaces carry the same rows, space-collapsed.
+ *
+ * `width` and `headingIndent` are what the two surfaces may differ on. The
+ * sheet passes a width measured over its gesture rows too, and indents its
+ * headings; the toast takes the default width and outdents.
+ *
+ * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
+ * @param {Record<string, string>} labels category key -> heading
+ */
 export function commandBlock(commands, labels, { width, headingIndent = '  ' } = {}) {
   const w = width ?? dashColumn(commands.map(commandUsage));
 
