@@ -1,11 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
-import { migrate } from '../../src/storage/db.js';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// 🛑 BEFORE any import that resolves a state path. Without this the supervisor
+// binds a socket and writes its MCP config into the OPERATOR'S LIVE
+// ~/.chat-mcp, and `bind()` unlinks what it judges to be a stale socket.
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-replace-'));
+
+const { migrate } = await import('../../src/storage/db.js');
+const { startSupervisor } = await import('../../src/supervise/index.js');
+const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
 import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
-import { startSupervisor } from '../../src/supervise/index.js';
-import { deliverToSupervisor } from '../../src/supervise/socket.js';
 
 /**
  * 🛑 THE APPROVAL PATH LOOKED FIXED AND WAS NOT.
