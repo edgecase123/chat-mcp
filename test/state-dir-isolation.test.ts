@@ -69,8 +69,28 @@ function touchesStateDir(src: string): string[] {
  * Probed on `state-dir-children-perms.test.ts`: deleting its real assignment
  * left the guard green, because lines 7 and 111 talk about the variable.
  */
+/**
+ * 🛑 A COMMENTED-OUT ASSIGNMENT IS NOT A REDIRECT, AND IT MATCHED.
+ *
+ * `// process.env.CHAT_MCP_HOME = '/tmp/x';` passed. Commenting the redirect
+ * out to reproduce something and forgetting to restore it is the realistic
+ * path to a leak, and it is the same silent direction as the mention hole.
+ * Raised by claude2.
+ *
+ * ⚠️ The stripping is deliberately crude: a `//` inside a string literal
+ * truncates its line. That direction FAILS LOUD — the line stops matching and
+ * the file is reported as an offender — which is the right way round for a
+ * guard. A clever stripper that kept strings would risk the quiet direction.
+ */
+function withoutComments(src: string): string {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
+    .replace(/^\s*\*.*$/gm, '');
+}
+
 function redirectsStateDir(src: string): boolean {
-  return REDIRECT.test(src);
+  return REDIRECT.test(withoutComments(src));
 }
 
 /**
@@ -161,6 +181,25 @@ test('🚨 a COMMENT naming CHAT_MCP_HOME is not a redirect', () => {
     false,
     'a COMPARISON is not a write — this is what (?!=) is for',
   );
+});
+
+/**
+ * 🛑 THE HOLE THE WIDENING OPENED. A real assignment, commented out, read as a
+ * redirect. Each form below is a line someone leaves behind after a debug pass.
+ */
+test('🚨 a COMMENTED-OUT assignment is not a redirect', () => {
+  for (const form of [
+    "// process.env.CHAT_MCP_HOME = '/tmp/x';",
+    "  //process.env.CHAT_MCP_HOME = '/tmp/x';",
+    " * process.env.CHAT_MCP_HOME = '/tmp/x';",
+    "/* process.env.CHAT_MCP_HOME = '/tmp/x'; */",
+    "/**\n * process.env['CHAT_MCP_HOME'] = x;\n */",
+  ]) {
+    assert.equal(redirectsStateDir(form), false, `accepted a commented-out redirect: ${form}`);
+  }
+
+  // The control: the SAME line, uncommented, must still be accepted.
+  assert.equal(redirectsStateDir("process.env.CHAT_MCP_HOME = '/tmp/x';"), true);
 });
 
 /**
