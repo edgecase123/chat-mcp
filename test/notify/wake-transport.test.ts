@@ -44,7 +44,8 @@ function withTransport<T>(id: string, fn: () => T): T {
 test('the default transport is the file watch, so nothing changes for existing hosts', () => {
   assert.equal(activeWakeTransport().id, 'file-watch');
   const sub = fileWatchTransport.subscribe('alice');
-  assert.match(sub.command, /fs'\)\.watch\(/);
+  assert.match(sub.command, /require\('fs'\)/);
+  assert.match(sub.command, /fs\.watch\(p/);
   assert.match(sub.endpoint ?? '', /alice$/);
 });
 
@@ -55,9 +56,43 @@ test('the REAL default block still parses and still arms the file watch', () => 
   const json = text.split('```json')[1]?.split('```')[0] ?? '';
   const parsed = JSON.parse(json) as { command: string; description: string; timeout_ms: number };
 
-  assert.match(parsed.command, /^node -e "require\('fs'\)\.watch\('.*\/claude2', \(\) => console\.log\('wake'\)\)"$/);
+  assert.match(parsed.command, /^node -e "const fs=require\('fs'\),p='.*\/claude2';/);
   assert.equal(parsed.description, 'chat-mcp inbound for claude2');
-  assert.equal(parsed.timeout_ms, 3600000);
+  // 🛑 THE HOST'S CAP, NOT AN HOUR. Monitor caps at 30 minutes, so an hour
+  // printed here made the watch die at half its advertised life.
+  assert.equal(parsed.timeout_ms, 1800000);
+  assert.doesNotMatch(parsed.command, /console\.log\('wake'\)/, 'a bare wake cannot be triaged');
+});
+
+test('🛑 the hook does NOT pass `persistent`, which is not a Monitor parameter', () => {
+  const text = buildAdditionalContext('claude2');
+  const json = text.split('```json')[1]?.split('```')[0] ?? '';
+  assert.doesNotMatch(json, /persistent/);
+  // The denominator: the block still carries the three real parameters.
+  const parsed = JSON.parse(json) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(parsed).sort(), ['command', 'description', 'timeout_ms']);
+});
+
+test('🛑 the duplicate check comes BEFORE the block it guards', () => {
+  // An instruction that says FIRST and is read second is not a guard. The
+  // hook is consumed top to bottom, so position is the whole of its effect.
+  const text = buildAdditionalContext('claude2');
+  const check = text.indexOf('FIRST, count the watchers');
+  const block = text.indexOf('```json');
+  assert.notEqual(check, -1, 'the check is missing');
+  assert.ok(check < block, `check at ${check} must precede the json block at ${block}`);
+  assert.match(text, /\/clear/, 'the reason has to name the trigger or it reads as optional');
+  assert.match(text, /must NOT arm a second/);
+  assert.match(text, /If that count is zero, then as your very first tool call/);
+});
+
+test('🛑 the duplicate-check command anchors on ^node, or it counts itself', () => {
+  // Measured: without the anchor the count also matches the watcher's parent
+  // shell and the grep process, so a first-ever session reads 2 and declines
+  // to arm anything at all.
+  const text = buildAdditionalContext('claude2');
+  assert.match(text, /grep -c '\^node -e\.\*/);
+  assert.match(text, /The `\^node` anchor is load-bearing/);
 });
 
 test('an unknown transport name falls back rather than leaving a host with no wake', () => {
@@ -70,7 +105,7 @@ test('THE SEAM: swapping the transport changes the adapter, and the file watch d
   registerWakeTransport(FAKE);
 
   const before = buildAdditionalContext('alice');
-  assert.match(before, /fs'\)\.watch\(/, 'default should still be the file watch');
+  assert.match(before, /fs\.watch\(p/, 'default should still be the file watch');
 
   const after = withTransport('test-socket', () => buildAdditionalContext('alice'));
 
@@ -79,7 +114,7 @@ test('THE SEAM: swapping the transport changes the adapter, and the file watch d
   assert.match(after, /"timeout_ms": 1234/);
   assert.match(after, /Wakes for "alice" arrive on a socket/);
   // THE ASSERTION THAT MATTERS. Indirection would leave this behind.
-  assert.doesNotMatch(after, /fs'\)\.watch\(/);
+  assert.doesNotMatch(after, /fs\.watch\(/);
   assert.doesNotMatch(after, /\.chat-mcp\/notify/);
 });
 

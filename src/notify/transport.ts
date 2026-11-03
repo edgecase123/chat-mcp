@@ -36,7 +36,36 @@ export interface WakeTransport {
   readonly subscribe: (handle: string) => WakeSubscription;
 }
 
-const HOUR_MS = 3_600_000;
+// 🛑 MATCHES THE HOST'S CAP, AND IS NOT A PREFERENCE. Monitor silently caps a
+// deadline at 30 minutes, so asking for an hour printed an hour into the hook
+// and the watch still died at half the advertised life. A dead watcher is
+// indistinguishable from a quiet queue, which is the failure this value had.
+const MONITOR_MAX_MS = 1_800_000;
+
+/**
+ * The wake command: print the message, and drop only a repeat of the same id.
+ *
+ * 🛑 THE BODY IS WHY THIS IS NOT A BARE `wake`. A wake with no payload cannot
+ * be triaged, so every one of them costs an `inbox` round trip just to learn
+ * whether it mattered.
+ *
+ * 🛑 THE DEDUPE IS GUARDED BY `id > 0` AND THAT GUARD IS THE WHOLE POINT.
+ * `notifyPeer` writes `id: 0` for system events and a bare millisecond when it
+ * has no envelope, so a dedupe on content or on a raw `id` would silently drop
+ * a second wake. Dropping a wake looks exactly like a peer that never replied.
+ */
+function watchCommand(path: string): string {
+  const js =
+    `const fs=require('fs'),p='${path}';let seen=0;` +
+    'fs.watch(p,()=>{' +
+    "let s='';try{s=fs.readFileSync(p,'utf8').trim()}catch{return}" +
+    'if(!s)return;' +
+    'let id=0;try{id=JSON.parse(s).id|0}catch{}' +
+    'if(id>0){if(id===seen)return;seen=id}' +
+    'console.log(s)})';
+
+  return `node -e "${js}"`;
+}
 
 /** Today's transport: a file per handle, whose writes are the wakes. */
 export const fileWatchTransport: WakeTransport = {
@@ -48,9 +77,9 @@ export const fileWatchTransport: WakeTransport = {
 
     return {
       kind: 'process',
-      command: `node -e "require('fs').watch('${path}', () => console.log('wake'))"`,
+      command: watchCommand(path),
       description: `chat-mcp inbound for ${handle}`,
-      timeoutMs: HOUR_MS,
+      timeoutMs: MONITOR_MAX_MS,
       endpoint: path,
     };
   },
