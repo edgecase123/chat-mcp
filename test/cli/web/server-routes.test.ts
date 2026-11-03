@@ -372,3 +372,25 @@ test('a clear with no target is refused', async () => {
     close(h);
   }
 });
+
+/**
+ * 🛑 THE CLIENT AND SERVER MUST AGREE ON WHAT A ROOM IS. `app.js` calls
+ * anything starting with `#` a room and warns that the delete hits everyone.
+ * `isRoomName` is stricter, so a malformed name used to fall through to the
+ * DM branch, skip the membership check and answer `cleared: 0` as success.
+ */
+test('a malformed room name is refused, not quietly treated as a DM', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#ops', 'operator');
+    dao.insertMessage(h.db, { from: 'operator', to: '#ops', body: 'one' });
+    const before = countTo(h, '#ops');
+
+    const res = await post(h, '/api/messages/clear', { target: '#Ops' }, h.origin);
+
+    assert.equal(res.status, 400);
+    assert.equal(countTo(h, '#ops'), before);
+  } finally {
+    close(h);
+  }
+});

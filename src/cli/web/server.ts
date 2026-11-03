@@ -470,13 +470,22 @@ async function handleRoomDelete(req: IncomingMessage, res: ServerResponse, ctx: 
  * `/clear` for the web UI, the surface the Ink CLI has had at App.tsx. Rooms
  * are member-only; a DM needs no check because the caller is always one side
  * of the pair it names.
+ *
+ * 🛑 THE `#` PREFIX DECIDES ROOM-OR-DM, AND `isRoomName` ONLY DECIDES VALID.
+ * `app.js` treats every `#`-prefixed target as a room and warns that the
+ * delete hits everyone. Discriminating on `isRoomName` alone sent `#Ops` down
+ * the DM branch, past the membership check, and answered `cleared: 0` as
+ * success under a room-scoped warning.
  */
 async function handleMessagesClear(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
   const body = (await readJsonBody(req)) as { target?: string };
   const target = body.target;
   if (!target) return respondJson(res, { error: 'target required' }, 400);
 
-  if (isRoomName(target)) {
+  if (target.startsWith('#')) {
+    if (!isRoomName(target)) {
+      return respondJson(res, { error: `${target} is not a valid room name` }, 400);
+    }
     if (!dao.isRoomMember(ctx.db, target, ctx.handle)) {
       return respondJson(res, { error: `you are not a member of ${target}` }, 403);
     }
