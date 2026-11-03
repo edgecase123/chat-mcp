@@ -119,3 +119,40 @@ test('🚨 the same text without pipes is wrapped, so it is the table branch doi
   assert.ok(widest <= BUDGET, `plain prose must fit, got ${widest}`);
   assert.ok(wrappedRowCount(plain, BUDGET) > 1, 'and must take more than one row');
 });
+
+/**
+ * 🛑 GRAPHEME CLASSES THE README NOW PROMISES. The slice iterates by CODE
+ * POINT, so each of these is a case where one glyph spans several points and
+ * could in principle be cut in half or mis-measured.
+ *
+ * Measured intact rather than assumed: `Intl.Segmenter` counts the same number
+ * of graphemes before and after the wrap.
+ */
+test('🚨 every multi-code-point grapheme class fits AND survives intact', () => {
+  const seg = new Intl.Segmenter('en', { granularity: 'grapheme' });
+  const graphemes = (t: string) => [...seg.segment(t)].length;
+
+  const cases: Record<string, string> = {
+    'combining accent': 'e\u0301'.repeat(80),
+    'ZWJ family': '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'.repeat(30),
+    'skin-tone modifier': '\u{1F44D}\u{1F3FD}'.repeat(30),
+    'regional-indicator flag': '\u{1F1EC}\u{1F1E7}'.repeat(30),
+  };
+
+  for (const [label, body] of Object.entries(cases)) {
+    // The premise: each fixture must actually need wrapping.
+    assert.ok(stringWidth(body) > BUDGET, `${label}: fixture is not over budget`);
+
+    const lines = wrapBody(body, BUDGET).split('\n');
+
+    assert.ok(
+      Math.max(...lines.map((l) => stringWidth(l))) <= BUDGET,
+      `${label}: a line exceeded the budget`,
+    );
+    assert.equal(
+      lines.reduce((n, l) => n + graphemes(l), 0),
+      graphemes(body),
+      `${label}: the wrap split a grapheme`,
+    );
+  }
+});

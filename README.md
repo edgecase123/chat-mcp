@@ -234,18 +234,21 @@ or hidden. What differs is finish:
 | layout survives any content | yes | **no — wide tables, see below** |
 | needs a width to be usable | no | yes |
 
-**One known rough edge, measured rather than assumed:**
+**Long message text wraps. It is never truncated or hidden.** Measured at a
+40-column budget:
 
-- **A markdown table wider than the pane overflows it.** A `|…|` row is handed
-  to the Markdown tokenizer whole, because wrapping it would break the pipe
-  count. So at a 40-column budget a 71-column row comes through unwrapped, and
-  the row budget counts it as one line however many it draws. Keep tables
-  narrow, or read them in the browser.
+| content | what happens |
+|---|---|
+| prose | wraps at whitespace |
+| a long URL or other unbroken token | hard-broken mid-token |
+| CJK, emoji, combining accents, ZWJ sequences | wrap correctly, and no glyph is split |
+| **a markdown table row** | **overflows the pane** |
 
-**Fixed, and noted because it was the headline complaint:** wide characters no
-longer overflow. The wrap compared and sliced by UTF-16 code units, so CJK text
-drew at double its budget — `你好` repeated 30 times reached 80 columns against
-a 40-column budget. It now measures display width throughout.
+**The table row is the one known rough edge.** A `|…|` row is handed to the
+Markdown tokenizer whole, because wrapping it would break the pipe count. So a
+59-column row comes through unwrapped against a 40-column budget, and the row
+budget counts it as one line however many it draws. **Keep tables narrow, or
+read them in the browser.**
 
 ### Full-screen terminal UI
 
