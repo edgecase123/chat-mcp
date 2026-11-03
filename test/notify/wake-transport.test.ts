@@ -1,11 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  activeWakeTransport,
-  fileWatchTransport,
-  registerWakeTransport,
-} from '../../src/notify/transport.js';
-import { buildAdditionalContext } from '../../src/adapters/claude-code.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+// 🛑 BEFORE any import that resolves a state path. `stateDir()` refuses the
+// default under the test runner, so this is required, not merely tidy.
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-wake-'));
+
+const { activeWakeTransport, fileWatchTransport, registerWakeTransport } = await import(
+  '../../src/notify/transport.js'
+);
+const { buildAdditionalContext } = await import('../../src/adapters/claude-code.js');
 
 /**
  * 🛑 THE POINT IS THE SEAM, NOT THE DEFAULT.
