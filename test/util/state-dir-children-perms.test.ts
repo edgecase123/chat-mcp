@@ -19,6 +19,8 @@ const {
   STATE_FILE_MODE,
 } = await import('../../src/util/paths.js');
 const { registerProject, projectsPath } = await import('../../src/supervise/projects.js');
+const { claudeCodeAdapter } = await import('../../src/adapters/claude-code.js');
+const { claudeCodeContextAdapter } = await import('../../src/adapters/claude-code-context.js');
 const { writeClaudeMcpConfig } = await import('../../src/supervise/drivers/claude.js');
 
 // registerProject refuses a directory that does not exist, so give it a real one.
@@ -93,3 +95,38 @@ test("🚨 an ALREADY EXISTING world-readable mcp/<handle>.json is tightened", (
  * asserted a fresh create under `umask 000` were removed for exactly the
  * reason this file exists: they passed with the fix reverted.
  */
+
+/**
+ * 🛑 THE HELPER BEING RIGHT DOES NOT MEAN THE INSTALLERS CALL IT. Both built
+ * this directory with their own bare `mkdirSync`, and a test that calls
+ * `ensureAdaptersDir()` directly cannot tell the difference — reverting one
+ * installer leaves such a suite green. Found by claude1 on this PR.
+ *
+ * So these drive the real `install()` and assert the mode it leaves behind.
+ */
+const INSTALLERS: ReadonlyArray<[string, () => Promise<unknown>]> = [
+  ['claude-code', () => claudeCodeAdapter.install({ handle: 'probe-a', scope: 'local', cwd: PROBE_DIR, force: true })],
+  [
+    'claude-code-context',
+    () =>
+      claudeCodeContextAdapter.install({
+        handle: 'probe-b',
+        scope: 'local',
+        cwd: PROBE_DIR,
+        force: true,
+        contextTotal: 200000,
+      }),
+  ],
+];
+
+for (const [label, install] of INSTALLERS) {
+  test(`🚨 the ${label} installer leaves the adapters directory at 0700`, async () => {
+    mkdirSync(adaptersDir(), { recursive: true });
+    chmodSync(adaptersDir(), 0o755);
+    assert.equal(modeOf(adaptersDir()), 0o755, 'the fixture is actually loose before the call');
+
+    await install();
+
+    assert.equal(modeOf(adaptersDir()), STATE_DIR_MODE);
+  });
+}
