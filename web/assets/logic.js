@@ -533,7 +533,9 @@ export function skillTokenAt(value, caret, peers) {
   // removing it failed no test and no input can reach it.
   //
   // The peer must also be the FIRST word, so a "/" later in prose stays prose.
-  const lead = value.match(/^(\S+)\s/);
+  // 🛑 `\s*` LEADS, because an anchor at position 0 means one stray leading
+  // space turns the whole feature off with no sign that it did.
+  const lead = value.match(/^\s*(\S+)\s/);
   if (!lead) return null;
   const peer = peers.find((h) => h === lead[1]);
   if (!peer) return null;

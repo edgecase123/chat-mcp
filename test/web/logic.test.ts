@@ -1064,3 +1064,29 @@ test('the inserted text keeps whatever followed the token', () => {
   const s = skillSuggestionsFor('claude1 /pr-w make a PR', 13, sctx);
   assert.equal(s.items[0].insert, 'claude1 /pr-writing make a PR');
 });
+
+test('🛑 a LEADING SPACE must not silently turn the feature off', () => {
+  // `/^(\S+)\s/` is anchored at 0, so " claude1 /pr" found no lead and the
+  // completion vanished with nothing to show the user why.
+  const s = skillSuggestionsFor('  claude1 /pr-w', 15, sctx);
+  assert.ok(s, 'a leading space disabled the completion');
+  assert.equal(s.items[0].insert, '  claude1 /pr-writing ', 'the indent must survive');
+});
+
+test('🛑 a ROOM target gets no skills, and that is DELIBERATE', () => {
+  // A skill is run by an agent, not by a room. Rooms keep their "#" in
+  // ctx.rooms, so `#gate` never matches a peer handle. Without this test the
+  // next reader reads the refusal as a bug and "fixes" it.
+  // 🛑 ASSERTED ON THE TOKEN, because the suggestion layer refuses for the
+  // WRONG REASON — `skills['#gate']` is undefined, so an empty pool returns
+  // null whether or not the peer check fired. Measured: letting a room match
+  // failed no test until this line existed.
+  assert.equal(skillTokenAt('#gate /pr-writing', 17, PEERS), null);
+
+  // And with skills present under that key it still refuses, which is the
+  // thing the empty-pool path could not tell us.
+  const ctx = { peers: PEERS, skills: { ...SKILLS, '#gate': [{ name: 'pr-writing', source: 'x' }] } };
+  assert.equal(skillSuggestionsFor('#gate /pr-writing', 17, ctx), null);
+  // The denominator: the same text with a PEER does complete.
+  assert.ok(skillSuggestionsFor('claude1 /pr-writing', 19, ctx));
+});
