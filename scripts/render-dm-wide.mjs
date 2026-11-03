@@ -35,6 +35,7 @@ const stdin = new MockStdin();
 
 const { Box, Text } = await import('ink');
 const { Header } = await import('../dist/cli/ink/panes/Header.js');
+const { packageVersion } = await import('../dist/util/version.js');
 const { Sidebar } = await import('../dist/cli/ink/panes/Sidebar.js');
 const { MessagesPane } = await import('../dist/cli/ink/panes/MessagesPane.js');
 const { HintBar } = await import('../dist/cli/ink/HintBar.js');
@@ -55,7 +56,7 @@ const discoverRooms = [{ name: '#leagues', created_at: 0, created_by: 'lee', mem
 const layout = React.createElement(
   Box,
   { flexDirection: 'column', width: '100%', height: ROWS, overflow: 'hidden' },
-  React.createElement(Header, { handle: 'me', version: '0.3.0', status: null, focus: null }),
+  React.createElement(Header, { handle: 'me', version: packageVersion(), status: null, focus: null }),
   React.createElement(
     Box,
     { flexGrow: 1, overflow: 'hidden' },

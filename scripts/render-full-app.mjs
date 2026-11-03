@@ -10,6 +10,7 @@ process.stdout.columns = 140;
 process.stdout.rows = 30;
 
 const { App } = await import('../dist/cli/ink/App.js');
+const { packageVersion } = await import('../dist/util/version.js');
 const { openDb } = await import('../dist/storage/db.js');
 const dao = await import('../dist/storage/dao.js');
 const { NotifyBus } = await import('../dist/notify/bus.js');
@@ -22,7 +23,7 @@ const notify = new NotifyBus('claude2');
 dao.upsertAgent(db, { handle: 'claude2', pid: process.pid, session_id: 'render-smoke', display_name: 'claude2', metadata: { kind: 'human' } });
 
 const { lastFrame } = render(
-  React.createElement(App, { handle: 'claude2', db, notify, version: '0.3.0' }),
+  React.createElement(App, { handle: 'claude2', db, notify, version: packageVersion() }),
 );
 
 // Give effects a tick, then dump.

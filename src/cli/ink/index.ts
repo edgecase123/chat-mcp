@@ -5,8 +5,9 @@ import { openDb } from '../../storage/db.js';
 import { NotifyBus } from '../../notify/bus.js';
 import * as dao from '../../storage/dao.js';
 import { App } from './App.js';
+import { packageVersion } from '../../util/version.js';
 
-const VERSION = '0.3.0';
+const VERSION = packageVersion();
 
 /** DEC private-mode sequence: enter alternate screen buffer (save cursor +
  *  switch to a fresh scroll region so the app owns the visible viewport and

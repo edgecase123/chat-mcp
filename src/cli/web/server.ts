@@ -20,8 +20,9 @@ import {
   realContainedDir,
   resolveHintQuery,
 } from './file-hints.js';
+import { packageVersion } from '../../util/version.js';
 
-const VERSION = '0.4.4';
+const VERSION = packageVersion();
 
 /** Well-known path where the currently-running server writes its URL so
  *  scripts + follow-up shell commands can find it without scraping stdout.
