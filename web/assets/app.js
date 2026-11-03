@@ -791,7 +791,8 @@ const COMMANDS = [
 
 // Grouped, because a flat list reads as unrelated things. Same builder as the
 // cheat sheet, so a new command's description cannot come out two ways.
-const HELP_TEXT = commandBlock(COMMANDS, CATEGORY_LABELS);
+// The toast outdents its headings; the sheet indents them to sit under its own.
+const HELP_TEXT = commandBlock(COMMANDS, CATEGORY_LABELS, { headingIndent: '' });
 
 // ── Composer suggestions ────────────────────────────────────────────────
 

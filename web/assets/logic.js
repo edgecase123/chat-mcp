@@ -401,71 +401,103 @@ export function messageMarkdown({ from, time, body }, { attributed = false } = {
  * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
  * @param {Record<string, string>} labels category key -> heading
  */
-export function commandBlock(commands, labels) {
-  const usages = commands.map((c) => `/${c.name} ${c.arg}`.trimEnd());
-  // Measured, not a constant: `/broadcast <#room> <text>` outgrew a hardcoded
-  // 24 and its dash butted the description. +1 keeps one space at the widest.
-  const width = usages.length ? Math.max(...usages.map((u) => u.length)) + 1 : 0;
+export function commandUsage(command) {
+  return `/${command.name} ${command.arg}`.trimEnd();
+}
+
+/**
+ * The dash column for a set of labels.
+ *
+ * 🛑 MEASURED, NEVER A CONSTANT, AND MEASURED OVER EVERY SECTION THAT SHARES
+ * THE COLUMN. A hardcoded 24 let `/broadcast <#room> <text>` run into its own
+ * description. Fixing only the command rows then split the sheet into two
+ * columns, 28 and 26, which is the same defect one section lower.
+ * The +1 is the space before the dash at the widest label.
+ */
+export function dashColumn(labels) {
+  return labels.length ? Math.max(...labels.map((l) => l.length)) + 1 : 0;
+}
+
+export function commandBlock(commands, labels, { width, headingIndent = '  ' } = {}) {
+  const w = width ?? dashColumn(commands.map(commandUsage));
 
   return Object.keys(labels)
     .map((cat) => {
       const rows = commands
         .filter((c) => c.cat === cat)
-        .map((c) => '  ' + `/${c.name} ${c.arg}`.trimEnd().padEnd(width) + `— ${c.desc}`);
+        .map((c) => '  ' + commandUsage(c).padEnd(w) + `— ${c.desc}`);
 
-      return rows.length ? [`  ${labels[cat]}`, ...rows].join('\n') : null;
+      return rows.length ? [`${headingIndent}${labels[cat]}`, ...rows].join('\n') : null;
     })
     .filter(Boolean)
     .join('\n\n');
 }
 
+/** Gestures, as data, so one measurement can cover them and the commands. */
+const GESTURE_SECTIONS = [
+  ['COMPOSER', [
+    ['Enter', 'send'],
+    ['Shift-Enter', 'newline, without sending'],
+    ['#', 'complete a peer or room name'],
+    ['Tab or Enter', 'accept the highlighted completion'],
+    ['Up / Down', 'move through the completion list'],
+    ['Esc', 'dismiss the completion list'],
+    ['Up / Down', 'with no list open, step through lines you sent'],
+    ['drop a file on the window', 'insert its path at the caret'],
+    { cont: 'relative to the project folder, "~/" under home', pad: 2 },
+  ]],
+  ['MESSAGES', [
+    ['click the copy icon', 'copy the message markdown as typed'],
+    ['Shift-click it', 'copy it under the author and the time'],
+  ]],
+  ['SIDEBAR', [
+    ['click a row', 'open that peer or room'],
+    ['(3) beside a row', 'unread messages waiting there'],
+    ['... on a peer', 'Dispatch, Alert, Copy handle, Kick'],
+    ['... on a room', 'Broadcast, Alert, Copy name, Leave, Delete'],
+    ['an entry ending "..."', 'opens in the composer, sends nothing'],
+    ['the entry below the rule', 'destructive, and asks first'],
+  ]],
+  ['READING', [
+    ['End', 'jump to the newest message'],
+    { cont: 'only while the composer is empty, because End', pad: 0 },
+    { cont: 'otherwise moves the caret', pad: 0 },
+    ['the jump badge', 'appears when messages arrive below the view'],
+  ]],
+];
+
 /**
  * The command block, plus the gesture sections no table can generate.
  *
- * Each gesture line was checked against app.js when written. A test asserts
- * every section heading and every named key survives.
+ * 🛑 ONE DASH COLUMN FOR THE WHOLE SHEET, measured over the commands AND the
+ * gesture labels together. Two independently padded sections read as two
+ * tables. A test asserts every dash in the output sits at one column.
+ *
+ * Each gesture line was checked against app.js when written.
  *
  * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
  * @param {Record<string, string>} labels category key -> heading
  */
 export function cheatSheet(commands, labels) {
-  const pad = (s) => s.padEnd(24);
+  const gestureLabels = GESTURE_SECTIONS.flatMap(([, rows]) =>
+    rows.filter(Array.isArray).map(([label]) => label));
+  const width = dashColumn([...commands.map(commandUsage), ...gestureLabels]);
+
+  const gestures = GESTURE_SECTIONS.flatMap(([heading, rows]) => [
+    heading,
+    ...rows.map((row) => Array.isArray(row)
+      ? '  ' + row[0].padEnd(width) + `— ${row[1]}`
+      : '  ' + ' '.repeat(width + 2 + row.pad) + row.cont),
+    '',
+  ]);
 
   return [
     'CHEAT SHEET',
     '',
     'SLASH COMMANDS',
-    commandBlock(commands, labels),
+    commandBlock(commands, labels, { width }),
     '',
-    'COMPOSER',
-    '  ' + pad('Enter') + '— send',
-    '  ' + pad('Shift-Enter') + '— newline, without sending',
-    '  ' + pad('#') + '— complete a peer or room name',
-    '  ' + pad('Tab or Enter') + '— accept the highlighted completion',
-    '  ' + pad('Up / Down') + '— move through the completion list',
-    '  ' + pad('Esc') + '— dismiss the completion list',
-    '  ' + pad('Up / Down') + '— with no list open, step through lines you sent',
-    '  ' + pad('drop a file on the window') + ' — insert its path at the caret',
-    '  ' + pad('') + '    relative to the project folder, "~/" under home',
-    '',
-    'MESSAGES',
-    '  ' + pad('click the copy icon') + '— copy the message markdown as typed',
-    '  ' + pad('Shift-click it') + '— copy it under the author and the time',
-    '',
-    'SIDEBAR',
-    '  ' + pad('click a row') + '— open that peer or room',
-    '  ' + pad('(3) beside a row') + '— unread messages waiting there',
-    '  ' + pad('... on a peer') + '— Dispatch, Alert, Copy handle, Kick',
-    '  ' + pad('... on a room') + '— Broadcast, Alert, Copy name, Leave, Delete',
-    '  ' + pad('an entry ending "..."') + '— opens in the composer, sends nothing',
-    '  ' + pad('the entry below the rule') + ' — destructive, and asks first',
-    '',
-    'READING',
-    '  ' + pad('End') + '— jump to the newest message',
-    '  ' + pad('') + '  only while the composer is empty, because End',
-    '  ' + pad('') + '  otherwise moves the caret',
-    '  ' + pad('the jump badge') + '— appears when messages arrive below the view',
-    '',
+    ...gestures,
     'This sheet is not saved. It disappears when you switch away.',
   ].join('\n');
 }

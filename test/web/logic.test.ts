@@ -16,6 +16,7 @@ import {
   atTokenAt,
   cheatSheet,
   commandBlock,
+  dashColumn,
   messageMarkdown,
   pathSuggestionsFor,
   nextUnreadBelow,
@@ -577,25 +578,53 @@ const CMDS = [
 
 test('🛑 the WIDEST command still keeps a space before its dash', () => {
   // A hardcoded pad let `/broadcast <#room> <text>` overflow and collide.
-  const wide = [...CMDS, { name: 'broadcast', arg: '<#room> <text>', desc: 'to a room', cat: 'messaging' }];
-  const block = commandBlock(wide, LABELS);
-  const collided = block.split('\n').filter((l) => /\S—/.test(l));
+  const collided = commandBlock(WIDE, LABELS).split('\n').filter((l) => /\S—/.test(l));
   assert.deepEqual(collided, [], 'a usage wider than the pad ran into its description');
   // The denominator: the added command really is the widest in the table.
-  const usages = wide.map((c) => `/${c.name} ${c.arg}`.trimEnd());
-  assert.equal(Math.max(...usages.map((u) => u.length)), '/broadcast <#room> <text>'.length);
+  assert.equal(dashColumn(WIDE.map((c) => `/${c.name} ${c.arg}`.trimEnd())), 26);
 });
 
-test('🛑 /help and /cheat-sheet print the SAME command block', () => {
+test('🛑 EVERY dash in the sheet sits at ONE column, commands and gestures alike', () => {
+  // Padding the command rows alone splits the sheet into two tables. Measured
+  // at 28 and 26 on the first cut of this fix, which `includes(block)` cannot
+  // see because each section is internally consistent.
+  // A category heading can itself contain an em-dash ("ADMIN — destructive"),
+  // so headings are excluded by name rather than by looking for the character.
+  const headings = new Set(Object.values(LABELS).map((h) => `  ${h}`));
+  const lines = cheatSheet(WIDE, LABELS)
+    .split('\n')
+    .filter((l) => l.includes('—') && !headings.has(l));
+  const columns = [...new Set(lines.map((l) => l.indexOf('—')))];
+  assert.deepEqual(columns, [26 + 2], 'the sheet has more than one dash column');
+  // The denominators: both halves are really in that count.
+  assert.ok(lines.some((l) => l.includes('/broadcast')), 'no command row was measured');
+  assert.ok(lines.some((l) => l.includes('Shift-Enter')), 'no gesture row was measured');
+  assert.ok(lines.length >= WIDE.length + 10, `only ${lines.length} rows carried a dash`);
+});
+
+test('the toast outdents its category headings and the sheet indents them', () => {
+  const flush = commandBlock(CMDS, LABELS, { headingIndent: '' });
+  assert.ok(flush.includes('\nCONVERSATION') || flush.startsWith('CONVERSATION'));
+  assert.ok(commandBlock(CMDS, LABELS).includes('  CONVERSATION'), 'the sheet default indents');
+});
+
+const WIDE = [...CMDS, { name: 'broadcast', arg: '<#room> <text>', desc: 'to a room', cat: 'messaging' }];
+
+/** Every non-blank line, trimmed and space-collapsed, so padding cannot matter. */
+const squash = (text: string) =>
+  text.split('\n').map((l) => l.trim().replace(/\s+/g, ' ')).filter(Boolean);
+
+test('🛑 /help and /cheat-sheet print the SAME command rows', () => {
   // Two builders is how one new command gets described two different ways
-  // depending on which of the two you typed. The sheet must embed the block.
-  const block = commandBlock(CMDS, LABELS);
-  const sheet = cheatSheet(CMDS, LABELS);
-  assert.ok(sheet.includes(block), 'the sheet rebuilt the block instead of embedding it');
-  // The denominator, so a block that silently shrank cannot pass the above.
-  const rows = block.split('\n').filter((l) => l.trim().startsWith('/'));
-  assert.equal(rows.length, CMDS.length, 'every command is one row in the block');
-  assert.equal(CMDS.length, 8);
+  // depending on which of the two you typed. The column differs by surface on
+  // purpose, so this compares the TEXT and the dash-column test owns the pad.
+  const toast = squash(commandBlock(WIDE, LABELS, { headingIndent: '' }));
+  const sheet = squash(cheatSheet(WIDE, LABELS));
+  const missing = toast.filter((row) => !sheet.includes(row));
+  assert.deepEqual(missing, [], 'the sheet does not carry what the toast prints');
+  // The denominator, so a toast that silently shrank cannot pass the above.
+  assert.equal(toast.filter((l) => l.startsWith('/')).length, WIDE.length);
+  assert.equal(WIDE.length, 9);
 });
 
 test('🛑 EVERY command in the table reaches the sheet', () => {
