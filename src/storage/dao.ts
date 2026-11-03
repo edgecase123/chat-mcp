@@ -587,16 +587,68 @@ function hydrateRoomFromRow(db: Db, row: RoomRow): Room {
  * sender's watermark, while the web UI and the CLI both do, so without this
  * an agent got its own message back as unread and paid to read it again.
  */
+export function roomWatermark(db: Db, room: string, handle: string): number {
+  const read = db.prepare(
+    `SELECT last_read_id FROM room_reads WHERE room_name = ? AND handle = ?`,
+  ).get(room, handle) as unknown as { last_read_id: number } | undefined;
+
+  return read?.last_read_id ?? 0;
+}
+
+/**
+ * The id floor for a read. `sinceId` can only ever raise it.
+ *
+ * 🛑 A MAX, NEVER A REPLACEMENT. A stale `sinceId` below the watermark would
+ * otherwise resurrect messages the caller already consumed.
+ */
+function readFloor(db: Db, room: string, handle: string, sinceId?: number): number {
+  return Math.max(roomWatermark(db, room, handle), sinceId ?? 0);
+}
+
+/**
+ * The id a `room_inbox` read may advance the watermark to, or `undefined` when
+ * it may not advance at all.
+ *
+ * 🛑 A `sinceId` ABOVE THE WATERMARK LEAVES A GAP, and advancing over a gap
+ * marks messages read that were never shown. A targeted recovery read must
+ * therefore consume nothing.
+ */
+export function safeRoomAdvanceId(
+  db: Db,
+  room: string,
+  handle: string,
+  sinceId: number | undefined,
+  returnedIds: number[],
+): number | undefined {
+  if (sinceId !== undefined && sinceId > roomWatermark(db, room, handle)) return undefined;
+  if (returnedIds.length === 0) return undefined;
+
+  return Math.max(...returnedIds);
+}
+
+/**
+ * 🛑 `since_id` WITHOUT A ROOM IS INCOHERENT, NOT MERELY UNHELPFUL.
+ *
+ * Ids are global; watermarks are per room. One id floors every room, so the
+ * caller is served messages from rooms it never named. A per-room gap test
+ * would only make that waste correct — a known id belongs to one known room.
+ */
+export function assertRoomInboxQuery(room: string | undefined, sinceId: number | undefined): void {
+  if (sinceId !== undefined && room === undefined) {
+    throw new Error(
+      'since_id requires room. Message ids are global but watermarks are per room, so an unscoped since_id returns messages from rooms you did not ask about and marks none of them read.',
+    );
+  }
+}
+
 export function roomUnread(
   db: Db,
   room: string,
   handle: string,
   limit = 50,
+  sinceId?: number,
 ): Message[] {
-  const read = db.prepare(
-    `SELECT last_read_id FROM room_reads WHERE room_name = ? AND handle = ?`,
-  ).get(room, handle) as unknown as { last_read_id: number } | undefined;
-  const since = read?.last_read_id ?? 0;
+  const since = readFloor(db, room, handle, sinceId);
   const rows = db.prepare(
     `SELECT * FROM messages
      WHERE to_handle = ? AND id > ? AND from_handle != ?
@@ -611,11 +663,13 @@ export function roomUnread(
  * so its length is a page size, not a count — a sidebar badge reading 50
  * when 300 are waiting is worse than no badge.
  */
-export function roomUnreadCount(db: Db, room: string, handle: string): number {
-  const read = db.prepare(
-    `SELECT last_read_id FROM room_reads WHERE room_name = ? AND handle = ?`,
-  ).get(room, handle) as unknown as { last_read_id: number } | undefined;
-  const since = read?.last_read_id ?? 0;
+export function roomUnreadCount(
+  db: Db,
+  room: string,
+  handle: string,
+  sinceId?: number,
+): number {
+  const since = readFloor(db, room, handle, sinceId);
   const row = db.prepare(
     // Must carry the SAME filter as `roomUnread`, or the sidebar badge reads
     // one number and opening the room produces another.
