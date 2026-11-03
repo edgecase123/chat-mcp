@@ -26,15 +26,6 @@ const PROBE_DIR = mkdtempSync(join(tmpdir(), 'chat-mcp-probe-'));
 
 const modeOf = (p: string) => statSync(p).mode & 0o777;
 
-const withUmask = <T>(mask: number, fn: () => T): T => {
-  const previous = process.umask(mask);
-  try {
-    return fn();
-  } finally {
-    process.umask(previous);
-  }
-};
-
 /**
  * 🚨 ONLY THE 0700 PARENT MADE THESE MODES UNREACHABLE. Each child was born at
  * the launching shell's umask, so the whole guarantee sat in one place and
@@ -60,14 +51,6 @@ for (const [label, ensure, path] of DIRS) {
     assert.equal(modeOf(path()), 0o755, 'the fixture is actually loose before the call');
 
     ensure();
-
-    assert.equal(modeOf(path()), STATE_DIR_MODE);
-  });
-
-  test(`a fresh ${label} directory is 0700 under a permissive umask`, () => {
-    withUmask(0o000, () => {
-      ensure();
-    });
 
     assert.equal(modeOf(path()), STATE_DIR_MODE);
   });
@@ -100,12 +83,13 @@ test("🚨 an ALREADY EXISTING world-readable mcp/<handle>.json is tightened", (
   assert.equal(modeOf(path), STATE_FILE_MODE);
 });
 
-test('both state files are 0600 when written fresh under a permissive umask', () => {
-  withUmask(0o000, () => {
-    registerProject('fresh', PROBE_DIR);
-    writeClaudeMcpConfig('fresh');
-  });
-
-  assert.equal(modeOf(projectsPath()), STATE_FILE_MODE);
-  assert.equal(modeOf(mcpConfigPathFor('fresh')), STATE_FILE_MODE);
-});
+/**
+ * 🛑 NOT TESTED, DELIBERATELY: the `mode` argument on each `mkdirSync`.
+ *
+ * Measured — deleting it from all four call sites leaves every test here
+ * green, because the `chmodVerified` that follows repairs the mode before
+ * anything can observe it. It is kept for the window between the two calls,
+ * and no assertion can see that window without racing it. Four tests that
+ * asserted a fresh create under `umask 000` were removed for exactly the
+ * reason this file exists: they passed with the fix reverted.
+ */
