@@ -393,30 +393,49 @@ export function messageMarkdown({ from, time, body }, { attributed = false } = {
  * 🛑 GENERATED FROM THE COMMAND TABLE, NOT TYPED OUT. A hand-written list of
  * commands goes stale the first time one is added and nobody notices.
  *
- * The gesture sections below it cannot be generated, so each line was checked
- * against app.js when written. A test asserts every command name appears.
+ * 🛑 BOTH `/help` AND `/cheat-sheet` PRINT THIS. One builder, two surfaces —
+ * a toast and the stream. A second builder is how one new command ends up
+ * described two different ways depending on which you typed. A test asserts
+ * the sheet embeds this block verbatim.
+ *
+ * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
+ * @param {Record<string, string>} labels category key -> heading
+ */
+export function commandBlock(commands, labels) {
+  const usages = commands.map((c) => `/${c.name} ${c.arg}`.trimEnd());
+  // Measured, not a constant: `/broadcast <#room> <text>` outgrew a hardcoded
+  // 24 and its dash butted the description. +1 keeps one space at the widest.
+  const width = usages.length ? Math.max(...usages.map((u) => u.length)) + 1 : 0;
+
+  return Object.keys(labels)
+    .map((cat) => {
+      const rows = commands
+        .filter((c) => c.cat === cat)
+        .map((c) => '  ' + `/${c.name} ${c.arg}`.trimEnd().padEnd(width) + `— ${c.desc}`);
+
+      return rows.length ? [`  ${labels[cat]}`, ...rows].join('\n') : null;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/**
+ * The command block, plus the gesture sections no table can generate.
+ *
+ * Each gesture line was checked against app.js when written. A test asserts
+ * every section heading and every named key survives.
  *
  * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
  * @param {Record<string, string>} labels category key -> heading
  */
 export function cheatSheet(commands, labels) {
   const pad = (s) => s.padEnd(24);
-  const commandBlock = Object.keys(labels)
-    .map((cat) => {
-      const rows = commands
-        .filter((c) => c.cat === cat)
-        .map((c) => '  ' + pad(`/${c.name} ${c.arg}`.trimEnd()) + `— ${c.desc}`);
-
-      return rows.length ? [`  ${labels[cat]}`, ...rows].join('\n') : null;
-    })
-    .filter(Boolean)
-    .join('\n\n');
 
   return [
     'CHEAT SHEET',
     '',
     'SLASH COMMANDS',
-    commandBlock,
+    commandBlock(commands, labels),
     '',
     'COMPOSER',
     '  ' + pad('Enter') + '— send',

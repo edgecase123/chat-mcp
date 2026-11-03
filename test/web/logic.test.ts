@@ -15,6 +15,7 @@ import {
   historyKeyApplies,
   atTokenAt,
   cheatSheet,
+  commandBlock,
   messageMarkdown,
   pathSuggestionsFor,
   nextUnreadBelow,
@@ -573,6 +574,29 @@ const CMDS = [
   { name: 'help', arg: '', desc: 'the short list', cat: 'system' },
   { name: 'cheat-sheet', arg: '', desc: 'this sheet', cat: 'system' },
 ];
+
+test('🛑 the WIDEST command still keeps a space before its dash', () => {
+  // A hardcoded pad let `/broadcast <#room> <text>` overflow and collide.
+  const wide = [...CMDS, { name: 'broadcast', arg: '<#room> <text>', desc: 'to a room', cat: 'messaging' }];
+  const block = commandBlock(wide, LABELS);
+  const collided = block.split('\n').filter((l) => /\S—/.test(l));
+  assert.deepEqual(collided, [], 'a usage wider than the pad ran into its description');
+  // The denominator: the added command really is the widest in the table.
+  const usages = wide.map((c) => `/${c.name} ${c.arg}`.trimEnd());
+  assert.equal(Math.max(...usages.map((u) => u.length)), '/broadcast <#room> <text>'.length);
+});
+
+test('🛑 /help and /cheat-sheet print the SAME command block', () => {
+  // Two builders is how one new command gets described two different ways
+  // depending on which of the two you typed. The sheet must embed the block.
+  const block = commandBlock(CMDS, LABELS);
+  const sheet = cheatSheet(CMDS, LABELS);
+  assert.ok(sheet.includes(block), 'the sheet rebuilt the block instead of embedding it');
+  // The denominator, so a block that silently shrank cannot pass the above.
+  const rows = block.split('\n').filter((l) => l.trim().startsWith('/'));
+  assert.equal(rows.length, CMDS.length, 'every command is one row in the block');
+  assert.equal(CMDS.length, 8);
+});
 
 test('🛑 EVERY command in the table reaches the sheet', () => {
   const sheet = cheatSheet(CMDS, LABELS);
