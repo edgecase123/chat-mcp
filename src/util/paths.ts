@@ -13,6 +13,10 @@ import type { Stats } from 'node:fs';
  * `node --test` sets `NODE_TEST_CONTEXT` and nothing else does, so the refusal
  * reaches every test while a real invocation keeps the default. It throws
  * rather than warning, because a warning still leaves the socket unlinked.
+ *
+ * ⚠️ A CHILD INHERITS THE VARIABLE, so it refuses too. That is correct — a child
+ * spawned from a test writes to the live directory exactly as its parent would —
+ * but it has no import to come before, which is why the message addresses both.
  */
 export function stateDir(): string {
   const override = process.env.CHAT_MCP_HOME;
@@ -22,8 +26,12 @@ export function stateDir(): string {
     throw new Error(
       'CHAT_MCP_HOME is unset under the node test runner, so this would resolve the ' +
         "operator's live ~/.chat-mcp — where binding a socket unlinks whatever looks " +
-        'stale, silently stopping a running agent. Set process.env.CHAT_MCP_HOME to a ' +
-        'temp directory BEFORE importing anything that resolves a state path.',
+        'stale, silently stopping a running agent.\n' +
+        'In a TEST: set process.env.CHAT_MCP_HOME to a temp directory BEFORE importing ' +
+        'anything that resolves a state path.\n' +
+        'In a SPAWNED CHILD, which inherits NODE_TEST_CONTEXT and so lands here with no ' +
+        'import of its own: pass it through, ' +
+        'spawn(cmd, { env: { ...process.env, CHAT_MCP_HOME: dir } }).',
     );
   }
 
