@@ -632,9 +632,15 @@ function relativeTo(abs, root) {
  * ⚠️ QUOTED WHEN IT CONTAINS A SPACE, unlike `dropInsertText`. A name is the
  * whole token here, so two unquoted names with spaces cannot be told apart.
  * A path keeps its directory separators to lean on and does not need this.
+ *
+ * 🛑 AND AN EMBEDDED QUOTE IS ESCAPED, because a filename may contain one —
+ * `touch 'two "q" .png'` succeeds on macOS. Quoting without escaping ends the
+ * token early, so two names become unreadable as a pair. Raised by claude1.
  */
 export function dropNameText(names) {
-  return names.map((name) => (/\s/.test(name) ? `"${name}"` : name)).join(' ');
+  return names
+    .map((name) => (/\s|"/.test(name) ? `"${name.replace(/"/g, '\\"')}"` : name))
+    .join(' ');
 }
 
 export function dropInsertText(paths, roots) {

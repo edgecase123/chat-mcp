@@ -854,3 +854,17 @@ test('no names produces an empty string rather than a stray quote', () => {
 test('a name containing a tab is quoted', () => {
   assert.equal(dropNameText(['a\tb.png']), '"a\tb.png"');
 });
+
+/**
+ * 🛑 A FILENAME MAY CONTAIN A DOUBLE QUOTE. `touch 'two "q" .png'` succeeds on
+ * macOS, verified. Quoting without escaping closes the token early and the
+ * pair becomes unreadable. Raised by claude1 reviewing 3c044cf.
+ */
+test('🚨 an embedded quote is escaped, so the pair stays readable', () => {
+  assert.equal(dropNameText(['two "q" .png', 'plain.png']), '"two \\"q\\" .png" plain.png');
+});
+
+/** A quote with no space still needs the quoting, or the escape has no fence. */
+test('🚨 a name with a quote but no space is quoted too', () => {
+  assert.equal(dropNameText(['a"b.png']), '"a\\"b.png"');
+});
