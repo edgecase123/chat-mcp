@@ -11,11 +11,6 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-wakecmd-'));
 const { fileWatchTransport } = await import('../../src/notify/transport.js');
 
 /**
- * 🛑 THE COMMAND IS A STRING, SO NOTHING ELSE CHECKS IT. tsc sees a template
- * literal and the other tests regex-match it. Neither can tell you it RUNS, or
- * that it emits one line per message. Only spawning it can.
- */
-/**
  * Kill the whole process GROUP, never throw.
  *
  * 🛑 `child.kill()` REACHES THE SHELL ONLY. These children are `sh -c "node
@@ -33,6 +28,13 @@ function kill(child: ReturnType<typeof spawn> | null): void {
   try { child.kill('SIGKILL'); } catch { /* already gone */ }
 }
 
+/**
+ * Run the real wake command and collect every line it emits.
+ *
+ * 🛑 THE COMMAND IS A STRING, SO NOTHING ELSE CHECKS IT. tsc sees a template
+ * literal and the other tests regex-match it. Neither can tell you it RUNS, or
+ * that it emits a line per message. Only spawning it can.
+ */
 async function wakesFor(writes: string[]): Promise<string[]> {
   const sub = fileWatchTransport.subscribe('probe');
   const path = sub.endpoint!;
