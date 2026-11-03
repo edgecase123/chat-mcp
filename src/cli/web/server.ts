@@ -13,7 +13,13 @@ import type { MessageKind } from '../../storage/dao.js';
 import { assertRoomName } from '../../util/naming.js';
 import { ensureStateDir, stateDir } from '../../util/paths.js';
 import { renderBodyToHtml } from './render.js';
-import { buildHints, defaultRoots, realContainedDir, resolveHintQuery } from './file-hints.js';
+import {
+  buildHints,
+  defaultRoots,
+  matchesHintPrefix,
+  realContainedDir,
+  resolveHintQuery,
+} from './file-hints.js';
 
 const VERSION = '0.4.4';
 
@@ -670,9 +676,28 @@ async function handleFileHints(url: URL, res: ServerResponse): Promise<void> {
     return respondJson(res, { hints: [] });
   }
 
-  const entries = dirents.map((d) => ({ name: d.name, isDirectory: d.isDirectory() }));
+  // 🛑 NARROW BY NAME BEFORE STATTING. The mtime sort needs a stat per entry,
+  // and a directory of thousands would otherwise pay for all of them on every
+  // keystroke. The prefix filter is the same one buildHints applies.
+  const named = dirents.filter((d) => matchesHintPrefix(d.name, query.prefix));
+  const entries = await Promise.all(
+    named.map(async (d) => {
+      const isDirectory = d.isDirectory();
+      if (isDirectory) return { name: d.name, isDirectory };
 
-  return respondJson(res, { hints: buildHints(entries, query) });
+      // A stat can fail on a broken symlink or a file deleted mid-listing.
+      // Losing its mtime drops it to the name tiebreak rather than the list.
+      try {
+        const info = await stat(join(dirAbs, d.name));
+
+        return { name: d.name, isDirectory, mtimeMs: info.mtimeMs };
+      } catch {
+        return { name: d.name, isDirectory };
+      }
+    }),
+  );
+
+  return respondJson(res, buildHints(entries, query));
 }
 
 // ── Browser launcher ─────────────────────────────────────────────────────
