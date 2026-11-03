@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { openDb, type Db } from '../storage/db.js';
 import { NotifyBus } from '../notify/bus.js';
 import * as dao from '../storage/dao.js';
+import { packageVersion } from '../util/version.js';
 import { installWhoami } from './tools/whoami.js';
 import { installRegister } from './tools/register.js';
 import { installListAgents } from './tools/list_agents.js';
@@ -133,7 +134,7 @@ export async function runShim(opts: ShimOptions): Promise<void> {
   const adapterStatus = checkWakeAdapter(opts.handle);
   const ctx: ShimContext = { handle: opts.handle, session_id, db, notify, adapterStatus };
   const server = new McpServer(
-    { name: 'chat-mcp', version: '0.3.0' },
+    { name: 'chat-mcp', version: packageVersion() },
     { instructions: prependAdapterWarning(buildInstructions(opts.handle), adapterStatus) },
   );
 

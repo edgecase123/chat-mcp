@@ -6,6 +6,7 @@ import * as dao from '../storage/dao.js';
 import type { Message } from '../storage/dao.js';
 import { assertRoomName } from '../util/naming.js';
 import { stampOf as timeOf } from '../util/time.js';
+import { packageVersion } from '../util/version.js';
 import { bold, cyan, dim, green } from './color.js';
 
 export interface CliOptions {
@@ -45,7 +46,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
   };
 
   console.log(
-    `${bold('chat-mcp')} ${dim('v0.3.0')}  ·  handle: ${cyan(opts.handle)}  ·  ${dim('/help or Ctrl-C to quit')}`,
+    `${bold('chat-mcp')} ${dim(`v${packageVersion()}`)}  ·  handle: ${cyan(opts.handle)}  ·  ${dim('/help or Ctrl-C to quit')}`,
   );
   rl.setPrompt(promptFor());
   rl.prompt();

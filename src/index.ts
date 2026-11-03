@@ -9,19 +9,9 @@ process.on('warning', (w) => {
   console.error(w.stack ?? `${w.name}: ${w.message}`);
 });
 
-import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { KNOWN_SUBCOMMANDS } from './util/subcommands.js';
-
-function packageVersion(): string {
-  try {
-    const raw = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
-
-    return (JSON.parse(raw) as { version?: string }).version ?? '0.0.0-unknown';
-  } catch {
-    return '0.0.0-unknown';
-  }
-}
+import { packageVersion } from './util/version.js';
 
 async function runShimEntry(handle: string | undefined, force = false): Promise<void> {
   if (!handle) {
@@ -63,14 +53,8 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   program
     .name('chat-mcp')
     .description('Local unintrusive chat bus for AI coding agents over MCP')
-    // 🛑 READ, NEVER HARDCODED. This said '0.3.0' while package.json said
-    // '0.4.11', so `chat-mcp --version` had been lying for several releases —
-    // which defeats the whole point of bumping the version to prove a new
-    // build is the one running.
-    //
-    // `../package.json` resolves correctly from BOTH `src/index.ts` under tsx
-    // and `dist/index.js` after a build, because both sit one level below the
-    // package root.
+    // 🛑 READ, NEVER HARDCODED. A hardcoded const here lied for several
+    // releases, which defeats the point of bumping the version at all.
     .version(packageVersion());
 
   program
