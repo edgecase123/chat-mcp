@@ -1,3 +1,5 @@
+import stringWidth from 'string-width';
+
 /**
  * Hard word-wrap `body` at `cols` columns, respecting existing newlines.
  * Words longer than `cols` are hard-broken mid-word so no line exceeds the
@@ -53,8 +55,30 @@ export function wrappedRowCount(body: string, cols: number): number {
   return wrapBody(body, cols).split('\n').length;
 }
 
+/**
+ * The longest prefix of `t` whose DISPLAY width fits `cols`.
+ *
+ * 🛑 ITERATES BY CODE POINT, so a surrogate pair is never split in half. A
+ * `slice(0, cols)` both over-ran the budget on wide glyphs and could cut an
+ * emoji into two broken halves.
+ */
+function sliceToWidth(t: string, cols: number): string {
+  let out = '';
+  for (const ch of t) {
+    if (stringWidth(out + ch) > cols) break;
+    out += ch;
+  }
+
+  return out;
+}
+
+/** The first code point, for the case where one glyph alone exceeds the budget. */
+function firstCodePoint(t: string): string {
+  return [...t][0] ?? '';
+}
+
 function wrapLine(line: string, cols: number): string {
-  if (line.length <= cols) return line;
+  if (stringWidth(line) <= cols) return line;
   const out: string[] = [];
   let cur = '';
   // Split on whitespace but KEEP the whitespace runs so we can restore them.
@@ -62,17 +86,20 @@ function wrapLine(line: string, cols: number): string {
   for (const part of parts) {
     if (part.length === 0) continue;
     // A too-long single token — hard-break.
-    if (part.length > cols) {
+    if (stringWidth(part) > cols) {
       if (cur) { out.push(cur); cur = ''; }
       let remaining = part;
-      while (remaining.length > cols) {
-        out.push(remaining.slice(0, cols));
-        remaining = remaining.slice(cols);
+      while (stringWidth(remaining) > cols) {
+        // 🛑 A GLYPH WIDER THAN THE WHOLE BUDGET CANNOT BE SPLIT. Emitting it
+        // alone overruns by design; an empty head here would loop forever.
+        const head = sliceToWidth(remaining, cols) || firstCodePoint(remaining);
+        out.push(head);
+        remaining = remaining.slice(head.length);
       }
       cur = remaining;
       continue;
     }
-    if ((cur + part).length > cols) {
+    if (stringWidth(cur + part) > cols) {
       out.push(cur.trimEnd());
       cur = /^\s/.test(part) ? '' : part;
     } else {
