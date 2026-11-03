@@ -27,6 +27,10 @@ export interface WakeSubscription {
   /** Where wakes land, when the transport has such a place. Adapters may
    *  mention it; they must not reconstruct the command from it. */
   readonly endpoint?: string;
+  /** Shell command printing how many watchers for THIS handle are already
+   *  running, or undefined when the transport cannot count them. Only the
+   *  transport knows its own mechanism, so only it can write this. */
+  readonly probeCommand?: string;
 }
 
 export interface WakeTransport {
@@ -36,7 +40,34 @@ export interface WakeTransport {
   readonly subscribe: (handle: string) => WakeSubscription;
 }
 
+// What this transport ASKS for. A host that cannot keep it this long clamps
+// it — see the adapter. Naming a host's limit here would invert the seam.
 const HOUR_MS = 3_600_000;
+
+/**
+ * The wake command: print the message, and drop only a repeat of the same id.
+ *
+ * 🛑 THE BODY IS WHY THIS IS NOT A BARE `wake`. A wake with no payload cannot
+ * be triaged, so every one of them costs an `inbox` round trip just to learn
+ * whether it mattered.
+ *
+ * 🛑 THE DEDUPE IS GUARDED BY `id > 0` AND THAT GUARD IS THE WHOLE POINT.
+ * `notifyPeer` writes `id: 0` for system events and a bare millisecond when it
+ * has no envelope, so a dedupe on content or on a raw `id` would silently drop
+ * a second wake. Dropping a wake looks exactly like a peer that never replied.
+ */
+function watchCommand(path: string): string {
+  const js =
+    `const fs=require('fs'),p='${path}';let seen=0;` +
+    'fs.watch(p,()=>{' +
+    "let s='';try{s=fs.readFileSync(p,'utf8').trim()}catch{return}" +
+    'if(!s)return;' +
+    'let id=0;try{id=JSON.parse(s).id|0}catch{}' +
+    'if(id>0){if(id===seen)return;seen=id}' +
+    'console.log(s)})';
+
+  return `node -e "${js}"`;
+}
 
 /** Today's transport: a file per handle, whose writes are the wakes. */
 export const fileWatchTransport: WakeTransport = {
@@ -48,8 +79,13 @@ export const fileWatchTransport: WakeTransport = {
 
     return {
       kind: 'process',
-      command: `node -e "require('fs').watch('${path}', () => console.log('wake'))"`,
+      command: watchCommand(path),
       description: `chat-mcp inbound for ${handle}`,
+      // 🛑 RIGHT-ANCHORED ON THE CLOSING QUOTE, because a handle can be a
+      // PREFIX of another. Measured with two live watchers: unanchored,
+      // "rw" counts 2 and matches rw2's; anchored, each counts 1. `rw` and
+      // `rw2` both have installed adapters, so this is not hypothetical.
+      probeCommand: `ps -axo command= | grep -c "^node -e.*${path}'"`,
       timeoutMs: HOUR_MS,
       endpoint: path,
     };

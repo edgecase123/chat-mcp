@@ -52,6 +52,14 @@ function scriptPath(handle: string): string {
   return adapterScriptPath(ADAPTER_NAME, handle);
 }
 
+/**
+ * 🛑 A HOST FACT, AND IT BELONGS HERE RATHER THAN IN THE TRANSPORT. Monitor
+ * silently caps a deadline at 30 minutes. A transport asking for an hour had
+ * that hour printed into the hook, so the watch died at half its advertised
+ * life — and a dead watcher is indistinguishable from a quiet queue.
+ */
+const MONITOR_MAX_TIMEOUT_MS = 1_800_000;
+
 /** Exported for tests: the wake block is the thing the seam has to change. */
 export function buildAdditionalContext(handle: string): string {
   // 🛑 ASKED FOR, NOT BUILT HERE. This adapter used to write
@@ -63,20 +71,29 @@ export function buildAdditionalContext(handle: string): string {
     '',
     `This session is registered on the chat-mcp bus as handle "${handle}". ${activeWakeTransport().summary(handle)} — but the model's inference loop needs an external wake trigger to know they arrived.`,
     '',
-    'As your very first tool call this session — before any text response, other tool call, or clarifying question — call the Monitor tool with these exact arguments:',
+    ...(wake.probeCommand
+      ? [
+          `FIRST, count the watchers already running: \`${wake.probeCommand}\`. 🛑 **A non-zero answer means one is ALREADY armed and you must NOT arm a second.** This hook re-fires on every /clear and does not kill the old watcher, so a duplicate doubles the inbox calls per message and the extra one always returns empty.`,
+          '',
+          'That count is your first tool call. If it is zero, then arm the watch next — before any text response, any other tool call, or any clarifying question — by calling the Monitor tool with these exact arguments:',
+        ]
+      : [
+          '🛑 FIRST, establish whether a watch for this handle is already armed in this session, and do NOT arm a second one if it is. This hook re-fires on every /clear and does not kill the old watcher.',
+          '',
+          'If none is armed, do that next — before any text response, any other tool call, or any clarifying question — by calling the Monitor tool with these exact arguments:',
+        ]),
     '',
     '```json',
     '{',
     `  ${JSON.stringify('command')}: ${JSON.stringify(wake.command)},`,
     `  ${JSON.stringify('description')}: ${JSON.stringify(wake.description)},`,
-    '  "persistent": true,',
-    `  "timeout_ms": ${wake.timeoutMs}`,
+    `  "timeout_ms": ${Math.min(wake.timeoutMs, MONITOR_MAX_TIMEOUT_MS)}`,
     '}',
     '```',
     '',
-    'On each Monitor notification thereafter, call the mcp__chat__inbox tool to fetch and mark messages read.',
+    'Each notification carries the message itself, so read it before deciding whether to fetch. Call mcp__chat__inbox when you need to act on it or to clear the unread watermark.',
     '',
-    'Do not ask permission or defer — just arm it. Skipping this step means messages from sibling agents sit unread indefinitely and look identical to "the sibling never replied."',
+    'Do not ask permission or defer the arming itself — if no watcher is running, arm it. Skipping it means messages from sibling agents sit unread indefinitely and look identical to "the sibling never replied."',
   ].join('\n');
 }
 
