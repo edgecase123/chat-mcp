@@ -87,3 +87,63 @@ test('an empty write is not a message and does not wake', async () => {
   const lines = await wakesFor(['', '']);
   assert.equal(lines.length, 0);
 });
+
+/**
+ * 🛑 THE PROBE IS A STRING TOO, AND EVERY OTHER TEST ONLY REGEXES IT.
+ *
+ * An OVER-anchored pattern returns 0 for ever, and 0 is also the correct
+ * answer for a handle with nothing armed — so the failure reads identically to
+ * success and every string assertion still passes. Only running it both ways
+ * can tell them apart.
+ */
+async function probeCount(handle: string, armed: boolean): Promise<number> {
+  const sub = fileWatchTransport.subscribe(handle);
+  mkdirSync(dirname(sub.endpoint!), { recursive: true });
+  writeFileSync(sub.endpoint!, '');
+
+  const child = armed
+    ? spawn('sh', ['-c', sub.command], { stdio: 'ignore', detached: false })
+    : null;
+  await new Promise((r) => setTimeout(r, 400));
+
+  const out = await new Promise<string>((resolve) => {
+    const p = spawn('sh', ['-c', sub.probeCommand!], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let s = '';
+    p.stdout.on('data', (b: Buffer) => { s += b.toString(); });
+    p.on('close', () => resolve(s.trim()));
+  });
+
+  child?.kill();
+  await new Promise((r) => setTimeout(r, 150));
+  return Number(out);
+}
+
+test('🛑 the probe counts 1 for a LIVE watcher, so it is not over-anchored', async () => {
+  assert.equal(await probeCount('probecount', true), 1);
+});
+
+test('🛑 the probe counts 0 when nothing is armed, so it does not count itself', async () => {
+  assert.equal(await probeCount('probezero', false), 0);
+});
+
+test('🛑 a PREFIX handle does not count its sibling, measured not reasoned', async () => {
+  const rw = fileWatchTransport.subscribe('pfx');
+  const rw2 = fileWatchTransport.subscribe('pfx2');
+  mkdirSync(dirname(rw.endpoint!), { recursive: true });
+  writeFileSync(rw.endpoint!, '');
+  writeFileSync(rw2.endpoint!, '');
+
+  // Only the SIBLING is armed. A prefix-matching probe for `pfx` would see it.
+  const child = spawn('sh', ['-c', rw2.command], { stdio: 'ignore' });
+  await new Promise((r) => setTimeout(r, 400));
+
+  const count = await new Promise<string>((resolve) => {
+    const p = spawn('sh', ['-c', rw.probeCommand!], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let s = '';
+    p.stdout.on('data', (b: Buffer) => { s += b.toString(); });
+    p.on('close', () => resolve(s.trim()));
+  });
+
+  child.kill();
+  assert.equal(Number(count), 0, 'pfx counted pfx2’s watcher as its own');
+});
