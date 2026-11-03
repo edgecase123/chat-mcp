@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { writeFileSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { AgentChild, SpawnOptions } from '../child.js';
 import { createLineParser } from '../child.js';
@@ -7,7 +7,7 @@ import { type RateLimitSnapshot } from '../rate-limit.js';
 import { parseClaudeRateLimit } from './claude-events.js';
 import { denialFromClaude, rememberClaudeToolUse } from './claude-events.js';
 import type { Denial } from '../denial.js';
-import { ensureMcpConfigDir, mcpConfigPathFor } from '../../util/paths.js';
+import { ensureMcpConfigDir, mcpConfigPathFor, writePrivateFileSync } from '../../util/paths.js';
 
 /**
  * The Claude Code driver: the ONLY file that knows this CLI's flags and event
@@ -199,7 +199,7 @@ export function writeClaudeMcpConfig(handle: string, entry?: string): string {
     },
   };
 
-  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+  writePrivateFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
 
   return path;
 }

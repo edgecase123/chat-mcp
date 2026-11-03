@@ -86,7 +86,8 @@ export function mcpConfigPathFor(handle: string): string {
 export function ensureMcpConfigDir(): string {
   ensureStateDir();
   const dir = mcpConfigDir();
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  chmodVerified(dir, STATE_DIR_MODE);
 
   return dir;
 }
@@ -151,6 +152,22 @@ export function writePrivateFileSync(path: string, data: string, flag?: string) 
  * the SQLite WAL and shm, a stale `chat.db.bak-*`, anything a future feature
  * drops in here. Denying traversal covers them without naming them.
  */
+/**
+ * 🛑 THE DIRECTORY IS THE CONTROL, WHICH IS WHY THE SCRIPTS MAY STAY 0755.
+ *
+ * Both framework installers created this with a bare `mkdirSync`, so it was
+ * born at the launching shell's umask. Extracted here so the mode has one
+ * home instead of one per installer.
+ */
+export function ensureAdaptersDir(): string {
+  ensureStateDir();
+  const dir = adaptersDir();
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  chmodVerified(dir, STATE_DIR_MODE);
+
+  return dir;
+}
+
 export function ensureStateDir(): string {
   const dir = stateDir();
   mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
@@ -168,6 +185,8 @@ export function ensureNotifyDir(): string {
   if (existsSync(dir) && statSync(dir).isFile()) {
     unlinkSync(dir);
   }
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  chmodVerified(dir, STATE_DIR_MODE);
+
   return dir;
 }
