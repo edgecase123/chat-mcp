@@ -27,6 +27,8 @@ import {
   droppedPathValue,
   dropInsertText,
   dropNameText,
+  clearConfirmText,
+  clearResultText,
 } from '../../web/assets/logic.js';
 
 /**
@@ -991,3 +993,59 @@ test('a newline is not a path space', () => {
   assert.equal(atTokenAt('@~/a\nb', 6), null);
 });
 
+
+// ── /clear — chat-mcp#88 ──────────────────────────────────────────────────
+
+/**
+ * 🛑 THE CONTRACT RULE THESE EXIST TO PIN: `cleared` may be 0, and 0 is a
+ * SUCCESS. `deleteRoomMessages` and `deleteDmMessages` return a row count, so
+ * neither can tell an empty room from a missing one. A client that branches on
+ * falsiness reports a failure that did not happen.
+ */
+test('🚨 a cleared count of 0 reads as success, not as a failure', () => {
+  const room = clearResultText(0, '#gate');
+  assert.match(room, /already empty/);
+  assert.doesNotMatch(room, /fail|error|could not/i);
+
+  const dm = clearResultText(0, 'claude2');
+  assert.match(dm, /already empty/);
+  assert.doesNotMatch(dm, /fail|error|could not/i);
+});
+
+test('the count and its plural are both in the result text', () => {
+  assert.equal(clearResultText(1, '#gate'), 'cleared 1 message from #gate');
+  assert.equal(clearResultText(7, '#gate'), 'cleared 7 messages from #gate');
+});
+
+/** A room is `from`, a DM is `with`. The preposition is the only tell. */
+test('a DM result names the peer, not a room', () => {
+  assert.equal(clearResultText(2, 'claude2'), 'cleared 2 messages with claude2');
+});
+
+/**
+ * The confirm text must state the blast radius, because the web UI reaches
+ * this in one click where the CLI makes you type it.
+ */
+test('the room confirm says EVERYONE and that the room survives', () => {
+  const t = clearConfirmText('#gate');
+  assert.match(t, /^Clear #gate\?/);
+  assert.match(t, /EVERYONE/);
+  assert.match(t, /room and its memberships stay/);
+  assert.match(t, /cannot be undone/);
+});
+
+test('the DM confirm says BOTH of you and never says EVERYONE', () => {
+  const t = clearConfirmText('claude2');
+  assert.match(t, /^Clear your conversation with claude2\?/);
+  assert.match(t, /BOTH of you/);
+  assert.doesNotMatch(t, /EVERYONE/);
+  assert.match(t, /cannot be undone/);
+});
+
+/**
+ * Both DM directions are deleted — `deleteDmMessages` matches (a,b) OR (b,a) —
+ * so claiming only the caller loses them would be false.
+ */
+test('the DM confirm does not promise a one-sided delete', () => {
+  assert.doesNotMatch(clearConfirmText('claude2'), /only (for )?you|your copy/i);
+});

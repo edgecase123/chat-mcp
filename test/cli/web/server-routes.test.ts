@@ -263,3 +263,138 @@ test('a member can delete the room, and its messages go with it', async () => {
   assert.equal(count(), 0);
   close(h);
 });
+
+// ── POST /api/messages/clear (#88) ───────────────────────────────────────
+
+/**
+ * 🛑 COUNTS ARE READ, NEVER HARDCODED. `joinRoom` posts a SYSTEM join banner,
+ * so a room seeded with one message holds two. A literal `1` here passed for
+ * the wrong reason and then failed for the right one.
+ */
+function countTo(h: Harness, target: string): number {
+  const row = h.db
+    .prepare('SELECT COUNT(*) AS n FROM messages WHERE to_handle = ?')
+    .get(target) as { n: number };
+  return row.n;
+}
+
+test('a member clears a room, gets the count, and the watermarks reset', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#ops', 'operator');
+    dao.insertMessage(h.db, { from: 'operator', to: '#ops', body: 'one' });
+    dao.insertMessage(h.db, { from: 'peer-a', to: '#ops', body: 'two' });
+    const before = countTo(h, '#ops');
+
+    const res = await post(h, '/api/messages/clear', { target: '#ops' }, h.origin);
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { cleared: before });
+    assert.equal(countTo(h, '#ops'), 0);
+    // deleteRoomMessages also zeroes read watermarks. Asserted so a route that
+    // only deletes rows fails here rather than silently skipping every member
+    // past a stale watermark.
+    const read = h.db
+      .prepare('SELECT last_read_id AS n FROM room_reads WHERE room_name = ? AND handle = ?')
+      .get('#ops', 'operator') as { n: number } | undefined;
+    assert.equal(read?.n ?? 0, 0);
+  } finally {
+    close(h);
+  }
+});
+
+test('a NON-member cannot clear a room, and the messages survive', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#ops', 'peer-a');
+    dao.insertMessage(h.db, { from: 'peer-a', to: '#ops', body: 'one' });
+    const before = countTo(h, '#ops');
+
+    const res = await post(h, '/api/messages/clear', { target: '#ops' }, h.origin);
+
+    assert.equal(res.status, 403);
+    // THE POINT. A refusal that already deleted the rows is not a refusal.
+    assert.equal(countTo(h, '#ops'), before);
+  } finally {
+    close(h);
+  }
+});
+
+/**
+ * ⚠️ The 403 here comes from the Origin guard, which sits AHEAD of routing, so
+ * this half passes even with no route at all. The count assertion is the part
+ * that is specific to this endpoint, and the test is kept because it fails the
+ * day somebody registers the route above the guard.
+ */
+test('a cross-site POST cannot clear a room, and the messages survive', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#ops', 'operator');
+    dao.insertMessage(h.db, { from: 'operator', to: '#ops', body: 'one' });
+    const before = countTo(h, '#ops');
+
+    const res = await post(h, '/api/messages/clear', { target: '#ops' }, 'https://evil.example');
+
+    assert.equal(res.status, 403);
+    assert.equal(countTo(h, '#ops'), before);
+  } finally {
+    close(h);
+  }
+});
+
+test('clearing a DM takes both directions and leaves another peer alone', async () => {
+  const h = await harness();
+  try {
+    // No joinRoom, so no SYSTEM banner. These three are the only rows.
+    dao.insertMessage(h.db, { from: 'operator', to: 'peer-a', body: 'mine to a' });
+    dao.insertMessage(h.db, { from: 'peer-a', to: 'operator', body: 'a to me' });
+    dao.insertMessage(h.db, { from: 'operator', to: 'peer-b', body: 'mine to b' });
+
+    const res = await post(h, '/api/messages/clear', { target: 'peer-a' }, h.origin);
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { cleared: 2 });
+    assert.equal(countTo(h, 'peer-a'), 0);
+    assert.equal(countTo(h, 'operator'), 0);
+    // A separate pair. Clearing one conversation must not reach another.
+    assert.equal(countTo(h, 'peer-b'), 1);
+  } finally {
+    close(h);
+  }
+});
+
+test('a clear with no target is refused', async () => {
+  const h = await harness();
+  try {
+    const res = await post(h, '/api/messages/clear', {}, h.origin);
+    assert.equal(res.status, 400);
+  } finally {
+    close(h);
+  }
+});
+
+/**
+ * 🛑 THE CLIENT AND SERVER MUST AGREE ON WHAT A ROOM IS. `app.js` calls
+ * anything starting with `#` a room and warns that the delete hits everyone.
+ * `isRoomName` is stricter, so a malformed name used to fall through to the
+ * DM branch, skip the membership check and answer `cleared: 0` as success.
+ */
+test('a malformed room name is refused, not quietly treated as a DM', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#ops', 'operator');
+    dao.insertMessage(h.db, { from: 'operator', to: '#ops', body: 'one' });
+    const before = countTo(h, '#ops');
+
+    const res = await post(h, '/api/messages/clear', { target: '#Ops' }, h.origin);
+
+    assert.equal(res.status, 400);
+    // ⚠️ The STATUS alone cannot tell the branches apart — `target required`
+    // is also a 400. Without this, a regression routing `#Ops` to the
+    // no-target branch stays green.
+    assert.match((await res.json() as { error: string }).error, /is not a valid room name/);
+    assert.equal(countTo(h, '#ops'), before);
+  } finally {
+    close(h);
+  }
+});
