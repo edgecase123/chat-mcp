@@ -868,3 +868,50 @@ test('🚨 an embedded quote is escaped, so the pair stays readable', () => {
 test('🚨 a name with a quote but no space is quoted too', () => {
   assert.equal(dropNameText(['a"b.png']), '"a\\"b.png"');
 });
+
+/**
+ * 🛑 lee's OWN CASE. Every macOS screenshot is "Screenshot <date> at <time>",
+ * so the space lands right after the first word anyone types. The popover
+ * closed on it, which made "keep typing to narrow" unfollowable on exactly
+ * the files the 30-item cap hides.
+ */
+test('🚨 a space inside a PATH keeps the token alive', () => {
+  const v = '@~/Desktop/Screenshot 2026-11-01';
+  assert.deepEqual(atTokenAt(v, v.length), {
+    query: '~/Desktop/Screenshot 2026-11-01',
+    start: 0,
+    end: v.length,
+  });
+});
+
+/**
+ * 🛑 THE NEGATIVE CONTROL, AND IT IS THE WHOLE SAFETY ARGUMENT. Without the
+ * "/" precondition this becomes one token and every mention breaks.
+ */
+test('🚨 a space after a HANDLE still ends the token', () => {
+  assert.equal(atTokenAt('@claude1 are you there', 22), null);
+  assert.equal(atTokenAt('@claude1 are', 12), null);
+});
+
+test('🚨 a bare word with no slash does not swallow the next word', () => {
+  assert.equal(atTokenAt('@src more words', 15), null);
+});
+
+test('several spaces inside one path are all kept', () => {
+  const v = '@~/a b/c d e.png';
+  assert.equal(atTokenAt(v, v.length)!.query, '~/a b/c d e.png');
+});
+
+/** The caret is the end, so text after it is left alone. */
+test('🚨 the token ends at the CARET, so a trailing word survives an accept', () => {
+  const v = '@~/Desktop/Screen shot.png and more';
+  const t = atTokenAt(v, 26)!;
+  assert.equal(t.query, '~/Desktop/Screen shot.png');
+  assert.equal(t.end, 26, 'the tail is not swallowed');
+});
+
+/** A path typed before a newline must not reach across it. */
+test('a newline is not a path space', () => {
+  assert.equal(atTokenAt('@~/a\nb', 6), null);
+});
+
