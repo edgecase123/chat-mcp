@@ -128,8 +128,19 @@ test('🛑 the probe anchors on ^node, or it counts the shell and itself', () =>
   // watcher is mine, because the watcher's parent shell matches too. The agent
   // then sees "already armed" and never arms anything.
   const probe = fileWatchTransport.subscribe('claude2').probeCommand!;
-  assert.match(probe, /grep -c '\^node -e\.\*/);
-  assert.match(probe, /\/claude2'$/, 'the probe must name THIS handle, not any node watcher');
+  assert.match(probe, /grep -c "\^node -e\.\*/);
+});
+
+test('🛑 the probe is RIGHT-anchored, or a handle counts its own PREFIX siblings', () => {
+  // Measured with two live watchers: unanchored, the pattern for `rw` counts
+  // 2 because it matches rw2's command too. `rw` and `rw2` both have
+  // installed adapters, so a prefix pair exists on this machine today.
+  const probe = fileWatchTransport.subscribe('rw').probeCommand!;
+  assert.match(probe, /\/rw'"$/, 'the pattern must end at the handle, not run on');
+
+  const sibling = fileWatchTransport.subscribe('rw2').probeCommand!;
+  // The denominator: the two probes must not be prefixes of one another.
+  assert.ok(!sibling.includes(probe.replace(/"$/, '')), 'rw2 still matches the rw pattern');
 });
 
 test('🛑 a transport with NO probe gets no invented one', () => {

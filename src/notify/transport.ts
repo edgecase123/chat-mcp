@@ -81,7 +81,11 @@ export const fileWatchTransport: WakeTransport = {
       kind: 'process',
       command: watchCommand(path),
       description: `chat-mcp inbound for ${handle}`,
-      probeCommand: `ps -axo command= | grep -c '^node -e.*${path}'`,
+      // 🛑 RIGHT-ANCHORED ON THE CLOSING QUOTE, because a handle can be a
+      // PREFIX of another. Measured with two live watchers: unanchored,
+      // "rw" counts 2 and matches rw2's; anchored, each counts 1. `rw` and
+      // `rw2` both have installed adapters, so this is not hypothetical.
+      probeCommand: `ps -axo command= | grep -c "^node -e.*${path}'"`,
       timeoutMs: HOUR_MS,
       endpoint: path,
     };
