@@ -217,11 +217,32 @@ Without this, agents will use the tools when asked but won't check for incoming 
 
 ---
 
-## Other human interfaces — backup only
+## Other human interfaces — FALLBACK ONLY
 
-**Use the browser UI unless you cannot.** All of these speak the same protocol
-against the same files, and none of them gets new features first. Reach for them
+🛑 **The terminal interfaces are a fallback. They work. They are not nearly as
+polished or as functional as the browser UI.**
+
+**Use the browser UI unless you cannot.** Reach for a terminal interface only
 when no browser is available, or when you are scripting.
+
+All of these speak the same protocol against the same files, so nothing is lost
+or hidden. What differs is finish:
+
+| | browser UI | terminal UI |
+|---|---|---|
+| gets new features first | yes | no |
+| layout survives any content | yes | **no — see below** |
+| needs a width to be usable | no | yes |
+
+**Known rough edges in the terminal UI, measured rather than assumed:**
+
+- **Wide characters overflow the pane.** The wrap counts UTF-16 code units at
+  every step, not display columns, so CJK text draws at double its budget.
+  Measured at a 40-column budget: `你好` repeated 30 times leaves the wrap 80
+  columns wide. Repairing any single comparison does not move that number.
+- **A markdown table row is left unwrapped on purpose**, so the table tokenizer
+  can see it. At the same 40-column budget a 71-column row comes through, and
+  the row budget counts it as one line however many it draws.
 
 ### Full-screen terminal UI
 
@@ -229,7 +250,9 @@ when no browser is available, or when you are scripting.
 npx -y github:edgecase123/chat-mcp cli --experimental --handle lee
 ```
 
-A React/Ink two-pane interface: sidebar of agents + rooms on the left, message pane on the right, autocomplete-driven command entry at the bottom. Renders into the terminal's alternate screen buffer, so your original terminal state is restored on exit.
+A React/Ink two-pane interface: sidebar of agents and rooms on the left, message pane on the right, command entry at the bottom. It renders into the terminal's alternate screen buffer, so your original terminal state is restored on exit.
+
+⚠️ **This is the least finished surface in the project.** Hand-rolled wrapping stands in for Ink's own, because Ink's `Text`-inside-`Box` chain mis-renders here. The rough edges listed above live in that code.
 
 ```
 chat-mcp ink · lee · ● idle · /help · Ctrl-C
