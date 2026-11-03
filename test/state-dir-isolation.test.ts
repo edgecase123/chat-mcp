@@ -63,6 +63,16 @@ function touchesStateDir(src: string): string[] {
   return hits;
 }
 
+/**
+ * 🛑 AN ASSIGNMENT, NOT A MENTION. The first version asked only whether the
+ * source contained `CHAT_MCP_HOME`, and two COMMENTS naming it satisfied that.
+ * Probed on `state-dir-children-perms.test.ts`: deleting its real assignment
+ * left the guard green, because lines 7 and 111 talk about the variable.
+ */
+function redirectsStateDir(src: string): boolean {
+  return /process\.env\.CHAT_MCP_HOME\s*=/.test(src);
+}
+
 function testFiles(): string[] {
   return execFileSync('git', ['ls-files', 'test'], { encoding: 'utf8' })
     .split('\n')
@@ -81,7 +91,7 @@ test('🚨 every test that can resolve a state path redirects CHAT_MCP_HOME', ()
     const hits = touchesStateDir(src);
     if (hits.length === 0) continue;
     examined += 1;
-    if (!src.includes('CHAT_MCP_HOME')) offenders.push(`${f} (via ${hits.join(', ')})`);
+    if (!redirectsStateDir(src)) offenders.push(`${f} (via ${hits.join(', ')})`);
   }
 
   // The scan read real content, not empty strings.
@@ -124,4 +134,17 @@ test('🚨 the matcher catches the shapes it is looking for, and not a body ment
     [],
     'a type-only import reaches nothing at runtime',
   );
+});
+
+/**
+ * 🛑 THE REDIRECT CHECK PROVES ITSELF TOO, AND THIS IS THE ONE THAT WAS WRONG.
+ * A comment naming the variable is not a redirect, and the first version of
+ * this guard accepted one.
+ */
+test('🚨 a COMMENT naming CHAT_MCP_HOME is not a redirect', () => {
+  assert.equal(redirectsStateDir("process.env.CHAT_MCP_HOME = '/tmp/x';"), true);
+  assert.equal(redirectsStateDir('process.env.CHAT_MCP_HOME  =  join(a, b);'), true);
+  assert.equal(redirectsStateDir('// Point CHAT_MCP_HOME at a scratch dir first.'), false);
+  assert.equal(redirectsStateDir(' * `CHAT_MCP_HOME` cannot stop it, because...'), false);
+  assert.equal(redirectsStateDir("const x = process.env.CHAT_MCP_HOME;"), false);
 });
