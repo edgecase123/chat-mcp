@@ -70,8 +70,19 @@ function touchesStateDir(src: string): string[] {
  * left the guard green, because lines 7 and 111 talk about the variable.
  */
 function redirectsStateDir(src: string): boolean {
-  return /process\.env\.CHAT_MCP_HOME\s*=/.test(src);
+  return REDIRECT.test(src);
 }
+
+/**
+ * ⚠️ AND NOT TOO NARROW EITHER. The first assignment-only version missed
+ * bracket access and the logical-assignment operators, so a legitimate redirect
+ * would have been reported as an offender. Raised by claude2.
+ *
+ * `(?!=)` after the `=` is what keeps a COMPARISON out: `===` and `==` are
+ * reads, not redirects.
+ */
+const REDIRECT =
+  /process\.env(?:\.CHAT_MCP_HOME|\[\s*['"`]CHAT_MCP_HOME['"`]\s*\])\s*(?:\|\||\?\?)?=(?!=)/;
 
 function testFiles(): string[] {
   return execFileSync('git', ['ls-files', 'test'], { encoding: 'utf8' })
@@ -142,9 +153,31 @@ test('🚨 the matcher catches the shapes it is looking for, and not a body ment
  * this guard accepted one.
  */
 test('🚨 a COMMENT naming CHAT_MCP_HOME is not a redirect', () => {
-  assert.equal(redirectsStateDir("process.env.CHAT_MCP_HOME = '/tmp/x';"), true);
-  assert.equal(redirectsStateDir('process.env.CHAT_MCP_HOME  =  join(a, b);'), true);
   assert.equal(redirectsStateDir('// Point CHAT_MCP_HOME at a scratch dir first.'), false);
   assert.equal(redirectsStateDir(' * `CHAT_MCP_HOME` cannot stop it, because...'), false);
-  assert.equal(redirectsStateDir("const x = process.env.CHAT_MCP_HOME;"), false);
+  assert.equal(redirectsStateDir('const x = process.env.CHAT_MCP_HOME;'), false, 'a READ is not a write');
+  assert.equal(
+    redirectsStateDir("if (process.env.CHAT_MCP_HOME === 'x') {"),
+    false,
+    'a COMPARISON is not a write — this is what (?!=) is for',
+  );
+});
+
+/**
+ * 🛑 THE OTHER DIRECTION. A matcher too narrow reports a legitimate redirect as
+ * an offender, which is a false alarm on a guard people are meant to trust.
+ */
+test('🚨 every legitimate way of setting it is accepted', () => {
+  for (const form of [
+    "process.env.CHAT_MCP_HOME = '/tmp/x';",
+    'process.env.CHAT_MCP_HOME  =  join(a, b);',
+    "process.env['CHAT_MCP_HOME'] = '/tmp/x';",
+    'process.env["CHAT_MCP_HOME"] = dir;',
+    'process.env[`CHAT_MCP_HOME`] = dir;',
+    "process.env.CHAT_MCP_HOME ||= '/tmp/x';",
+    "process.env.CHAT_MCP_HOME ??= '/tmp/x';",
+    "process.env[ 'CHAT_MCP_HOME' ] = x;",
+  ]) {
+    assert.equal(redirectsStateDir(form), true, `rejected a real redirect: ${form}`);
+  }
 });
