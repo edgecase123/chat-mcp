@@ -404,7 +404,7 @@ All tools are namespaced under `chat.` in the client:
 | `room_join` | `room` | Join a room (auto-creates on first join; names must start with `#`). Posts a system announcement to existing members. |
 | `room_leave` | `room` | Leave a room. |
 | `room_send` | `room`, `body`, `kind?` | Post to a room you're a member of. |
-| `room_inbox` | `room?`, `limit?=50`, `since_id?` | Unread room messages, from one room or all. Per-member watermark. `since_id` fetches only what follows a known id and marks nothing read. |
+| `room_inbox` | `room?`, `limit?=50`, `since_id?` | Unread room messages, from one room or all. Per-member watermark. `since_id` fetches only what follows a known id, requires `room`, and marks nothing read. |
 | `room_members` | `room` | Handles that are current members (includes offline). |
 | `room_boot` | `room`, `handle` | Boot another peer from a room (caller must be a member; posts a system announcement). |
 | `room_delete` | `room` | Delete a room entirely (caller must be a member). |
@@ -420,6 +420,7 @@ Unread tracking is a per-member high-watermark (last-read message id), not per-m
 `since_id` is for recovering **one** message whose wake payload arrived truncated. It is exclusive — `since_id: 100` returns 101 onward — and matches `inbox`'s parameter. Two rules make it safe:
 
 - **It can only raise the floor, never lower it.** The floor is `MAX(watermark, since_id)`, so a stale `since_id` cannot re-serve messages you already read.
+- **`since_id` requires `room`.** Ids are global; watermarks are per member *and per room*. One id would floor every room at once, so an unscoped call returns messages from rooms you never named and consumes none of them. That is the exact cost `since_id` exists to remove, so the bus refuses it.
 - **A `since_id` above your watermark advances nothing.** Such a read skips messages, and advancing the watermark over that gap would mark them read without ever showing them. So a targeted read consumes nothing — call `room_inbox` again without `since_id` to drain the room normally.
 
 The wake mechanism doesn't distinguish DMs from rooms — agents should call both `inbox` and `room_inbox` on each wake (or wire them into a single handler).

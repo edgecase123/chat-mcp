@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { migrate } from '../../src/storage/db.js';
 import * as dao from '../../src/storage/dao.js';
@@ -150,17 +151,72 @@ test('🚨 the count honours since_id too, so the badge cannot disagree with the
   }
 });
 
-/** `allRoomsUnread` is the no-room `room_inbox` path and must pass it through. */
-test('🚨 the all-rooms read honours since_id', () => {
+/**
+ * 🛑 AN UNSCOPED `since_id` IS REFUSED, NOT HONOURED.
+ *
+ * Found by claude2 on PR 75. Ids are global and watermarks are per room, so one
+ * id floors every room. Reproduced on a two-room fixture: a caller wanting ONE
+ * message got five, from a room it never named, and the gap rule refused to
+ * advance either watermark — paid for five, consumed none.
+ */
+test('🚨 since_id without a room is refused', () => {
+  assert.throws(
+    () => dao.assertRoomInboxQuery(undefined, 5),
+    /since_id requires room/,
+  );
+});
+
+/** The three negative controls. A guard that threw always would also pass above. */
+test('🚨 the guard permits every coherent combination', () => {
+  assert.doesNotThrow(() => dao.assertRoomInboxQuery('#r', 5));
+  assert.doesNotThrow(() => dao.assertRoomInboxQuery('#r', undefined));
+  assert.doesNotThrow(() => dao.assertRoomInboxQuery(undefined, undefined));
+});
+
+/**
+ * ⚠️ `since_id: 0` IS A REAL VALUE, NOT AN ABSENT ONE. A `!sinceId` test would
+ * let it through unscoped, and 0 floors nothing — so the bug would be silent.
+ */
+test('🚨 since_id of 0 without a room is still refused', () => {
+  assert.throws(() => dao.assertRoomInboxQuery(undefined, 0), /since_id requires room/);
+});
+
+/** The unscoped path still drains normally, which is what the refusal protects. */
+test('🚨 the all-rooms read still returns and consumes everything', () => {
   const db = roomWithTwoMembers();
   try {
-    const ids = fourPosts(db);
+    fourPosts(db);
 
-    assert.deepEqual(
-      dao.allRoomsUnread(db, 'me', 50, ids[1]).map((m) => m.body),
-      ['c', 'd'],
+    const got = dao.allRoomsUnread(db, 'me', 50);
+
+    assert.deepEqual(got.map((m) => m.body), ['a', 'b', 'c', 'd']);
+    assert.equal(
+      dao.safeRoomAdvanceId(db, '#r', 'me', undefined, got.map((m) => m.id)),
+      got[3]?.id,
+      'with no since_id there is no gap, so it consumes',
     );
   } finally {
     db.close();
   }
+});
+
+/**
+ * 🛑 THE GUARD IS ONLY WORTH ITS COMMENT IF THE TOOL CALLS IT, AND THERE IS NO
+ * SHIM-TOOL HARNESS IN THIS REPO TO PROVE THAT AT RUNTIME.
+ *
+ * ⚠️ ORDER, NOT PRESENCE. A guard that sits after the read has already returned
+ * the messages it was supposed to refuse, and a presence-only grep passes.
+ */
+test('🚨 room_inbox calls the guard BEFORE it reads anything', () => {
+  const src = readFileSync(
+    new URL('../../src/shim/tools/room_inbox.ts', import.meta.url),
+    'utf8',
+  );
+
+  const guard = src.indexOf('assertRoomInboxQuery(room, since_id)');
+  const firstRead = src.indexOf('dao.roomUnread(');
+
+  assert.notEqual(guard, -1, 'room_inbox must call assertRoomInboxQuery');
+  assert.notEqual(firstRead, -1, 'anchor moved — this test is reading the wrong file');
+  assert.ok(guard < firstRead, 'the guard must precede the first read');
 });

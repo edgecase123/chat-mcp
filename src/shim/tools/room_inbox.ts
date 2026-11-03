@@ -23,11 +23,12 @@ export function installRoomInbox(server: McpServer, ctx: ShimContext): void {
           .min(0)
           .optional()
           .describe(
-            'Return only messages with an id greater than this (exclusive), same as inbox. Raises the floor above the watermark but never below it. A since_id above the watermark skips messages, so the watermark is NOT advanced and nothing is marked read.',
+            'Return only messages with an id greater than this (exclusive), same as inbox. REQUIRES room — ids are global but watermarks are per room. Raises the floor above the watermark but never below it. A since_id above the watermark skips messages, so the watermark is NOT advanced and nothing is marked read.',
           ),
       },
     },
     async ({ room, limit, since_id }) => {
+      dao.assertRoomInboxQuery(room, since_id);
       dao.touchLastSeen(ctx.db, ctx.handle);
 
       let messages;
@@ -38,7 +39,7 @@ export function installRoomInbox(server: McpServer, ctx: ShimContext): void {
         }
         messages = dao.roomUnread(ctx.db, room, ctx.handle, limit ?? 50, since_id);
       } else {
-        messages = dao.allRoomsUnread(ctx.db, ctx.handle, limit ?? 50, since_id);
+        messages = dao.allRoomsUnread(ctx.db, ctx.handle, limit ?? 50);
       }
 
       // Advance watermark(s) — group by room, since each has its own.

@@ -626,6 +626,26 @@ export function safeRoomAdvanceId(
   return Math.max(...returnedIds);
 }
 
+/**
+ * 🛑 `since_id` WITHOUT A ROOM IS INCOHERENT, NOT MERELY UNHELPFUL.
+ *
+ * Message ids are global; watermarks are per room. So one id floors every room
+ * at once. Measured on a two-room fixture: a caller wanting ONE message got
+ * five, from a room it never named, and the gap rule refused to advance either
+ * watermark — so it paid for all five and consumed none. That is the exact cost
+ * `since_id` exists to remove.
+ *
+ * A known message id belongs to one known room. Demanding the room is the fix;
+ * a per-room gap test would only make the waste correct.
+ */
+export function assertRoomInboxQuery(room: string | undefined, sinceId: number | undefined): void {
+  if (sinceId !== undefined && room === undefined) {
+    throw new Error(
+      'since_id requires room. Message ids are global but watermarks are per room, so an unscoped since_id returns messages from rooms you did not ask about and marks none of them read.',
+    );
+  }
+}
+
 export function roomUnread(
   db: Db,
   room: string,
@@ -682,19 +702,14 @@ export function advanceRoomRead(
  * Unread across every room the caller is a member of. Used by an
  * unfiltered `chat.room_inbox` call.
  */
-export function allRoomsUnread(
-  db: Db,
-  handle: string,
-  limit = 50,
-  sinceId?: number,
-): Message[] {
+export function allRoomsUnread(db: Db, handle: string, limit = 50): Message[] {
   const rooms = myRooms(db, handle);
   const cap = Math.min(Math.max(limit, 1), 500);
   const collected: Message[] = [];
   for (const r of rooms) {
     if (collected.length >= cap) break;
     const remaining = cap - collected.length;
-    const batch = roomUnread(db, r.name, handle, remaining, sinceId);
+    const batch = roomUnread(db, r.name, handle, remaining);
     collected.push(...batch);
   }
   // Interleaved by id ascending so the caller sees chronological order.
