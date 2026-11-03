@@ -168,7 +168,7 @@ test('the escape IS allowed when realpath is stubbed out, so the fixture does re
 
 const E = (name: string, isDirectory = false) => ({ name, isDirectory });
 const build = (entries: { name: string; isDirectory: boolean }[], prefix = '', rebuild = '') =>
-  buildHints(entries, { prefix, rebuild }).map((h) => h.value);
+  buildHints(entries, { prefix, rebuild }).hints.map((h) => h.value);
 
 test('directories come before files, each group alphabetical', () => {
   assert.deepEqual(
@@ -199,8 +199,11 @@ test('the rebuild prefixes every value, so a nested accept keeps its directory',
 test(`🛑 the reply is capped at ${HINT_LIMIT}, so one keystroke cannot return a huge directory`, () => {
   const many = Array.from({ length: 500 }, (_, i) => E(`f${String(i).padStart(3, '0')}.ts`));
   const out = buildHints(many, { prefix: '', rebuild: '' });
-  assert.equal(out.length, HINT_LIMIT);
-  assert.equal(out[0]!.value, '@f000.ts', 'and it is the first alphabetically, not a random slice');
+  assert.equal(out.hints.length, HINT_LIMIT);
+  assert.equal(out.hints[0]!.value, '@f000.ts', 'and it is the first alphabetically, not a random slice');
+  // 🛑 THE CAP IS NO LONGER SILENT. Without this the caller cannot tell 30 of
+  // 30 from 30 of 500, which is the defect lee hit on a 34-file Desktop.
+  assert.equal(out.total, 500, 'the matched count survives the cap');
 });
 
 test('a prefix matching nothing gives an empty list, not everything', () => {
@@ -209,5 +212,71 @@ test('a prefix matching nothing gives an empty list, not everything', () => {
 
 test('each hint says whether it is a dir or a file', () => {
   const out = buildHints([E('src', true), E('x.ts')], { prefix: '', rebuild: '' });
-  assert.deepEqual(out.map((h) => h.kind), ['dir', 'file']);
+  assert.deepEqual(out.hints.map((h) => h.kind), ['dir', 'file']);
 });
+
+const F = (name: string, mtimeMs: number) => ({ name, isDirectory: false, mtimeMs });
+
+/**
+ * 🛑 lee's OWN CASE. A 34-file Desktop showed 30 and the missing 4 were every
+ * screenshot, because `Screenshot …` sorts last alphabetically. The files most
+ * likely to be wanted were the first the cap dropped.
+ */
+test('🚨 files come back newest first, so a cap drops the OLDEST', () => {
+  const out = buildHints(
+    [F('Archive.zip', 1_000), F('Screenshot 2026-11-01.png', 9_000), F('notes.md', 5_000)],
+    { prefix: '', rebuild: '' },
+  );
+
+  assert.deepEqual(out.hints.map((h) => h.value), [
+    '@Screenshot 2026-11-01.png',
+    '@notes.md',
+    '@Archive.zip',
+  ]);
+});
+
+/** A folder's age says nothing about whether you are navigating into it. */
+test('🚨 directories stay alphabetical and still come first', () => {
+  const out = buildHints(
+    [
+      { name: 'zeta', isDirectory: true },
+      F('new.png', 9_000),
+      { name: 'alpha', isDirectory: true },
+    ],
+    { prefix: '', rebuild: '' },
+  );
+
+  assert.deepEqual(out.hints.map((h) => h.value), ['@alpha/', '@zeta/', '@new.png']);
+});
+
+/**
+ * 🛑 THE CAP MUST ANNOUNCE ITSELF. 30 of 30 and 30 of 34 looked identical, so
+ * a file that was present read as absent.
+ */
+test('🚨 total counts the MATCHES, not what survived the cap', () => {
+  const many = Array.from({ length: 34 }, (_, i) => F(`f${i}.png`, i));
+  const out = buildHints(many, { prefix: '', rebuild: '' });
+
+  assert.equal(out.hints.length, HINT_LIMIT);
+  assert.equal(out.total, 34);
+});
+
+/** The prefix narrows before the cap, so typing more really does reach a file. */
+test('🚨 a narrowing prefix brings a capped-out file back into range', () => {
+  const many = Array.from({ length: 34 }, (_, i) => F(`f${i}.png`, i));
+  const out = buildHints([...many, F('target.png', 0)], { prefix: 'targ', rebuild: '' });
+
+  assert.deepEqual(out.hints.map((h) => h.value), ['@target.png']);
+  assert.equal(out.total, 1);
+});
+
+/** A stat can fail, and a file with no mtime must not vanish or throw. */
+test('an entry with no mtime falls back to the name order', () => {
+  const out = buildHints(
+    [{ name: 'b.png', isDirectory: false }, { name: 'a.png', isDirectory: false }],
+    { prefix: '', rebuild: '' },
+  );
+
+  assert.deepEqual(out.hints.map((h) => h.value), ['@a.png', '@b.png']);
+});
+

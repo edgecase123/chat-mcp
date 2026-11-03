@@ -827,7 +827,10 @@ function renderSuggest() {
       h('span', { className: 'composer-suggest__desc' }, [item.desc]),
     ]));
   });
-  el.suggest.appendChild(h('div', { className: 'composer-suggest__hint' }, ['Tab or Enter to accept · Esc to dismiss']));
+  const hint = s.truncated
+    ? `showing ${s.items.length} of ${s.truncated} · keep typing to narrow · Tab or Enter to accept · Esc to dismiss`
+    : 'Tab or Enter to accept · Esc to dismiss';
+  el.suggest.appendChild(h('div', { className: 'composer-suggest__hint' }, [hint]));
 }
 
 function updateSuggest() {
@@ -867,15 +870,20 @@ async function requestHints(value, caret) {
   hintSeq = seq;
   const token = atTokenAt(value, caret);
   let hints = [];
+  let total = 0;
   try {
     const body = await api(`/api/files?q=${encodeURIComponent(token.query)}`);
     hints = body.hints ?? [];
+    total = body.total ?? hints.length;
   } catch (e) {
     console.error('file hints failed', e);
   }
   if (seq !== hintSeq) return;
   if (el.composerInput.value !== value) return;
   state.suggest = pathSuggestionsFor(hints, value, caret);
+  // 🛑 A SILENT CAP READS AS A MISSING FILE. 30 of 30 and 30 of 34 looked
+  // identical, so a file that was there looked absent.
+  if (state.suggest) state.suggest.truncated = total > hints.length ? total : 0;
   renderSuggest();
 }
 

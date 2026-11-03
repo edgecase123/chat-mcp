@@ -116,23 +116,52 @@ export interface HintEntry {
   kind: 'dir' | 'file';
 }
 
+export interface HintResult {
+  hints: HintEntry[];
+  /**
+   * How many entries MATCHED, before the cap.
+   *
+   * 🛑 THE CAP USED TO BE SILENT, and that is the defect. A Desktop holding 34
+   * files showed 30 with no sign the other 4 existed, so a file that was there
+   * read as missing. The caller shows this when it exceeds `hints.length`.
+   */
+  total: number;
+}
+
+/**
+ * The name-only half of the filter, split out so a caller can narrow BEFORE
+ * paying for a `stat` per entry. A directory of 5000 files would otherwise
+ * cost 5000 stats on every keystroke.
+ */
+export function matchesHintPrefix(name: string, prefix: string): boolean {
+  if (!name.toLowerCase().startsWith(prefix.toLowerCase())) return false;
+
+  // Hidden unless the prefix opens with a dot, so `@` is not a wall of dotfiles.
+  return !name.startsWith('.') || prefix.startsWith('.');
+}
+
 /**
  * Shapes a directory listing into hints. Takes the entries rather than reading
  * them, so the ordering, the dotfile rule and the cap are testable with no
  * filesystem.
  */
 export function buildHints(
-  entries: { name: string; isDirectory: boolean }[],
+  entries: { name: string; isDirectory: boolean; mtimeMs?: number }[],
   { prefix, rebuild }: Pick<HintQuery, 'prefix' | 'rebuild'>,
-): HintEntry[] {
-  const lower = prefix.toLowerCase();
+): HintResult {
+  const matched = entries.filter((e) => matchesHintPrefix(e.name, prefix));
 
-  return entries
-    .filter((e) => e.name.toLowerCase().startsWith(lower))
-    // Hidden unless the prefix opens with a dot, so `@` is not a wall of dotfiles.
-    .filter((e) => !e.name.startsWith('.') || prefix.startsWith('.'))
+  const hints = matched
+    .slice()
     .sort((a, b) => {
       if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+      // 🛑 FILES NEWEST FIRST. Alphabetical put every `Screenshot …` at the end
+      // of a Desktop, so the files most likely to be wanted were the first
+      // ones the cap dropped. Directories stay alphabetical — a folder's age
+      // says nothing about whether you are navigating into it.
+      if (!a.isDirectory && a.mtimeMs !== undefined && b.mtimeMs !== undefined) {
+        if (a.mtimeMs !== b.mtimeMs) return b.mtimeMs - a.mtimeMs;
+      }
 
       return a.name.localeCompare(b.name);
     })
@@ -141,4 +170,6 @@ export function buildHints(
       value: `@${rebuild}${e.name}${e.isDirectory ? '/' : ''}`,
       kind: e.isDirectory ? ('dir' as const) : ('file' as const),
     }));
+
+  return { hints, total: matched.length };
 }
