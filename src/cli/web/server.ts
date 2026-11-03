@@ -30,8 +30,15 @@ const VERSION = packageVersion();
  *
  *  Goes through `stateDir()`, so CHAT_MCP_HOME moves it with everything else.
  *  A hardcoded `~/.chat-mcp` created a SECOND state directory at the umask
- *  mode, outside the 0700 guarantee. */
-const WEB_URL_FILE = join(stateDir(), 'web-url');
+ *  mode, outside the 0700 guarantee.
+ *
+ *  🛑 A FUNCTION, NOT A CONST. As a module-scope `const` this resolved the
+ *  state directory at IMPORT time, so merely importing this file reached the
+ *  path — which made `stateDir()`'s test-runner refusal fire on any test that
+ *  imports a route, and baked in whatever CHAT_MCP_HOME held at import. */
+function webUrlFile(): string {
+  return join(stateDir(), 'web-url');
+}
 
 /** Where the static web assets live at runtime. Ships alongside the compiled
  *  server; we assume `dist/cli/web/server.js` and `web/` are siblings under
@@ -133,7 +140,7 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   // Write URL to a well-known path so external scripts can find it.
   try {
     ensureStateDir();
-    await writeFile(WEB_URL_FILE, url + '\n');
+    await writeFile(webUrlFile(), url + '\n');
   } catch { /* best-effort */ }
 
   if (opts.open !== false) {
@@ -226,7 +233,7 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
     server.close();
     void notify.close();
     try { db.close(); } catch { /* best-effort */ }
-    void unlink(WEB_URL_FILE).catch(() => { /* already gone */ });
+    void unlink(webUrlFile()).catch(() => { /* already gone */ });
     process.exit(code);
   };
   process.on('SIGINT', () => shutdown(130));

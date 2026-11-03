@@ -1,12 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync, rmSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { migrate } from '../../src/storage/db.js';
-import * as dao from '../../src/storage/dao.js';
-import { answerAndNotify } from '../../src/supervise/answer.js';
+
+// 🛑 BEFORE any import that resolves a state path.
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-answer-'));
+
+const { migrate } = await import('../../src/storage/db.js');
+const dao = await import('../../src/storage/dao.js');
+const { answerAndNotify } = await import('../../src/supervise/answer.js');
+const { notifyPathFor } = await import('../../src/util/paths.js');
 
 /**
  * 🛑 ANSWERING A ROW IS HALF THE JOB. The other half is waking the
@@ -18,7 +23,14 @@ import { answerAndNotify } from '../../src/supervise/answer.js';
  * it would be the second place the decision and the wake could drift apart.
  */
 
-const notifyPath = (handle: string) => join(homedir(), '.chat-mcp', 'notify', handle);
+/**
+ * 🛑 ASK THE RESOLVER, NEVER REBUILD THE PATH. This was
+ * `join(homedir(), '.chat-mcp', 'notify', handle)`, which ignores
+ * `CHAT_MCP_HOME` — so it wrote AND `rmSync`'d inside the operator's live
+ * notify directory. Only the `ans-<pid>` handle naming kept it off
+ * `notify/claude1`, and nothing enforced that naming.
+ */
+const notifyPath = (handle: string) => notifyPathFor(handle);
 
 function seed(db: DatabaseSync, supervisor: string) {
   return dao.insertApproval(db, {

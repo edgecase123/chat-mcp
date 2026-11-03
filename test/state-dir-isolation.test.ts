@@ -104,6 +104,37 @@ function redirectsStateDir(src: string): boolean {
 const REDIRECT =
   /process\.env(?:\.CHAT_MCP_HOME|\[\s*['"`]CHAT_MCP_HOME['"`]\s*\])\s*(?:\|\||\?\?)?=(?!=)/;
 
+/**
+ * 🛑 THE ONE CLASS `stateDir()`'s REFUSAL CANNOT CATCH. A test that builds the
+ * path by hand never calls the resolver, so no block in it can fire.
+ *
+ * `answer-and-notify.test.ts` did exactly this — `join(homedir(), '.chat-mcp',
+ * 'notify', handle)` — and then `rmSync`'d the result. It wrote into and
+ * deleted from the operator's LIVE notify directory. Only its `ans-<pid>`
+ * handle naming kept it off `notify/claude1`, and nothing enforced that.
+ */
+const HANDROLLED = /homedir\(\)[^;\n]*['"`]\.chat-mcp/;
+
+/**
+ * Carved out BY CAUSE, and each entry is asserted to still MATCH below — so a
+ * carve-out cannot outlive its reason. Both of these name the shape in order
+ * to test it, which is the one legitimate way to write it.
+ */
+const HANDROLLED_ALLOWED = new Map([
+  ['test/state-dir-isolation.test.ts', 'holds the matcher and its own samples'],
+  ['test/util/state-dir-test-runner-block.test.ts', 'asserts the DEFAULT path still resolves'],
+]);
+
+function handRollsStatePath(src: string): boolean {
+  return HANDROLLED.test(withoutComments(src));
+}
+
+/**
+ * ⚠️ TRACKED FILES ONLY. A brand-new test file is invisible here until it is
+ * `git add`ed, which is why a carve-out for one read as unearned. That is the
+ * right trade — every other scanner in this repo uses `git ls-files`, and CI
+ * only ever sees committed files.
+ */
 function testFiles(): string[] {
   return execFileSync('git', ['ls-files', 'test'], { encoding: 'utf8' })
     .split('\n')
@@ -134,6 +165,35 @@ test('🚨 every test that can resolve a state path redirects CHAT_MCP_HOME', ()
  * 🛑 THE MATCHER PROVES ITSELF. An empty offender list and a broken matcher
  * produce the same green, and the two real offenders were found by hand.
  */
+test('🚨 no test builds a state path by hand from homedir()', () => {
+  const files = testFiles();
+  assert.ok(files.length >= 40, `found only ${files.length} test files`);
+
+  const matched = files.filter((f) => handRollsStatePath(readFileSync(f, 'utf8')));
+  const offenders = matched.filter((f) => !HANDROLLED_ALLOWED.has(f));
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `these bypass stateDir() entirely, so no refusal can fire: ${offenders.join(', ')}`,
+  );
+
+  // 🛑 EVERY CARVE-OUT MUST STILL BE EARNING ITS PLACE, or it is hiding a file
+  // that has since stopped needing it — and then quietly covering a real one.
+  for (const [f, why] of HANDROLLED_ALLOWED) {
+    assert.ok(matched.includes(f), `${f} no longer hand-rolls a path; drop the carve-out (${why})`);
+  }
+});
+
+/** The matcher proves itself: an empty list and a broken regex look the same. */
+test('🚨 the hand-rolled-path matcher sees the real shape, and not the safe one', () => {
+  assert.equal(handRollsStatePath("join(homedir(), '.chat-mcp', 'notify', h)"), true);
+  assert.equal(handRollsStatePath('join(homedir(), ".chat-mcp", "sock")'), true);
+  assert.equal(handRollsStatePath("// join(homedir(), '.chat-mcp', 'notify', h)"), false);
+  assert.equal(handRollsStatePath('notifyPathFor(handle)'), false, 'the resolver is the fix');
+  assert.equal(handRollsStatePath("join(homedir(), '.claude', 'settings.json')"), false);
+});
+
 test('🚨 the matcher catches the shapes it is looking for, and not a body mention', () => {
   assert.deepEqual(
     touchesStateDir("import { startSupervisor } from '../../src/supervise/index.js';"),
