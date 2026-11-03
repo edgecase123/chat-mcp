@@ -389,64 +389,120 @@ export function messageMarkdown({ from, time, body }, { attributed = false } = {
   return `**${from}** · ${time}\n\n${body.trimEnd()}`;
 }
 
+/** `/name <arg>`, with the space dropped when a command takes no argument. */
+export function commandUsage(command) {
+  return `/${command.name} ${command.arg}`.trimEnd();
+}
+
+/**
+ * The dash column for a set of labels.
+ *
+ * 🛑 MEASURED, NEVER A CONSTANT, AND MEASURED OVER EVERY SECTION THAT SHARES
+ * THE COLUMN. A hardcoded 24 let `/broadcast <#room> <text>` run into its own
+ * description. Fixing only the command rows then split the sheet into two
+ * columns, 28 and 26, which is the same defect one section lower.
+ * The +1 is the space before the dash at the widest label.
+ */
+export function dashColumn(labels) {
+  return labels.length ? Math.max(...labels.map((l) => l.length)) + 1 : 0;
+}
+
 /**
  * 🛑 GENERATED FROM THE COMMAND TABLE, NOT TYPED OUT. A hand-written list of
  * commands goes stale the first time one is added and nobody notices.
  *
- * The gesture sections below it cannot be generated, so each line was checked
- * against app.js when written. A test asserts every command name appears.
+ * 🛑 BOTH `/help` AND `/cheat-sheet` PRINT THIS. One builder, two surfaces —
+ * a toast and the stream. A second builder is how one new command ends up
+ * described two different ways depending on which you typed. A test asserts
+ * the two surfaces carry the same rows, space-collapsed.
+ *
+ * `width` and `headingIndent` are what the two surfaces may differ on. The
+ * sheet passes a width measured over its gesture rows too, and indents its
+ * headings; the toast takes the default width and outdents.
+ *
+ * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
+ * @param {Record<string, string>} labels category key -> heading
+ */
+export function commandBlock(commands, labels, { width, headingIndent = '  ' } = {}) {
+  const w = width ?? dashColumn(commands.map(commandUsage));
+
+  return Object.keys(labels)
+    .map((cat) => {
+      const rows = commands
+        .filter((c) => c.cat === cat)
+        .map((c) => '  ' + commandUsage(c).padEnd(w) + `— ${c.desc}`);
+
+      return rows.length ? [`${headingIndent}${labels[cat]}`, ...rows].join('\n') : null;
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/** Gestures, as data, so one measurement can cover them and the commands. */
+const GESTURE_SECTIONS = [
+  ['COMPOSER', [
+    ['Enter', 'send'],
+    ['Shift-Enter', 'newline, without sending'],
+    ['#', 'complete a peer or room name'],
+    ['Tab or Enter', 'accept the highlighted completion'],
+    ['Up / Down', 'move through the completion list'],
+    ['Esc', 'dismiss the completion list'],
+    ['Up / Down', 'with no list open, step through lines you sent'],
+    ['drop a file on the window', 'insert its path at the caret'],
+    { cont: 'relative to the project folder, "~/" under home', pad: 2 },
+  ]],
+  ['MESSAGES', [
+    ['click the copy icon', 'copy the message markdown as typed'],
+    ['Shift-click it', 'copy it under the author and the time'],
+  ]],
+  ['SIDEBAR', [
+    ['click a row', 'open that peer or room'],
+    ['(3) beside a row', 'unread messages waiting there'],
+    ['... on a peer', 'Dispatch, Alert, Copy handle, Kick'],
+    ['... on a room', 'Broadcast, Alert, Copy name, Leave, Delete'],
+    ['an entry ending "..."', 'opens in the composer, sends nothing'],
+    ['the entry below the rule', 'destructive, and asks first'],
+  ]],
+  ['READING', [
+    ['End', 'jump to the newest message'],
+    { cont: 'only while the composer is empty, because End', pad: 0 },
+    { cont: 'otherwise moves the caret', pad: 0 },
+    ['the jump badge', 'appears when messages arrive below the view'],
+  ]],
+];
+
+/**
+ * The command block, plus the gesture sections no table can generate.
+ *
+ * 🛑 ONE DASH COLUMN FOR THE WHOLE SHEET, measured over the commands AND the
+ * gesture labels together. Two independently padded sections read as two
+ * tables. A test asserts every dash in the output sits at one column.
+ *
+ * Each gesture line was checked against app.js when written.
  *
  * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
  * @param {Record<string, string>} labels category key -> heading
  */
 export function cheatSheet(commands, labels) {
-  const pad = (s) => s.padEnd(24);
-  const commandBlock = Object.keys(labels)
-    .map((cat) => {
-      const rows = commands
-        .filter((c) => c.cat === cat)
-        .map((c) => '  ' + pad(`/${c.name} ${c.arg}`.trimEnd()) + `— ${c.desc}`);
+  const gestureLabels = GESTURE_SECTIONS.flatMap(([, rows]) =>
+    rows.filter(Array.isArray).map(([label]) => label));
+  const width = dashColumn([...commands.map(commandUsage), ...gestureLabels]);
 
-      return rows.length ? [`  ${labels[cat]}`, ...rows].join('\n') : null;
-    })
-    .filter(Boolean)
-    .join('\n\n');
+  const gestures = GESTURE_SECTIONS.flatMap(([heading, rows]) => [
+    heading,
+    ...rows.map((row) => Array.isArray(row)
+      ? '  ' + row[0].padEnd(width) + `— ${row[1]}`
+      : '  ' + ' '.repeat(width + 2 + row.pad) + row.cont),
+    '',
+  ]);
 
   return [
     'CHEAT SHEET',
     '',
     'SLASH COMMANDS',
-    commandBlock,
+    commandBlock(commands, labels, { width }),
     '',
-    'COMPOSER',
-    '  ' + pad('Enter') + '— send',
-    '  ' + pad('Shift-Enter') + '— newline, without sending',
-    '  ' + pad('#') + '— complete a peer or room name',
-    '  ' + pad('Tab or Enter') + '— accept the highlighted completion',
-    '  ' + pad('Up / Down') + '— move through the completion list',
-    '  ' + pad('Esc') + '— dismiss the completion list',
-    '  ' + pad('Up / Down') + '— with no list open, step through lines you sent',
-    '  ' + pad('drop a file on the window') + ' — insert its path at the caret',
-    '  ' + pad('') + '    relative to the project folder, "~/" under home',
-    '',
-    'MESSAGES',
-    '  ' + pad('click the copy icon') + '— copy the message markdown as typed',
-    '  ' + pad('Shift-click it') + '— copy it under the author and the time',
-    '',
-    'SIDEBAR',
-    '  ' + pad('click a row') + '— open that peer or room',
-    '  ' + pad('(3) beside a row') + '— unread messages waiting there',
-    '  ' + pad('... on a peer') + '— Dispatch, Alert, Copy handle, Kick',
-    '  ' + pad('... on a room') + '— Broadcast, Alert, Copy name, Leave, Delete',
-    '  ' + pad('an entry ending "..."') + '— opens in the composer, sends nothing',
-    '  ' + pad('the entry below the rule') + ' — destructive, and asks first',
-    '',
-    'READING',
-    '  ' + pad('End') + '— jump to the newest message',
-    '  ' + pad('') + '  only while the composer is empty, because End',
-    '  ' + pad('') + '  otherwise moves the caret',
-    '  ' + pad('the jump badge') + '— appears when messages arrive below the view',
-    '',
+    ...gestures,
     'This sheet is not saved. It disappears when you switch away.',
   ].join('\n');
 }

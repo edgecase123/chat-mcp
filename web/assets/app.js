@@ -19,6 +19,7 @@ import {
   historyKeyApplies,
   messageMarkdown,
   cheatSheet,
+  commandBlock,
   atTokenAt,
   pathSuggestionsFor,
   pathsFromUriList,
@@ -784,19 +785,14 @@ const COMMANDS = [
   { name: 'kick', arg: '<peer>', desc: 'remove a peer from the bus', suggest: 'peer', cat: 'admin' },
   { name: 'delete', arg: '<#room>', desc: 'delete a room and its messages, for everyone', suggest: 'room', cat: 'admin' },
 
-  { name: 'help', arg: '', desc: 'this list', cat: 'system' },
-  { name: 'cheat-sheet', arg: '', desc: 'every command and gesture, in the stream', cat: 'system' },
+  { name: 'help', arg: '', desc: 'the commands, as a toast', cat: 'system' },
+  { name: 'cheat-sheet', arg: '', desc: 'the same commands plus every gesture, in the stream', cat: 'system' },
 ];
 
-// Grouped, because a flat list of thirteen reads as thirteen unrelated things.
-const HELP_TEXT = Object.keys(CATEGORY_LABELS)
-  .map((cat) => {
-    const rows = COMMANDS.filter((c) => c.cat === cat)
-      .map((c) => '  ' + `/${c.name} ${c.arg}`.trimEnd().padEnd(22) + `— ${c.desc}`);
-    return rows.length ? [CATEGORY_LABELS[cat], ...rows].join('\n') : null;
-  })
-  .filter(Boolean)
-  .join('\n\n');
+// Grouped, because a flat list reads as unrelated things. Same builder as the
+// cheat sheet, so a new command's description cannot come out two ways.
+// The toast outdents its headings; the sheet indents them to sit under its own.
+const HELP_TEXT = commandBlock(COMMANDS, CATEGORY_LABELS, { headingIndent: '' });
 
 // ── Composer suggestions ────────────────────────────────────────────────
 
