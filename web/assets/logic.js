@@ -728,3 +728,40 @@ export function dropNameText(names) {
 export function dropInsertText(paths, roots) {
   return paths.map((p) => droppedPathValue(p, roots)).join(' ');
 }
+
+// ── /clear ───────────────────────────────────────────────────────────────
+
+/** A `#` prefix is the only thing separating a room target from a DM peer. */
+const isRoomTarget = (target) => target.startsWith('#');
+
+/**
+ * The browser confirms first; the server's 403 is the second line, not the
+ * only one. Same shape as the `/delete` and `/kick` confirms above it in
+ * `app.js`.
+ *
+ * The two wordings differ because the blast radius does. A room clear resets
+ * every member's unread mark; a DM clear removes both directions of the
+ * conversation, so it is never one-sided.
+ */
+export function clearConfirmText(target) {
+  if (isRoomTarget(target)) {
+    return `Clear ${target}?\n\n`
+      + `Every message ever sent to ${target} is deleted for EVERYONE, not `
+      + 'just you, and every member\'s unread mark resets. The room and its '
+      + 'memberships stay. This cannot be undone.';
+  }
+  return `Clear your conversation with ${target}?\n\n`
+    + `Every message between you and ${target} is deleted, in both `
+    + 'directions, for BOTH of you. This cannot be undone.';
+}
+
+/**
+ * Zero is a SUCCESS. The DAO returns a row count, so it cannot tell an empty
+ * room from a missing one — and the route answers 403 before a missing room
+ * could ever reach here.
+ */
+export function clearResultText(count, target) {
+  const where = isRoomTarget(target) ? `from ${target}` : `with ${target}`;
+  if (count === 0) return `${target} was already empty`;
+  return `cleared ${count} message${count === 1 ? '' : 's'} ${where}`;
+}

@@ -10,7 +10,7 @@ import { NotifyBus, notifyPeer } from '../../notify/bus.js';
 import { answerAndNotify } from '../../supervise/answer.js';
 import * as dao from '../../storage/dao.js';
 import type { MessageKind } from '../../storage/dao.js';
-import { assertRoomName } from '../../util/naming.js';
+import { assertRoomName, isRoomName } from '../../util/naming.js';
 import { ensureStateDir, stateDir } from '../../util/paths.js';
 import { renderBodyToHtml } from './render.js';
 import {
@@ -297,6 +297,8 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   if (path === '/api/kick' && req.method === 'POST') return handleKick(req, res, ctx);
   if (path === '/api/rooms/delete' && req.method === 'POST') return handleRoomDelete(req, res, ctx);
   if (path === '/api/rooms/read' && req.method === 'POST') return handleRoomRead(req, res, ctx);
+  if (path === '/api/messages/clear' && req.method === 'POST')
+    return handleMessagesClear(req, res, ctx);
   if (path === '/api/approvals' && req.method === 'GET') return handleGetApprovals(res, ctx);
   if (path === '/api/approvals/answer' && req.method === 'POST')
     return handleAnswerApproval(req, res, ctx);
@@ -462,6 +464,26 @@ async function handleRoomDelete(req: IncomingMessage, res: ServerResponse, ctx: 
   }
   if (!dao.deleteRoom(ctx.db, room)) return respondJson(res, { error: `${room} does not exist` }, 404);
   respondJson(res, { ok: true });
+}
+
+/**
+ * `/clear` for the web UI, the surface the Ink CLI has had at App.tsx. Rooms
+ * are member-only; a DM needs no check because the caller is always one side
+ * of the pair it names.
+ */
+async function handleMessagesClear(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+  const body = (await readJsonBody(req)) as { target?: string };
+  const target = body.target;
+  if (!target) return respondJson(res, { error: 'target required' }, 400);
+
+  if (isRoomName(target)) {
+    if (!dao.isRoomMember(ctx.db, target, ctx.handle)) {
+      return respondJson(res, { error: `you are not a member of ${target}` }, 403);
+    }
+    return respondJson(res, { cleared: dao.deleteRoomMessages(ctx.db, target) });
+  }
+
+  respondJson(res, { cleared: dao.deleteDmMessages(ctx.db, ctx.handle, target) });
 }
 
 /**

@@ -25,6 +25,8 @@ import {
   pathsFromUriList,
   dropInsertText,
   dropNameText,
+  clearConfirmText,
+  clearResultText,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -359,6 +361,22 @@ async function deleteRoomEntry(room) {
     renderMessages({ forceBottom: true });
   } catch (e) {
     toast(`delete failed: ${e.message}`, 'error');
+  }
+}
+
+async function clearConversation(target) {
+  const ok = window.confirm(clearConfirmText(target));
+  if (!ok) return;
+  try {
+    const { cleared } = await api('/api/messages/clear', {
+      method: 'POST',
+      body: JSON.stringify({ target }),
+    });
+    // A count of 0 is a success — see `clearResultText`.
+    toast(clearResultText(cleared, target), 'info');
+    await refresh();
+  } catch (e) {
+    toast(`clear failed: ${e.message}`, 'error');
   }
 }
 
@@ -784,6 +802,7 @@ const COMMANDS = [
 
   { name: 'kick', arg: '<peer>', desc: 'remove a peer from the bus', suggest: 'peer', cat: 'admin' },
   { name: 'delete', arg: '<#room>', desc: 'delete a room and its messages, for everyone', suggest: 'room', cat: 'admin' },
+  { name: 'clear', arg: '<target>', desc: 'delete every message in a room or DM, for everyone in it', suggest: 'any', cat: 'admin' },
 
   { name: 'help', arg: '', desc: 'the commands, as a toast', cat: 'system' },
   { name: 'cheat-sheet', arg: '', desc: 'the same commands plus every gesture, in the stream', cat: 'system' },
@@ -1021,6 +1040,14 @@ async function tryDispatchSlashCommand(input) {
       const room = args[0];
       if (!room || !room.startsWith('#')) { toast('usage: /delete #room', 'warn'); return true; }
       await deleteRoomEntry(room);
+      return true;
+    }
+    case 'clear': {
+      // Named explicitly, like /delete, and NOT taken from the open pane. One
+      // click reaches this in the web UI, so the target is never implied.
+      const target = args[0];
+      if (!target) { toast('usage: /clear <#room|peer>', 'warn'); return true; }
+      await clearConversation(target);
       return true;
     }
     default:
