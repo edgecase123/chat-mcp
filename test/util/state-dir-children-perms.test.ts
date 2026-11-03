@@ -21,6 +21,7 @@ const {
 const { registerProject, projectsPath } = await import('../../src/supervise/projects.js');
 const { claudeCodeAdapter } = await import('../../src/adapters/claude-code.js');
 const { claudeCodeContextAdapter } = await import('../../src/adapters/claude-code-context.js');
+type Adapter = import('../../src/adapters/types.js').Adapter;
 const { writeClaudeMcpConfig } = await import('../../src/supervise/drivers/claude.js');
 
 // registerProject refuses a directory that does not exist, so give it a real one.
@@ -104,28 +105,41 @@ test("🚨 an ALREADY EXISTING world-readable mcp/<handle>.json is tightened", (
  *
  * So these drive the real `install()` and assert the mode it leaves behind.
  */
-const INSTALLERS: ReadonlyArray<[string, () => Promise<unknown>]> = [
-  ['claude-code', () => claudeCodeAdapter.install({ handle: 'probe-a', scope: 'local', cwd: PROBE_DIR, force: true })],
-  [
-    'claude-code-context',
-    () =>
-      claudeCodeContextAdapter.install({
-        handle: 'probe-b',
-        scope: 'local',
-        cwd: PROBE_DIR,
-        force: true,
-        contextTotal: 200000,
-      }),
-  ],
+/**
+ * 🛑 CWD-RELATIVE SCOPES ONLY. `scope: 'user'` resolves to
+ * `homedir()/.claude/settings.json` and ignores `cwd`, so it would rewrite the
+ * operator's real Claude Code settings — and `CHAT_MCP_HOME` cannot stop it,
+ * because that path never goes through the state dir. Raised by claude1.
+ *
+ * ⚠️ The scope is passed through to `install()` from here, so the assertion
+ * below governs the real argument. Holding it twice would let an edit to the
+ * call bypass the guard.
+ */
+const CWD_SCOPES: readonly string[] = ['local', 'project'];
+
+const INSTALLERS: ReadonlyArray<[string, Adapter, string]> = [
+  ['claude-code', claudeCodeAdapter, 'local'],
+  ['claude-code-context', claudeCodeContextAdapter, 'local'],
 ];
 
-for (const [label, install] of INSTALLERS) {
+for (const [label, adapter, scope] of INSTALLERS) {
   test(`🚨 the ${label} installer leaves the adapters directory at 0700`, async () => {
+    assert.ok(
+      CWD_SCOPES.includes(scope),
+      `${label} must use a cwd-relative scope, got "${scope}" — see the note above`,
+    );
+
     mkdirSync(adaptersDir(), { recursive: true });
     chmodSync(adaptersDir(), 0o755);
     assert.equal(modeOf(adaptersDir()), 0o755, 'the fixture is actually loose before the call');
 
-    await install();
+    await adapter.install({
+      handle: `probe-${label}`,
+      scope,
+      cwd: PROBE_DIR,
+      force: true,
+      contextTotal: 200000,
+    });
 
     assert.equal(modeOf(adaptersDir()), STATE_DIR_MODE);
   });
