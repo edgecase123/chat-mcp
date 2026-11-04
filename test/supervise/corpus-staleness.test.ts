@@ -51,15 +51,18 @@ test('🛑 no record is stamped in the future, which would read as permanent fre
   );
 });
 
-test('🛑 the newest capture is inside the staleness ceiling', () => {
+test('🛑 the OLDEST capture is inside the staleness ceiling', () => {
+  // claude1 on PR 112: gating on the newest meant re-capturing ONE record
+  // laundered the rest. Measured — 25 of 26 aged to 307 days with one left
+  // fresh reported itself 1 day old and passed 5 of 5.
   const age = corpusAge(CORPUS, Date.now());
   const ceiling = maxAgeDays();
 
-  assert.notEqual(age.newest, null, `no record carries a usable capturedAt, so staleness is unmeasurable. Rebuild: ${RECAPTURE}`);
+  assert.notEqual(age.oldest, null, `no record carries a usable capturedAt, so staleness is unmeasurable. Rebuild: ${RECAPTURE}`);
 
   assert.ok(
-    (age.ageDays as number) <= ceiling,
-    `the corpus is ${age.ageDays} days old and the ceiling is ${ceiling}. A recorded refusal may no longer be what the CLI does. Re-capture: ${RECAPTURE}`,
+    (age.oldestAgeDays as number) <= ceiling,
+    `the corpus's OLDEST record is ${age.oldestAgeDays} days old and the ceiling is ${ceiling} (its newest is ${age.newestAgeDays}). A corpus is only as fresh as its stalest replayed record. Re-capture: ${RECAPTURE}`,
   );
 });
 
@@ -69,31 +72,51 @@ test('the age reader can actually see a stale corpus, so a pass means something'
   const now = Date.parse('2026-11-04T00:00:00Z');
 
   const stale = corpusAge([{ capturedAt: '2026-01-01T00:00:00Z' }], now);
-  assert.equal(stale.ageDays, 307);
+  assert.equal(stale.oldestAgeDays, 307);
   assert.equal(stale.stamped, 1);
 
   const fresh = corpusAge([{ capturedAt: '2026-11-03T00:00:00Z' }], now);
-  assert.equal(fresh.ageDays, 1);
+  assert.equal(fresh.oldestAgeDays, 1);
 
   const missing = corpusAge([{}, {}], now);
   assert.equal(missing.unstamped, 2);
-  assert.equal(missing.newest, null);
-  assert.equal(missing.ageDays, null);
+  assert.equal(missing.oldest, null);
+  assert.equal(missing.oldestAgeDays, null);
 
   const broken = corpusAge([{ capturedAt: 'last tuesday' }], now);
   assert.equal(broken.unparseable, 1);
-  assert.equal(broken.newest, null);
+  assert.equal(broken.oldest, null);
 
   const ahead = corpusAge([{ capturedAt: '2027-01-01T00:00:00Z' }], now);
   assert.equal(ahead.future, 1);
   assert.equal(ahead.newest, null, 'a future stamp must not become the newest reading');
+  assert.equal(ahead.oldest, null, 'nor the oldest');
+});
 
-  // The newest wins, and a future outlier does not.
+test('🛑 ONE fresh record cannot launder a stale corpus', () => {
+  // This is claude1's control B, as a test. It is the whole point of the fix.
+  const now = Date.parse('2026-11-04T00:00:00Z');
+  const records = [
+    ...Array.from({ length: 25 }, () => ({ capturedAt: '2026-01-01T00:00:00Z' })),
+    { capturedAt: '2026-11-03T00:00:00Z' },
+  ];
+
+  const age = corpusAge(records, now);
+
+  assert.equal(age.newestAgeDays, 1, 'the newest reading is still reported');
+  assert.equal(age.oldestAgeDays, 307, 'and the ceiling reads THIS one');
+  assert.ok(age.oldestAgeDays > maxAgeDays({}), 'a 307-day corpus must be over any sane ceiling');
+});
+
+test('a future outlier changes neither end of the range', () => {
+  const now = Date.parse('2026-11-04T00:00:00Z');
   const mixed = corpusAge(
     [{ capturedAt: '2026-10-01T00:00:00Z' }, { capturedAt: '2026-11-01T00:00:00Z' }, { capturedAt: '2030-01-01T00:00:00Z' }],
     now,
   );
-  assert.equal(mixed.ageDays, 3);
+
+  assert.equal(mixed.newestAgeDays, 3);
+  assert.equal(mixed.oldestAgeDays, 34);
   assert.equal(mixed.future, 1);
 });
 

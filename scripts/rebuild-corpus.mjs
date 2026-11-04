@@ -70,10 +70,12 @@ const stamp = (record) => {
   const ids = record.approvalIds ?? (record.approvalId === undefined ? [] : [record.approvalId]);
   const stamps = ids.map((id) => capturedAtById.get(id)).filter((s) => s !== undefined);
 
-  // ⚠️ THE LATEST OF THEM. A `refused_under_grant` answers several approvals
-  // before its target is checked, so the measurement is as old as its newest
-  // input, not its first.
-  return stamps.length === 0 ? record : { ...record, capturedAt: stamps.sort().at(-1) };
+  // 🛑 THE EARLIEST OF THEM, NOT THE LATEST. A `refused_under_grant` answers
+  // several approvals before its target is checked, and the measurement is
+  // only as fresh as the OLDEST CLI behaviour it leans on. Taking the latest
+  // was the same optimism as gating the ceiling on the newest record —
+  // claude1's second finding on PR 112.
+  return stamps.length === 0 ? record : { ...record, capturedAt: stamps.sort()[0] };
 };
 
 const best = new Map();
@@ -168,7 +170,7 @@ console.log(`\nreal coverage is ${recorded.length + underGrant.length + permits.
  */
 const age = corpusAge(records, Date.now());
 
-console.log(`\nnewest capture is ${age.ageDays} day(s) old, ceiling ${maxAgeDays()}.`);
+console.log(`\noldest capture is ${age.oldestAgeDays} day(s) old, newest ${age.newestAgeDays}, ceiling ${maxAgeDays()}.`);
 
 if (age.unstamped > 0) {
   console.log(`  ⚠️ ${age.unstamped} of ${age.total} records carry NO date — their approval id is not in the database.`);

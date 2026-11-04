@@ -12,6 +12,12 @@
  * 🛑 A FUTURE STAMP DEFEATS AN AGE CHECK AND LOOKS LIKE FRESHNESS. It is
  * reported separately from a missing one, because the remedy differs: a
  * missing stamp needs a rebuild, a future stamp means a clock is wrong.
+ *
+ * 🛑 AGE IS THE OLDEST RECORD, NEVER THE NEWEST. A corpus is only as fresh as
+ * its stalest replayed record, because any record can be the one that answers
+ * a query. An earlier version gated on the newest, so re-capturing ONE record
+ * laundered the other 25 — measured by claude1 on PR 112: 25 records aged to
+ * 307 days with one left fresh reported itself 1 day old and passed.
  */
 
 import type { Captured } from './would-refuse.js';
@@ -29,8 +35,17 @@ export interface CorpusAge {
   readonly total: number;
   /** Epoch ms of the newest usable, non-future stamp, or null if none. */
   readonly newest: number | null;
-  /** Whole days between `newest` and `now`, or null if there is no stamp. */
-  readonly ageDays: number | null;
+  /** Epoch ms of the OLDEST usable, non-future stamp, or null if none. */
+  readonly oldest: number | null;
+  /**
+   * Whole days between the OLDEST stamp and `now`, or null if there is none.
+   *
+   * 🛑 OLDEST, AND THE NAME SAYS SO. A bare `ageDays` read as "how old is this
+   * corpus" and answered with its freshest record.
+   */
+  readonly oldestAgeDays: number | null;
+  /** Whole days to the NEWEST stamp. For reporting, never for a ceiling. */
+  readonly newestAgeDays: number | null;
 }
 
 const MS_PER_DAY = 86_400_000;
@@ -47,6 +62,7 @@ export function corpusAge(records: readonly Captured[], now: number): CorpusAge 
   let unparseable = 0;
   let future = 0;
   let newest: number | null = null;
+  let oldest: number | null = null;
 
   for (const r of records) {
     if (typeof r.capturedAt !== 'string' || r.capturedAt === '') {
@@ -67,6 +83,7 @@ export function corpusAge(records: readonly Captured[], now: number): CorpusAge 
     }
 
     if (newest === null || at > newest) newest = at;
+    if (oldest === null || at < oldest) oldest = at;
   }
 
   return {
@@ -76,7 +93,9 @@ export function corpusAge(records: readonly Captured[], now: number): CorpusAge 
     future,
     total: records.length,
     newest,
-    ageDays: newest === null ? null : Math.floor((now - newest) / MS_PER_DAY),
+    oldest,
+    oldestAgeDays: oldest === null ? null : Math.floor((now - oldest) / MS_PER_DAY),
+    newestAgeDays: newest === null ? null : Math.floor((now - newest) / MS_PER_DAY),
   };
 }
 
