@@ -9,6 +9,7 @@ import { openDb, type Db } from '../../storage/db.js';
 import { NotifyBus, notifyPeer } from '../../notify/bus.js';
 import { answerAndNotify } from '../../supervise/answer.js';
 import * as dao from '../../storage/dao.js';
+import { gaugeFreshness } from '../../shim/gauge-freshness.js';
 import type { MessageKind } from '../../storage/dao.js';
 import { assertRoomName, isRoomName } from '../../util/naming.js';
 import { ensureStateDir, stateDir } from '../../util/paths.js';
@@ -338,10 +339,15 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
   const allRooms = dao.allRooms(ctx.db);
   const memberRoomNames = new Set(myRooms.map((r) => r.name));
   const discoverRooms = allRooms.filter((r) => !memberRoomNames.has(r.name));
+  // #103 — the freshness verdict is computed HERE, not in the browser, so the
+  // 15-minute window has one home. A second copy in `web/assets/logic.js`
+  // would be free to drift from the one the MCP tools use.
+  const now = Date.now();
+
   respondJson(res, {
     handle: ctx.handle,
     session_id: me?.session_id,
-    peers,
+    peers: peers.map((a) => ({ ...a, ...gaugeFreshness(a.context_reported_at, now) })),
     rooms: myRooms.map((r) => ({ ...r, unread: dao.roomUnreadCount(ctx.db, r.name, ctx.handle) })),
     discoverRooms,
     version: VERSION,
