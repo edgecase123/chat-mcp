@@ -74,29 +74,66 @@ function peakDelta(selector: string): number {
  */
 const MIN_DELTA = 60;
 
-test('🛑 the shimmer is visible in the LIGHT theme, where lee could not see it', () => {
-  const delta = peakDelta(':root');
+/**
+ * Every theme block in the stylesheet, DISCOVERED rather than listed.
+ *
+ * 🛑 TWO LITERAL CALLS WOULD LET A THIRD THEME SHIP INVISIBLE AND GREEN. The
+ * stylesheet's own header says adding a theme is drop-in — define a property
+ * block and let the toggle set `data-theme`. A hand-written pair of
+ * assertions covers the two that exist and nothing that arrives. Raised by
+ * claude1.
+ *
+ * The selector is anchored at a line start and followed by the brace, so
+ * `[data-theme="dark"] .theme-icon::before` is not mistaken for the block.
+ */
+function themeSelectors(): string[] {
+  const found = [...CSS.matchAll(/^(:root|\[data-theme="[a-z-]+"\])\s*\{/gm)].map((m) => m[1]!);
 
-  assert.ok(delta >= MIN_DELTA, `light peak delta ${delta} is below the ${MIN_DELTA} floor`);
+  return [...new Set(found)];
+}
+
+/**
+ * The denominator, asserted. `:root` plus one `data-theme` block is the
+ * minimum this stylesheet has ever had, so a regex that silently stops
+ * matching fails here instead of reporting a clean sweep over nothing.
+ */
+const MIN_THEMES = 2;
+
+test('🛑 the sweep found every theme block — the denominator, not just the result', () => {
+  const selectors = themeSelectors();
+
+  assert.ok(
+    selectors.length >= MIN_THEMES,
+    `found ${selectors.length} theme blocks, expected at least ${MIN_THEMES}: ${selectors.join(', ')}`,
+  );
+  // `:root` carries the tint and is the light theme, so it must be among them.
+  assert.ok(selectors.includes(':root'), `:root is missing from ${selectors.join(', ')}`);
 });
 
-test('🛑 the shimmer is visible in the DARK theme too — it has its own accent and bg', () => {
-  const delta = peakDelta('[data-theme="dark"]');
+test('🛑 the shimmer is visible in EVERY theme, including any added later', () => {
+  const failures = themeSelectors()
+    .map((selector) => ({ selector, delta: peakDelta(selector) }))
+    .filter(({ delta }) => delta < MIN_DELTA);
 
-  assert.ok(delta >= MIN_DELTA, `dark peak delta ${delta} is below the ${MIN_DELTA} floor`);
+  assert.deepEqual(
+    failures,
+    [],
+    `these themes are below the ${MIN_DELTA} floor: ${failures.map((f) => `${f.selector} at ${f.delta}`).join(', ')}`,
+  );
 });
 
-test('⚠️ control — the OLD 16% tint fails this floor in both themes', () => {
+test('⚠️ control — the OLD 16% tint fails this floor in EVERY theme', () => {
   // Proves the floor discriminates. A floor every value passes is no floor.
-  const old = (accentHex: string, bgHex: string) => {
-    const accent = rgb(accentHex);
-    const bg = rgb(bgHex);
+  const atOldTint = (selector: string) => {
+    const accent = rgb(token(selector, 'accent'));
+    const bg = rgb(token(selector, 'bg'));
 
     return Math.max(...accent.map((c, i) => Math.abs(Math.round(0.16 * c + 0.84 * bg[i]!) - bg[i]!)));
   };
 
-  assert.ok(old(token(':root', 'accent'), token(':root', 'bg')) < MIN_DELTA);
-  assert.ok(old(token('[data-theme="dark"]', 'accent'), token('[data-theme="dark"]', 'bg')) < MIN_DELTA);
+  const passing = themeSelectors().filter((s) => atOldTint(s) >= MIN_DELTA);
+
+  assert.deepEqual(passing, [], `the old 16% tint should fail everywhere, but passed in ${passing.join(', ')}`);
 });
 
 test('🛑 the shimmer gradient reads the TOKEN, not a hard-coded percentage', () => {
