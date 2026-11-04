@@ -1226,13 +1226,18 @@ export function latestClaim(db: Db, resource: string): ClaimRow | null {
   return row ?? null;
 }
 
-/** Every claim still held at `now`, newest first. */
+/**
+ * Every claim still held at `now`, newest first.
+ *
+ * 🛑 NO PER-RESOURCE MAX(id). A duplicate must show as two holders, because
+ * naming one and reporting no conflict is worse than the chat scrollback this
+ * table replaced. `released_at IS NULL` is what keeps a handover to one row.
+ */
 export function liveClaims(db: Db, now: number): ClaimRow[] {
   const rows = db
     .prepare(
       `SELECT * FROM claims c
         WHERE c.released_at IS NULL AND c.expires_at > ?
-          AND c.id = (SELECT MAX(id) FROM claims WHERE resource = c.resource)
         ORDER BY c.id DESC`,
     )
     .all(now) as unknown as ClaimRow[];
@@ -1240,23 +1245,64 @@ export function liveClaims(db: Db, now: number): ClaimRow[] {
   return rows;
 }
 
-/** Write a claim. The caller has already been told it may. */
+/**
+ * Write a claim, but ONLY if the resource is still free.
+ *
+ * 🛑 THIS IS THE COMPARE-AND-SWAP, AND IT IS WHY THERE IS NO TRANSACTION.
+ * Reading the newest row and then inserting leaves a window: two agents
+ * claiming together both read "free", both pass `decideClaim`, and both write.
+ * Same bug, same remedy and the same reasoning as `writeClaim` above.
+ *
+ * ⚠️ A UNIQUE INDEX CANNOT DO THIS. "One live claim per resource" is partly a
+ * statement about the clock, and an index cannot read `now`.
+ *
+ * Returns null when a rival got in first, which the caller reports as the
+ * conflict it is.
+ */
 export function insertClaim(
   db: Db,
   input: { resource: string; holder: string; note: string | null; claimed_at: number; expires_at: number },
-): ClaimRow {
+): ClaimRow | null {
   const info = db
-    .prepare('INSERT INTO claims (resource, holder, note, claimed_at, expires_at) VALUES (?, ?, ?, ?, ?)')
-    .run(input.resource, input.holder, input.note, input.claimed_at, input.expires_at);
+    .prepare(
+      `INSERT INTO claims (resource, holder, note, claimed_at, expires_at)
+       SELECT @resource, @holder, @note, @claimed_at, @expires_at
+        WHERE NOT EXISTS (
+          SELECT 1 FROM claims
+           WHERE resource = @resource AND released_at IS NULL AND expires_at > @claimed_at
+        )`,
+    )
+    .run({ ...input });
+
+  if (Number(info.changes) === 0) return null;
 
   return latestClaimById(db, Number(info.lastInsertRowid));
 }
 
-/** Extend a live claim's expiry in place, so the row keeps its claimed_at. */
-export function renewClaim(db: Db, id: number, expires_at: number): ClaimRow {
-  db.prepare('UPDATE claims SET expires_at = ? WHERE id = ?').run(expires_at, id);
+/**
+ * Extend a live claim's expiry in place, so the row keeps its claimed_at.
+ *
+ * 🛑 THE SAME SWAP, BECAUSE A RENEWAL HAS THE SAME WINDOW. Between reading its
+ * own live claim and writing the new expiry, the claim can lapse and a rival
+ * can take it over — and an UPDATE by id alone then REVIVES the dead row,
+ * leaving two live claims with the insert already atomic.
+ *
+ * Returns null when the row is no longer live, or no longer the caller's.
+ */
+export function renewClaim(
+  db: Db,
+  input: { id: number; holder: string; expires_at: number; now: number },
+): ClaimRow | null {
+  const info = db
+    .prepare(
+      `UPDATE claims SET expires_at = @expires_at
+        WHERE id = @id AND holder = @holder AND released_at IS NULL AND expires_at > @now`,
+    )
+    .run({ ...input });
 
-  return latestClaimById(db, id);
+  if (Number(info.changes) === 0) return null;
+
+  return latestClaimById(db, input.id);
 }
 
 /** Mark a claim released. Returns false if the row was already released. */

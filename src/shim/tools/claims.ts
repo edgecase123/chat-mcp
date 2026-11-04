@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as dao from '../../storage/dao.js';
 import { decideClaim, decideRelease, remainingMs, ttlMinutes } from '../../claims/lifecycle.js';
+import type { Db } from '../../storage/db.js';
 import type { ShimContext } from '../index.js';
 
 /**
@@ -27,6 +28,76 @@ const text = (payload: unknown) => ({
   content: [{ type: 'text' as const, text: JSON.stringify(payload) }],
 });
 
+const CONFLICT_HINT = 'Ask the holder in the room, or `release` with force if you know their process is gone.';
+
+/**
+ * Decide and store one claim, as the payload the tool returns.
+ *
+ * 🛑 SPLIT OUT OF THE TOOL SO THE LOST RACE IS REACHABLE BY A TEST. The branch
+ * that matters is the compare-and-swap refusing, and a `null` nobody checks is
+ * the original bug with extra steps.
+ */
+export function performClaim(input: {
+  db: Db;
+  holder: string;
+  resource: string;
+  note: string | null;
+  now: number;
+  ttlMinutes: number;
+}): Record<string, unknown> {
+  const { db, holder, resource, note, now } = input;
+  const existing = dao.latestClaim(db, resource);
+  const decision = decideClaim({ existing, resource, holder, now, ttlMinutes: input.ttlMinutes });
+
+  if (decision.outcome === 'conflict') {
+    return {
+      outcome: 'conflict',
+      resource,
+      held_by: decision.heldBy,
+      expires_in_minutes: minutes(decision.remainingMs ?? 0),
+      hint: CONFLICT_HINT,
+    };
+  }
+
+  // 🛑 A RENEWAL UPDATES THE SAME ROW. Appending would lose `claimed_at`,
+  // which is the answer to "how long has this been held".
+  const row =
+    decision.outcome === 'renewed' && existing !== null
+      ? dao.renewClaim(db, { id: existing.id, holder, expires_at: decision.expires_at as number, now })
+      : dao.insertClaim(db, {
+          resource,
+          holder,
+          note,
+          claimed_at: now,
+          expires_at: decision.expires_at as number,
+        });
+
+  // 🛑 THE SWAP REFUSED, SO A RIVAL LANDED IN THE WINDOW. The decision was
+  // judged against a row that has since moved, so re-read rather than
+  // reporting a grant nobody holds.
+  if (row === null) {
+    const rival = dao.latestClaim(db, resource);
+
+    return {
+      outcome: 'conflict',
+      resource,
+      held_by: rival?.holder,
+      expires_in_minutes: minutes(rival === null ? 0 : remainingMs(rival, now)),
+      hint: CONFLICT_HINT,
+      lost_race: true,
+    };
+  }
+
+  return {
+    outcome: decision.outcome,
+    resource,
+    holder,
+    expires_in_minutes: minutes(remainingMs(row, now)),
+    // Surfaced because the failsafe firing means somebody never released.
+    took_over_from: decision.tookOverFrom,
+  };
+}
+
 export function installClaims(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
     'claim',
@@ -51,47 +122,16 @@ export function installClaims(server: McpServer, ctx: ShimContext): void {
       const name = resource.trim();
       if (name.length === 0) return text({ outcome: 'invalid', reason: 'resource is blank' });
 
-      const now = Date.now();
-      const existing = dao.latestClaim(ctx.db, name);
-      const decision = decideClaim({
-        existing,
-        resource: name,
-        holder: ctx.handle,
-        now,
-        ttlMinutes: ttlMinutes(),
-      });
-
-      if (decision.outcome === 'conflict') {
-        return text({
-          outcome: 'conflict',
+      return text(
+        performClaim({
+          db: ctx.db,
+          holder: ctx.handle,
           resource: name,
-          held_by: decision.heldBy,
-          expires_in_minutes: minutes(decision.remainingMs ?? 0),
-          hint: 'Ask the holder in the room, or `release` with force if you know their process is gone.',
-        });
-      }
-
-      // 🛑 A RENEWAL UPDATES THE SAME ROW. Appending would lose `claimed_at`,
-      // which is the answer to "how long has this been held".
-      const row =
-        decision.outcome === 'renewed' && existing !== null
-          ? dao.renewClaim(ctx.db, existing.id, decision.expires_at as number)
-          : dao.insertClaim(ctx.db, {
-              resource: name,
-              holder: ctx.handle,
-              note: note && note.length > 0 ? note : null,
-              claimed_at: now,
-              expires_at: decision.expires_at as number,
-            });
-
-      return text({
-        outcome: decision.outcome,
-        resource: name,
-        holder: ctx.handle,
-        expires_in_minutes: minutes(remainingMs(row, now)),
-        // Surfaced because the failsafe firing means somebody never released.
-        took_over_from: decision.tookOverFrom,
-      });
+          note: note && note.length > 0 ? note : null,
+          now: Date.now(),
+          ttlMinutes: ttlMinutes(),
+        }),
+      );
     },
   );
 

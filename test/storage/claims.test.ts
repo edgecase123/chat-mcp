@@ -31,7 +31,7 @@ function claim(db: DatabaseSync, resource: string, holder: string, now: number) 
 
   if (d.outcome === 'conflict') return d;
   if (d.outcome === 'renewed' && existing) {
-    dao.renewClaim(db, existing.id, d.expires_at as number);
+    dao.renewClaim(db, { id: existing.id, holder, expires_at: d.expires_at as number, now });
 
     return d;
   }
@@ -134,9 +134,10 @@ test('🛑 an EXPIRED claim is taken over, and the takeover names who never rele
   assert.equal(d.tookOverFrom, 'claude1');
 });
 
-test('🛑 liveClaims reports the NEWEST row per resource, never a superseded one', () => {
-  // Without the per-resource MAX(id), a handover would show the old holder
-  // alongside the new one and the panel would name two holders for one thing.
+test('🛑 a handover reports only the new holder, never the superseded one', () => {
+  // ⚠️ THIS TEST ONCE CREDITED A PER-RESOURCE `MAX(id)` FOR THE RESULT, AND
+  // THAT WAS FALSE. `released_at IS NULL` already excludes the old row, so the
+  // subquery's only effect was hiding a duplicate — see `claims-race.test.ts`.
   const db = freshDb();
   claim(db, 'leagues_app', 'claude1', NOW);
   dao.releaseClaim(db, dao.latestClaim(db, 'leagues_app')?.id as number, NOW + 10);
