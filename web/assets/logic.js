@@ -773,20 +773,27 @@ export function clearResultText(count, target) {
  * app.js states at the top of itself. Returns the action and, for a revert, the
  * value to put back.
  *
- * `custom` is refused here rather than offered-and-failed. The server demands
- * markdown with it and a header select has nowhere to type multi-line markdown.
- * The option still EXISTS in the list because a room can be in that state, set
- * through the `set_style` tool, and the selector has to be able to show it.
+ * `custom` opens the editor rather than saving, because the server demands
+ * markdown alongside it.
  */
 export function styleSelection(chosen, currentStyle) {
-  // 🛑 `custom` OPENS AN EDITOR, IT DOES NOT REFUSE. The first version alerted
-  // "set one with the set_style tool", which is a dead end from a browser —
-  // lee hit it and got a message box and nothing else.
   if (chosen === 'custom') {
     return { action: 'edit', revertTo: currentStyle ?? '' };
   }
 
   return { action: 'save', style: chosen === '' ? null : chosen };
+}
+
+/**
+ * Whether a room on this style needs its own way back into the editor.
+ *
+ * 🛑 RE-PICKING THE SELECTED OPTION FIRES NO `change`, so the selector cannot
+ * reopen the editor for a room already on `custom`. Measured in Chromium: a
+ * keypress selecting `custom` over `custom` fired 0 change events where a real
+ * change fired one.
+ */
+export function styleEditAffordance(style) {
+  return style === 'custom';
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   suggestionsFor,
   enterShouldSend,
   styleSelection,
+  styleEditAffordance,
   customStyleSubmission,
   menuEntriesFor,
   mentionSuggestionsFor,
@@ -70,6 +71,7 @@ const el = {
   paneMeta: document.getElementById('pane-meta'),
   paneStyleWrap: document.getElementById('pane-style-wrap'),
   paneStyle: document.getElementById('pane-style'),
+  paneStyleEdit: document.getElementById('pane-style-edit'),
   styleEditor: document.getElementById('style-editor'),
   styleEditorRoom: document.getElementById('style-editor-room'),
   styleEditorText: document.getElementById('style-editor-text'),
@@ -590,6 +592,7 @@ function renderPaneHeader() {
     el.paneTitle.textContent = 'select a peer or room';
     el.paneMeta.textContent = 'type /help for commands';
     if (el.paneStyleWrap) el.paneStyleWrap.hidden = true;
+    if (el.paneStyleEdit) el.paneStyleEdit.hidden = true;
     el.composerInput.placeholder = 'Type /dm <peer> or /join #room to get started. /help for commands.';
     return;
   }
@@ -603,6 +606,7 @@ function renderPaneHeader() {
     if (el.paneStyleWrap && el.paneStyle) {
       el.paneStyleWrap.hidden = !room;
       if (room) el.paneStyle.value = room.style ?? '';
+      if (el.paneStyleEdit) el.paneStyleEdit.hidden = !room || !styleEditAffordance(room.style);
       if (el.styleEditor && el.styleEditor.hidden === false && state.currentTarget !== el.styleEditorRoom.textContent) closeStyleEditor();
     }
   } else {
@@ -610,6 +614,7 @@ function renderPaneHeader() {
     const peer = state.peers.find((p) => p.handle === state.currentTarget);
     el.paneMeta.textContent = peer ? (peer.online ? 'online' : 'offline') : '';
     if (el.paneStyleWrap) el.paneStyleWrap.hidden = true;
+    if (el.paneStyleEdit) el.paneStyleEdit.hidden = true;
   }
   el.composerInput.focus();
 }
@@ -1324,6 +1329,13 @@ function closeStyleEditor() {
   if (el.styleEditor) el.styleEditor.hidden = true;
 }
 
+if (el.paneStyleEdit) {
+  el.paneStyleEdit.addEventListener('click', () => {
+    const room = state.rooms.find((r) => r.name === state.currentTarget);
+    if (room) openStyleEditor(room.name, room.style_custom ?? '');
+  });
+}
+
 if (el.styleEditorCancel) {
   el.styleEditorCancel.addEventListener('click', () => {
     closeStyleEditor();
@@ -1357,13 +1369,8 @@ if (el.styleEditorSave) {
   });
 }
 
-// #92 — saving a room's conversation style.
-//
-// 🛑 `custom` IS REFUSED HERE AND SAYS WHY. The server demands markdown with
-// it, and this header has nowhere to type multi-line markdown — so offering the
-// option and failing silently would be worse than not offering it. The option
-// stays in the list because it is a real state a room can be IN, set through
-// the `set_style` MCP tool, and the selector has to be able to show it.
+// #92 — saving a room's conversation style. `custom` opens the editor instead
+// of saving, because the server demands markdown alongside it.
 if (el.paneStyle) {
   el.paneStyle.addEventListener('change', async () => {
     const room = state.currentTarget;

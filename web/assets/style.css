@@ -373,6 +373,22 @@ html, body {
   font-size: 12px;
 }
 
+.pane__style-edit {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  margin-left: 6px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pane__style-edit:hover {
+  border-color: var(--accent);
+}
+
 /* Messages */
 .pane__stream {
   position: relative;

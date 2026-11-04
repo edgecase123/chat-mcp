@@ -31,6 +31,10 @@
             <option value="custom">custom</option>
           </select>
         </label>
+        <!-- Outside the label on purpose: a button inside one also activates
+             the select it wraps. -->
+        <button type="button" class="pane__style-edit" id="pane-style-edit" hidden
+                title="Edit this room's custom style">edit</button>
       </header>
       <!-- #92 — the custom-style editor. Opens when `custom` is chosen in the
            selector, because an alert telling the operator to use an MCP tool is

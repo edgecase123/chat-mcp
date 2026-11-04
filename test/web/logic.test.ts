@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 // The browser file itself, imported directly. No DOM, no bundler, no copy.
 import {
   styleSelection,
+  styleEditAffordance,
   customStyleSubmission,
   acceptReopens,
   enterShouldSend,
@@ -1055,6 +1056,25 @@ test('the DM confirm does not promise a one-sided delete', () => {
 // ---------------------------------------------------------------------------
 // #92 — the conversation style selector
 // ---------------------------------------------------------------------------
+
+/**
+ * 🛑 THE SELECTOR CANNOT REOPEN THE EDITOR FOR A ROOM ALREADY ON `custom`.
+ * Re-picking the selected option fires no `change` — measured in Chromium, a
+ * keypress selecting `custom` over `custom` fired 0 change events where a real
+ * change fired one. Without a separate control the markdown was write-once:
+ * unreadable, and destroyed by the only action that got you back in, because
+ * `setRoomStyle` nulls `style_custom` for any style but `custom`.
+ */
+test('a room on custom gets its own way back into the editor', () => {
+  assert.equal(styleEditAffordance('custom'), true);
+});
+
+test('no other style offers an editor, including an unset one', () => {
+  assert.equal(styleEditAffordance('succinct'), false);
+  assert.equal(styleEditAffordance(null), false);
+  assert.equal(styleEditAffordance(undefined), false);
+  assert.equal(styleEditAffordance(''), false);
+});
 
 test('choosing a preset saves it', () => {
   assert.deepEqual(styleSelection('succinct', null), { action: 'save', style: 'succinct' });
