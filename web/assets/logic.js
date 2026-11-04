@@ -59,8 +59,15 @@ export function shouldShowJump(unread, geo) {
  * code block and having a peer say anything lost the selection.
  *
  * Append is only safe when the rendered prefix is still exactly the head of
- * the new list. Anything else — a different target, a page of older messages
- * loaded above, a message edited or withdrawn — is a rebuild.
+ * the new list. A different target, a page of older messages loaded above, or
+ * a shorter list all rebuild.
+ *
+ * 🛑 THIS COMPARES IDS, NOT CONTENT. A message whose BODY changed under the
+ * same id is not detected, and its stale text would stay on screen. Nothing
+ * edits a message today, so there is no such path to guard; an edit feature
+ * has to carry a version in the id comparison or force a rebuild itself.
+ * Raised by claude1 reviewing PR 99, against a docblock that claimed
+ * otherwise.
  *
  * @param {{ target: string|null, ids: number[] }} prev  what the DOM holds
  * @param {{ target: string|null, ids: number[] }} next  what state now holds

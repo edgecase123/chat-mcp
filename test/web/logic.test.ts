@@ -128,10 +128,14 @@ test('an empty DOM rebuilds even when the target matches', () => {
 });
 
 /**
- * Same length, same target, different content. An append of zero here would
- * leave the stale message on screen for good.
+ * Same length and same target, but one id differs — an append of zero here
+ * would leave the stale message on screen for good.
+ *
+ * 🛑 A CHANGED BODY UNDER THE SAME ID IS NOT COVERED, and cannot be: the plan
+ * compares ids, never content. `streamPlan`'s own docblock says so. There is
+ * no edit path today, so there is nothing to assert about one.
  */
-test('a replaced id rebuilds rather than appending nothing', () => {
+test('a replaced id rebuilds, because the prefix no longer matches', () => {
   assert.deepEqual(
     streamPlan({ target: '#ops', ids: [1, 2, 3] }, { target: '#ops', ids: [1, 9, 3] }),
     { mode: 'full' },

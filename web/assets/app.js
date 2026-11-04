@@ -517,7 +517,6 @@ function renderMessages({ forceBottom = false } = {}) {
   // Measured BEFORE either path below moves anything.
   const wasPinned = forceBottom || isPinnedToBottom(streamGeometry());
   const prevScrollTop = el.messages.scrollTop;
-  const arrived = Math.max(0, state.messages.length - state.renderedCount);
 
   if (!state.currentTarget) {
     el.messages.innerHTML = '';
@@ -541,6 +540,13 @@ function renderMessages({ forceBottom = false } = {}) {
     { target: state.renderedTarget, ids: state.renderedIds },
     { target: state.currentTarget, ids },
   );
+
+  // 🛑 ONLY AN APPEND HAS ARRIVALS. On a rebuild the previous count belongs to
+  // another conversation, so a 3-message DM followed by a 40-message room
+  // would read as 37 arrivals. Every rebuild path happens to pass
+  // `forceBottom`, which zeroes the count downstream — this makes it
+  // structural rather than lucky. Raised by claude1 reviewing PR 99.
+  const arrived = plan.mode === 'append' ? state.messages.length - plan.from : 0;
 
   if (plan.mode === 'full') {
     el.messages.innerHTML = '';
