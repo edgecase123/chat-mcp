@@ -306,10 +306,14 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       'Push a context-window gauge report for a handle (used by adapter hooks + shell scripts to reach the same DB path as the report_context MCP tool)',
     )
     .requiredOption('--handle <handle>', 'agent handle whose gauge to update')
-    .requiredOption('--used <n>', 'tokens currently consumed', (v) => parseInt(v, 10))
+    .option('--used <n>', 'tokens currently consumed', (v) => parseInt(v, 10))
+    .option(
+      '--from-transcript <path>',
+      "read `used` from the newest assistant turn's token usage in a Claude Code transcript, instead of passing --used. Reports nothing when the file holds no usage, rather than guessing",
+    )
     .requiredOption('--total <n>', "total context-window size for this agent's model", (v) => parseInt(v, 10))
     .option('--json', 'emit the transition payload as JSON', false)
-    .action(async (opts: { handle: string; used: number; total: number; json?: boolean }) => {
+    .action(async (opts: { handle: string; used?: number; fromTranscript?: string; total: number; json?: boolean }) => {
       const { runReportContext } = await import('./oneshot/report_context.js');
       await runReportContext(opts);
     });

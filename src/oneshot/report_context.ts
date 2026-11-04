@@ -1,11 +1,15 @@
 import * as dao from '../storage/dao.js';
+import { usedFromTranscript } from '../adapters/transcript-usage.js';
 import { openDb } from '../storage/db.js';
 import { notifyPeer } from '../notify/bus.js';
 import { nextGaugeState, warningBody, type Threshold } from '../shim/gauge.js';
 
 export interface ReportContextOpts {
   handle: string;
-  used: number;
+  /** Pass this, or `fromTranscript`. */
+  used?: number;
+  /** A Claude Code transcript to read the live window size out of. */
+  fromTranscript?: string;
   total: number;
   json?: boolean;
 }
@@ -19,15 +23,30 @@ export interface ReportContextOpts {
  */
 export async function runReportContext(opts: ReportContextOpts): Promise<void> {
   if (!opts.handle) throw new Error('--handle is required');
-  if (!Number.isInteger(opts.used) || opts.used < 0) {
-    throw new Error(`--used must be a non-negative integer (got ${opts.used})`);
+
+  // 🛑 A TRANSCRIPT WITH NO USAGE REPORTS NOTHING. Falling back to a byte
+  // estimate is the behaviour #103 removed: it read 100% on a window that
+  // held 73.3%. An unknown gauge is honest; a guessed one gets acted on.
+  const used = opts.fromTranscript !== undefined
+    ? usedFromTranscript(opts.fromTranscript)
+    : opts.used;
+
+  if (used === null || used === undefined) {
+    if (opts.fromTranscript !== undefined) return;
+    throw new Error('--used or --from-transcript is required');
+  }
+
+  if (!Number.isInteger(used) || used < 0) {
+    throw new Error(`--used must be a non-negative integer (got ${used})`);
   }
   if (!Number.isInteger(opts.total) || opts.total <= 0) {
     throw new Error(`--total must be a positive integer (got ${opts.total})`);
   }
-  if (opts.used > opts.total) {
-    throw new Error(`--used (${opts.used}) must not exceed --total (${opts.total})`);
-  }
+  // A window genuinely larger than the configured total means `--total` is
+  // stale — the model changed since `chat-mcp install` ran. Clamp rather than
+  // refuse: a gauge pinned at 100% still says "full", and throwing inside a
+  // PreToolUse hook would surface as a tool-call failure.
+  const clamped = Math.min(used, opts.total);
 
   const db = openDb();
   try {
@@ -38,9 +57,9 @@ export async function runReportContext(opts: ReportContextOpts): Promise<void> {
       );
     }
     const prevWarned = (me.context_warned_threshold ?? null) as Threshold | null;
-    dao.setAgentContext(db, opts.handle, opts.used, opts.total);
+    dao.setAgentContext(db, opts.handle, clamped, opts.total);
 
-    const percent = opts.total > 0 ? Math.round((opts.used / opts.total) * 1000) / 10 : 0;
+    const percent = opts.total > 0 ? Math.round((clamped / opts.total) * 1000) / 10 : 0;
     const transition = nextGaugeState(percent, prevWarned);
 
     if (transition.next_warned !== prevWarned) {
@@ -92,7 +111,7 @@ export async function runReportContext(opts: ReportContextOpts): Promise<void> {
 
     const payload = {
       handle: opts.handle,
-      used: opts.used,
+      used: clamped,
       total: opts.total,
       percent,
       warned: transition.next_warned,
