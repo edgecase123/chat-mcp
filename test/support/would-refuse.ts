@@ -20,7 +20,20 @@ import { fileURLToPath } from 'node:url';
  * evidence of permission. Anything unrecognised is `unknown`, and a caller
  * must treat that as a failure.
  */
-export interface RefusedRecord {
+/**
+ * When the measurement was taken, ISO 8601 UTC, looked up from
+ * `approvals.created_at` by `scripts/rebuild-corpus.mjs`.
+ *
+ * 🛑 OPTIONAL IN THE TYPE, REQUIRED BY A TEST. A record whose approval id is
+ * no longer in the database legitimately has no date, and the honest answer
+ * is to leave it off rather than invent one. `corpus-staleness.test.ts` is
+ * what fails when any record arrives without it.
+ */
+export interface Captured {
+  readonly capturedAt?: string;
+}
+
+export interface RefusedRecord extends Captured {
   readonly outcome: 'refused';
   readonly approvalId: number;
   readonly attempted: string;
@@ -48,7 +61,7 @@ export interface RefusedRecord {
  * answer "no, not under that grant" to a question whose measured answer is
  * "yes, and it did not work".
  */
-export interface RefusedUnderGrantRecord {
+export interface RefusedUnderGrantRecord extends Captured {
   readonly outcome: 'refused_under_grant';
   /**
    * ⚠️ PLURAL. A probe can answer more than one approval before its target
@@ -68,7 +81,7 @@ export interface RefusedUnderGrantRecord {
   readonly evidence: string;
 }
 
-export interface PermittedRecord {
+export interface PermittedRecord extends Captured {
   readonly outcome: 'permitted';
   readonly approvalId: number;
   readonly attempted: string;
