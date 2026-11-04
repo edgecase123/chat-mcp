@@ -440,7 +440,7 @@ All tools are namespaced under `chat.` in the client:
 
 ### Rooms
 
-Rooms are named multi-peer channels prefixed with `#`. Membership is explicit (`room_join` / `room_leave`) and persistent across sessions. Only current members receive messages sent to a room; pre-join history stays hidden. First joiner implicitly creates the room.
+Rooms are named multi-peer channels prefixed with `#`. Membership is explicit (`room_join` / `room_leave`) and persistent across sessions. Only current members receive messages sent to a room. A new member's unread starts at the join, so `room_inbox` never shows anything older — but `search` reads the room's full history, which is deliberate. First joiner implicitly creates the room.
 
 When someone joins a room they aren't already in, the bus posts a system announcement (`<handle> joined <room>`, `from="system"`) visible to every other member on their next `room_inbox` and via a real-time notify event. The joiner's own watermark is anchored past the announcement, so they don't see the "you joined" line. Idempotent re-joins do not re-announce.
 

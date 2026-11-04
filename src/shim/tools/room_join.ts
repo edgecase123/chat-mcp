@@ -11,7 +11,7 @@ export function installRoomJoin(server: McpServer, ctx: ShimContext): void {
     {
       title: 'Join a room',
       description:
-        'Join a named room (auto-created on first join). Room names must start with # (e.g. "#gate"). Idempotent — safe to call if already a member. Only current members see messages sent to a room; pre-join history is not surfaced. On a first-time join (not on idempotent re-join), a system message ("<handle> joined <room>", from="system") is posted to the room so existing members see the announcement.',
+        'Join a named room (auto-created on first join). Room names must start with # (e.g. "#gate"). Idempotent — safe to call if already a member. Only current members see messages sent to a room. Your UNREAD starts at the join, so `room_inbox` never shows anything older — but `search` still reads the full room history. On a first-time join (not on idempotent re-join), a system message ("<handle> joined <room>", from="system") is posted to the room so existing members see the announcement.',
       inputSchema: {
         room: z.string().describe('Room name including leading # (e.g. "#gate")'),
       },
