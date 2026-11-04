@@ -478,6 +478,15 @@ html, body {
   font-family: var(--font-mono);
   font-size: 11px;
 }
+/* #104 — quieter than the time, because it is reference data rather than
+   something read on every line. Selectable so it can be pasted to a peer. */
+.message__id {
+  color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  opacity: 0.75;
+  user-select: text;
+}
 .message__kind {
   font-size: 10px;
   font-weight: 700;

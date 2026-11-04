@@ -28,6 +28,7 @@ import {
   nextUnreadBelow,
   shouldShowJump,
   streamPlan,
+  messageIdLabel,
   suggestionsFor,
 // @ts-expect-error — plain JS with JSDoc types, deliberately not compiled.
   pathsFromUriList,
@@ -1240,4 +1241,68 @@ test('the cap is measured in bytes', () => {
   const result = customStyleSubmission(emoji);
   assert.equal(result.ok, false, 'a character-based cap would have passed this');
   assert.match(result.error, /bytes/);
+});
+
+/**
+ * 🛑 A CAPPED CONVERSATION STOPPED SHIMMERING, AND IT READ AS A ROOM-vs-DM BUG.
+ *
+ * `/api/messages` serves at most 100 rows. Past that, a new message drops the
+ * oldest, the prefix moves, and the plan went `full` — and the `full` branch
+ * renders every node with no `fresh` flag. So `is-fresh` was never set and
+ * `msg-shimmer` never ran. #leagues had 235 messages and never shimmered; a
+ * 3-message DM did. Reported by lee, 2026-11-04.
+ *
+ * ⚠️ A SLID WINDOW AND A PAGE OF OLDER HISTORY BOTH MOVE THE PREFIX. Only ids
+ * AFTER the last one we already had are arrivals, which is what separates them.
+ */
+test('🛑 a slid window still names the arrival, so it can shimmer', () => {
+  assert.deepEqual(
+    streamPlan({ target: '#ops', ids: [1, 2, 3] }, { target: '#ops', ids: [2, 3, 4] }),
+    { mode: 'full', freshIds: [4] },
+  );
+});
+
+test('a slid window with two arrivals names both', () => {
+  assert.deepEqual(
+    streamPlan({ target: '#ops', ids: [1, 2, 3] }, { target: '#ops', ids: [3, 4, 5] }),
+    { mode: 'full', freshIds: [4, 5] },
+  );
+});
+
+test('🛑 a page of OLDER history names no arrival, so nothing shimmers', () => {
+  // The control that separates the two prefix-moving cases. Without it, a
+  // scroll-up would shimmer messages from last week.
+  assert.deepEqual(
+    streamPlan({ target: '#ops', ids: [8, 9] }, { target: '#ops', ids: [6, 7, 8, 9] }),
+    { mode: 'full' },
+  );
+});
+
+test('a target switch names no arrival, so a whole room never shimmers at once', () => {
+  assert.deepEqual(
+    streamPlan({ target: '#ops', ids: [1, 2] }, { target: '@alice', ids: [3, 4] }),
+    { mode: 'full' },
+  );
+});
+
+test('a window that moved past everything we held names no arrival', () => {
+  // Nothing in common, so which rows are new is unknowable. Shimmering all of
+  // them would be worse than shimmering none.
+  assert.deepEqual(
+    streamPlan({ target: '#ops', ids: [1, 2] }, { target: '#ops', ids: [50, 51] }),
+    { mode: 'full' },
+  );
+});
+
+// ── the message id in the meta row (#104) ────────────────────────────────
+
+test('🛑 the id label carries the words, so a bare number is never ambiguous', () => {
+  // "see 12582" is how agents point at a message. A lone number beside a
+  // timestamp reads as a count or a duration.
+  assert.equal(messageIdLabel(12582), 'Message ID: 12582');
+});
+
+test('the id label does not group or pad the number, so it can be pasted back', () => {
+  assert.equal(messageIdLabel(1000), 'Message ID: 1000');
+  assert.equal(messageIdLabel(7), 'Message ID: 7');
 });

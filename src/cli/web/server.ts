@@ -9,6 +9,7 @@ import { openDb, type Db } from '../../storage/db.js';
 import { NotifyBus, notifyPeer } from '../../notify/bus.js';
 import { answerAndNotify } from '../../supervise/answer.js';
 import * as dao from '../../storage/dao.js';
+import { parseSearch, snippet } from '../../search/query.js';
 import { gaugeFreshness } from '../../shim/gauge-freshness.js';
 import type { MessageKind } from '../../storage/dao.js';
 import { assertRoomName, isRoomName } from '../../util/naming.js';
@@ -303,6 +304,7 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
     return handleMessagesClear(req, res, ctx);
   if (path === '/api/approvals' && req.method === 'GET') return handleGetApprovals(res, ctx);
   if (path === '/api/claims' && req.method === 'GET') return handleGetClaims(res, ctx);
+  if (path === '/api/search' && req.method === 'GET') return handleSearch(url, res, ctx);
   if (path === '/api/approvals/answer' && req.method === 'POST')
     return handleAnswerApproval(req, res, ctx);
   if (path === '/api/files' && req.method === 'GET') return handleFileHints(url, res);
@@ -591,6 +593,52 @@ function handleGetClaims(res: ServerResponse, ctx: RouteContext): void {
       note: c.note,
       held_for_minutes: Math.max(1, Math.round((now - c.claimed_at) / 60_000)),
       expires_in_minutes: Math.max(1, Math.round(Math.max(0, c.expires_at - now) / 60_000)),
+    })),
+  });
+}
+
+/**
+ * Search the transcript (#102).
+ *
+ * 🛑 READ ONLY, AND THAT IS THE POINT. `room_inbox` advances a read watermark,
+ * so a search built on it would silently mark messages read — the very cost
+ * this endpoint removes. `dao.searchMessages` writes nothing.
+ *
+ * 🛑 400 ON A BLANK TERM, NOT AN EMPTY LIST. A blank query would match every
+ * row, and "here is your whole transcript" is indistinguishable from a search
+ * that worked.
+ */
+function handleSearch(url: URL, res: ServerResponse, ctx: RouteContext): void {
+  const limitRaw = url.searchParams.get('limit');
+  const parsed = parseSearch({
+    q: url.searchParams.get('q') ?? undefined,
+    target: url.searchParams.get('target') ?? undefined,
+    limit: limitRaw === null ? undefined : Number(limitRaw),
+  });
+
+  if (!parsed.ok) return respondJson(res, { error: parsed.reason }, 400);
+
+  // 🛑 NO `caller`, DELIBERATELY. This is lee's own UI on 127.0.0.1 behind the
+  // rebinding guard, so it is meant to read every room and DM. The MCP tool
+  // passes one; see `dao.searchMessages`.
+  const { hits, truncated } = dao.searchMessages(ctx.db, {
+    pattern: parsed.pattern,
+    target: parsed.target,
+    limit: parsed.limit,
+  });
+
+  respondJson(res, {
+    // ⚠️ BOTH NUMBERS. A list of 50 cannot be told from a list truncated at 50.
+    returned: hits.length,
+    limit: parsed.limit,
+    truncated,
+    broad: parsed.broad,
+    results: hits.map((h) => ({
+      id: h.id,
+      from: h.from_handle,
+      to: h.to_handle,
+      sent_at: h.sent_at,
+      snippet: snippet(h.body, parsed.q, 220),
     })),
   });
 }

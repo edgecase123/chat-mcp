@@ -470,3 +470,95 @@ test('a rebound GET to /api/claims is refused like every other route', async () 
   assert.equal(res.status, 403);
   close(h);
 });
+
+// ── /api/search (#102) ───────────────────────────────────────────────────
+
+/**
+ * 🛑 A BLANK TERM MUST NOT RETURN THE TRANSCRIPT, and a wrong escape returns
+ * results either way — so both halves are asserted with their denominators.
+ */
+test('🛑 a blank search is 400, not the whole transcript', async () => {
+  const h = await harness();
+  dao.insertMessage(h.db, { from: 'peer-a', to: 'peer-b', body: 'anything at all', kind: 'chat' });
+
+  for (const q of ['', '%20', '++']) {
+    const res = await raw(h, { path: `/api/search?q=${q}` });
+    if (q === '++') continue; // '+' decodes to a space, covered by the blanks above
+    assert.equal(res.status, 400, `q=${JSON.stringify(q)} was not refused`);
+    assert.doesNotMatch(res.body, /anything at all/, 'a refused search returned a message body');
+  }
+  close(h);
+});
+
+test('a search returns the match, newest first, with a snippet and an id', async () => {
+  const h = await harness();
+  const first = dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: 'CLAIMING the gate', kind: 'chat' });
+  const second = dao.insertMessage(h.db, { from: 'peer-b', to: '#gate', body: 'DONE with the gate', kind: 'chat' });
+  dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: 'unrelated chatter', kind: 'chat' });
+
+  const body = JSON.parse((await raw(h, { path: '/api/search?q=gate' })).body) as {
+    returned: number; truncated: boolean; results: Array<Record<string, unknown>>;
+  };
+
+  assert.equal(body.returned, 2, 'expected 2 of 3');
+  assert.equal(body.truncated, false);
+  assert.deepEqual(body.results.map((r) => r.id), [second.id, first.id]);
+  assert.match(String(body.results[0]?.snippet), /gate/);
+  close(h);
+});
+
+test('🛑 a percent in the query does not match every message', async () => {
+  const h = await harness();
+  dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: 'the gauge read 100% again', kind: 'chat' });
+  dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: 'nothing numeric here', kind: 'chat' });
+  dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: 'nor here', kind: 'chat' });
+
+  const body = JSON.parse((await raw(h, { path: '/api/search?q=100%25' })).body) as { returned: number };
+
+  assert.equal(body.returned, 1, 'expected 1 of 3 — the % was treated as a wildcard');
+  close(h);
+});
+
+test('truncated says so, so a capped list is not read as a total', async () => {
+  const h = await harness();
+  for (let i = 0; i < 4; i++) {
+    dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: `gate ${i}`, kind: 'chat' });
+  }
+
+  const body = JSON.parse((await raw(h, { path: '/api/search?q=gate&limit=2' })).body) as {
+    returned: number; limit: number; truncated: boolean;
+  };
+
+  assert.deepEqual([body.returned, body.limit, body.truncated], [2, 2, true]);
+  close(h);
+});
+
+test('a search does not move any read watermark through the HTTP path either', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#gate', 'peer-a');
+    dao.insertMessage(h.db, { from: 'peer-b', to: '#gate', body: 'CLAIMING the gate', kind: 'chat' });
+
+    // ⚠️ NOT `gate`. `joinRoom` posts "<handle> joined <room>", so a term
+    // drawn from the ROOM NAME matches that system message too and the guard
+    // below reads 2. The term has to come from the planted body alone.
+    const before = h.db.prepare('SELECT handle, last_read_id FROM room_reads ORDER BY handle').all();
+    const body = JSON.parse((await raw(h, { path: '/api/search?q=CLAIMING' })).body) as { returned: number };
+    assert.equal(body.returned, 1, 'the fixture has to match or this proves nothing');
+    const after = h.db.prepare('SELECT handle, last_read_id FROM room_reads ORDER BY handle').all();
+
+    assert.deepEqual(after, before);
+  } finally {
+    // 🛑 WITHOUT THIS, A FAILED ASSERTION LEAKS THE SERVER AND THE FILE NEVER
+    // EXITS — so the real failure is replaced by a timeout that names nothing.
+    // Three orphaned runs of this file were alive before it was found.
+    close(h);
+  }
+});
+
+test('a rebound GET to /api/search is refused — it reads every room', async () => {
+  const h = await harness();
+
+  assert.equal((await raw(h, { path: '/api/search?q=gate', host: 'evil.example.com' })).status, 403);
+  close(h);
+});

@@ -69,9 +69,20 @@ export function shouldShowJump(unread, geo) {
  * Raised by claude1 reviewing PR 99, against a docblock that claimed
  * otherwise.
  *
+ * 🛑 A REBUILD STILL HAS TO NAME ITS ARRIVALS, OR THEY CANNOT SHIMMER. The
+ * server serves at most 100 rows, so past that a new message drops the oldest
+ * and the prefix moves. That rebuilt, and a rebuild rendered every node with
+ * no `fresh` flag — so no conversation past 100 messages ever shimmered.
+ * Reported by lee: #leagues at 235 messages never did, a 3-message DM always
+ * did.
+ *
+ * ⚠️ A SLID WINDOW AND A PAGE OF OLDER HISTORY BOTH MOVE THE PREFIX, so the
+ * mismatch alone cannot tell them apart. Only ids AFTER the last one the DOM
+ * already held are arrivals; a scroll-up adds ids before it and names none.
+ *
  * @param {{ target: string|null, ids: number[] }} prev  what the DOM holds
  * @param {{ target: string|null, ids: number[] }} next  what state now holds
- * @returns {{ mode: 'full' } | { mode: 'append', from: number }}
+ * @returns {{ mode: 'full', freshIds?: number[] } | { mode: 'append', from: number }}
  */
 export function streamPlan(prev, next) {
   if (prev.target !== next.target) return { mode: 'full' };
@@ -79,10 +90,32 @@ export function streamPlan(prev, next) {
   if (next.ids.length < prev.ids.length) return { mode: 'full' };
 
   for (let i = 0; i < prev.ids.length; i++) {
-    if (prev.ids[i] !== next.ids[i]) return { mode: 'full' };
+    if (prev.ids[i] !== next.ids[i]) return rebuildNamingArrivals(prev, next);
   }
 
   return { mode: 'append', from: prev.ids.length };
+}
+
+/**
+ * A rebuild, plus the ids that arrived since the DOM was last filled.
+ *
+ * `freshIds` is OMITTED rather than empty when there are none, so an ordinary
+ * rebuild stays exactly `{ mode: 'full' }`.
+ *
+ * @param {{ target: string|null, ids: number[] }} prev
+ * @param {{ target: string|null, ids: number[] }} next
+ */
+function rebuildNamingArrivals(prev, next) {
+  const lastHeld = prev.ids[prev.ids.length - 1];
+  const at = next.ids.lastIndexOf(lastHeld);
+
+  // Not found means the window moved past everything the DOM held, so which
+  // rows are new is unknowable. Shimmering all of them is worse than none.
+  if (at === -1) return { mode: 'full' };
+
+  const freshIds = next.ids.slice(at + 1);
+
+  return freshIds.length === 0 ? { mode: 'full' } : { mode: 'full', freshIds };
 }
 
 /** @param {number} unread */
@@ -971,4 +1004,65 @@ function durationLabel(mins) {
  */
 export function claimsPanelEmpty() {
   return '(nothing claimed)';
+}
+
+/**
+ * The id shown beside a message's timestamp (#104).
+ *
+ * 🛑 THE WORDS, NOT A BARE NUMBER. "see 12582" is how one agent points another
+ * at a message, and a lone number in the meta row is indistinguishable from a
+ * count or a duration. lee asked for this wording, 2026-11-04.
+ *
+ * @param {number} id
+ */
+export function messageIdLabel(id) {
+  return `Message ID: ${id}`;
+}
+
+/**
+ * Every place a search term appears in a string (#102).
+ *
+ * 🛑 RANGES, NOT A REPLACED STRING. Returning marked-up text would mean
+ * injecting `<mark>` either into markdown source — which corrupts a code span
+ * or a link — or into rendered HTML, where it can land inside a tag and is an
+ * injection hazard. The caller wraps TEXT NODES using these offsets, which
+ * cannot do either.
+ *
+ * 🛑 LITERAL AND CASE-INSENSITIVE, matching how the bus found the row. A regex
+ * built from user text would treat `100%` and `context_used` as patterns, the
+ * same defect `likePattern` exists to stop on the SQL side.
+ */
+export function matchRanges(text, term) {
+  const needle = (term || '').trim().toLowerCase();
+  if (needle.length === 0) return [];
+
+  const hay = text.toLowerCase();
+  const out = [];
+  let from = 0;
+
+  for (;;) {
+    const at = hay.indexOf(needle, from);
+    if (at === -1) return out;
+
+    out.push({ start: at, end: at + needle.length });
+    // ⚠️ Advance past the whole match, never by one. Overlapping ranges
+    // produce nested <mark> elements around the same characters.
+    from = at + needle.length;
+  }
+}
+
+/**
+ * Whether a message belongs in a filtered view.
+ *
+ * 🛑 THE SAME MATCH RULE AS THE HIGHLIGHT. A filter that kept a message the
+ * highlighter then found nothing in would render a hit with no visible reason,
+ * which reads as a bug in the search.
+ */
+export function messageMatchesSearch(body, term) {
+  return matchRanges(body || '', term).length > 0;
+}
+
+/** What the message pane says when a filter hides everything. */
+export function searchFilterEmpty(term, scanned) {
+  return `no match for "${term}" in ${scanned} loaded message${scanned === 1 ? '' : 's'}`;
 }

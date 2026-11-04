@@ -34,6 +34,7 @@ import {
   gaugeDisplay,
   claimRow,
   claimsPanelEmpty,
+  messageIdLabel,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -520,6 +521,9 @@ function messageNode(m, { fresh: arriving = false } = {}) {
   const meta = h('div', { className: 'message__meta' }, [
     h('span', { className: 'message__from' }, [m.from_handle]),
     h('span', { className: 'message__time' }, [fmtTime(m.sent_at)]),
+    // #104 — the id was unreachable from the UI, so "see 12582" meant nothing
+    // to the human reading it.
+    h('span', { className: 'message__id' }, [messageIdLabel(m.id)]),
     kind !== 'chat' ? h('span', { className: 'message__kind' }, [kind.toUpperCase()]) : null,
     copyButton(m),
   ]);
@@ -580,11 +584,16 @@ function renderMessages({ forceBottom = false } = {}) {
   // would read as 37 arrivals. Every rebuild path happens to pass
   // `forceBottom`, which zeroes the count downstream — this makes it
   // structural rather than lucky. Raised by claude1 reviewing PR 99.
-  const arrived = plan.mode === 'append' ? state.messages.length - plan.from : 0;
+  // 🛑 A REBUILD CAN HAVE ARRIVALS TOO, past the server's 100-row cap. The
+  // window slides, the prefix moves, and the plan names what is new — see
+  // `streamPlan`. Treating a rebuild as zero arrivals is what stopped #leagues
+  // shimmering while a short DM still did.
+  const freshIds = plan.mode === 'full' ? new Set(plan.freshIds ?? []) : null;
+  const arrived = plan.mode === 'append' ? state.messages.length - plan.from : freshIds.size;
 
   if (plan.mode === 'full') {
     el.messages.innerHTML = '';
-    for (const m of state.messages) el.messages.appendChild(messageNode(m));
+    for (const m of state.messages) el.messages.appendChild(messageNode(m, { fresh: freshIds.has(m.id) }));
   } else {
     detachEphemeral();
     for (const m of state.messages.slice(plan.from)) {
