@@ -65,10 +65,11 @@ export function installRoomInbox(server: McpServer, ctx: ShimContext): void {
       // 🛑 ONLY FOR ROOMS THAT ACTUALLY RETURNED SOMETHING, and only when one
       // is set. A room with no style adds no block at all, so every existing
       // database keeps the byte-identical response it has today.
-      const styleBlocks = dao.styleBlocksForRooms(
-        ctx.db,
-        room !== undefined ? [room] : [...idsByRoom.keys()],
-      );
+      // 🛑 GATED ON idsByRoom, NOT ON `room`. Passing `[room]` emitted the
+      // block on a scoped read that returned ZERO messages, which is the
+      // polling case — pure cost, and it made the comment above false.
+      // claude1 caught the comment, not the behaviour.
+      const styleBlocks = dao.styleBlocksForRooms(ctx.db, [...idsByRoom.keys()]);
 
       return {
         content: [

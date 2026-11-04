@@ -159,3 +159,67 @@ test('a custom style pushes the operator markdown verbatim', () => {
   assert.ok(blocks[0]!.text.includes('# House rules'));
   assert.ok(blocks[0]!.text.includes('- Lead with the sha.'));
 });
+
+/**
+ * 🛑 A SCOPED READ THAT RETURNED NOTHING MUST PUSH NOTHING. That is the polling
+ * case, and the first version emitted the block anyway by passing `[room]`
+ * unconditionally. claude1 caught it as a false COMMENT; the behaviour was
+ * changed to match the comment rather than the reverse.
+ */
+test('no rooms returned means no blocks, however styled they are', () => {
+  const db = freshDb();
+  dao.setRoomStyle(db, '#gate', 'succinct');
+
+  assert.deepEqual(dao.styleBlocksForRooms(db, []), []);
+});
+
+// ---------------------------------------------------------------------------
+// The CLI cycle (#92 unit 2)
+// ---------------------------------------------------------------------------
+
+test('the cycle walks none -> normal -> succinct -> none when no custom exists', () => {
+  assert.equal(dao.nextStyle(null, false), 'normal');
+  assert.equal(dao.nextStyle('normal', false), 'succinct');
+  assert.equal(dao.nextStyle('succinct', false), null);
+});
+
+/**
+ * 🛑 `custom` IS ONLY REACHABLE WHEN MARKDOWN ALREADY EXISTS. A terminal cannot
+ * prompt for multi-line markdown mid-cycle, so cycling onto an empty custom
+ * would set a style that pushes nothing — the half-written state resolveStyle
+ * already refuses.
+ */
+test('the cycle includes custom only when markdown is already stored', () => {
+  assert.equal(dao.nextStyle('succinct', true), 'custom');
+  assert.equal(dao.nextStyle('custom', true), null);
+
+  assert.equal(dao.nextStyle('succinct', false), null, 'custom was offered with no markdown behind it');
+});
+
+test('an unrecognised stored style is CLEARED rather than advanced', () => {
+  // My first version of this test expected 'normal' and the code returns null.
+  // The docblock said "cycles to the start"; index 0 of the order is `null`.
+  assert.equal(dao.nextStyle('terse', false), null);
+});
+
+test('custom markdown is what makes custom reachable in the cycle', () => {
+  const db = freshDb();
+
+  assert.equal(dao.hasCustomStyle(db, '#gate'), false);
+
+  dao.setRoomStyle(db, '#gate', 'custom', '# rules');
+  assert.equal(dao.hasCustomStyle(db, '#gate'), true);
+
+  // Whitespace-only is not markdown — the same rule resolveStyle applies.
+  db.prepare('UPDATE rooms SET style_custom = ? WHERE name = ?').run('  \n ', '#gate');
+  assert.equal(dao.hasCustomStyle(db, '#gate'), false);
+});
+
+test('a room row carries its style so the pane can render it', () => {
+  const db = freshDb();
+  dao.setRoomStyle(db, '#gate', 'succinct');
+
+  const room = dao.allRooms(db).find((r) => r.name === '#gate');
+
+  assert.equal(room?.style, 'succinct', 'Room.style did not survive the hydrator');
+});

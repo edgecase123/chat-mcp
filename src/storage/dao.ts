@@ -409,6 +409,8 @@ export interface Room {
   created_at: number;
   created_by: string;
   member_count: number;
+  /** The configured style name, or null when the room has no preference (#92). */
+  style: string | null;
 }
 
 export interface JoinResult {
@@ -430,6 +432,7 @@ interface RoomRow {
   name: string;
   created_at: number;
   created_by: string;
+  style: string | null;
 }
 
 /**
@@ -553,14 +556,14 @@ export function myRooms(db: Db, handle: string): Room[] {
 /** All rooms known to the bus (for /rooms --all). */
 export function allRooms(db: Db): Room[] {
   const rows = db.prepare(
-    `SELECT name, created_at, created_by FROM rooms ORDER BY name ASC`,
+    `SELECT name, created_at, created_by, style FROM rooms ORDER BY name ASC`,
   ).all() as unknown as RoomRow[];
   return rows.map((r) => hydrateRoomFromRow(db, r));
 }
 
 function hydrateRoom(db: Db, name: string): Room {
   const row = db.prepare(
-    `SELECT name, created_at, created_by FROM rooms WHERE name = ?`,
+    `SELECT name, created_at, created_by, style FROM rooms WHERE name = ?`,
   ).get(name) as unknown as RoomRow | undefined;
   if (!row) throw new Error(`Room ${name} does not exist`);
   return hydrateRoomFromRow(db, row);
@@ -575,6 +578,7 @@ function hydrateRoomFromRow(db: Db, row: RoomRow): Room {
     created_at: row.created_at,
     created_by: row.created_by,
     member_count: count.n,
+    style: row.style ?? null,
   };
 }
 
@@ -1133,4 +1137,35 @@ export function styleBlocksForRooms(db: Db, rooms: string[]): { type: 'text'; te
   }
 
   return blocks;
+}
+
+/**
+ * The order the CLI cycles a room's style through.
+ *
+ * 🛑 `custom` IS ONLY REACHABLE WHEN MARKDOWN ALREADY EXISTS. A terminal
+ * cannot prompt for multi-line markdown mid-cycle, so cycling onto an empty
+ * `custom` would set a style that pushes nothing — the half-written state
+ * `resolveStyle` already refuses. Markdown is set through `set_style`.
+ */
+/** Whether a room has custom markdown stored, which is what makes `custom` reachable in the CLI cycle. */
+export function hasCustomStyle(db: Db, room: string): boolean {
+  const row = db.prepare('SELECT style_custom FROM rooms WHERE name = ?').get(room) as unknown as
+    | { style_custom: string | null }
+    | undefined;
+
+  return typeof row?.style_custom === 'string' && row.style_custom.trim() !== '';
+}
+
+export function nextStyle(current: string | null, hasCustom: boolean): string | null {
+  const order: (string | null)[] = [null, 'normal', 'succinct'];
+
+  if (hasCustom) order.push('custom');
+
+  const at = order.indexOf(current);
+
+  // An unknown stored value — a preset since removed, say — CLEARS rather than
+  // advancing. "Cycles to the start" was the first wording and it is ambiguous:
+  // index 0 is `null`, not the first named style, and my own test read it the
+  // other way.
+  return order[at === -1 ? 0 : (at + 1) % order.length] ?? null;
 }
