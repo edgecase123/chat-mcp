@@ -1,51 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-
-/**
- * 🛑 THE SHIMMER FIRED THE WHOLE TIME AND WAS TOO FAINT TO SEE.
- *
- * lee reported it as not working for new messages. A MutationObserver on the
- * live UI caught the arriving row carrying `.is-fresh`, so the logic was right
- * and the token was not: at 16% of `--accent` the peak sat at rgb(215,237,243)
- * on white, a 40/255 delta, crossing any pixel in roughly an eighth of a
- * second.
- *
- * 🛑 SO THE FLOOR IS ASSERTED, NOT THE VALUE. Pinning `--msg-fresh-tint: 40%`
- * would only restate the stylesheet and would still pass if `--accent` moved
- * to something that vanishes against `--bg`. What matters is the composited
- * distance a reader actually perceives, in BOTH themes.
- *
- * ⚠️ READS THE STYLESHEET AS TEXT. There is no DOM under `node --test`, so this
- * cannot resolve a cascade — it reads the two token blocks it names and fails
- * loudly if either stops existing.
- */
-
-const CSS = readFileSync(new URL('../../web/assets/style.css', import.meta.url), 'utf8');
-
-/** The body of a top-level rule, by its exact selector. */
-function block(selector: string): string {
-  const start = CSS.indexOf(`${selector} {`);
-  assert.notEqual(start, -1, `selector ${selector} is gone from style.css`);
-  const end = CSS.indexOf('\n}', start);
-  assert.notEqual(end, -1, `selector ${selector} has no closing brace`);
-
-  return CSS.slice(start, end);
-}
-
-function token(selector: string, name: string): string {
-  const m = new RegExp(`--${name}:\\s*([^;]+);`).exec(block(selector));
-  assert.ok(m, `--${name} is gone from ${selector}`);
-
-  return m[1]!.trim();
-}
-
-function rgb(hex: string): [number, number, number] {
-  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
-  assert.ok(m, `expected a 6-digit hex colour, got ${hex}`);
-
-  return [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
-}
+import { MIN_THEMES, block, rgb, themeSelectors, token } from '../support/theme-tokens.js';
 
 /**
  * The largest per-channel distance between the shimmer's peak and the page.
@@ -73,31 +28,6 @@ function peakDelta(selector: string): number {
  * a target — it exists so lowering the tint back to invisible fails here.
  */
 const MIN_DELTA = 60;
-
-/**
- * Every theme block in the stylesheet, DISCOVERED rather than listed.
- *
- * 🛑 TWO LITERAL CALLS WOULD LET A THIRD THEME SHIP INVISIBLE AND GREEN. The
- * stylesheet's own header says adding a theme is drop-in — define a property
- * block and let the toggle set `data-theme`. A hand-written pair of
- * assertions covers the two that exist and nothing that arrives. Raised by
- * claude1.
- *
- * The selector is anchored at a line start and followed by the brace, so
- * `[data-theme="dark"] .theme-icon::before` is not mistaken for the block.
- */
-function themeSelectors(): string[] {
-  const found = [...CSS.matchAll(/^(:root|\[data-theme="[a-z-]+"\])\s*\{/gm)].map((m) => m[1]!);
-
-  return [...new Set(found)];
-}
-
-/**
- * The denominator, asserted. `:root` plus one `data-theme` block is the
- * minimum this stylesheet has ever had, so a regex that silently stops
- * matching fails here instead of reporting a clean sweep over nothing.
- */
-const MIN_THEMES = 2;
 
 test('🛑 the sweep found every theme block — the denominator, not just the result', () => {
   const selectors = themeSelectors();
