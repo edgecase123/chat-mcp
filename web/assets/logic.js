@@ -1052,6 +1052,44 @@ export function matchRanges(text, term) {
 }
 
 /**
+ * A string split into the parts that match a term and the parts that do not.
+ *
+ * 🛑 SEGMENTS, NOT MARKED-UP TEXT, FOR THE SAME REASON `matchRanges` RETURNS
+ * OFFSETS. Injecting `<mark>` into markdown source corrupts a code span or a
+ * link; injecting it into rendered HTML can land inside a tag and is an
+ * injection hazard. The caller turns these into text nodes and `<mark>`
+ * elements, which can do neither.
+ *
+ * 🛑 NO EMPTY SEGMENTS. A `<mark>` wrapping nothing is a stray element, and an
+ * empty text node is a child that renders nothing. A term that matches nothing
+ * still returns ONE segment, because an empty list would erase the text.
+ *
+ * ⚠️ THE ORIGINAL CASE SURVIVES. The match is case-insensitive, but the
+ * segment carries the text as written — slicing the needle in would rewrite
+ * the operator's own transcript.
+ *
+ * @param {string} text
+ * @param {string} term
+ * @returns {{ text: string, hit: boolean }[]}
+ */
+export function highlightSegments(text, term) {
+  const ranges = matchRanges(text, term);
+  if (ranges.length === 0) return [{ text, hit: false }];
+
+  const out = [];
+  let at = 0;
+
+  for (const r of ranges) {
+    if (r.start > at) out.push({ text: text.slice(at, r.start), hit: false });
+    out.push({ text: text.slice(r.start, r.end), hit: true });
+    at = r.end;
+  }
+  if (at < text.length) out.push({ text: text.slice(at), hit: false });
+
+  return out;
+}
+
+/**
  * Whether a message belongs in a filtered view.
  *
  * 🛑 THE SAME MATCH RULE AS THE HIGHLIGHT. A filter that kept a message the
@@ -1065,4 +1103,49 @@ export function messageMatchesSearch(body, term) {
 /** What the message pane says when a filter hides everything. */
 export function searchFilterEmpty(term, scanned) {
   return `no match for "${term}" in ${scanned} loaded message${scanned === 1 ? '' : 's'}`;
+}
+
+/**
+ * The string a search must match: what the reader sees, plus the URLs they do
+ * not (#102).
+ *
+ * 🛑 A MARKDOWN LINK'S URL IS INVISIBLE TO `textContent`. `[label](url)`
+ * renders as `<a href=url>label</a>`, so the URL lives in an attribute and
+ * nowhere in the text. Matching rendered text alone made every PR reference in
+ * `#leagues` unfindable by its URL, and finding an old decision is what the box
+ * is for. Found by claude1 reviewing PR 118.
+ *
+ * 🛑 SO "EVERY SHOWN ROW CARRIES A MARK" IS NOW IMPOSSIBLE, NOT MERELY UNDONE.
+ * `highlightInPlace` walks `NodeFilter.SHOW_TEXT`, and an attribute value is
+ * not a text node — an href-only hit is unmarkable by construction. Findable
+ * is a strictly larger set than markable once URLs are searchable. claude1
+ * named this and withdrew the union on it.
+ *
+ * ⚠️ A UNION WITH THE MARKDOWN SOURCE WAS REJECTED FOR NOISE, NOT FOR MARKS.
+ * `body` carries every backtick, `*` and `[`, so searching `**` would match
+ * every bold message in the room. Appending only hrefs adds what a reader
+ * would actually look for.
+ *
+ * The join is a NEWLINE because the search input is single-line, so no term can
+ * straddle the boundary and match text that is not contiguous on screen.
+ *
+ * @param {string} text   `textContent` of the rendered body
+ * @param {string[]} hrefs  every `a[href]` value in it, in document order
+ */
+export function searchableText(text, hrefs = []) {
+  const extra = [];
+
+  for (const href of hrefs) {
+    if (typeof href !== 'string' || href.length === 0) continue;
+    // 🛑 `#` IS WHAT A NEUTERED LINK RENDERS AS, not a destination. `safeUrl`
+    // turns a `javascript:` or `data:` target into `#`, and appending that made
+    // the term "#" match every message holding a dead link. Found by claude1.
+    if (href === '#') continue;
+    // A bare URL is already its own label, so appending it would double it.
+    if (text.includes(href)) continue;
+    if (extra.includes(href)) continue;
+    extra.push(href);
+  }
+
+  return extra.length === 0 ? text : `${text}\n${extra.join('\n')}`;
 }

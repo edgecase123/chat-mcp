@@ -35,6 +35,10 @@ import {
   claimRow,
   claimsPanelEmpty,
   messageIdLabel,
+  highlightSegments,
+  messageMatchesSearch,
+  searchableText,
+  searchFilterEmpty,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -57,6 +61,10 @@ const state = {
   // from "a different room" or "older messages loaded above".
   renderedTarget: null,
   renderedIds: [],
+  // #102 — the filter term for the OPEN conversation. Not persisted: a filter
+  // left on across a room switch hides messages for a reason the reader has
+  // forgotten setting.
+  searchTerm: '',
   unreadBelow: 0,   // messages that arrived while the reader was scrolled up
   suggest: null,     // { items, index, kind, token } while the composer popover is open
   history: { entries: [], index: null, draft: null },
@@ -92,6 +100,7 @@ const el = {
   jumpNewest: document.getElementById('jump-newest'),
   suggest: document.getElementById('composer-suggest'),
   approvals: document.getElementById('approvals'),
+  paneSearch: document.getElementById('pane-search'),
   composer: document.getElementById('composer'),
   composerInput: document.getElementById('composer-input'),
   composerSend: document.getElementById('composer-send'),
@@ -508,7 +517,69 @@ function freshDurationMs() {
   return Number.isFinite(ms) && ms > 0 ? ms + 60 : 500;
 }
 
-function messageNode(m, { fresh: arriving = false } = {}) {
+/**
+ * The message as the reader SEES it, not as it was typed (#102).
+ *
+ * 🛑 THE FILTER AND THE HIGHLIGHTER MUST MATCH THE SAME STRING. They did not:
+ * the filter read markdown SOURCE and the highlighter walked RENDERED text, so
+ * a term crossing a code span hid a row whose exact text was on screen.
+ * Measured on `see \`--color-card\` here`: the term "see --color-card" returned
+ * ZERO rows while those characters were visible. Found by claude1.
+ *
+ * ⚠️ PARSED IN THE BROWSER, NOT STRIPPED ON THE SERVER. A server-side tag
+ * strip has to decode entities to agree with what a text node holds — `&amp;`
+ * against `&` — which is the same mismatch one layer down. `textContent` of a
+ * parse is what the highlighter walks, by construction.
+ *
+ * ⚠️ PLUS EVERY `a[href]`, WHICH `textContent` CANNOT SEE. See
+ * `searchableText` for why that is worth an unmarkable hit.
+ *
+ * Cached per message object. `refresh()` replaces `state.messages` wholesale on
+ * every wake, so this costs one parse per fetch rather than one per keystroke.
+ */
+function renderedText(m) {
+  if (m.__renderedText === undefined) {
+    const probe = document.createElement('div');
+    probe.innerHTML = m.body_html || '';
+    const hrefs = [...probe.querySelectorAll('a[href]')].map((a) => a.getAttribute('href') ?? '');
+    m.__renderedText = searchableText(probe.textContent ?? '', hrefs);
+  }
+
+  return m.__renderedText;
+}
+
+/**
+ * Wrap every occurrence of `term` in a node's TEXT NODES with `<mark>` (#102).
+ *
+ * 🛑 TEXT NODES, NEVER THE HTML STRING. A regex over `body_html` can match
+ * inside a tag or an attribute, which breaks the markup and is an injection
+ * hazard; `highlightSegments` works on text that is already parsed, so neither
+ * is reachable.
+ *
+ * ⚠️ THE NODES ARE COLLECTED BEFORE ANY ARE REPLACED. A TreeWalker advanced
+ * while the tree is being rewritten under it skips siblings, and the symptom
+ * is a hit highlighted in one paragraph and missed in the next.
+ */
+function highlightInPlace(root, term) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const texts = [];
+  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) texts.push(n);
+
+  for (const node of texts) {
+    const segments = highlightSegments(node.nodeValue ?? '', term);
+    // One unhit segment means nothing matched in this node; replacing it would
+    // churn the DOM for no change.
+    if (segments.length === 1 && !segments[0].hit) continue;
+
+    const frag = document.createDocumentFragment();
+    for (const seg of segments) {
+      frag.appendChild(seg.hit ? h('mark', {}, [seg.text]) : document.createTextNode(seg.text));
+    }
+    node.replaceWith(frag);
+  }
+}
+
+function messageNode(m, { fresh: arriving = false, term = '' } = {}) {
   const isSelf = m.from_handle === state.handle;
   // 🛑 YOUR OWN MESSAGE IS NEVER FRESH. `is-fresh` means "this arrived while
   // you were reading"; you already know you sent it, so both the shimmer and
@@ -528,6 +599,7 @@ function messageNode(m, { fresh: arriving = false } = {}) {
     copyButton(m),
   ]);
   const body = h('div', { className: 'message__body', html: m.body_html || '' });
+  if (term.length > 0) highlightInPlace(body, term);
   const li = h('li', { className: cls }, [meta, body]);
 
   // 🛑 DROP THE CLASS ONCE IT HAS PLAYED. Left on, the next reflow replays the
@@ -573,10 +645,41 @@ function renderMessages({ forceBottom = false } = {}) {
     return;
   }
 
-  const ids = state.messages.map((m) => m.id);
+  // #102 — the filter applies to what is LOADED, which is why the empty state
+  // says how many messages were scanned. "no match" alone reads as "it is not
+  // in the transcript", and the transcript is longer than this view.
+  const term = state.searchTerm.trim();
+  // 🛑 `renderedText`, NOT `m.body`. Matching markdown SOURCE while marking
+  // RENDERED text hid rows whose exact characters were on screen: the term
+  // "see --color-card" returned nothing against `see \`--color-card\` here`.
+  //
+  // ⚠️ A SHOWN ROW DOES NOT ALWAYS CARRY A MARK, and an earlier version of this
+  // comment claimed it always would. Two independent reasons, both measured at
+  // 1 row and 0 marks: a term spanning a code span appears in no single text
+  // node, and an href hit lives in an attribute. See `searchableText`.
+  const visible =
+    term.length === 0 ? state.messages : state.messages.filter((m) => messageMatchesSearch(renderedText(m), term));
+
+  if (visible.length === 0) {
+    el.messages.innerHTML = '';
+    el.messages.appendChild(
+      h('div', { className: 'messages__empty' }, [searchFilterEmpty(term, state.messages.length)]),
+    );
+    appendEphemeral();
+    resetStreamPosition();
+    return;
+  }
+
+  const ids = visible.map((m) => m.id);
+  // 🛑 THE FILTER TERM IS PART OF THE VIEW IDENTITY, NOT A SEPARATE BRANCH.
+  // Clearing a filter makes the list longer with a different prefix, which
+  // `streamPlan` would otherwise read as a slid window and shimmer every
+  // message the filter had been hiding. Folding the term into the target
+  // reuses the existing "different conversation" guard instead.
+  const viewKey = `${state.currentTarget}\u0000${state.searchTerm}`;
   const plan = streamPlan(
     { target: state.renderedTarget, ids: state.renderedIds },
-    { target: state.currentTarget, ids },
+    { target: viewKey, ids },
   );
 
   // 🛑 ONLY AN APPEND HAS ARRIVALS. On a rebuild the previous count belongs to
@@ -589,20 +692,20 @@ function renderMessages({ forceBottom = false } = {}) {
   // `streamPlan`. Treating a rebuild as zero arrivals is what stopped #leagues
   // shimmering while a short DM still did.
   const freshIds = plan.mode === 'full' ? new Set(plan.freshIds ?? []) : null;
-  const arrived = plan.mode === 'append' ? state.messages.length - plan.from : freshIds.size;
+  const arrived = plan.mode === 'append' ? visible.length - plan.from : freshIds.size;
 
   if (plan.mode === 'full') {
     el.messages.innerHTML = '';
-    for (const m of state.messages) el.messages.appendChild(messageNode(m, { fresh: freshIds.has(m.id) }));
+    for (const m of visible) el.messages.appendChild(messageNode(m, { fresh: freshIds.has(m.id), term }));
   } else {
     detachEphemeral();
-    for (const m of state.messages.slice(plan.from)) {
-      el.messages.appendChild(messageNode(m, { fresh: true }));
+    for (const m of visible.slice(plan.from)) {
+      el.messages.appendChild(messageNode(m, { fresh: true, term }));
     }
   }
 
-  state.renderedCount = state.messages.length;
-  state.renderedTarget = state.currentTarget;
+  state.renderedCount = visible.length;
+  state.renderedTarget = viewKey;
   state.renderedIds = ids;
   appendEphemeral();
 
@@ -736,6 +839,11 @@ function renderPaneHeader() {
 
 async function selectTarget(target) {
   state.currentTarget = target;
+  // 🛑 THE FILTER DOES NOT FOLLOW YOU. A term left on across a switch hides
+  // messages in the new conversation for a reason the reader has forgotten
+  // setting, and an empty-looking room reads as a broken one.
+  state.searchTerm = '';
+  el.paneSearch.value = '';
   state.ephemeral = [];
   renderSidebar();
   renderPaneHeader();
@@ -1200,6 +1308,24 @@ async function tryDispatchSlashCommand(input) {
 }
 
 // ── Composer ─────────────────────────────────────────────────────────────
+
+// #102 — filter and highlight the open conversation as the term is typed.
+el.paneSearch.addEventListener('input', () => {
+  state.searchTerm = el.paneSearch.value;
+  // 🛑 NOT forceBottom. Filtering while scrolled up must not yank the reader
+  // to the newest hit; the jump affordance already offers that.
+  renderMessages();
+});
+
+// Escape clears the filter rather than closing anything, because an empty box
+// and a hidden message list look the same and only one of them is a mistake.
+el.paneSearch.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  e.preventDefault();
+  el.paneSearch.value = '';
+  state.searchTerm = '';
+  renderMessages();
+});
 
 el.composerInput.addEventListener('input', () => {
   // Auto-grow up to CSS max-height.

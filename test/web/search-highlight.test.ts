@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 // @ts-expect-error — plain JS module, no types, same as the other logic tests.
-import { matchRanges, messageMatchesSearch, searchFilterEmpty } from '../../web/assets/logic.js';
+import { matchRanges, messageMatchesSearch, searchableText, searchFilterEmpty } from '../../web/assets/logic.js';
 
 /**
  * 🛑 HIGHLIGHTING IS WHERE A SEARCH FEATURE GETS DANGEROUS.
@@ -96,4 +96,81 @@ test('🛑 an empty filtered view SAYS what it searched and how much it saw', ()
   assert.match(s, /gate/);
   assert.match(s, /12 loaded messages/);
   assert.match(searchFilterEmpty('gate', 1), /1 loaded message\b/, 'singular, because 1 messages reads as a bug');
+});
+
+/**
+ * 🛑 A MARKDOWN LINK'S URL IS NOT IN THE RENDERED TEXT.
+ *
+ * `[PR 118](https://github.com/edgecase123/chat-mcp/pull/118)` renders as an
+ * `<a>` whose href holds the URL and whose text holds only "PR 118". Matching
+ * `textContent` alone made every PR reference in `#leagues` unfindable by its
+ * URL. Found by claude1 reviewing PR 118.
+ *
+ * `searchableText` is given the href list because the DOM parse belongs to the
+ * caller — these tests run under plain `node --test`, with no document.
+ */
+
+test('🛑 a markdown link URL is findable, though only its LABEL is on screen', () => {
+  const text = searchableText('decided in PR 118', ['https://github.com/edgecase123/chat-mcp/pull/118']);
+
+  assert.ok(messageMatchesSearch(text, 'chat-mcp/pull/118'));
+  assert.ok(messageMatchesSearch(text, 'github.com'));
+  // The label still matches, which is the behaviour the href must not displace.
+  assert.ok(messageMatchesSearch(text, 'PR 118'));
+});
+
+test('a bare URL is NOT doubled — it is already its own label', () => {
+  const url = 'https://github.com/edgecase123/chat-mcp/pull/118';
+
+  assert.equal(searchableText(`see ${url} here`, [url]), `see ${url} here`);
+});
+
+test('the same href twice appends it once', () => {
+  const url = 'https://example.test/a';
+
+  assert.equal(searchableText('one two', [url, url]), `one two\n${url}`);
+});
+
+test('no links means the string is the rendered text, byte for byte', () => {
+  assert.equal(searchableText('plain body', []), 'plain body');
+  assert.equal(searchableText('plain body'), 'plain body');
+});
+
+test('an empty or non-string href is skipped rather than appended blank', () => {
+  // @ts-expect-error — deliberately wrong types, as a hostile DOM could give.
+  assert.equal(searchableText('body', ['', null, undefined]), 'body');
+});
+
+test('🛑 no term can straddle the join, so the appended URL invents no phrase', () => {
+  // "here" ends the text and "https" starts the href. A space join would make
+  // "here https" matchable, and those words are not contiguous on screen.
+  const text = searchableText('ends here', ['https://example.test/x']);
+
+  assert.equal(messageMatchesSearch(text, 'here https'), false);
+  assert.ok(messageMatchesSearch(text, 'example.test'));
+});
+
+/**
+ * ⚠️ NEGATIVE CONTROL for the whole feature: without the href the URL search
+ * finds nothing. This is the state PR 118 shipped at `402ceea` and it is the
+ * regression this file now pins.
+ */
+test('⚠️ control — rendered text alone cannot find the URL', () => {
+  assert.equal(messageMatchesSearch('decided in PR 118', 'chat-mcp/pull/118'), false);
+});
+
+test('🛑 a neutered link contributes NOTHING — `#` is not a destination', () => {
+  // `safeUrl` renders a `javascript:` target as `href="#"`. Appending that made
+  // the single-character term "#" match every message holding a dead link.
+  const text = searchableText('careful with this link', ['#']);
+
+  assert.equal(text, 'careful with this link');
+  assert.equal(messageMatchesSearch(text, '#'), false);
+});
+
+test('a real fragment or relative href is still appended', () => {
+  // `safeUrl` passes `/`, `#` and `?` prefixes through, so these are genuine
+  // destinations and only the bare `#` is the dead one.
+  assert.equal(searchableText('see the gate', ['#gate-section']), 'see the gate\n#gate-section');
+  assert.equal(searchableText('see the gate', ['/rooms/gate']), 'see the gate\n/rooms/gate');
 });
