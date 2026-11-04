@@ -27,10 +27,18 @@ export function RoomsBrowserPane({ db, handle, rooms, onOpen, onJoin, onStyleCha
   useInput((raw, key) => {
     if (key.upArrow) return setSelected((i) => Math.max(0, i - 1));
     if (key.downArrow) return setSelected((i) => Math.min(rooms.length - 1, i + 1));
-    // #92 — the style selector. A terminal has no dropdown, so `s` cycles.
+    // #92 — the style selector. A terminal has no dropdown, so this cycles.
     // `custom` is offered only when markdown is already stored, because this
     // key cannot prompt for it; `set_style` writes the markdown.
-    if (raw === 's') {
+    //
+    // 🛑 CTRL, NOT A BARE LETTER, AND NOT AN `EMPTY_BUFFER_HOTKEYS` ENTRY.
+    // That list only suppresses echo while the buffer is EMPTY
+    // (`Input.tsx:167`), so a bare `s` cycled the style AND echoed whenever
+    // someone was mid-message. Adding `s` to the list instead would stop
+    // every message that starts with "s" from being typeable at all.
+    // `Input.tsx:164` never inserts when `key.ctrl`, so this needs no sync
+    // with that list and cannot echo at any buffer state. claude1's finding.
+    if (raw === 's' && key.ctrl) {
       const r = rooms[selected];
       if (!r) return;
       const hasCustom = dao.hasCustomStyle(db, r.name);
@@ -69,7 +77,7 @@ export function RoomsBrowserPane({ db, handle, rooms, onOpen, onJoin, onStyleCha
         })
       )}
       <Box marginTop={1}>
-        <Text dimColor>↑↓ move · Enter open/join · s style · /back close</Text>
+        <Text dimColor>↑↓ move · Enter open/join · ^s style · /back close</Text>
       </Box>
     </Box>
   );
