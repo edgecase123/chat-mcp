@@ -21,6 +21,17 @@
       <header class="pane__header">
         <h1 class="pane__title" id="pane-title">select a peer or room</h1>
         <div class="pane__meta" id="pane-meta"></div>
+        <!-- #92 — the conversation style agents must follow in this room.
+             Hidden for DMs and for the empty state; shown only for a room. -->
+        <label class="pane__style" id="pane-style-wrap" hidden>
+          <span class="pane__style-label">style</span>
+          <select class="pane__style-select" id="pane-style">
+            <option value="">none</option>
+            <option value="normal">normal</option>
+            <option value="succinct">succinct</option>
+            <option value="custom">custom</option>
+          </select>
+        </label>
       </header>
       <!-- Pending permission requests. Above the message list on purpose:
            a supervised agent is STOPPED until one of these is answered, so it

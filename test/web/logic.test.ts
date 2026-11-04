@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 // The browser file itself, imported directly. No DOM, no bundler, no copy.
 import {
+  styleSelection,
   acceptReopens,
   enterShouldSend,
   isPinnedToBottom,
@@ -1048,4 +1049,34 @@ test('the DM confirm says BOTH of you and never says EVERYONE', () => {
  */
 test('the DM confirm does not promise a one-sided delete', () => {
   assert.doesNotMatch(clearConfirmText('claude2'), /only (for )?you|your copy/i);
+});
+
+// ---------------------------------------------------------------------------
+// #92 — the conversation style selector
+// ---------------------------------------------------------------------------
+
+test('choosing a preset saves it', () => {
+  assert.deepEqual(styleSelection('succinct', null), { action: 'save', style: 'succinct' });
+});
+
+test('choosing none clears it, which is null and not an empty string', () => {
+  assert.deepEqual(styleSelection('', 'succinct'), { action: 'save', style: null });
+});
+
+/**
+ * 🛑 `custom` IS REFUSED, NOT SAVED. The server demands markdown with it and a
+ * header select has nowhere to type multi-line markdown, so offering it and
+ * failing would be worse than refusing. The option stays in the list because a
+ * room CAN be in that state via the set_style tool.
+ */
+test('choosing custom refuses and reverts to what the room already had', () => {
+  const decision = styleSelection('custom', 'normal');
+
+  assert.equal(decision.action, 'refuse');
+  assert.equal(decision.revertTo, 'normal');
+  assert.match(decision.message, /set_style/);
+});
+
+test('refusing custom on an unstyled room reverts to none, not undefined', () => {
+  assert.equal(styleSelection('custom', null).revertTo, '');
 });
