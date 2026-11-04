@@ -544,7 +544,7 @@ export function roomMembers(db: Db, room: string): string[] {
 /** Rooms the caller is a member of. */
 export function myRooms(db: Db, handle: string): Room[] {
   const rows = db.prepare(
-    `SELECT r.name, r.created_at, r.created_by
+    `SELECT r.name, r.created_at, r.created_by, r.style
      FROM rooms r
      JOIN room_members m ON m.room_name = r.name
      WHERE m.handle = ?
