@@ -11,9 +11,16 @@
  * decision testable at all.
  */
 
-/** A position this close to the end counts as the bottom. A fractional
- *  scrollHeight makes an equality test false when it looks true. */
-export const BOTTOM_TOLERANCE_PX = 24;
+/**
+ * A position this close to the end counts as the bottom.
+ *
+ * 🛑 NOT ZERO, AND NO LONGER 24. Zero is unsafe: a fractional `scrollHeight`
+ * makes an exact test read false on a view that looks pinned. 24 was wide
+ * enough that nudging up by one short line still counted as pinned, so the
+ * next arrival yanked the view back while you were reading. 4 covers
+ * sub-pixel rounding and nothing a reader would do on purpose.
+ */
+export const BOTTOM_TOLERANCE_PX = 4;
 
 /** How far up counts as "reading history" rather than "glancing back". */
 export const JUMP_VISIBLE_AFTER_PX = 240;
@@ -42,6 +49,40 @@ export function shouldShowJump(unread, geo) {
   if (unread > 0) return true;
 
   return distanceFromBottom(geo) > Math.max(JUMP_VISIBLE_AFTER_PX, geo.clientHeight);
+}
+
+/**
+ * Whether the stream can be grown in place, or has to be rebuilt.
+ *
+ * 🛑 A REBUILD DESTROYS WHAT THE READER IS DOING. `innerHTML = ''` collapses
+ * any text selection in the transcript, so before this existed, highlighting a
+ * code block and having a peer say anything lost the selection.
+ *
+ * Append is only safe when the rendered prefix is still exactly the head of
+ * the new list. A different target, a page of older messages loaded above, or
+ * a shorter list all rebuild.
+ *
+ * 🛑 THIS COMPARES IDS, NOT CONTENT. A message whose BODY changed under the
+ * same id is not detected, and its stale text would stay on screen. Nothing
+ * edits a message today, so there is no such path to guard; an edit feature
+ * has to carry a version in the id comparison or force a rebuild itself.
+ * Raised by claude1 reviewing PR 99, against a docblock that claimed
+ * otherwise.
+ *
+ * @param {{ target: string|null, ids: number[] }} prev  what the DOM holds
+ * @param {{ target: string|null, ids: number[] }} next  what state now holds
+ * @returns {{ mode: 'full' } | { mode: 'append', from: number }}
+ */
+export function streamPlan(prev, next) {
+  if (prev.target !== next.target) return { mode: 'full' };
+  if (prev.ids.length === 0) return { mode: 'full' };
+  if (next.ids.length < prev.ids.length) return { mode: 'full' };
+
+  for (let i = 0; i < prev.ids.length; i++) {
+    if (prev.ids[i] !== next.ids[i]) return { mode: 'full' };
+  }
+
+  return { mode: 'append', from: prev.ids.length };
 }
 
 /** @param {number} unread */

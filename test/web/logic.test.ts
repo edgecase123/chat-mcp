@@ -27,6 +27,7 @@ import {
   pathSuggestionsFor,
   nextUnreadBelow,
   shouldShowJump,
+  streamPlan,
   suggestionsFor,
 // @ts-expect-error — plain JS with JSDoc types, deliberately not compiled.
   pathsFromUriList,
@@ -71,7 +72,74 @@ test('at the bottom is pinned, and a fractional gap still counts', () => {
 
 test('scrolled up is not pinned, so a render must hold position', () => {
   assert.equal(isPinnedToBottom(GEO(0, 1000, 100)), false);
-  assert.equal(isPinnedToBottom(GEO(875, 1000, 100)), false, '25px is past the 24px tolerance');
+  assert.equal(isPinnedToBottom(GEO(875, 1000, 100)), false, '25px is past the tolerance');
+});
+
+/**
+ * The boundary itself. Lowering the tolerance from 24 to 4 was the whole
+ * point, so a test that only checks 0px and 25px would pass at either value.
+ */
+test('a nudge of a few pixels already counts as scrolled up', () => {
+  assert.equal(isPinnedToBottom(GEO(896, 1000, 100)), true, '4px is the tolerance, not past it');
+  assert.equal(isPinnedToBottom(GEO(895, 1000, 100)), false, '5px must not count as pinned');
+  assert.equal(isPinnedToBottom(GEO(880, 1000, 100)), false, '20px counted as pinned under the old 24px');
+});
+
+// ── growing the stream in place ──────────────────────────────────────────
+
+test('two more messages in the same room append from the old length', () => {
+  const plan = streamPlan({ target: '#ops', ids: [1, 2, 3] }, { target: '#ops', ids: [1, 2, 3, 4, 5] });
+
+  assert.deepEqual(plan, { mode: 'append', from: 3 });
+});
+
+test('nothing new is still an append of zero, so the ephemeral panels refresh', () => {
+  const plan = streamPlan({ target: '#ops', ids: [1, 2] }, { target: '#ops', ids: [1, 2] });
+
+  assert.deepEqual(plan, { mode: 'append', from: 2 });
+});
+
+test('switching target rebuilds, because the DOM holds another conversation', () => {
+  assert.deepEqual(
+    streamPlan({ target: '#ops', ids: [1, 2] }, { target: '@alice', ids: [1, 2] }),
+    { mode: 'full' },
+  );
+});
+
+test('a page of older messages loaded above rebuilds, because the prefix moved', () => {
+  assert.deepEqual(
+    streamPlan({ target: '#ops', ids: [8, 9] }, { target: '#ops', ids: [6, 7, 8, 9] }),
+    { mode: 'full' },
+  );
+});
+
+test('a shorter list rebuilds, because something was withdrawn', () => {
+  assert.deepEqual(
+    streamPlan({ target: '#ops', ids: [1, 2, 3] }, { target: '#ops', ids: [1, 2] }),
+    { mode: 'full' },
+  );
+});
+
+test('an empty DOM rebuilds even when the target matches', () => {
+  assert.deepEqual(
+    streamPlan({ target: '#ops', ids: [] }, { target: '#ops', ids: [1] }),
+    { mode: 'full' },
+  );
+});
+
+/**
+ * Same length and same target, but one id differs — an append of zero here
+ * would leave the stale message on screen for good.
+ *
+ * 🛑 A CHANGED BODY UNDER THE SAME ID IS NOT COVERED, and cannot be: the plan
+ * compares ids, never content. `streamPlan`'s own docblock says so. There is
+ * no edit path today, so there is nothing to assert about one.
+ */
+test('a replaced id rebuilds, because the prefix no longer matches', () => {
+  assert.deepEqual(
+    streamPlan({ target: '#ops', ids: [1, 2, 3] }, { target: '#ops', ids: [1, 9, 3] }),
+    { mode: 'full' },
+  );
 });
 
 test('unread accrues while away from the bottom and resets when pinned', () => {

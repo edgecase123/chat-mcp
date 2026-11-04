@@ -10,6 +10,7 @@ import {
   moveIndex,
   nextUnreadBelow,
   shouldShowJump,
+  streamPlan,
   suggestionsFor,
   enterShouldSend,
   styleSelection,
@@ -47,6 +48,10 @@ const state = {
   currentTarget: null, // e.g. "#poker" or "@alice"
   messages: [],
   renderedCount: 0, // list length at last render, so a delta gives the unread count
+  // What the DOM currently holds, so `streamPlan` can tell "two more arrived"
+  // from "a different room" or "older messages loaded above".
+  renderedTarget: null,
+  renderedIds: [],
   unreadBelow: 0,   // messages that arrived while the reader was scrolled up
   suggest: null,     // { items, index, kind, token } while the composer popover is open
   history: { entries: [], index: null, draft: null },
@@ -451,18 +456,70 @@ function renderJumpNewest() {
 
 function resetStreamPosition() {
   state.renderedCount = 0;
+  state.renderedTarget = null;
+  state.renderedIds = [];
   state.unreadBelow = 0;
   renderJumpNewest();
 }
 
+/**
+ * How long `.is-fresh` stays on a node, read from the stylesheet so the
+ * duration has ONE home. Hard-coding it here too is how the two drift.
+ */
+function freshDurationMs() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--msg-fresh-ms');
+  const ms = Number.parseInt(raw, 10);
+
+  return Number.isFinite(ms) && ms > 0 ? ms + 60 : 500;
+}
+
+function messageNode(m, { fresh: arriving = false } = {}) {
+  const isSelf = m.from_handle === state.handle;
+  // 🛑 YOUR OWN MESSAGE IS NEVER FRESH. `is-fresh` means "this arrived while
+  // you were reading"; you already know you sent it, so both the shimmer and
+  // the slide are noise. Decided by lee, 2026-11-04, after the slide alone
+  // still read as a flash.
+  const fresh = arriving && !isSelf;
+  const kind = m.kind || 'chat';
+  const cls = ['message', isSelf ? 'is-self' : '', kind === 'dispatch' ? 'is-dispatch' : '', kind === 'alert' ? 'is-alert' : '', fresh ? 'is-fresh' : '']
+    .filter(Boolean).join(' ');
+  const meta = h('div', { className: 'message__meta' }, [
+    h('span', { className: 'message__from' }, [m.from_handle]),
+    h('span', { className: 'message__time' }, [fmtTime(m.sent_at)]),
+    kind !== 'chat' ? h('span', { className: 'message__kind' }, [kind.toUpperCase()]) : null,
+    copyButton(m),
+  ]);
+  const body = h('div', { className: 'message__body', html: m.body_html || '' });
+  const li = h('li', { className: cls }, [meta, body]);
+
+  // 🛑 DROP THE CLASS ONCE IT HAS PLAYED. Left on, the next reflow replays the
+  // shimmer on an old message, and `prefers-reduced-motion` fires no
+  // animationend at all — so a timer, not only the event.
+  // 🛑 A TIMER, NOT `animationend`. `.is-fresh` drives TWO animations — the
+  // 160ms slide on the element and the longer shimmer on its `::after` — and
+  // a one-shot `animationend` listener fired on the first of them, stripping
+  // the class and cutting the shimmer off at 160ms. `prefers-reduced-motion`
+  // is the other reason: it fires no `animationend` at all.
+  if (fresh) {
+    setTimeout(() => li.classList.remove('is-fresh'), freshDurationMs());
+  }
+
+  return li;
+}
+
+/** Ephemeral panels sit after the messages, so growing the list means lifting
+ *  them off and putting them back. */
+function detachEphemeral() {
+  for (const node of el.messages.querySelectorAll('li.is-ephemeral')) node.remove();
+}
+
 function renderMessages({ forceBottom = false } = {}) {
-  // Measured BEFORE the wipe below destroys both of them.
+  // Measured BEFORE either path below moves anything.
   const wasPinned = forceBottom || isPinnedToBottom(streamGeometry());
   const prevScrollTop = el.messages.scrollTop;
-  const arrived = Math.max(0, state.messages.length - state.renderedCount);
 
-  el.messages.innerHTML = '';
   if (!state.currentTarget) {
+    el.messages.innerHTML = '';
     el.messages.appendChild(h('div', { className: 'messages__empty' }, ['Select a peer or room from the sidebar.']));
     // 🛑 BEFORE the return. /cheat-sheet works with no target selected, and
     // an early return here is what would have swallowed it.
@@ -471,26 +528,39 @@ function renderMessages({ forceBottom = false } = {}) {
     return;
   }
   if (state.messages.length === 0) {
+    el.messages.innerHTML = '';
     el.messages.appendChild(h('div', { className: 'messages__empty' }, ['No messages yet.']));
     appendEphemeral();
     resetStreamPosition();
     return;
   }
-  for (const m of state.messages) {
-    const isSelf = m.from_handle === state.handle;
-    const kind = m.kind || 'chat';
-    const cls = ['message', isSelf ? 'is-self' : '', kind === 'dispatch' ? 'is-dispatch' : '', kind === 'alert' ? 'is-alert' : '']
-      .filter(Boolean).join(' ');
-    const meta = h('div', { className: 'message__meta' }, [
-      h('span', { className: 'message__from' }, [m.from_handle]),
-      h('span', { className: 'message__time' }, [fmtTime(m.sent_at)]),
-      kind !== 'chat' ? h('span', { className: 'message__kind' }, [kind.toUpperCase()]) : null,
-      copyButton(m),
-    ]);
-    const body = h('div', { className: 'message__body', html: m.body_html || '' });
-    el.messages.appendChild(h('li', { className: cls }, [meta, body]));
+
+  const ids = state.messages.map((m) => m.id);
+  const plan = streamPlan(
+    { target: state.renderedTarget, ids: state.renderedIds },
+    { target: state.currentTarget, ids },
+  );
+
+  // 🛑 ONLY AN APPEND HAS ARRIVALS. On a rebuild the previous count belongs to
+  // another conversation, so a 3-message DM followed by a 40-message room
+  // would read as 37 arrivals. Every rebuild path happens to pass
+  // `forceBottom`, which zeroes the count downstream — this makes it
+  // structural rather than lucky. Raised by claude1 reviewing PR 99.
+  const arrived = plan.mode === 'append' ? state.messages.length - plan.from : 0;
+
+  if (plan.mode === 'full') {
+    el.messages.innerHTML = '';
+    for (const m of state.messages) el.messages.appendChild(messageNode(m));
+  } else {
+    detachEphemeral();
+    for (const m of state.messages.slice(plan.from)) {
+      el.messages.appendChild(messageNode(m, { fresh: true }));
+    }
   }
+
   state.renderedCount = state.messages.length;
+  state.renderedTarget = state.currentTarget;
+  state.renderedIds = ids;
   appendEphemeral();
 
   // Jump INSTANT, never animated: a smooth scroll on room open reads as the
