@@ -898,7 +898,12 @@ export function gaugeDisplay(peer) {
 
   const percent = Math.round((used / total) * 100);
 
-  // The bands the bus already warns on, so the colour and the DM agree.
+  // 🛑 EVERY BUS BAND EXCEPT THE PLANNING ONE. Not "the bands the bus warns
+  // on" (it warns at 50 too) and not "the bands it posts to a room" (70 is a
+  // DM and is coloured here). Both of those were written and both were false.
+  // The rule is the exclusion: 50 asks for a plan, and a plan is not an
+  // escalation, so it earns no colour. Pinned by `the web gauge colours every
+  // band EXCEPT the planning one` in test/shim/gauge-bands.test.ts.
   const band = percent >= 95 ? 'crit' : percent >= 85 ? 'warn' : percent >= 70 ? 'soft' : 'ok';
 
   return { show: true, percent, band, title: `Context ${percent}% — ${used.toLocaleString()} of ${total.toLocaleString()} tokens` };
