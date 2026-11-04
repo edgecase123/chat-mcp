@@ -31,7 +31,26 @@
             <option value="custom">custom</option>
           </select>
         </label>
+        <!-- Outside the label on purpose: a button inside one also activates
+             the select it wraps. -->
+        <button type="button" class="pane__style-edit" id="pane-style-edit" hidden
+                title="Edit this room's custom style">edit</button>
       </header>
+      <!-- #92 — the custom-style editor. Opens when `custom` is chosen in the
+           selector, because an alert telling the operator to use an MCP tool is
+           a dead end from a browser. -->
+      <section class="style-editor" id="style-editor" hidden>
+        <label class="style-editor__label" for="style-editor-text">
+          Custom style for <span id="style-editor-room"></span> — markdown, pushed to agents with every read
+        </label>
+        <textarea class="style-editor__text" id="style-editor-text" rows="8"
+                  placeholder="# House style&#10;&#10;Answer in the first line. No preamble."></textarea>
+        <div class="style-editor__actions">
+          <button type="button" class="style-editor__save" id="style-editor-save">Save</button>
+          <button type="button" class="style-editor__cancel" id="style-editor-cancel">Cancel</button>
+          <span class="style-editor__error" id="style-editor-error"></span>
+        </div>
+      </section>
       <!-- Pending permission requests. Above the message list on purpose:
            a supervised agent is STOPPED until one of these is answered, so it
            outranks anything being said. -->

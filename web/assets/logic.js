@@ -773,19 +773,51 @@ export function clearResultText(count, target) {
  * app.js states at the top of itself. Returns the action and, for a revert, the
  * value to put back.
  *
- * `custom` is refused here rather than offered-and-failed. The server demands
- * markdown with it and a header select has nowhere to type multi-line markdown.
- * The option still EXISTS in the list because a room can be in that state, set
- * through the `set_style` tool, and the selector has to be able to show it.
+ * `custom` opens the editor rather than saving, because the server demands
+ * markdown alongside it.
  */
 export function styleSelection(chosen, currentStyle) {
   if (chosen === 'custom') {
-    return {
-      action: 'refuse',
-      revertTo: currentStyle ?? '',
-      message: 'Custom styles need markdown. Set one with the set_style tool, then it appears here.',
-    };
+    return { action: 'edit', revertTo: currentStyle ?? '' };
   }
 
   return { action: 'save', style: chosen === '' ? null : chosen };
+}
+
+/**
+ * Whether a room on this style needs its own way back into the editor.
+ *
+ * 🛑 RE-PICKING THE SELECTED OPTION FIRES NO `change`, so the selector cannot
+ * reopen the editor for a room already on `custom`. Measured in Chromium: a
+ * keypress selecting `custom` over `custom` fired 0 change events where a real
+ * change fired one.
+ */
+export function styleEditAffordance(style) {
+  return style === 'custom';
+}
+
+/**
+ * Whether the markdown in the editor can be saved, and why not when it cannot.
+ *
+ * Mirrors the server's own guard so the operator hears about an empty or
+ * oversized style before a round trip, not after a 400.
+ */
+export const STYLE_CUSTOM_MAX_BYTES = 65536;
+
+export function customStyleSubmission(markdown) {
+  const text = (markdown ?? '').trim();
+
+  if (text === '') {
+    return { ok: false, error: 'A custom style needs some markdown.' };
+  }
+
+  // The server measures BYTES, not characters, so a style of emoji or accented
+  // text is larger than its length suggests.
+  const bytes = new TextEncoder().encode(text).length;
+
+  if (bytes > STYLE_CUSTOM_MAX_BYTES) {
+    return { ok: false, error: `Too long: ${bytes} bytes, the cap is ${STYLE_CUSTOM_MAX_BYTES}.` };
+  }
+
+  return { ok: true, style: 'custom', custom: text };
 }

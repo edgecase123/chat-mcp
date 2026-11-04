@@ -13,6 +13,8 @@ import {
   suggestionsFor,
   enterShouldSend,
   styleSelection,
+  styleEditAffordance,
+  customStyleSubmission,
   menuEntriesFor,
   mentionSuggestionsFor,
   pushHistory,
@@ -69,6 +71,13 @@ const el = {
   paneMeta: document.getElementById('pane-meta'),
   paneStyleWrap: document.getElementById('pane-style-wrap'),
   paneStyle: document.getElementById('pane-style'),
+  paneStyleEdit: document.getElementById('pane-style-edit'),
+  styleEditor: document.getElementById('style-editor'),
+  styleEditorRoom: document.getElementById('style-editor-room'),
+  styleEditorText: document.getElementById('style-editor-text'),
+  styleEditorSave: document.getElementById('style-editor-save'),
+  styleEditorCancel: document.getElementById('style-editor-cancel'),
+  styleEditorError: document.getElementById('style-editor-error'),
   messages: document.getElementById('messages'),
   jumpNewest: document.getElementById('jump-newest'),
   suggest: document.getElementById('composer-suggest'),
@@ -583,6 +592,7 @@ function renderPaneHeader() {
     el.paneTitle.textContent = 'select a peer or room';
     el.paneMeta.textContent = 'type /help for commands';
     if (el.paneStyleWrap) el.paneStyleWrap.hidden = true;
+    if (el.paneStyleEdit) el.paneStyleEdit.hidden = true;
     el.composerInput.placeholder = 'Type /dm <peer> or /join #room to get started. /help for commands.';
     return;
   }
@@ -596,12 +606,15 @@ function renderPaneHeader() {
     if (el.paneStyleWrap && el.paneStyle) {
       el.paneStyleWrap.hidden = !room;
       if (room) el.paneStyle.value = room.style ?? '';
+      if (el.paneStyleEdit) el.paneStyleEdit.hidden = !room || !styleEditAffordance(room.style);
+      if (el.styleEditor && el.styleEditor.hidden === false && state.currentTarget !== el.styleEditorRoom.textContent) closeStyleEditor();
     }
   } else {
     el.paneTitle.textContent = `DM · ${state.currentTarget}`;
     const peer = state.peers.find((p) => p.handle === state.currentTarget);
     el.paneMeta.textContent = peer ? (peer.online ? 'online' : 'offline') : '';
     if (el.paneStyleWrap) el.paneStyleWrap.hidden = true;
+    if (el.paneStyleEdit) el.paneStyleEdit.hidden = true;
   }
   el.composerInput.focus();
 }
@@ -1302,13 +1315,62 @@ el.messages.addEventListener('scroll', () => {
 
 el.jumpNewest.addEventListener('click', jumpToNewest);
 
-// #92 — saving a room's conversation style.
-//
-// 🛑 `custom` IS REFUSED HERE AND SAYS WHY. The server demands markdown with
-// it, and this header has nowhere to type multi-line markdown — so offering the
-// option and failing silently would be worse than not offering it. The option
-// stays in the list because it is a real state a room can be IN, set through
-// the `set_style` MCP tool, and the selector has to be able to show it.
+// #92 — the custom-style editor.
+function openStyleEditor(room, markdown) {
+  if (!el.styleEditor) return;
+  el.styleEditorRoom.textContent = room;
+  el.styleEditorText.value = markdown;
+  el.styleEditorError.textContent = '';
+  el.styleEditor.hidden = false;
+  el.styleEditorText.focus();
+}
+
+function closeStyleEditor() {
+  if (el.styleEditor) el.styleEditor.hidden = true;
+}
+
+if (el.paneStyleEdit) {
+  el.paneStyleEdit.addEventListener('click', () => {
+    const room = state.rooms.find((r) => r.name === state.currentTarget);
+    if (room) openStyleEditor(room.name, room.style_custom ?? '');
+  });
+}
+
+if (el.styleEditorCancel) {
+  el.styleEditorCancel.addEventListener('click', () => {
+    closeStyleEditor();
+    // Put the selector back to what the room actually holds, so cancelling
+    // does not leave it reading "custom" over an unsaved style.
+    const current = state.rooms.find((r) => r.name === state.currentTarget);
+    if (el.paneStyle) el.paneStyle.value = current?.style ?? '';
+  });
+}
+
+if (el.styleEditorSave) {
+  el.styleEditorSave.addEventListener('click', async () => {
+    const room = state.currentTarget;
+    const check = customStyleSubmission(el.styleEditorText.value);
+
+    if (!check.ok) {
+      el.styleEditorError.textContent = check.error;
+      return;
+    }
+
+    try {
+      await api('/api/rooms/style', {
+        method: 'POST',
+        body: JSON.stringify({ room, style: check.style, custom: check.custom }),
+      });
+      closeStyleEditor();
+      await refresh();
+    } catch (e) {
+      el.styleEditorError.textContent = String(e.message ?? e);
+    }
+  });
+}
+
+// #92 — saving a room's conversation style. `custom` opens the editor instead
+// of saving, because the server demands markdown alongside it.
 if (el.paneStyle) {
   el.paneStyle.addEventListener('change', async () => {
     const room = state.currentTarget;
@@ -1319,11 +1381,12 @@ if (el.paneStyle) {
     const current = state.rooms.find((r) => r.name === room);
     const decision = styleSelection(chosen, current?.style ?? null);
 
-    if (decision.action === 'refuse') {
-      el.paneStyle.value = decision.revertTo;
-      alert(decision.message);
+    if (decision.action === 'edit') {
+      openStyleEditor(room, current?.style_custom ?? '');
       return;
     }
+
+    closeStyleEditor();
 
     try {
       await api('/api/rooms/style', {

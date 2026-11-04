@@ -318,6 +318,40 @@ html, body {
   font-size: 12px;
 }
 
+/* #92 — the custom-style editor, opened from the selector. */
+.style-editor {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.style-editor__label {
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+.style-editor__text {
+  width: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+.style-editor__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.style-editor__error {
+  color: var(--danger, #c33);
+  font-size: 12px;
+}
+
 /* #92 — conversation style selector, beside the room name and member count. */
 .pane__style {
   position: absolute;
@@ -337,6 +371,22 @@ html, body {
   padding: 2px 6px;
   font: inherit;
   font-size: 12px;
+}
+
+.pane__style-edit {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  margin-left: 6px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pane__style-edit:hover {
+  border-color: var(--accent);
 }
 
 /* Messages */

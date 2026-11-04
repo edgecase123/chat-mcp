@@ -1,8 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+// The SERVER's copy of the byte cap, so the two can be compared.
+import * as dao from '../../src/storage/dao.js';
 // The browser file itself, imported directly. No DOM, no bundler, no copy.
 import {
   styleSelection,
+  styleEditAffordance,
+  customStyleSubmission,
+  STYLE_CUSTOM_MAX_BYTES,
   acceptReopens,
   enterShouldSend,
   isPinnedToBottom,
@@ -1055,6 +1060,25 @@ test('the DM confirm does not promise a one-sided delete', () => {
 // #92 — the conversation style selector
 // ---------------------------------------------------------------------------
 
+/**
+ * 🛑 THE SELECTOR CANNOT REOPEN THE EDITOR FOR A ROOM ALREADY ON `custom`.
+ * Re-picking the selected option fires no `change` — measured in Chromium, a
+ * keypress selecting `custom` over `custom` fired 0 change events where a real
+ * change fired one. Without a separate control the markdown was write-once:
+ * unreadable, and destroyed by the only action that got you back in, because
+ * `setRoomStyle` nulls `style_custom` for any style but `custom`.
+ */
+test('a room on custom gets its own way back into the editor', () => {
+  assert.equal(styleEditAffordance('custom'), true);
+});
+
+test('no other style offers an editor, including an unset one', () => {
+  assert.equal(styleEditAffordance('succinct'), false);
+  assert.equal(styleEditAffordance(null), false);
+  assert.equal(styleEditAffordance(undefined), false);
+  assert.equal(styleEditAffordance(''), false);
+});
+
 test('choosing a preset saves it', () => {
   assert.deepEqual(styleSelection('succinct', null), { action: 'save', style: 'succinct' });
 });
@@ -1064,19 +1088,88 @@ test('choosing none clears it, which is null and not an empty string', () => {
 });
 
 /**
- * 🛑 `custom` IS REFUSED, NOT SAVED. The server demands markdown with it and a
- * header select has nowhere to type multi-line markdown, so offering it and
- * failing would be worse than refusing. The option stays in the list because a
- * room CAN be in that state via the set_style tool.
+ * 🛑 `custom` OPENS AN EDITOR. The first version REFUSED with an alert saying
+ * "use the set_style tool", which is a dead end from a browser — lee hit it and
+ * got a message box and nothing else.
  */
-test('choosing custom refuses and reverts to what the room already had', () => {
+test('choosing custom asks for the editor rather than refusing', () => {
   const decision = styleSelection('custom', 'succinct');
 
-  assert.equal(decision.action, 'refuse');
-  assert.equal(decision.revertTo, 'succinct');
-  assert.match(decision.message, /set_style/);
+  assert.equal(decision.action, 'edit');
+  assert.equal(decision.revertTo, 'succinct', 'cancelling must be able to restore the real value');
 });
 
-test('refusing custom on an unstyled room reverts to none, not undefined', () => {
+test('the revert value is a selectable empty string on an unstyled room', () => {
   assert.equal(styleSelection('custom', null).revertTo, '');
+});
+
+test('an empty custom style is refused before the round trip', () => {
+  assert.deepEqual(customStyleSubmission('   \n  '), {
+    ok: false,
+    error: 'A custom style needs some markdown.',
+  });
+});
+
+test('a valid custom style is trimmed and tagged', () => {
+  assert.deepEqual(customStyleSubmission('  # rules\n\nbe brief.  '), {
+    ok: true,
+    style: 'custom',
+    custom: '# rules\n\nbe brief.',
+  });
+});
+
+/**
+ * 🛑 BYTES, NOT CHARACTERS, because that is what the server measures. A style
+ * of accented or emoji text is larger than its length suggests, and a
+ * character-based guard would pass it here and 400 there.
+ */
+/**
+ * 🛑 THE BYTE CAP IS DECLARED TWICE AND NOTHING KEPT THE TWO EQUAL.
+ * `dao.ts` holds the server's guard and `logic.js` mirrors it, because a
+ * browser asset cannot import the TS module. One copy is unavoidable; a drift
+ * nobody notices is not. Raised by claude1 on PR 98.
+ */
+test('the client and server byte caps are the same number', () => {
+  assert.equal(STYLE_CUSTOM_MAX_BYTES, dao.STYLE_CUSTOM_MAX_BYTES);
+});
+
+/**
+ * Equality of the constants is not agreement on the ANSWER — the two measure
+ * with different functions and could differ on the comparison. So walk the
+ * boundary and require the same verdict on each side.
+ */
+test('both sides give the same verdict on each side of the boundary', () => {
+  const cap = dao.STYLE_CUSTOM_MAX_BYTES;
+
+  for (const [bytes, shouldPass] of [
+    [cap - 1, true],
+    [cap, true],
+    [cap + 1, false],
+  ] as [number, boolean][]) {
+    const text = 'a'.repeat(bytes);
+
+    assert.equal(customStyleSubmission(text).ok, shouldPass, `client at ${bytes}`);
+
+    let serverAccepted = true;
+    try {
+      dao.assertStyleCustom('custom', text);
+    } catch {
+      serverAccepted = false;
+    }
+
+    assert.equal(serverAccepted, shouldPass, `server at ${bytes}`);
+  }
+});
+
+test('the cap is measured in bytes', () => {
+  const justUnder = 'a'.repeat(65536);
+  assert.equal(customStyleSubmission(justUnder).ok, true);
+
+  assert.equal(customStyleSubmission('a'.repeat(65537)).ok, false);
+
+  // 2 bytes each in UTF-8, so half the character count hits the cap.
+  const emoji = 'é'.repeat(32769);
+  const result = customStyleSubmission(emoji);
+  assert.equal(result.ok, false, 'a character-based cap would have passed this');
+  assert.match(result.error, /bytes/);
 });
