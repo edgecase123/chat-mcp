@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 // The browser file itself, imported directly. No DOM, no bundler, no copy.
 import {
   styleSelection,
+  customStyleSubmission,
   acceptReopens,
   enterShouldSend,
   isPinnedToBottom,
@@ -1064,19 +1065,50 @@ test('choosing none clears it, which is null and not an empty string', () => {
 });
 
 /**
- * 🛑 `custom` IS REFUSED, NOT SAVED. The server demands markdown with it and a
- * header select has nowhere to type multi-line markdown, so offering it and
- * failing would be worse than refusing. The option stays in the list because a
- * room CAN be in that state via the set_style tool.
+ * 🛑 `custom` OPENS AN EDITOR. The first version REFUSED with an alert saying
+ * "use the set_style tool", which is a dead end from a browser — lee hit it and
+ * got a message box and nothing else.
  */
-test('choosing custom refuses and reverts to what the room already had', () => {
+test('choosing custom asks for the editor rather than refusing', () => {
   const decision = styleSelection('custom', 'succinct');
 
-  assert.equal(decision.action, 'refuse');
-  assert.equal(decision.revertTo, 'succinct');
-  assert.match(decision.message, /set_style/);
+  assert.equal(decision.action, 'edit');
+  assert.equal(decision.revertTo, 'succinct', 'cancelling must be able to restore the real value');
 });
 
-test('refusing custom on an unstyled room reverts to none, not undefined', () => {
+test('the revert value is a selectable empty string on an unstyled room', () => {
   assert.equal(styleSelection('custom', null).revertTo, '');
+});
+
+test('an empty custom style is refused before the round trip', () => {
+  assert.deepEqual(customStyleSubmission('   \n  '), {
+    ok: false,
+    error: 'A custom style needs some markdown.',
+  });
+});
+
+test('a valid custom style is trimmed and tagged', () => {
+  assert.deepEqual(customStyleSubmission('  # rules\n\nbe brief.  '), {
+    ok: true,
+    style: 'custom',
+    custom: '# rules\n\nbe brief.',
+  });
+});
+
+/**
+ * 🛑 BYTES, NOT CHARACTERS, because that is what the server measures. A style
+ * of accented or emoji text is larger than its length suggests, and a
+ * character-based guard would pass it here and 400 there.
+ */
+test('the cap is measured in bytes', () => {
+  const justUnder = 'a'.repeat(65536);
+  assert.equal(customStyleSubmission(justUnder).ok, true);
+
+  assert.equal(customStyleSubmission('a'.repeat(65537)).ok, false);
+
+  // 2 bytes each in UTF-8, so half the character count hits the cap.
+  const emoji = 'é'.repeat(32769);
+  const result = customStyleSubmission(emoji);
+  assert.equal(result.ok, false, 'a character-based cap would have passed this');
+  assert.match(result.error, /bytes/);
 });

@@ -13,6 +13,7 @@ import {
   suggestionsFor,
   enterShouldSend,
   styleSelection,
+  customStyleSubmission,
   menuEntriesFor,
   mentionSuggestionsFor,
   pushHistory,
@@ -69,6 +70,12 @@ const el = {
   paneMeta: document.getElementById('pane-meta'),
   paneStyleWrap: document.getElementById('pane-style-wrap'),
   paneStyle: document.getElementById('pane-style'),
+  styleEditor: document.getElementById('style-editor'),
+  styleEditorRoom: document.getElementById('style-editor-room'),
+  styleEditorText: document.getElementById('style-editor-text'),
+  styleEditorSave: document.getElementById('style-editor-save'),
+  styleEditorCancel: document.getElementById('style-editor-cancel'),
+  styleEditorError: document.getElementById('style-editor-error'),
   messages: document.getElementById('messages'),
   jumpNewest: document.getElementById('jump-newest'),
   suggest: document.getElementById('composer-suggest'),
@@ -596,6 +603,7 @@ function renderPaneHeader() {
     if (el.paneStyleWrap && el.paneStyle) {
       el.paneStyleWrap.hidden = !room;
       if (room) el.paneStyle.value = room.style ?? '';
+      if (el.styleEditor && el.styleEditor.hidden === false && state.currentTarget !== el.styleEditorRoom.textContent) closeStyleEditor();
     }
   } else {
     el.paneTitle.textContent = `DM · ${state.currentTarget}`;
@@ -1302,6 +1310,53 @@ el.messages.addEventListener('scroll', () => {
 
 el.jumpNewest.addEventListener('click', jumpToNewest);
 
+// #92 — the custom-style editor.
+function openStyleEditor(room, markdown) {
+  if (!el.styleEditor) return;
+  el.styleEditorRoom.textContent = room;
+  el.styleEditorText.value = markdown;
+  el.styleEditorError.textContent = '';
+  el.styleEditor.hidden = false;
+  el.styleEditorText.focus();
+}
+
+function closeStyleEditor() {
+  if (el.styleEditor) el.styleEditor.hidden = true;
+}
+
+if (el.styleEditorCancel) {
+  el.styleEditorCancel.addEventListener('click', () => {
+    closeStyleEditor();
+    // Put the selector back to what the room actually holds, so cancelling
+    // does not leave it reading "custom" over an unsaved style.
+    const current = state.rooms.find((r) => r.name === state.currentTarget);
+    if (el.paneStyle) el.paneStyle.value = current?.style ?? '';
+  });
+}
+
+if (el.styleEditorSave) {
+  el.styleEditorSave.addEventListener('click', async () => {
+    const room = state.currentTarget;
+    const check = customStyleSubmission(el.styleEditorText.value);
+
+    if (!check.ok) {
+      el.styleEditorError.textContent = check.error;
+      return;
+    }
+
+    try {
+      await api('/api/rooms/style', {
+        method: 'POST',
+        body: JSON.stringify({ room, style: check.style, custom: check.custom }),
+      });
+      closeStyleEditor();
+      await refresh();
+    } catch (e) {
+      el.styleEditorError.textContent = String(e.message ?? e);
+    }
+  });
+}
+
 // #92 — saving a room's conversation style.
 //
 // 🛑 `custom` IS REFUSED HERE AND SAYS WHY. The server demands markdown with
@@ -1319,11 +1374,12 @@ if (el.paneStyle) {
     const current = state.rooms.find((r) => r.name === room);
     const decision = styleSelection(chosen, current?.style ?? null);
 
-    if (decision.action === 'refuse') {
-      el.paneStyle.value = decision.revertTo;
-      alert(decision.message);
+    if (decision.action === 'edit') {
+      openStyleEditor(room, current?.style_custom ?? '');
       return;
     }
+
+    closeStyleEditor();
 
     try {
       await api('/api/rooms/style', {

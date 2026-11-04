@@ -411,6 +411,8 @@ export interface Room {
   member_count: number;
   /** The configured style name, or null when the room has no preference (#92). */
   style: string | null;
+  /** The markdown behind `style: 'custom'`, so the web editor can prefill it. */
+  style_custom: string | null;
 }
 
 export interface JoinResult {
@@ -433,6 +435,7 @@ interface RoomRow {
   created_at: number;
   created_by: string;
   style: string | null;
+  style_custom: string | null;
 }
 
 /**
@@ -544,7 +547,7 @@ export function roomMembers(db: Db, room: string): string[] {
 /** Rooms the caller is a member of. */
 export function myRooms(db: Db, handle: string): Room[] {
   const rows = db.prepare(
-    `SELECT r.name, r.created_at, r.created_by, r.style
+    `SELECT r.name, r.created_at, r.created_by, r.style, r.style_custom
      FROM rooms r
      JOIN room_members m ON m.room_name = r.name
      WHERE m.handle = ?
@@ -556,14 +559,14 @@ export function myRooms(db: Db, handle: string): Room[] {
 /** All rooms known to the bus (for /rooms --all). */
 export function allRooms(db: Db): Room[] {
   const rows = db.prepare(
-    `SELECT name, created_at, created_by, style FROM rooms ORDER BY name ASC`,
+    `SELECT name, created_at, created_by, style, style_custom FROM rooms ORDER BY name ASC`,
   ).all() as unknown as RoomRow[];
   return rows.map((r) => hydrateRoomFromRow(db, r));
 }
 
 function hydrateRoom(db: Db, name: string): Room {
   const row = db.prepare(
-    `SELECT name, created_at, created_by, style FROM rooms WHERE name = ?`,
+    `SELECT name, created_at, created_by, style, style_custom FROM rooms WHERE name = ?`,
   ).get(name) as unknown as RoomRow | undefined;
   if (!row) throw new Error(`Room ${name} does not exist`);
   return hydrateRoomFromRow(db, row);
@@ -579,6 +582,7 @@ function hydrateRoomFromRow(db: Db, row: RoomRow): Room {
     created_by: row.created_by,
     member_count: count.n,
     style: row.style ?? null,
+    style_custom: row.style_custom ?? null,
   };
 }
 

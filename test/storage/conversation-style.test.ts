@@ -272,3 +272,23 @@ test('myRooms carries the style, because that is what the web UI reads', () => {
 
   assert.equal(mine?.style, 'succinct', 'myRooms dropped the style the web UI needs');
 });
+
+/**
+ * 🛑 THE WEB EDITOR PREFILLS FROM `style_custom`, SO ALL THREE QUERIES MUST
+ * CARRY IT. I shipped `style` on two of the three and the web dropdown silently
+ * read null — this is the same mistake one column over, so all three paths get
+ * a test this time.
+ */
+test('all three Room queries carry style_custom', () => {
+  const db = freshDb();
+  db.prepare('INSERT INTO room_members (room_name, handle, joined_at) VALUES (?, ?, ?)').run(
+    '#gate',
+    'claude2',
+    1,
+  );
+  dao.setRoomStyle(db, '#gate', 'custom', '# house rules');
+
+  assert.equal(dao.allRooms(db).find((r) => r.name === '#gate')?.style_custom, '# house rules', 'allRooms');
+  assert.equal(dao.myRooms(db, 'claude2').find((r) => r.name === '#gate')?.style_custom, '# house rules', 'myRooms');
+  assert.equal(dao.joinRoom(db, '#gate', 'claude2').room.style_custom, '# house rules', 'hydrateRoom');
+});

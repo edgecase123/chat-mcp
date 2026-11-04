@@ -779,13 +779,38 @@ export function clearResultText(count, target) {
  * through the `set_style` tool, and the selector has to be able to show it.
  */
 export function styleSelection(chosen, currentStyle) {
+  // 🛑 `custom` OPENS AN EDITOR, IT DOES NOT REFUSE. The first version alerted
+  // "set one with the set_style tool", which is a dead end from a browser —
+  // lee hit it and got a message box and nothing else.
   if (chosen === 'custom') {
-    return {
-      action: 'refuse',
-      revertTo: currentStyle ?? '',
-      message: 'Custom styles need markdown. Set one with the set_style tool, then it appears here.',
-    };
+    return { action: 'edit', revertTo: currentStyle ?? '' };
   }
 
   return { action: 'save', style: chosen === '' ? null : chosen };
+}
+
+/**
+ * Whether the markdown in the editor can be saved, and why not when it cannot.
+ *
+ * Mirrors the server's own guard so the operator hears about an empty or
+ * oversized style before a round trip, not after a 400.
+ */
+export const STYLE_CUSTOM_MAX_BYTES = 65536;
+
+export function customStyleSubmission(markdown) {
+  const text = (markdown ?? '').trim();
+
+  if (text === '') {
+    return { ok: false, error: 'A custom style needs some markdown.' };
+  }
+
+  // The server measures BYTES, not characters, so a style of emoji or accented
+  // text is larger than its length suggests.
+  const bytes = new TextEncoder().encode(text).length;
+
+  if (bytes > STYLE_CUSTOM_MAX_BYTES) {
+    return { ok: false, error: `Too long: ${bytes} bytes, the cap is ${STYLE_CUSTOM_MAX_BYTES}.` };
+  }
+
+  return { ok: true, style: 'custom', custom: text };
 }
