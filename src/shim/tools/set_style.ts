@@ -10,7 +10,7 @@ export function installSetStyle(server: McpServer, ctx: ShimContext): void {
     {
       title: 'Set the conversation style for a room or a peer',
       description:
-        'Set the prose style agents must follow in a room, or when writing to one peer. `succinct` is the only preset; `custom` takes your own markdown and REPLACES the preset rather than layering on it. Pass style=null to clear. The style is pushed with every room_inbox read of that room, so it arrives before the writing rather than waiting to be fetched.',
+        'Set the prose style agents must follow in a room, or when writing to one peer. `succinct` is the only preset; `custom` takes your own markdown and REPLACES the preset rather than layering on it. Pass style=null to clear. The style is pushed with every read that surfaces that target — `room_inbox` for a room, `inbox` for a peer who sent you something — so it arrives before the writing rather than waiting to be fetched.',
       inputSchema: {
         target: z
           .string()

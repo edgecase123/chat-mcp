@@ -26,8 +26,22 @@ export function installInbox(server: McpServer, ctx: ShimContext): void {
       if (messages.length > 0) {
         dao.markRead(ctx.db, messages.map((m) => m.id));
       }
+
+      // #92 — the peer half. The style rides WITH the messages for the same
+      // reason the room half does: an instruction about how to write has to
+      // arrive before the writing.
+      //
+      // 🛑 ONLY SENDERS THAT ACTUALLY APPEAR, mirroring `room_inbox`'s gate on
+      // rooms that returned something. Pushing every styled peer on an empty
+      // poll is the cost that gate exists to avoid.
+      const senders = [...new Set(messages.map((m) => m.from_handle))];
+      const styleBlocks = dao.styleBlocksForPeers(ctx.db, senders);
+
       return {
-        content: [{ type: 'text', text: JSON.stringify(messages.map(toWireMessage), null, 2) }],
+        content: [
+          ...styleBlocks,
+          { type: 'text', text: JSON.stringify(messages.map(toWireMessage), null, 2) },
+        ],
       };
     },
   );

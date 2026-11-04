@@ -159,6 +159,87 @@ test('a custom style pushes the operator markdown verbatim', () => {
   assert.ok(blocks[0]!.text.includes('- Lead with the sha.'));
 });
 
+// ── the peer half, #92 ───────────────────────────────────────────────────
+
+test('an unstyled peer contributes nothing, so an existing inbox is unchanged', () => {
+  const db = freshDb();
+
+  assert.deepEqual(dao.styleBlocksForPeers(db, ['claude2']), []);
+});
+
+test('a styled peer contributes one block naming the peer and the style', () => {
+  const db = freshDb();
+  dao.setAgentStyle(db, 'claude2', 'succinct');
+
+  const blocks = dao.styleBlocksForPeers(db, ['claude2']);
+
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0]!.type, 'text');
+  assert.match(blocks[0]!.text, /claude2/);
+  assert.match(blocks[0]!.text, /succinct/);
+  assert.ok(blocks[0]!.text.includes(dao.STYLE_PRESETS.succinct!), 'the preset text itself is missing');
+});
+
+/**
+ * The wording is the whole difference between the two halves. A room style
+ * governs what you write IN a place; a peer style governs what you write TO
+ * someone.
+ */
+test('the peer block says "when writing to them", not "in this room"', () => {
+  const db = freshDb();
+  dao.setAgentStyle(db, 'claude2', 'succinct');
+
+  const text = dao.styleBlocksForPeers(db, ['claude2'])[0]!.text;
+
+  assert.match(text, /when writing to them/);
+  assert.doesNotMatch(text, /in this room/);
+});
+
+test('an unstyled peer among styled ones drops out', () => {
+  const db = freshDb();
+  db.prepare(
+    'INSERT INTO agents (handle, session_id, registered_at, last_seen_at) VALUES (?, ?, ?, ?)',
+  ).run('claude1', 's2', 1, 1);
+  dao.setAgentStyle(db, 'claude2', 'succinct');
+
+  const blocks = dao.styleBlocksForPeers(db, ['claude2', 'claude1']);
+
+  assert.equal(blocks.length, 1, 'claude1 has no style and must contribute nothing');
+  assert.match(blocks[0]!.text, /claude2/);
+});
+
+test('a peer custom style pushes the operator markdown verbatim', () => {
+  const db = freshDb();
+  dao.setAgentStyle(db, 'claude2', 'custom', '# DM rules\n\n- Name the file.');
+
+  const blocks = dao.styleBlocksForPeers(db, ['claude2']);
+
+  assert.ok(blocks[0]!.text.includes('# DM rules'));
+  assert.ok(blocks[0]!.text.includes('- Name the file.'));
+});
+
+/**
+ * A half-written `custom` row pushes nothing, same as the room half. Asserted
+ * on the peer side too because the guard lives in `resolveStyle`, and a reader
+ * checking one caller cannot tell the two share it.
+ */
+test('a peer on custom with no markdown pushes nothing', () => {
+  const db = freshDb();
+  dao.setAgentStyle(db, 'claude2', 'custom', '   ');
+
+  assert.deepEqual(dao.styleBlocksForPeers(db, ['claude2']), []);
+});
+
+/**
+ * A handle with no agent row — a sender who deregistered between writing and
+ * being read. This is the no-crash case, not a style decision.
+ */
+test('an unknown handle contributes nothing rather than throwing', () => {
+  const db = freshDb();
+
+  assert.deepEqual(dao.styleBlocksForPeers(db, ['nobody']), []);
+});
+
 /**
  * 🛑 A SCOPED READ THAT RETURNED NOTHING MUST PUSH NOTHING. That is the polling
  * case, and the first version emitted the block anyway by passing `[room]`

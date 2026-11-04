@@ -1147,6 +1147,39 @@ export function styleBlocksForRooms(db: Db, rooms: string[]): { type: 'text'; te
 }
 
 /**
+ * The style blocks to push alongside an `inbox` result.
+ *
+ * 🛑 KEYED ON THE SENDER, BECAUSE THE STYLE IS "HOW TO WRITE TO THIS PEER".
+ * `set_style` describes a peer target as the style to follow *when writing to
+ * one peer*, and reading their message is the moment before the reply. Keyed
+ * on the reader instead it would be a style about yourself, which no caller
+ * can set and no reader needs pushed.
+ *
+ * 🛑 ONE BLOCK PER DISTINCT SENDER, NOT ONE PER MESSAGE. Three messages from
+ * one peer are one conversation and one instruction; repeating it per message
+ * is pure payload.
+ *
+ * Empty for peers with no style, which is every peer on every existing
+ * database — so the unset response stays byte-identical.
+ */
+export function styleBlocksForPeers(db: Db, peers: string[]): { type: 'text'; text: string }[] {
+  const blocks: { type: 'text'; text: string }[] = [];
+
+  for (const peer of peers) {
+    const resolved = resolveStyle(db, 'agents', peer);
+
+    if (resolved) {
+      blocks.push({
+        type: 'text',
+        text: `Conversation style for ${peer} (${resolved.style}) — follow it when writing to them:\n\n${resolved.text}`,
+      });
+    }
+  }
+
+  return blocks;
+}
+
+/**
  * The order the CLI cycles a room's style through.
  *
  * 🛑 `custom` IS ONLY REACHABLE WHEN MARKDOWN ALREADY EXISTS. A terminal
