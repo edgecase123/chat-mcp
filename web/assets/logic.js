@@ -972,3 +972,51 @@ function durationLabel(mins) {
 export function claimsPanelEmpty() {
   return '(nothing claimed)';
 }
+
+/**
+ * Every place a search term appears in a string (#102).
+ *
+ * 🛑 RANGES, NOT A REPLACED STRING. Returning marked-up text would mean
+ * injecting `<mark>` either into markdown source — which corrupts a code span
+ * or a link — or into rendered HTML, where it can land inside a tag and is an
+ * injection hazard. The caller wraps TEXT NODES using these offsets, which
+ * cannot do either.
+ *
+ * 🛑 LITERAL AND CASE-INSENSITIVE, matching how the bus found the row. A regex
+ * built from user text would treat `100%` and `context_used` as patterns, the
+ * same defect `likePattern` exists to stop on the SQL side.
+ */
+export function matchRanges(text, term) {
+  const needle = (term || '').trim().toLowerCase();
+  if (needle.length === 0) return [];
+
+  const hay = text.toLowerCase();
+  const out = [];
+  let from = 0;
+
+  for (;;) {
+    const at = hay.indexOf(needle, from);
+    if (at === -1) return out;
+
+    out.push({ start: at, end: at + needle.length });
+    // ⚠️ Advance past the whole match, never by one. Overlapping ranges
+    // produce nested <mark> elements around the same characters.
+    from = at + needle.length;
+  }
+}
+
+/**
+ * Whether a message belongs in a filtered view.
+ *
+ * 🛑 THE SAME MATCH RULE AS THE HIGHLIGHT. A filter that kept a message the
+ * highlighter then found nothing in would render a hit with no visible reason,
+ * which reads as a bug in the search.
+ */
+export function messageMatchesSearch(body, term) {
+  return matchRanges(body || '', term).length > 0;
+}
+
+/** What the message pane says when a filter hides everything. */
+export function searchFilterEmpty(term, scanned) {
+  return `no match for "${term}" in ${scanned} loaded message${scanned === 1 ? '' : 's'}`;
+}

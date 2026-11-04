@@ -1320,3 +1320,47 @@ function latestClaimById(db: Db, id: number): ClaimRow {
 
   return row;
 }
+
+/* ------------------------------------------------------------------------- *
+ * #102 — searching the transcript
+ *
+ * 🛑 READ ONLY. NOTHING HERE WRITES `room_reads`.
+ *
+ * That is the hazard #102 names: `room_inbox` advances a per-member read
+ * watermark, so a search routed through it would silently mark messages read —
+ * the very thing that makes re-reading a room expensive today.
+ * `search-no-watermark.test.ts` asserts the pointer is untouched.
+ *
+ * 🛑 NO NEW INDEX, DELIBERATELY. A leading-wildcard `LIKE '%term%'` cannot use
+ * one, so an index on `body` would be theatre — it would cost writes and serve
+ * nothing. The scoped case rides `ix_messages_to_read`'s leading column.
+ * FTS5 would change this and `node:sqlite` does not ship it (#102).
+ * ------------------------------------------------------------------------- */
+
+export interface SearchHit {
+  readonly id: number;
+  readonly from_handle: string;
+  readonly to_handle: string;
+  readonly body: string;
+  readonly sent_at: number;
+}
+
+export function searchMessages(
+  db: Db,
+  input: { pattern: string; target?: string; limit: number },
+): SearchHit[] {
+  // ⚠️ `ESCAPE '\'` IS NOT OPTIONAL. Without it the backslashes `likePattern`
+  // inserts are matched literally, so a query containing % finds nothing
+  // instead of finding too much — wrong in the other direction, still silent.
+  const where = input.target === undefined ? '' : 'AND to_handle = ?';
+  const sql = `SELECT id, from_handle, to_handle, body, sent_at
+                 FROM messages
+                WHERE body LIKE ? ESCAPE '\\' ${where}
+                ORDER BY id DESC
+                LIMIT ?`;
+
+  const args: (string | number)[] =
+    input.target === undefined ? [input.pattern, input.limit] : [input.pattern, input.target, input.limit];
+
+  return db.prepare(sql).all(...args) as unknown as SearchHit[];
+}
