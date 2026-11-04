@@ -58,8 +58,21 @@ export function installRoomInbox(server: McpServer, ctx: ShimContext): void {
         if (upTo !== undefined) dao.advanceRoomRead(ctx.db, r, ctx.handle, upTo);
       }
 
+      // #92 — the style rides WITH the messages, because an instruction about
+      // how to write has to arrive before the writing. A style an agent must
+      // fetch is a style it will not fetch.
+      //
+      // 🛑 ONLY FOR ROOMS THAT ACTUALLY RETURNED SOMETHING, and only when one
+      // is set. A room with no style adds no block at all, so every existing
+      // database keeps the byte-identical response it has today.
+      const styleBlocks = dao.styleBlocksForRooms(
+        ctx.db,
+        room !== undefined ? [room] : [...idsByRoom.keys()],
+      );
+
       return {
         content: [
+          ...styleBlocks,
           {
             type: 'text',
             text: JSON.stringify(
