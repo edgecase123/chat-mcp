@@ -24,7 +24,7 @@
 const { openDb } = await import('../dist/storage/db.js');
 const dao = await import('../dist/storage/dao.js');
 const { notifyDir, notifyPathFor } = await import('../dist/util/paths.js');
-const { partitionNotifyFiles, planNotifyRemoval } = await import('../dist/util/notify-orphans.js');
+const { partitionNotifyFiles, planNotifyRemoval, ORPHAN_UNCHECKED } = await import('../dist/util/notify-orphans.js');
 const { readdirSync, unlinkSync, existsSync } = await import('node:fs');
 
 /** Everything in the notify directory, or nothing if it has never been made. */
@@ -48,7 +48,8 @@ if (names.length === 0) {
   console.log(`\n${notify.orphans.length} of ${notify.total} notify file(s) have no agent row:\n`);
   if (notify.orphans.length > 0) {
     console.log(`  ${notify.orphans.join(' ')}`);
-    console.log('\nThose handles are gone, so there is no liveness to check. Remove the files with:');
+    console.log(`\nEach of those has ${ORPHAN_UNCHECKED}`);
+    console.log('\nRemove the files with:');
     console.log(`\n  node scripts/prune-test-agents.mjs ${notify.orphans.join(' ')}`);
   }
 
@@ -83,7 +84,7 @@ for (const step of plan) {
 console.log(`removed ${unlinked.length} notify file(s): ${unlinked.join(', ') || '(none)'}`);
 for (const step of plan) {
   if (step.reason === 'orphan-liveness-unchecked') {
-    console.log(`  ${step.handle}: no agent row, so LIVENESS WAS NOT CHECKED. If a bus is still running under that handle, its wake is now dead.`);
+    console.log(`  ${step.handle}: ${ORPHAN_UNCHECKED}`);
   }
   if (step.reason === 'unsafe-name') {
     console.log(`  ${step.handle}: REFUSED, a handle is one path segment. --force does not override this.`);

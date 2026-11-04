@@ -73,6 +73,24 @@ export function isSafeHandleName(name: string): boolean {
   return !/[/\\]/.test(name);
 }
 
+/**
+ * What an operator is told about an orphan, in both list mode and after a
+ * removal.
+ *
+ * 🛑 ONE COPY, AND IT MUST NOT CLAIM LIVENESS. The first version of list mode
+ * said *"those handles are gone, so there is no liveness to check"* — which IS
+ * the liveness claim this whole module refuses to make, printed in the one
+ * place a human reads BEFORE deciding to delete. The removal path said
+ * "LIVENESS WAS NOT CHECKED" four lines later and the two contradicted.
+ * claude1 caught it on PR 114.
+ *
+ * ⚠️ `UNCHECKED` is the SAME SENTENCE both paths print, so they cannot drift
+ * again.
+ */
+export const ORPHAN_UNCHECKED =
+  'no agent row. That is NOT proof no bus is running under that handle — nothing here can check. ' +
+  'If one is, removing its file kills its wake silently.';
+
 export type RemovalReason =
   /** Registered, offline — the row and the file go together. */
   | 'offline-row'

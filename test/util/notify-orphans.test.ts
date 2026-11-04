@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { partitionNotifyFiles, planNotifyRemoval, isSafeHandleName } from '../../src/util/notify-orphans.js';
+import { readFileSync } from 'node:fs';
+import { partitionNotifyFiles, planNotifyRemoval, isSafeHandleName, ORPHAN_UNCHECKED } from '../../src/util/notify-orphans.js';
 
 /**
  * 🛑 A NOTIFY FILE IS DELETED WITH NO WAY TO UNDO IT, AND BEING WRONG IS SILENT.
@@ -171,4 +172,35 @@ test('a plan keeps one entry per NAME, in the order given', () => {
       ['gone', false],
     ],
   );
+});
+
+/**
+ * 🛑 THE COPY IS THE SAFETY FEATURE, so it is tested like one.
+ *
+ * claude1 on PR 114: list mode said *"those handles are gone, so there is no
+ * liveness to check"*. That IS a liveness claim, printed in the one place a
+ * human reads BEFORE deciding to delete, while the removal path four lines
+ * later correctly said liveness was unchecked.
+ */
+test('🛑 the orphan sentence never claims a handle is gone, dead or safe', () => {
+  assert.match(ORPHAN_UNCHECKED, /no agent row/i, 'it has to say what IS known');
+  assert.match(ORPHAN_UNCHECKED, /NOT proof/i, 'and that the known part proves nothing');
+  assert.match(ORPHAN_UNCHECKED, /nothing here can check/i);
+
+  for (const claim of [/\bare gone\b/i, /\bis gone\b/i, /\bno liveness to check\b/i, /\bsafe to\b/i, /\bnot running\b/i]) {
+    assert.doesNotMatch(ORPHAN_UNCHECKED, claim, `the sentence asserts ${claim}`);
+  }
+});
+
+test('both operator paths print the SAME sentence, so they cannot drift', () => {
+  const script = readFileSync(new URL('../../scripts/prune-test-agents.mjs', import.meta.url), 'utf8');
+
+  // Two call sites, one constant. The first draft had two hand-written
+  // sentences and they disagreed with each other.
+  assert.equal(
+    (script.match(/ORPHAN_UNCHECKED/g) ?? []).length,
+    3,
+    'expected the import plus both call sites to use the one constant',
+  );
+  assert.doesNotMatch(script, /handles are gone/i, 'the liveness claim is back in the script');
 });
