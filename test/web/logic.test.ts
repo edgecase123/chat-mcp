@@ -1,10 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+// The SERVER's copy of the byte cap, so the two can be compared.
+import * as dao from '../../src/storage/dao.js';
 // The browser file itself, imported directly. No DOM, no bundler, no copy.
 import {
   styleSelection,
   styleEditAffordance,
   customStyleSubmission,
+  STYLE_CUSTOM_MAX_BYTES,
   acceptReopens,
   enterShouldSend,
   isPinnedToBottom,
@@ -1120,6 +1123,44 @@ test('a valid custom style is trimmed and tagged', () => {
  * of accented or emoji text is larger than its length suggests, and a
  * character-based guard would pass it here and 400 there.
  */
+/**
+ * 🛑 THE BYTE CAP IS DECLARED TWICE AND NOTHING KEPT THE TWO EQUAL.
+ * `dao.ts` holds the server's guard and `logic.js` mirrors it, because a
+ * browser asset cannot import the TS module. One copy is unavoidable; a drift
+ * nobody notices is not. Raised by claude1 on PR 98.
+ */
+test('the client and server byte caps are the same number', () => {
+  assert.equal(STYLE_CUSTOM_MAX_BYTES, dao.STYLE_CUSTOM_MAX_BYTES);
+});
+
+/**
+ * Equality of the constants is not agreement on the ANSWER — the two measure
+ * with different functions and could differ on the comparison. So walk the
+ * boundary and require the same verdict on each side.
+ */
+test('both sides give the same verdict on each side of the boundary', () => {
+  const cap = dao.STYLE_CUSTOM_MAX_BYTES;
+
+  for (const [bytes, shouldPass] of [
+    [cap - 1, true],
+    [cap, true],
+    [cap + 1, false],
+  ] as [number, boolean][]) {
+    const text = 'a'.repeat(bytes);
+
+    assert.equal(customStyleSubmission(text).ok, shouldPass, `client at ${bytes}`);
+
+    let serverAccepted = true;
+    try {
+      dao.assertStyleCustom('custom', text);
+    } catch {
+      serverAccepted = false;
+    }
+
+    assert.equal(serverAccepted, shouldPass, `server at ${bytes}`);
+  }
+});
+
 test('the cap is measured in bytes', () => {
   const justUnder = 'a'.repeat(65536);
   assert.equal(customStyleSubmission(justUnder).ok, true);
