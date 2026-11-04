@@ -517,6 +517,33 @@ function freshDurationMs() {
 }
 
 /**
+ * The message as the reader SEES it, not as it was typed (#102).
+ *
+ * 🛑 THE FILTER AND THE HIGHLIGHTER MUST MATCH THE SAME STRING. They did not:
+ * the filter read markdown SOURCE and the highlighter walked RENDERED text, so
+ * a term crossing a code span hid a row whose exact text was on screen.
+ * Measured on `see \`--color-card\` here`: the term "see --color-card" returned
+ * ZERO rows while those characters were visible. Found by claude1.
+ *
+ * ⚠️ PARSED IN THE BROWSER, NOT STRIPPED ON THE SERVER. A server-side tag
+ * strip has to decode entities to agree with what a text node holds — `&amp;`
+ * against `&` — which is the same mismatch one layer down. `textContent` of a
+ * parse is what the highlighter walks, by construction.
+ *
+ * Cached per message object. `refresh()` replaces `state.messages` wholesale on
+ * every wake, so this costs one parse per fetch rather than one per keystroke.
+ */
+function renderedText(m) {
+  if (m.__renderedText === undefined) {
+    const probe = document.createElement('div');
+    probe.innerHTML = m.body_html || '';
+    m.__renderedText = probe.textContent ?? '';
+  }
+
+  return m.__renderedText;
+}
+
+/**
  * Wrap every occurrence of `term` in a node's TEXT NODES with `<mark>` (#102).
  *
  * 🛑 TEXT NODES, NEVER THE HTML STRING. A regex over `body_html` can match
@@ -617,8 +644,18 @@ function renderMessages({ forceBottom = false } = {}) {
   // says how many messages were scanned. "no match" alone reads as "it is not
   // in the transcript", and the transcript is longer than this view.
   const term = state.searchTerm.trim();
+  // 🛑 `renderedText`, NOT `m.body`. Matching markdown SOURCE while marking
+  // RENDERED text hid rows whose exact characters were on screen: the term
+  // "see --color-card" returned nothing against `see \`--color-card\` here`.
+  //
+  // ⚠️ THIS DOES NOT MAKE EVERY SHOWN ROW CARRY A MARK, and an earlier version
+  // of this comment claimed it did. `highlightInPlace` works per TEXT NODE, so
+  // a term spanning a code span matches the concatenated text and appears in no
+  // single node. The row is FOUND, which is the half that matters; marking
+  // across nodes needs offset mapping and is not done here. Measured: that term
+  // gives 1 row, 0 marks.
   const visible =
-    term.length === 0 ? state.messages : state.messages.filter((m) => messageMatchesSearch(m.body, term));
+    term.length === 0 ? state.messages : state.messages.filter((m) => messageMatchesSearch(renderedText(m), term));
 
   if (visible.length === 0) {
     el.messages.innerHTML = '';
