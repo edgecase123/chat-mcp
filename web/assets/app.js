@@ -462,6 +462,17 @@ function resetStreamPosition() {
   renderJumpNewest();
 }
 
+/**
+ * How long `.is-fresh` stays on a node, read from the stylesheet so the
+ * duration has ONE home. Hard-coding it here too is how the two drift.
+ */
+function freshDurationMs() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--msg-fresh-ms');
+  const ms = Number.parseInt(raw, 10);
+
+  return Number.isFinite(ms) && ms > 0 ? ms + 60 : 500;
+}
+
 function messageNode(m, { fresh = false } = {}) {
   const isSelf = m.from_handle === state.handle;
   const kind = m.kind || 'chat';
@@ -479,10 +490,13 @@ function messageNode(m, { fresh = false } = {}) {
   // 🛑 DROP THE CLASS ONCE IT HAS PLAYED. Left on, the next reflow replays the
   // shimmer on an old message, and `prefers-reduced-motion` fires no
   // animationend at all — so a timer, not only the event.
+  // 🛑 A TIMER, NOT `animationend`. `.is-fresh` drives TWO animations — the
+  // 160ms slide on the element and the longer shimmer on its `::after` — and
+  // a one-shot `animationend` listener fired on the first of them, stripping
+  // the class and cutting the shimmer off at 160ms. `prefers-reduced-motion`
+  // is the other reason: it fires no `animationend` at all.
   if (fresh) {
-    const settle = () => li.classList.remove('is-fresh');
-    li.addEventListener('animationend', settle, { once: true });
-    setTimeout(settle, 2000);
+    setTimeout(() => li.classList.remove('is-fresh'), freshDurationMs());
   }
 
   return li;
