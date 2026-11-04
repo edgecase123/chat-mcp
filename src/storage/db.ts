@@ -234,7 +234,47 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       UPDATE agents SET style = NULL, style_custom = NULL WHERE style = 'normal';
     `);
   },
+  (db) => {
+    // #101 — a claim on a shared resource, as rows rather than prose.
+    //
+    // 🛑 A ROW PER CLAIM, NEVER A ROW PER RESOURCE. The history is the point:
+    // "who held the gate when this broke" is unanswerable from a table that
+    // only remembers the current holder, and that question is why #101 exists.
+    //
+    // 🛑 `expires_at` IS NOT NULLABLE. A claim with no expiry is the lock
+    // nobody can clear, which is the failure lee's ruling names — expiry is
+    // the failsafe for an agent that died holding one.
+    //
+    // ⚠️ A SEPARATE MIGRATION, per migration 8's docblock. Editing an earlier
+    // one never reaches a database that already ran it.
+    db.exec(`
+      CREATE TABLE claims (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        resource    TEXT    NOT NULL,
+        holder      TEXT    NOT NULL,
+        note        TEXT,
+        claimed_at  INTEGER NOT NULL,
+        expires_at  INTEGER NOT NULL,
+        released_at INTEGER
+      );
+      CREATE INDEX claims_by_resource ON claims (resource, id DESC);
+    `);
+  },
 ];
+
+/**
+ * The version a fully migrated database reports.
+ *
+ * 🛑 DERIVED, NEVER TYPED. A test used to pin the literal `13`, so every new
+ * migration had to edit a test named for conversation styles — a second copy
+ * of a number that only moves one way.
+ *
+ * ⚠️ It is NOT a substitute for the version pin. Comparing a database to this
+ * only proves every migration registered its own version, which is migration
+ * 8's bug. A test still has to assert the floor, so deleting a migration is
+ * loud.
+ */
+export const SCHEMA_VERSION = MIGRATIONS.length;
 
 function tx(db: Db, fn: () => void): void {
   db.exec('BEGIN');

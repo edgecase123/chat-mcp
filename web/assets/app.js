@@ -32,6 +32,8 @@ import {
   clearConfirmText,
   clearResultText,
   gaugeDisplay,
+  claimRow,
+  claimsPanelEmpty,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -44,6 +46,7 @@ const state = {
   handle: null,
   version: null,
   peers: [],
+  claims: [],  // #101 — live claims on shared resources
   rooms: [],
   discoverRooms: [],
   currentTarget: null, // e.g. "#poker" or "@alice"
@@ -195,6 +198,26 @@ function h(tag, attrs = {}, children = []) {
 
 function renderSidebar() {
   el.sidebar.innerHTML = '';
+
+  // Claims (#101) — ABOVE Peers on purpose. Who holds the gate is the thing
+  // an agent has to know before starting anything, and it used to live only
+  // in chat scrollback.
+  const claims = state.claims.map((c) => claimRow(c, { me: state.handle }));
+  const claimsSection = h('div', { className: 'sidebar__section' }, [
+    h('div', { className: 'sidebar__heading' }, ['Claims']),
+    ...(claims.length === 0
+      // 🛑 SAYS it is empty. A blank panel and a panel that failed to load
+      // look identical, which is #103's frozen gauge in a different place.
+      ? [h('div', { className: 'sidebar__empty' }, [claimsPanelEmpty()])]
+      : claims.map((c) => h('div', {
+        className: `claim${c.stale ? ' claim--stale' : ''}${c.mine ? ' claim--mine' : ''}`,
+        title: `${c.holder} · ${c.age} · ${c.expiry}${c.note ? ` · ${c.note}` : ''}`,
+      }, [
+        h('div', { className: 'claim__resource' }, [c.resource]),
+        h('div', { className: 'claim__meta' }, [`${c.holder} · ${c.age}`]),
+      ]))),
+  ]);
+  el.sidebar.appendChild(claimsSection);
 
   // Peers
   const peersSection = h('div', { className: 'sidebar__section' }, [
@@ -720,10 +743,16 @@ async function selectTarget(target) {
   renderSidebar();
 }
 
+async function fetchClaims() {
+  const data = await api('/api/claims');
+  state.claims = data.claims;
+}
+
 async function refresh() {
   try {
     await fetchWhoami();
     await fetchApprovals();
+    await fetchClaims();
     if (state.currentTarget) await fetchMessages(state.currentTarget);
     renderSidebar();
     renderPaneHeader();

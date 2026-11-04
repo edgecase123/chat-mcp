@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { migrate } from '../../src/storage/db.js';
+import { migrate, SCHEMA_VERSION } from '../../src/storage/db.js';
 import * as dao from '../../src/storage/dao.js';
 
 /**
@@ -238,12 +238,17 @@ test('a legacy normal value is inert and clears on the next cycle', () => {
   assert.equal(dao.nextStyle('normal', false), null, 'an unknown value clears rather than advancing');
 });
 
-test('the schema reaches version 13', () => {
+test('a migrated database registers every migration, and the count only grows', () => {
+  // 🛑 TWO HALVES, AND NEITHER COVERS THE OTHER. The first proves each
+  // migration wrote its own version row — migration 8's bug was editing one in
+  // place, which left the count behind. The second is the floor, so DELETING a
+  // migration is loud; it moves when a human decides it does.
   const db = freshDb();
 
   const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as unknown as { v: number };
 
-  assert.equal(v.v, 13);
+  assert.equal(v.v, SCHEMA_VERSION, 'a migration ran without registering its version');
+  assert.ok(SCHEMA_VERSION >= 14, `the schema went BACKWARDS to ${SCHEMA_VERSION}`);
 });
 
 test('custom markdown is what makes custom reachable in the cycle', () => {

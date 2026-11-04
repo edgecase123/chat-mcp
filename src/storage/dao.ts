@@ -1,4 +1,5 @@
 import type { Db } from './db.js';
+import type { ClaimRow } from '../claims/lifecycle.js';
 
 export type AgentStatus = 'idle' | 'thinking' | 'tool' | 'blocked' | 'error' | 'offline';
 export type MessageKind = 'chat' | 'dispatch' | 'alert';
@@ -1199,4 +1200,123 @@ export function nextStyle(current: string | null, hasCustom: boolean): string | 
   // index 0 is `null`, not the first named style, and my own test read it the
   // other way.
   return order[at === -1 ? 0 : (at + 1) % order.length] ?? null;
+}
+
+/* ------------------------------------------------------------------------- *
+ * #101 — claims on shared resources
+ *
+ * 🛑 THESE FUNCTIONS DECIDE NOTHING. Every rule about conflict, renewal,
+ * expiry and ownership lives in `src/claims/lifecycle.ts`, pure and tested
+ * without a database. A lock that is wrong is silent, so the logic has to be
+ * reachable by a unit test rather than only by two agents colliding.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The newest claim row for a resource, live or not.
+ *
+ * 🛑 NEWEST, NOT NEWEST-LIVE. `decideClaim` needs to tell an expired claim
+ * (a failsafe fired, say so) from a released one (a clean handover, say
+ * nothing), and a query that filters to live rows throws that away.
+ */
+export function latestClaim(db: Db, resource: string): ClaimRow | null {
+  const row = db
+    .prepare('SELECT * FROM claims WHERE resource = ? ORDER BY id DESC LIMIT 1')
+    .get(resource) as unknown as ClaimRow | undefined;
+
+  return row ?? null;
+}
+
+/**
+ * Every claim still held at `now`, newest first.
+ *
+ * 🛑 NO PER-RESOURCE MAX(id). A duplicate must show as two holders, because
+ * naming one and reporting no conflict is worse than the chat scrollback this
+ * table replaced. `released_at IS NULL` is what keeps a handover to one row.
+ */
+export function liveClaims(db: Db, now: number): ClaimRow[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM claims c
+        WHERE c.released_at IS NULL AND c.expires_at > ?
+        ORDER BY c.id DESC`,
+    )
+    .all(now) as unknown as ClaimRow[];
+
+  return rows;
+}
+
+/**
+ * Write a claim, but ONLY if the resource is still free.
+ *
+ * 🛑 THIS IS THE COMPARE-AND-SWAP, AND IT IS WHY THERE IS NO TRANSACTION.
+ * Reading the newest row and then inserting leaves a window: two agents
+ * claiming together both read "free", both pass `decideClaim`, and both write.
+ * Same bug, same remedy and the same reasoning as `writeClaim` above.
+ *
+ * ⚠️ A UNIQUE INDEX CANNOT DO THIS. "One live claim per resource" is partly a
+ * statement about the clock, and an index cannot read `now`.
+ *
+ * Returns null when a rival got in first, which the caller reports as the
+ * conflict it is.
+ */
+export function insertClaim(
+  db: Db,
+  input: { resource: string; holder: string; note: string | null; claimed_at: number; expires_at: number },
+): ClaimRow | null {
+  const info = db
+    .prepare(
+      `INSERT INTO claims (resource, holder, note, claimed_at, expires_at)
+       SELECT @resource, @holder, @note, @claimed_at, @expires_at
+        WHERE NOT EXISTS (
+          SELECT 1 FROM claims
+           WHERE resource = @resource AND released_at IS NULL AND expires_at > @claimed_at
+        )`,
+    )
+    .run({ ...input });
+
+  if (Number(info.changes) === 0) return null;
+
+  return latestClaimById(db, Number(info.lastInsertRowid));
+}
+
+/**
+ * Extend a live claim's expiry in place, so the row keeps its claimed_at.
+ *
+ * 🛑 THE SAME SWAP, BECAUSE A RENEWAL HAS THE SAME WINDOW. Between reading its
+ * own live claim and writing the new expiry, the claim can lapse and a rival
+ * can take it over — and an UPDATE by id alone then REVIVES the dead row,
+ * leaving two live claims with the insert already atomic.
+ *
+ * Returns null when the row is no longer live, or no longer the caller's.
+ */
+export function renewClaim(
+  db: Db,
+  input: { id: number; holder: string; expires_at: number; now: number },
+): ClaimRow | null {
+  const info = db
+    .prepare(
+      `UPDATE claims SET expires_at = @expires_at
+        WHERE id = @id AND holder = @holder AND released_at IS NULL AND expires_at > @now`,
+    )
+    .run({ ...input });
+
+  if (Number(info.changes) === 0) return null;
+
+  return latestClaimById(db, input.id);
+}
+
+/** Mark a claim released. Returns false if the row was already released. */
+export function releaseClaim(db: Db, id: number, released_at: number): boolean {
+  const info = db
+    .prepare('UPDATE claims SET released_at = ? WHERE id = ? AND released_at IS NULL')
+    .run(released_at, id);
+
+  return Number(info.changes) > 0;
+}
+
+function latestClaimById(db: Db, id: number): ClaimRow {
+  const row = db.prepare('SELECT * FROM claims WHERE id = ?').get(id) as unknown as ClaimRow | undefined;
+  if (row === undefined) throw new Error(`claim ${id} vanished immediately after being written`);
+
+  return row;
 }

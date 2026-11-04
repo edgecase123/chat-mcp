@@ -952,3 +952,28 @@ html, body {
 .sidebar__item-gauge.is-warn { color: var(--warning, #b45309); font-weight: 600; }
 .sidebar__item-gauge.is-crit { color: var(--danger, #dc2626); font-weight: 600; }
 .sidebar__item-gauge.is-stale { color: var(--fg-faint); opacity: 0.7; }
+
+/* Claims panel (#101). Who holds a shared resource, above Peers because it is
+   the thing to check before starting anything. */
+.claim {
+  padding: 4px 8px;
+  border-left: 2px solid var(--border, #333);
+  margin-bottom: 4px;
+}
+.claim__resource {
+  font-size: 12px;
+  word-break: break-all;
+}
+.claim__meta {
+  font-size: 11px;
+  opacity: 0.65;
+}
+/* Held past an hour, when one full gate is about 23 minutes. Not "near
+   expiry" — the failsafe is four hours, which is three hours too late to
+   start wondering. */
+.claim--stale {
+  border-left-color: #d98324;
+}
+.claim--mine {
+  border-left-color: #4a9eda;
+}
