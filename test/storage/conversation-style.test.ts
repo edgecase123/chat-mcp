@@ -62,7 +62,6 @@ test('custom replaces the preset rather than layering on it', () => {
 
   assert.equal(resolved?.style, 'custom');
   assert.equal(resolved?.text, '# Rules\n\nLead with the sha.');
-  assert.ok(!resolved?.text.includes(dao.STYLE_PRESETS.normal!));
   assert.ok(!resolved?.text.includes(dao.STYLE_PRESETS.succinct!));
 });
 
@@ -81,7 +80,7 @@ test('custom with blank markdown pushes nothing', () => {
 test('switching away from custom drops the markdown', () => {
   const db = freshDb();
   dao.setRoomStyle(db, '#gate', 'custom', 'keep it short');
-  dao.setRoomStyle(db, '#gate', 'normal');
+  dao.setRoomStyle(db, '#gate', 'succinct');
 
   const row = db.prepare('SELECT style_custom FROM rooms WHERE name = ?').get('#gate') as unknown as {
     style_custom: string | null;
@@ -100,7 +99,7 @@ test('a peer style resolves the same way as a room style', () => {
 test('an unknown style name is refused', () => {
   assert.throws(() => dao.assertStyleName('terse'), /Unknown style "terse"/);
   assert.doesNotThrow(() => dao.assertStyleName('custom'));
-  assert.doesNotThrow(() => dao.assertStyleName('normal'));
+  assert.throws(() => dao.assertStyleName('normal'), /Unknown style "normal"/);
 });
 
 test('custom demands markdown, and an oversized one is refused', () => {
@@ -177,9 +176,8 @@ test('no rooms returned means no blocks, however styled they are', () => {
 // The CLI cycle (#92 unit 2)
 // ---------------------------------------------------------------------------
 
-test('the cycle walks none -> normal -> succinct -> none when no custom exists', () => {
-  assert.equal(dao.nextStyle(null, false), 'normal');
-  assert.equal(dao.nextStyle('normal', false), 'succinct');
+test('the cycle walks none -> succinct -> none when no custom exists', () => {
+  assert.equal(dao.nextStyle(null, false), 'succinct');
   assert.equal(dao.nextStyle('succinct', false), null);
 });
 
@@ -197,9 +195,34 @@ test('the cycle includes custom only when markdown is already stored', () => {
 });
 
 test('an unrecognised stored style is CLEARED rather than advanced', () => {
-  // My first version of this test expected 'normal' and the code returns null.
   // The docblock said "cycles to the start"; index 0 of the order is `null`.
   assert.equal(dao.nextStyle('terse', false), null);
+});
+
+/**
+ * 🛑 `normal` IS NOW UNRECOGNISED, AND A LIVE ROOM HELD IT. Migration 13 clears
+ * those rows so the column cannot read "normal" while resolveStyle pushes
+ * nothing — a style configured and silently inert.
+ *
+ * ⚠️ THIS DOES NOT TEST THE MIGRATION'S UPDATE. `migrate()` runs every
+ * migration, so a row planted afterwards is never swept, and my first version
+ * of this test asserted exactly that and failed. What it pins is the
+ * behaviour a legacy value gets if one ever survives.
+ */
+test('a legacy normal value is inert and clears on the next cycle', () => {
+  const db = freshDb();
+  db.prepare('UPDATE rooms SET style = ? WHERE name = ?').run('normal', '#gate');
+
+  assert.equal(dao.resolveStyle(db, 'rooms', '#gate'), undefined, 'an unknown preset must push nothing');
+  assert.equal(dao.nextStyle('normal', false), null, 'an unknown value clears rather than advancing');
+});
+
+test('the schema reaches version 13', () => {
+  const db = freshDb();
+
+  const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as unknown as { v: number };
+
+  assert.equal(v.v, 13);
 });
 
 test('custom markdown is what makes custom reachable in the cycle', () => {

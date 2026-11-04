@@ -1070,10 +1070,10 @@ test('choosing none clears it, which is null and not an empty string', () => {
  * room CAN be in that state via the set_style tool.
  */
 test('choosing custom refuses and reverts to what the room already had', () => {
-  const decision = styleSelection('custom', 'normal');
+  const decision = styleSelection('custom', 'succinct');
 
   assert.equal(decision.action, 'refuse');
-  assert.equal(decision.revertTo, 'normal');
+  assert.equal(decision.revertTo, 'succinct');
   assert.match(decision.message, /set_style/);
 });
 
