@@ -671,8 +671,8 @@ function renderPaneHeader() {
     el.paneTitle.textContent = state.currentTarget;
     const room = state.rooms.find((r) => r.name === state.currentTarget);
     el.paneMeta.textContent = room ? `${room.member_count ?? '?'} members` : '';
-    // #92 — the style selector belongs to rooms only. A DM has no shared room
-    // to carry one, and the empty state has no target at all.
+    // #92 — a room style instructs everyone in the room. The peer branch
+    // below carries the other half: how to write TO one peer.
     if (el.paneStyleWrap && el.paneStyle) {
       el.paneStyleWrap.hidden = !room;
       if (room) el.paneStyle.value = room.style ?? '';
@@ -683,8 +683,14 @@ function renderPaneHeader() {
     el.paneTitle.textContent = `DM · ${state.currentTarget}`;
     const peer = state.peers.find((p) => p.handle === state.currentTarget);
     el.paneMeta.textContent = peer ? (peer.online ? 'online' : 'offline') : '';
-    if (el.paneStyleWrap) el.paneStyleWrap.hidden = true;
-    if (el.paneStyleEdit) el.paneStyleEdit.hidden = true;
+    // #92 — the same selector, for the peer half. Hidden for a handle that is
+    // not a known peer, because the server refuses a style on one.
+    if (el.paneStyleWrap && el.paneStyle) {
+      el.paneStyleWrap.hidden = !peer;
+      if (peer) el.paneStyle.value = peer.style ?? '';
+      if (el.paneStyleEdit) el.paneStyleEdit.hidden = !peer || !styleEditAffordance(peer.style);
+      if (el.styleEditor && el.styleEditor.hidden === false && state.currentTarget !== el.styleEditorRoom.textContent) closeStyleEditor();
+    }
   }
   el.composerInput.focus();
 }
@@ -1411,14 +1417,17 @@ if (el.styleEditorCancel) {
     closeStyleEditor();
     // Put the selector back to what the room actually holds, so cancelling
     // does not leave it reading "custom" over an unsaved style.
-    const current = state.rooms.find((r) => r.name === state.currentTarget);
+    const t = state.currentTarget;
+    const current = t?.startsWith('#')
+      ? state.rooms.find((r) => r.name === t)
+      : state.peers.find((p) => p.handle === t);
     if (el.paneStyle) el.paneStyle.value = current?.style ?? '';
   });
 }
 
 if (el.styleEditorSave) {
   el.styleEditorSave.addEventListener('click', async () => {
-    const room = state.currentTarget;
+    const target = state.currentTarget;
     const check = customStyleSubmission(el.styleEditorText.value);
 
     if (!check.ok) {
@@ -1426,10 +1435,18 @@ if (el.styleEditorSave) {
       return;
     }
 
+    // #92 — same split as the dropdown handler below: the endpoint and the
+    // key are the only difference between a room style and a peer style.
+    const isRoom = target.startsWith('#');
+
     try {
-      await api('/api/rooms/style', {
+      await api(isRoom ? '/api/rooms/style' : '/api/peers/style', {
         method: 'POST',
-        body: JSON.stringify({ room, style: check.style, custom: check.custom }),
+        body: JSON.stringify(
+          isRoom
+            ? { room: target, style: check.style, custom: check.custom }
+            : { peer: target, style: check.style, custom: check.custom },
+        ),
       });
       closeStyleEditor();
       await refresh();
@@ -1439,34 +1456,46 @@ if (el.styleEditorSave) {
   });
 }
 
-// #92 — saving a room's conversation style. `custom` opens the editor instead
-// of saving, because the server demands markdown alongside it.
+// #92 — saving a conversation style for a room OR a peer. `custom` opens the
+// editor instead of saving, because the server demands markdown alongside it.
+//
+// 🛑 THE TWO HALVES DIFFER ONLY IN THE ENDPOINT AND THE KEY, so they share
+// this handler. Forked into two listeners, the `custom` branch and the
+// revert-on-failure branch would each exist twice and be free to drift.
 if (el.paneStyle) {
   el.paneStyle.addEventListener('change', async () => {
-    const room = state.currentTarget;
+    const target = state.currentTarget;
     const chosen = el.paneStyle.value;
 
-    if (!room || !room.startsWith('#')) return;
+    if (!target) return;
 
-    const current = state.rooms.find((r) => r.name === room);
-    const decision = styleSelection(chosen, current?.style ?? null);
+    const isRoom = target.startsWith('#');
+    const current = isRoom
+      ? state.rooms.find((r) => r.name === target)
+      : state.peers.find((p) => p.handle === target);
+
+    if (!current) return;
+
+    const decision = styleSelection(chosen, current.style ?? null);
 
     if (decision.action === 'edit') {
-      openStyleEditor(room, current?.style_custom ?? '');
+      openStyleEditor(target, current.style_custom ?? '');
       return;
     }
 
     closeStyleEditor();
 
     try {
-      await api('/api/rooms/style', {
+      await api(isRoom ? '/api/rooms/style' : '/api/peers/style', {
         method: 'POST',
-        body: JSON.stringify({ room, style: decision.style }),
+        body: JSON.stringify(
+          isRoom ? { room: target, style: decision.style } : { peer: target, style: decision.style },
+        ),
       });
       await refresh();
     } catch (e) {
       console.error('could not save the style', e);
-      el.paneStyle.value = current?.style ?? '';
+      el.paneStyle.value = current.style ?? '';
     }
   });
 }

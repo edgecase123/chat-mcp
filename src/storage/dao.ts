@@ -20,6 +20,11 @@ export interface Agent {
   context_total: number | null;
   context_reported_at: number | null;
   context_warned_threshold: number | null;
+  // #92 — the style to follow when writing TO this peer. Carried on the
+  // agent so the web selector reads back what it saved; dropping it here is
+  // the bug #96 fixed on the room side.
+  style: string | null;
+  style_custom: string | null;
 }
 
 export interface Message {
@@ -48,6 +53,8 @@ interface AgentRow {
   context_total: number | null;
   context_reported_at: number | null;
   context_warned_threshold: number | null;
+  style: string | null;
+  style_custom: string | null;
 }
 
 interface MessageRow {
@@ -110,6 +117,8 @@ function hydrate(row: AgentRow): Agent {
     context_total: row.context_total,
     context_reported_at: row.context_reported_at,
     context_warned_threshold: row.context_warned_threshold,
+    style: row.style ?? null,
+    style_custom: row.style_custom ?? null,
   };
 }
 

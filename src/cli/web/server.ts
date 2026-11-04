@@ -295,6 +295,7 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   if (path === '/api/rooms/join' && req.method === 'POST') return handleRoomJoin(req, res, ctx);
   if (path === '/api/rooms/leave' && req.method === 'POST') return handleRoomLeave(req, res, ctx);
   if (path === '/api/rooms/style' && req.method === 'POST') return handleRoomStyle(req, res, ctx);
+  if (path === '/api/peers/style' && req.method === 'POST') return handlePeerStyle(req, res, ctx);
   if (path === '/api/kick' && req.method === 'POST') return handleKick(req, res, ctx);
   if (path === '/api/rooms/delete' && req.method === 'POST') return handleRoomDelete(req, res, ctx);
   if (path === '/api/rooms/read' && req.method === 'POST') return handleRoomRead(req, res, ctx);
@@ -457,6 +458,42 @@ async function handleRoomStyle(req: IncomingMessage, res: ServerResponse, ctx: R
   }
 
   dao.setRoomStyle(ctx.db, body.room, style, body.custom);
+
+  respondJson(res, { ok: true, style });
+}
+
+/**
+ * #92 — set a PEER's conversation style from the web selector.
+ *
+ * 🛑 NO MEMBERSHIP CHECK, AND THAT IS THE DIFFERENCE FROM THE ROOM HANDLER.
+ * A room style instructs everyone in the room, so it is scoped to members. A
+ * peer style instructs only the reader about how to write TO that peer, so
+ * there is nobody else to protect and the peer is not affected.
+ *
+ * The agent must EXIST, because a style written to a handle nobody registered
+ * is a setting that silently addresses no one.
+ */
+async function handlePeerStyle(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+  const body = (await readJsonBody(req)) as { peer?: string; style?: string | null; custom?: string };
+
+  if (!body.peer) return respondJson(res, { error: 'peer required' }, 400);
+
+  if (dao.getAgent(ctx.db, body.peer) === null) {
+    return respondJson(res, { error: `no such peer ${body.peer}` }, 404);
+  }
+
+  const style = body.style ?? null;
+
+  if (style !== null) {
+    try {
+      dao.assertStyleName(style);
+      dao.assertStyleCustom(style, body.custom);
+    } catch (e) {
+      return respondJson(res, { error: (e as Error).message }, 400);
+    }
+  }
+
+  dao.setAgentStyle(ctx.db, body.peer, style, body.custom);
 
   respondJson(res, { ok: true, style });
 }
