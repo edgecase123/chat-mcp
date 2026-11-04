@@ -158,3 +158,19 @@ test('🛑 no term can straddle the join, so the appended URL invents no phrase'
 test('⚠️ control — rendered text alone cannot find the URL', () => {
   assert.equal(messageMatchesSearch('decided in PR 118', 'chat-mcp/pull/118'), false);
 });
+
+test('🛑 a neutered link contributes NOTHING — `#` is not a destination', () => {
+  // `safeUrl` renders a `javascript:` target as `href="#"`. Appending that made
+  // the single-character term "#" match every message holding a dead link.
+  const text = searchableText('careful with this link', ['#']);
+
+  assert.equal(text, 'careful with this link');
+  assert.equal(messageMatchesSearch(text, '#'), false);
+});
+
+test('a real fragment or relative href is still appended', () => {
+  // `safeUrl` passes `/`, `#` and `?` prefixes through, so these are genuine
+  // destinations and only the bare `#` is the dead one.
+  assert.equal(searchableText('see the gate', ['#gate-section']), 'see the gate\n#gate-section');
+  assert.equal(searchableText('see the gate', ['/rooms/gate']), 'see the gate\n/rooms/gate');
+});

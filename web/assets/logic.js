@@ -1137,6 +1137,10 @@ export function searchableText(text, hrefs = []) {
 
   for (const href of hrefs) {
     if (typeof href !== 'string' || href.length === 0) continue;
+    // 🛑 `#` IS WHAT A NEUTERED LINK RENDERS AS, not a destination. `safeUrl`
+    // turns a `javascript:` or `data:` target into `#`, and appending that made
+    // the term "#" match every message holding a dead link. Found by claude1.
+    if (href === '#') continue;
     // A bare URL is already its own label, so appending it would double it.
     if (text.includes(href)) continue;
     if (extra.includes(href)) continue;
