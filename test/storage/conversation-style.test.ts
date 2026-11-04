@@ -89,11 +89,32 @@ test('switching away from custom drops the markdown', () => {
   assert.equal(row.style_custom, null, 'stale custom markdown survived a preset switch');
 });
 
-test('a peer style resolves the same way as a room style', () => {
+/**
+ * The agents branch of `resolveStyle` still works, and nothing reaches it.
+ * Kept because the COLUMNS are kept — lee closed PR 100 on scope, not on the
+ * storage — so this pins what a future peer feature would get back.
+ */
+test('a peer style still resolves, though no caller writes one any more', () => {
   const db = freshDb();
   dao.setAgentStyle(db, 'claude2', 'succinct');
 
   assert.equal(dao.resolveStyle(db, 'agents', 'claude2')?.text, dao.STYLE_PRESETS.succinct);
+});
+
+// ── rooms only, #92 / PR 100 closed ──────────────────────────────────────
+
+test('a room target is accepted', () => {
+  assert.doesNotThrow(() => dao.assertStyleTarget('#gate'));
+});
+
+/**
+ * 🛑 THE POINT IS THE SILENT SUCCESS IT REPLACES. `agents.style` is writable
+ * and nothing reads it, so before this a peer style was stored and did
+ * nothing. The message has to say that, not just "refused".
+ */
+test('a peer target is refused, and the message says the style would never be delivered', () => {
+  assert.throws(() => dao.assertStyleTarget('claude1'), /per-room only/);
+  assert.throws(() => dao.assertStyleTarget('claude1'), /never delivered/);
 });
 
 test('an unknown style name is refused', () => {
