@@ -2,7 +2,7 @@ import * as dao from '../storage/dao.js';
 import { usedFromTranscript } from '../adapters/transcript-usage.js';
 import { openDb } from '../storage/db.js';
 import { notifyPeer } from '../notify/bus.js';
-import { nextGaugeState, warningBody, type Threshold } from '../shim/gauge.js';
+import { nextGaugeState, warningBody, deliveryFor, type Threshold } from '../shim/gauge.js';
 
 export interface ReportContextOpts {
   handle: string;
@@ -69,7 +69,9 @@ export async function runReportContext(opts: ReportContextOpts): Promise<void> {
     const notified = { dm: 0, rooms: [] as string[] };
     if (transition.fire != null) {
       const body = warningBody(opts.handle, transition.fire, percent);
-      if (transition.fire === 70) {
+      const delivery = deliveryFor(transition.fire);
+
+      if (delivery === 'dm') {
         const result = dao.insertMessage(db, {
           from: dao.SYSTEM_HANDLE,
           to: opts.handle,
@@ -86,7 +88,7 @@ export async function runReportContext(opts: ReportContextOpts): Promise<void> {
         });
         notified.dm = 1;
       } else {
-        const kind = transition.fire === 95 ? 'alert' : 'chat';
+        const kind = delivery === 'alert' ? 'alert' : 'chat';
         for (const room of dao.myRooms(db, opts.handle)) {
           const result = dao.insertMessage(db, {
             from: dao.SYSTEM_HANDLE,

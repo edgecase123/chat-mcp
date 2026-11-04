@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as dao from '../../storage/dao.js';
 import { notifyPeer } from '../../notify/bus.js';
-import { nextGaugeState, warningBody, type Threshold } from '../gauge.js';
+import { nextGaugeState, warningBody, deliveryFor, type Threshold } from '../gauge.js';
 import type { ShimContext } from '../index.js';
 
 export function installReportContext(server: McpServer, ctx: ShimContext): void {
@@ -43,7 +43,9 @@ export function installReportContext(server: McpServer, ctx: ShimContext): void 
       const notified = { dm: 0, rooms: [] as string[] };
       if (transition.fire != null) {
         const body = warningBody(ctx.handle, transition.fire, percent);
-        if (transition.fire === 70) {
+        const delivery = deliveryFor(transition.fire);
+
+        if (delivery === 'dm') {
           // Soft warning: DM the peer only. The peer's own client renders
           // this in their inbox; no room chatter yet.
           const result = dao.insertMessage(ctx.db, {
@@ -65,7 +67,7 @@ export function installReportContext(server: McpServer, ctx: ShimContext): void 
           // 85 / 95: post to every room the peer is a member of so co-agents
           // + the human can react. Kind='alert' at 95 so it surfaces in the
           // alert lane.
-          const kind = transition.fire === 95 ? 'alert' : 'chat';
+          const kind = delivery === 'alert' ? 'alert' : 'chat';
           for (const room of dao.myRooms(ctx.db, ctx.handle)) {
             const result = dao.insertMessage(ctx.db, {
               from: dao.SYSTEM_HANDLE,

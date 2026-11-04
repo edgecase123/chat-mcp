@@ -898,7 +898,12 @@ export function gaugeDisplay(peer) {
 
   const percent = Math.round((used / total) * 100);
 
-  // The bands the bus already warns on, so the colour and the DM agree.
+  // 🛑 THE THREE BANDS THE BUS POSTS TO A ROOM, NOT ALL FOUR IT WARNS ON.
+  // The bus also DMs at 50 (#105), and lee ruled that level DM-only, so it
+  // earns no colour here. An earlier comment said "the bands the bus already
+  // warns on", which stopped being true the moment a fourth band landed.
+  // Pinned by `the web gauge's colours mirror the ROOM-POST bands` in
+  // test/shim/gauge-bands.test.ts.
   const band = percent >= 95 ? 'crit' : percent >= 85 ? 'warn' : percent >= 70 ? 'soft' : 'ok';
 
   return { show: true, percent, band, title: `Context ${percent}% — ${used.toLocaleString()} of ${total.toLocaleString()} tokens` };
