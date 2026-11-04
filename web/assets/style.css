@@ -403,9 +403,33 @@ html, body {
   padding: 16px 20px;
   list-style: none;
 }
+/* 🛑 THE ENTRY ANIMATION IS NOT ON `.message` ANY MORE. It was, and because a
+   wake rebuilt the whole list, every message in the room replayed it on each
+   arrival — the transcript flashed. Only a genuinely new node gets
+   `.is-fresh`, and app.js strips the class once it has played. */
 .message {
   padding: 8px 0;
+  position: relative;
+}
+.message.is-fresh {
   animation: msg-in 160ms ease-out;
+}
+/* The shimmer rides on a pseudo-element, so it cannot disturb layout or the
+   text selection in the body underneath. */
+.message.is-fresh::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 35%,
+    color-mix(in srgb, var(--accent) 16%, transparent) 50%,
+    transparent 65%
+  );
+  background-size: 300% 100%;
+  background-position: 100% 0;
+  animation: msg-shimmer 900ms ease-out;
 }
 /* Between messages only, so the first one does not get a stray rule under
    the pane header. --border is the soft token; --border-strong is not. */
@@ -415,6 +439,17 @@ html, body {
 @keyframes msg-in {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: none; }
+}
+@keyframes msg-shimmer {
+  from { background-position: 100% 0; }
+  to   { background-position: -100% 0; }
+}
+/* 🛑 NO `animation: none` ON `.is-fresh` HERE. That fires no `animationend`,
+   and the class would stay on the node. app.js also clears it on a timer, so
+   this only needs to stop the motion. */
+@media (prefers-reduced-motion: reduce) {
+  .message.is-fresh { animation-duration: 1ms; }
+  .message.is-fresh::after { animation-duration: 1ms; }
 }
 .message__meta {
   display: flex;
