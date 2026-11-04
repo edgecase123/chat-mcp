@@ -939,3 +939,16 @@ html, body {
   border-radius: 6px;
   background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
+
+/* #103 — the context gauge beside a peer. A stale reading is a dash in the
+   muted colour, never a number: the digits are what a reader acts on. */
+.sidebar__item-gauge {
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-faint);
+}
+.sidebar__item-gauge.is-soft { color: var(--warning, #b45309); }
+.sidebar__item-gauge.is-warn { color: var(--warning, #b45309); font-weight: 600; }
+.sidebar__item-gauge.is-crit { color: var(--danger, #dc2626); font-weight: 600; }
+.sidebar__item-gauge.is-stale { color: var(--fg-faint); opacity: 0.7; }

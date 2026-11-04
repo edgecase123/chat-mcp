@@ -862,3 +862,57 @@ export function customStyleSubmission(markdown) {
 
   return { ok: true, style: 'custom', custom: text };
 }
+
+/**
+ * What to render for a peer's context gauge.
+ *
+ * 🛑 A STALE READING RENDERS AS UNKNOWN, NOT AS ITS LAST VALUE. Measured
+ * 2026-11-04: both agents sat at exactly `1000000/1000000` with a 27.7-day-old
+ * timestamp, and every reader took it as current because nothing subtracted
+ * the age. Showing the number greyed would repeat that — the digits are what
+ * people act on.
+ *
+ * `fresh` and `age_ms` are computed server-side (`/api/whoami`), so the
+ * 15-minute window has ONE home and this file never hard-codes it.
+ *
+ * @param {{context_used?: number|null, context_total?: number|null, fresh?: boolean, age_ms?: number|null}} peer
+ * @returns {{show: boolean, percent: number|null, band: string, title: string}}
+ */
+export function gaugeDisplay(peer) {
+  const used = peer?.context_used;
+  const total = peer?.context_total;
+  const reported = used != null && total != null && total > 0;
+
+  if (!reported) {
+    return { show: false, percent: null, band: 'none', title: 'Context usage not reported' };
+  }
+
+  if (peer.fresh !== true) {
+    return {
+      show: true,
+      percent: null,
+      band: 'stale',
+      title: `Context usage is ${ageLabel(peer.age_ms)} old — the agent has stopped reporting`,
+    };
+  }
+
+  const percent = Math.round((used / total) * 100);
+
+  // The bands the bus already warns on, so the colour and the DM agree.
+  const band = percent >= 95 ? 'crit' : percent >= 85 ? 'warn' : percent >= 70 ? 'soft' : 'ok';
+
+  return { show: true, percent, band, title: `Context ${percent}% — ${used.toLocaleString()} of ${total.toLocaleString()} tokens` };
+}
+
+/** A duration a human reads at a glance. Exported for its own test. */
+export function ageLabel(ms) {
+  if (ms == null) return 'never reported';
+
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins}m`;
+
+  const hours = Math.floor(mins / 60);
+  if (hours < 48) return `${hours}h`;
+
+  return `${Math.floor(hours / 24)}d`;
+}
