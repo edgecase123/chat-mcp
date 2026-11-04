@@ -409,6 +409,8 @@ export interface Room {
   created_at: number;
   created_by: string;
   member_count: number;
+  /** The configured style name, or null when the room has no preference (#92). */
+  style: string | null;
 }
 
 export interface JoinResult {
@@ -430,6 +432,7 @@ interface RoomRow {
   name: string;
   created_at: number;
   created_by: string;
+  style: string | null;
 }
 
 /**
@@ -553,14 +556,14 @@ export function myRooms(db: Db, handle: string): Room[] {
 /** All rooms known to the bus (for /rooms --all). */
 export function allRooms(db: Db): Room[] {
   const rows = db.prepare(
-    `SELECT name, created_at, created_by FROM rooms ORDER BY name ASC`,
+    `SELECT name, created_at, created_by, style FROM rooms ORDER BY name ASC`,
   ).all() as unknown as RoomRow[];
   return rows.map((r) => hydrateRoomFromRow(db, r));
 }
 
 function hydrateRoom(db: Db, name: string): Room {
   const row = db.prepare(
-    `SELECT name, created_at, created_by FROM rooms WHERE name = ?`,
+    `SELECT name, created_at, created_by, style FROM rooms WHERE name = ?`,
   ).get(name) as unknown as RoomRow | undefined;
   if (!row) throw new Error(`Room ${name} does not exist`);
   return hydrateRoomFromRow(db, row);
@@ -575,6 +578,7 @@ function hydrateRoomFromRow(db: Db, row: RoomRow): Room {
     created_at: row.created_at,
     created_by: row.created_by,
     member_count: count.n,
+    style: row.style ?? null,
   };
 }
 
@@ -1015,4 +1019,153 @@ export function answerApproval(db: Db, id: number, decision: 'approve' | 'deny')
     .run(Date.now(), decision, id);
 
   return Number(result.changes) > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Conversation style, per room and per peer (#92)
+// ---------------------------------------------------------------------------
+
+/**
+ * 🛑 THE PRESET TEXT RIDES IN EVERY INBOX CALL THAT HAS ONE SET, so it is
+ * deliberately short. The operator's own style guide is hundreds of words and
+ * belongs in `custom`, where they pay for it knowingly.
+ */
+export const STYLE_PRESETS: Record<string, string> = {
+  normal:
+    'Write normally for this room. Explain mechanism and tradeoffs where they matter.',
+  succinct:
+    'Answer in the first line. One idea per sentence. Rank rather than list. No preamble. Keep it under ten lines.',
+};
+
+export type ResolvedStyle = { style: string; text: string };
+
+export function assertStyleName(style: string): void {
+  if (style !== 'custom' && STYLE_PRESETS[style] === undefined) {
+    const known = [...Object.keys(STYLE_PRESETS), 'custom'].join(', ');
+    throw new Error(`Unknown style "${style}". Known styles: ${known}`);
+  }
+}
+
+/** 64 KB matches the message body cap, so a style cannot outgrow a post. */
+export const STYLE_CUSTOM_MAX_BYTES = 65536;
+
+export function assertStyleCustom(style: string, custom: string | undefined): void {
+  if (style === 'custom') {
+    if (custom === undefined || custom.trim() === '') {
+      throw new Error('style "custom" requires non-empty markdown in `custom`.');
+    }
+    if (Buffer.byteLength(custom, 'utf8') > STYLE_CUSTOM_MAX_BYTES) {
+      throw new Error(`Custom style exceeds ${STYLE_CUSTOM_MAX_BYTES} bytes.`);
+    }
+  }
+}
+
+export function roomExists(db: Db, room: string): boolean {
+  const row = db.prepare('SELECT 1 AS ok FROM rooms WHERE name = ?').get(room) as unknown as
+    | { ok: number }
+    | undefined;
+
+  return row !== undefined;
+}
+
+export function setRoomStyle(db: Db, room: string, style: string | null, custom?: string): void {
+  db.prepare('UPDATE rooms SET style = ?, style_custom = ? WHERE name = ?').run(
+    style,
+    style === 'custom' ? (custom ?? null) : null,
+    room,
+  );
+}
+
+export function setAgentStyle(db: Db, handle: string, style: string | null, custom?: string): void {
+  db.prepare('UPDATE agents SET style = ?, style_custom = ? WHERE handle = ?').run(
+    style,
+    style === 'custom' ? (custom ?? null) : null,
+    handle,
+  );
+}
+
+/**
+ * The style text to push, or undefined when none is set.
+ *
+ * 🛑 `custom` REPLACES the preset rather than layering on it. Layering means two
+ * instructions that can contradict, and the operator writing custom markdown is
+ * already saying exactly what they want.
+ */
+export function resolveStyle(db: Db, table: 'rooms' | 'agents', key: string): ResolvedStyle | undefined {
+  const column = table === 'rooms' ? 'name' : 'handle';
+  const row = db
+    .prepare(`SELECT style, style_custom FROM ${table} WHERE ${column} = ?`)
+    .get(key) as unknown as { style: string | null; style_custom: string | null } | undefined;
+
+  if (!row || row.style === null) return undefined;
+
+  if (row.style === 'custom') {
+    // A 'custom' row with no markdown is a half-written setting, not a style.
+    // Pushing an empty instruction reads as "no preference" and is worse than
+    // pushing nothing, because the row says one is configured.
+    if (!row.style_custom || row.style_custom.trim() === '') return undefined;
+    return { style: 'custom', text: row.style_custom };
+  }
+
+  const preset = STYLE_PRESETS[row.style];
+
+  return preset === undefined ? undefined : { style: row.style, text: preset };
+}
+
+/**
+ * The style blocks to push alongside a room_inbox result.
+ *
+ * 🛑 EXTRACTED SO IT CAN BE TESTED. Nothing in this repo's 650 tests drives an
+ * MCP tool handler, so logic left inside one is logic with no test. The tool
+ * keeps a single line of glue.
+ *
+ * Empty for rooms with no style, which is every room on every existing
+ * database — so the unset response stays byte-identical.
+ */
+export function styleBlocksForRooms(db: Db, rooms: string[]): { type: 'text'; text: string }[] {
+  const blocks: { type: 'text'; text: string }[] = [];
+
+  for (const room of rooms) {
+    const resolved = resolveStyle(db, 'rooms', room);
+
+    if (resolved) {
+      blocks.push({
+        type: 'text',
+        text: `Conversation style for ${room} (${resolved.style}) — follow it in this room:\n\n${resolved.text}`,
+      });
+    }
+  }
+
+  return blocks;
+}
+
+/**
+ * The order the CLI cycles a room's style through.
+ *
+ * 🛑 `custom` IS ONLY REACHABLE WHEN MARKDOWN ALREADY EXISTS. A terminal
+ * cannot prompt for multi-line markdown mid-cycle, so cycling onto an empty
+ * `custom` would set a style that pushes nothing — the half-written state
+ * `resolveStyle` already refuses. Markdown is set through `set_style`.
+ */
+/** Whether a room has custom markdown stored, which is what makes `custom` reachable in the CLI cycle. */
+export function hasCustomStyle(db: Db, room: string): boolean {
+  const row = db.prepare('SELECT style_custom FROM rooms WHERE name = ?').get(room) as unknown as
+    | { style_custom: string | null }
+    | undefined;
+
+  return typeof row?.style_custom === 'string' && row.style_custom.trim() !== '';
+}
+
+export function nextStyle(current: string | null, hasCustom: boolean): string | null {
+  const order: (string | null)[] = [null, 'normal', 'succinct'];
+
+  if (hasCustom) order.push('custom');
+
+  const at = order.indexOf(current);
+
+  // An unknown stored value — a preset since removed, say — CLEARS rather than
+  // advancing. "Cycles to the start" was the first wording and it is ambiguous:
+  // index 0 is `null`, not the first named style, and my own test read it the
+  // other way.
+  return order[at === -1 ? 0 : (at + 1) % order.length] ?? null;
 }

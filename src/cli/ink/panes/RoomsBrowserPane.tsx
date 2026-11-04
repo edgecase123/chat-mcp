@@ -10,6 +10,8 @@ export interface RoomsBrowserProps {
   rooms: Room[];
   onOpen: (room: string) => void;
   onJoin: (room: string) => void;
+  /** Re-read the rooms after a style cycle, since Room carries the style. */
+  onStyleChanged?: () => void;
 }
 
 function summariseMembers(db: Db, name: string, max = 3): string {
@@ -19,12 +21,22 @@ function summariseMembers(db: Db, name: string, max = 3): string {
   return `${head}${extra}`;
 }
 
-export function RoomsBrowserPane({ db, handle, rooms, onOpen, onJoin }: RoomsBrowserProps): React.ReactElement {
+export function RoomsBrowserPane({ db, handle, rooms, onOpen, onJoin, onStyleChanged }: RoomsBrowserProps): React.ReactElement {
   const [selected, setSelected] = useState(0);
 
-  useInput((_raw, key) => {
+  useInput((raw, key) => {
     if (key.upArrow) return setSelected((i) => Math.max(0, i - 1));
     if (key.downArrow) return setSelected((i) => Math.min(rooms.length - 1, i + 1));
+    // #92 — the style selector. A terminal has no dropdown, so `s` cycles.
+    // `custom` is offered only when markdown is already stored, because this
+    // key cannot prompt for it; `set_style` writes the markdown.
+    if (raw === 's') {
+      const r = rooms[selected];
+      if (!r) return;
+      const hasCustom = dao.hasCustomStyle(db, r.name);
+      dao.setRoomStyle(db, r.name, dao.nextStyle(r.style, hasCustom));
+      return onStyleChanged?.();
+    }
     if (key.return) {
       const r = rooms[selected];
       if (!r) return;
@@ -51,12 +63,13 @@ export function RoomsBrowserPane({ db, handle, rooms, onOpen, onJoin }: RoomsBro
               <Text bold={active} color={active ? 'cyan' : joined ? 'cyan' : undefined}>{r.name.padEnd(14)}</Text>
               {'  '}
               <Text dimColor>{r.member_count} members · {summary}</Text>
+              {r.style && <Text color="yellow"> · {r.style}</Text>}
             </Text>
           );
         })
       )}
       <Box marginTop={1}>
-        <Text dimColor>↑↓ move · Enter open/join · /back close</Text>
+        <Text dimColor>↑↓ move · Enter open/join · s style · /back close</Text>
       </Box>
     </Box>
   );

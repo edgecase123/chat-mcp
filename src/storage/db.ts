@@ -204,6 +204,22 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       ALTER TABLE approvals ADD COLUMN allowlist TEXT;
     `);
   },
+  (db) => {
+    // #92 — the conversation style a room or a peer expects.
+    //
+    // `style` holds a preset name or the literal 'custom'. `style_custom`
+    // holds the markdown used when it is 'custom'. NULL style means no
+    // preference, and nothing is pushed — the unset path stays byte-identical.
+    //
+    // ⚠️ A SEPARATE MIGRATION, per migration 8's docblock. Editing an earlier
+    // one never reaches a database that already ran it.
+    db.exec(`
+      ALTER TABLE rooms  ADD COLUMN style TEXT;
+      ALTER TABLE rooms  ADD COLUMN style_custom TEXT;
+      ALTER TABLE agents ADD COLUMN style TEXT;
+      ALTER TABLE agents ADD COLUMN style_custom TEXT;
+    `);
+  },
 ];
 
 function tx(db: Db, fn: () => void): void {

@@ -866,6 +866,9 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
               handle={handle}
               rooms={allRoomsList.filter((r) => r.member_count > 0)}
               onOpen={(room) => setView({ kind: 'room', room })}
+              // #92 — `allRoomsList` is memoised on `tick`, and Room now
+              // carries the style, so a cycle needs a bump to show up.
+              onStyleChanged={() => setTick((t) => t + 1)}
               onJoin={(room) => {
                 const result = dao.joinRoom(db, room, handle);
                 if (result.was_new_member && result.system_message) {
