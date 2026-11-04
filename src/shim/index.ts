@@ -78,7 +78,7 @@ function buildInstructions(handle: string): string {
     ``,
     `Rooms are named channels prefixed with \`#\` (e.g. \`#gate\`, \`#planning\`). Only current members receive messages sent to a room. Membership is explicit and persistent across sessions.`,
     ``,
-    `- \`room_join\` — join a room (auto-creates on first join). Pre-join history stays hidden.`,
+    `- \`room_join\` — join a room (auto-creates on first join). Your UNREAD starts at the join, so \`room_inbox\` never shows anything older; \`search\` still reads the room's full history.`,
     `- \`room_leave\` — leave; drops membership.`,
     `- \`room_send\` — post to a room you're a member of. Notifies every currently-online member.`,
     `- \`room_inbox\` — read unread messages, per-member watermark. Pass a specific \`room\` or omit to read across all your rooms.`,
