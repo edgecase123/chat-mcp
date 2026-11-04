@@ -38,7 +38,8 @@ const find = (db: DatabaseSync, q: string, target?: string) => {
   assert.equal(p.ok, true, `query ${JSON.stringify(q)} was refused`);
   if (!p.ok) throw new Error('unreachable');
 
-  return dao.searchMessages(db, { pattern: p.pattern, target: p.target, limit: p.limit });
+  // `.hits` since #102's scoping fix: the result also carries `truncated`.
+  return dao.searchMessages(db, { pattern: p.pattern, target: p.target, limit: p.limit }).hits;
 };
 
 test('🛑 a search does NOT advance any read watermark', () => {
@@ -119,7 +120,7 @@ test('the limit is honoured, and it is the parsed one', () => {
   assert.equal(p.ok, true);
   if (!p.ok) throw new Error('unreachable');
 
-  assert.equal(dao.searchMessages(db, { pattern: p.pattern, target: p.target, limit: p.limit }).length, 2);
+  assert.equal(dao.searchMessages(db, { pattern: p.pattern, target: p.target, limit: p.limit }).hits.length, 2);
 });
 
 test('a term that matches nothing returns an empty list rather than throwing', () => {

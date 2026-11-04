@@ -48,10 +48,14 @@ export function installSearch(server: McpServer, ctx: ShimContext): void {
         return { content: [{ type: 'text', text: JSON.stringify({ error: parsed.reason }) }] };
       }
 
-      const hits = dao.searchMessages(ctx.db, {
+      // 🛑 `caller` IS WHAT MAKES THE DESCRIPTION TRUE. Without it this read
+      // every DM on the bus and every room, including ones the caller had been
+      // booted from, while promising "every room and DM you can see".
+      const { hits, truncated } = dao.searchMessages(ctx.db, {
         pattern: parsed.pattern,
         target: parsed.target,
         limit: parsed.limit,
+        caller: ctx.handle,
       });
 
       return {
@@ -64,7 +68,7 @@ export function installSearch(server: McpServer, ctx: ShimContext): void {
               // count that was really a cap.
               returned: hits.length,
               limit: parsed.limit,
-              truncated: hits.length === parsed.limit,
+              truncated,
               broad: parsed.broad,
               results: hits.map((h) => ({
                 id: h.id,

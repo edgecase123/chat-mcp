@@ -618,7 +618,10 @@ function handleSearch(url: URL, res: ServerResponse, ctx: RouteContext): void {
 
   if (!parsed.ok) return respondJson(res, { error: parsed.reason }, 400);
 
-  const hits = dao.searchMessages(ctx.db, {
+  // 🛑 NO `caller`, DELIBERATELY. This is lee's own UI on 127.0.0.1 behind the
+  // rebinding guard, so it is meant to read every room and DM. The MCP tool
+  // passes one; see `dao.searchMessages`.
+  const { hits, truncated } = dao.searchMessages(ctx.db, {
     pattern: parsed.pattern,
     target: parsed.target,
     limit: parsed.limit,
@@ -628,7 +631,7 @@ function handleSearch(url: URL, res: ServerResponse, ctx: RouteContext): void {
     // ⚠️ BOTH NUMBERS. A list of 50 cannot be told from a list truncated at 50.
     returned: hits.length,
     limit: parsed.limit,
-    truncated: hits.length === parsed.limit,
+    truncated,
     broad: parsed.broad,
     results: hits.map((h) => ({
       id: h.id,

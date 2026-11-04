@@ -1,5 +1,8 @@
 import type { Db } from './db.js';
 import type { ClaimRow } from '../claims/lifecycle.js';
+// A value import, not a type: `searchMessages` has to tell a room target from
+// a peer target at runtime. `naming.ts` imports nothing, so this cannot cycle.
+import { isRoomName } from '../util/naming.js';
 
 export type AgentStatus = 'idle' | 'thinking' | 'tool' | 'blocked' | 'error' | 'offline';
 export type MessageKind = 'chat' | 'dispatch' | 'alert';
@@ -1345,22 +1348,67 @@ export interface SearchHit {
   readonly sent_at: number;
 }
 
+export interface SearchResult {
+  readonly hits: SearchHit[];
+  /** True only when a row beyond `limit` exists, never on an exact hit count. */
+  readonly truncated: boolean;
+}
+
+/**
+ * Find messages whose body matches `pattern`.
+ *
+ * 🛑 `caller` IS AN AUTHORIZATION SCOPE. `target` is a filter the caller
+ * chooses; without `caller` this reads every DM on the bus and every room,
+ * including ones the caller was booted from. The MCP tool passes it. lee ruled
+ * the code wrong rather than the description, 2026-11-04; found by claude1.
+ *
+ * ⚠️ OMITTING `caller` IS DELIBERATE, NOT AN OVERSIGHT. `/api/search` is lee's
+ * own UI on `127.0.0.1` behind the rebinding guard, so it is meant to see
+ * everything. Scoping unconditionally would empty it.
+ *
+ * ⚠️ `ESCAPE '\'` IS NOT OPTIONAL. Without it the backslashes `likePattern`
+ * inserts are matched literally, so a query containing % finds nothing instead
+ * of finding too much — wrong in the other direction, still silent.
+ */
 export function searchMessages(
   db: Db,
-  input: { pattern: string; target?: string; limit: number },
-): SearchHit[] {
-  // ⚠️ `ESCAPE '\'` IS NOT OPTIONAL. Without it the backslashes `likePattern`
-  // inserts are matched literally, so a query containing % finds nothing
-  // instead of finding too much — wrong in the other direction, still silent.
-  const where = input.target === undefined ? '' : 'AND to_handle = ?';
+  input: { pattern: string; target?: string; limit: number; caller?: string },
+): SearchResult {
+  const clauses: string[] = [];
+  const args: (string | number)[] = [input.pattern];
+
+  if (input.caller !== undefined) {
+    // Current membership, not history: a booted member must stop seeing the
+    // room, which a check written against past messages would miss.
+    clauses.push(`AND (to_handle = ? OR from_handle = ?
+                   OR to_handle IN (SELECT room_name FROM room_members WHERE handle = ?))`);
+    args.push(input.caller, input.caller, input.caller);
+  }
+
+  if (input.target !== undefined) {
+    // 🛑 A ROOM HAS ONE `to_handle`; A PEER HAS TWO DIRECTIONS. Matching only
+    // `to_handle` for a peer returned the caller's own half of the thread and
+    // dropped everything the peer said. Raised by claude1 on #102.
+    if (isRoomName(input.target)) {
+      clauses.push('AND to_handle = ?');
+      args.push(input.target);
+    } else {
+      clauses.push('AND (to_handle = ? OR from_handle = ?)');
+      args.push(input.target, input.target);
+    }
+  }
+
+  // 🛑 ONE ROW BEYOND THE LIMIT, THEN DROPPED. `hits.length === limit` cannot
+  // tell an exact count from a cap, so it reported a complete list as
+  // truncated.
   const sql = `SELECT id, from_handle, to_handle, body, sent_at
                  FROM messages
-                WHERE body LIKE ? ESCAPE '\\' ${where}
+                WHERE body LIKE ? ESCAPE '\\' ${clauses.join(' ')}
                 ORDER BY id DESC
                 LIMIT ?`;
+  args.push(input.limit + 1);
 
-  const args: (string | number)[] =
-    input.target === undefined ? [input.pattern, input.limit] : [input.pattern, input.target, input.limit];
+  const rows = db.prepare(sql).all(...args) as unknown as SearchHit[];
 
-  return db.prepare(sql).all(...args) as unknown as SearchHit[];
+  return { hits: rows.slice(0, input.limit), truncated: rows.length > input.limit };
 }

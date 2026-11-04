@@ -69,9 +69,20 @@ export function shouldShowJump(unread, geo) {
  * Raised by claude1 reviewing PR 99, against a docblock that claimed
  * otherwise.
  *
+ * 🛑 A REBUILD STILL HAS TO NAME ITS ARRIVALS, OR THEY CANNOT SHIMMER. The
+ * server serves at most 100 rows, so past that a new message drops the oldest
+ * and the prefix moves. That rebuilt, and a rebuild rendered every node with
+ * no `fresh` flag — so no conversation past 100 messages ever shimmered.
+ * Reported by lee: #leagues at 235 messages never did, a 3-message DM always
+ * did.
+ *
+ * ⚠️ A SLID WINDOW AND A PAGE OF OLDER HISTORY BOTH MOVE THE PREFIX, so the
+ * mismatch alone cannot tell them apart. Only ids AFTER the last one the DOM
+ * already held are arrivals; a scroll-up adds ids before it and names none.
+ *
  * @param {{ target: string|null, ids: number[] }} prev  what the DOM holds
  * @param {{ target: string|null, ids: number[] }} next  what state now holds
- * @returns {{ mode: 'full' } | { mode: 'append', from: number }}
+ * @returns {{ mode: 'full', freshIds?: number[] } | { mode: 'append', from: number }}
  */
 export function streamPlan(prev, next) {
   if (prev.target !== next.target) return { mode: 'full' };
@@ -79,10 +90,32 @@ export function streamPlan(prev, next) {
   if (next.ids.length < prev.ids.length) return { mode: 'full' };
 
   for (let i = 0; i < prev.ids.length; i++) {
-    if (prev.ids[i] !== next.ids[i]) return { mode: 'full' };
+    if (prev.ids[i] !== next.ids[i]) return rebuildNamingArrivals(prev, next);
   }
 
   return { mode: 'append', from: prev.ids.length };
+}
+
+/**
+ * A rebuild, plus the ids that arrived since the DOM was last filled.
+ *
+ * `freshIds` is OMITTED rather than empty when there are none, so an ordinary
+ * rebuild stays exactly `{ mode: 'full' }`.
+ *
+ * @param {{ target: string|null, ids: number[] }} prev
+ * @param {{ target: string|null, ids: number[] }} next
+ */
+function rebuildNamingArrivals(prev, next) {
+  const lastHeld = prev.ids[prev.ids.length - 1];
+  const at = next.ids.lastIndexOf(lastHeld);
+
+  // Not found means the window moved past everything the DOM held, so which
+  // rows are new is unknowable. Shimmering all of them is worse than none.
+  if (at === -1) return { mode: 'full' };
+
+  const freshIds = next.ids.slice(at + 1);
+
+  return freshIds.length === 0 ? { mode: 'full' } : { mode: 'full', freshIds };
 }
 
 /** @param {number} unread */
@@ -971,6 +1004,19 @@ function durationLabel(mins) {
  */
 export function claimsPanelEmpty() {
   return '(nothing claimed)';
+}
+
+/**
+ * The id shown beside a message's timestamp (#104).
+ *
+ * 🛑 THE WORDS, NOT A BARE NUMBER. "see 12582" is how one agent points another
+ * at a message, and a lone number in the meta row is indistinguishable from a
+ * count or a duration. lee asked for this wording, 2026-11-04.
+ *
+ * @param {number} id
+ */
+export function messageIdLabel(id) {
+  return `Message ID: ${id}`;
 }
 
 /**
