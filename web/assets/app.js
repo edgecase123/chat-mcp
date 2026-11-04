@@ -473,8 +473,13 @@ function freshDurationMs() {
   return Number.isFinite(ms) && ms > 0 ? ms + 60 : 500;
 }
 
-function messageNode(m, { fresh = false } = {}) {
+function messageNode(m, { fresh: arriving = false } = {}) {
   const isSelf = m.from_handle === state.handle;
+  // 🛑 YOUR OWN MESSAGE IS NEVER FRESH. `is-fresh` means "this arrived while
+  // you were reading"; you already know you sent it, so both the shimmer and
+  // the slide are noise. Decided by lee, 2026-11-04, after the slide alone
+  // still read as a flash.
+  const fresh = arriving && !isSelf;
   const kind = m.kind || 'chat';
   const cls = ['message', isSelf ? 'is-self' : '', kind === 'dispatch' ? 'is-dispatch' : '', kind === 'alert' ? 'is-alert' : '', fresh ? 'is-fresh' : '']
     .filter(Boolean).join(' ');

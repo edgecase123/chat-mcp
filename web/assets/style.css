@@ -436,12 +436,6 @@ html, body {
   background-position: 100% 0;
   animation: msg-shimmer var(--msg-fresh-ms) ease-out;
 }
-/* 🛑 NO SHIMMER ON YOUR OWN MESSAGE. The shimmer says "this arrived while you
-   were reading". You already know you sent it, so on a self message it is
-   noise. The slide-in stays — that is the send confirming. */
-.message.is-fresh.is-self::after {
-  content: none;
-}
 /* Between messages only, so the first one does not get a stray rule under
    the pane header. --border is the soft token; --border-strong is not. */
 .message + .message {
