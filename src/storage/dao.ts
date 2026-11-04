@@ -1053,6 +1053,30 @@ export function assertStyleName(style: string): void {
   }
 }
 
+/**
+ * Styles are per-ROOM. A peer target is refused.
+ *
+ * 🛑 `agents.style` EXISTS AND NOTHING READS IT. `setAgentStyle` writes it and
+ * `inbox` pushes no style block, so before this a peer style was accepted,
+ * stored, and silently did nothing — a setting that reports success and
+ * changes behaviour not at all.
+ *
+ * lee, 2026-11-04, on closing PR 100 rather than wiring the read: *"skip the
+ * style with peers. agents can just be governed by their own skills"*. The
+ * columns stay in case that reverses; the write path does not.
+ *
+ * Lives here rather than in the tool because no test in this repo drives an
+ * MCP tool handler, and a rule with no test is one that gets deleted by
+ * accident.
+ */
+export function assertStyleTarget(target: string): void {
+  if (target.startsWith('#')) return;
+
+  throw new Error(
+    `Conversation styles are per-room only. "${target}" is a peer, and a peer style would be stored and never delivered. Set the style on a #room, or govern the agent through its own skill.`,
+  );
+}
+
 /** 64 KB matches the message body cap, so a style cannot outgrow a post. */
 export const STYLE_CUSTOM_MAX_BYTES = 65536;
 

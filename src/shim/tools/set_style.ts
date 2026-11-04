@@ -8,13 +8,13 @@ export function installSetStyle(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
     'set_style',
     {
-      title: 'Set the conversation style for a room or a peer',
+      title: 'Set the conversation style for a room',
       description:
-        'Set the prose style agents must follow in a room, or when writing to one peer. `succinct` is the only preset; `custom` takes your own markdown and REPLACES the preset rather than layering on it. Pass style=null to clear. The style is pushed with every room_inbox read of that room, so it arrives before the writing rather than waiting to be fetched.',
+        'Set the prose style agents must follow in a room. Rooms only — a peer target is refused, because a peer style would be stored and never delivered. `succinct` is the only preset; `custom` takes your own markdown and REPLACES the preset rather than layering on it. Pass style=null to clear. The style is pushed with every room_inbox read of that room, so it arrives before the writing rather than waiting to be fetched.',
       inputSchema: {
         target: z
           .string()
-          .describe('A room name with its leading # (e.g. "#gate"), or a peer handle (e.g. "claude2").'),
+          .describe('A room name with its leading # (e.g. "#gate"). A peer handle is refused.'),
         style: z
           .enum(['succinct', 'custom'])
           .nullable()
@@ -33,10 +33,11 @@ export function installSetStyle(server: McpServer, ctx: ShimContext): void {
         dao.assertStyleCustom(style, custom);
       }
 
-      // 🛑 A ROOM OR A HANDLE, decided by the `#`, the same discriminator every
-      // other tool here uses. Writing a style to a target that does not exist
-      // would UPDATE zero rows and report success, so both branches check.
-      if (target.startsWith('#')) {
+      // Rooms only — the refusal and its reason live in the DAO, where a test
+      // can reach them. See `assertStyleTarget`.
+      dao.assertStyleTarget(target);
+
+      {
         assertRoomName(target);
 
         if (!dao.roomExists(ctx.db, target)) {
@@ -44,12 +45,6 @@ export function installSetStyle(server: McpServer, ctx: ShimContext): void {
         }
 
         dao.setRoomStyle(ctx.db, target, style, custom);
-      } else {
-        if (dao.getAgent(ctx.db, target) === null) {
-          throw new Error(`No such peer "${target}". Call list_agents to see who is registered.`);
-        }
-
-        dao.setAgentStyle(ctx.db, target, style, custom);
       }
 
       return {
