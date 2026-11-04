@@ -220,6 +220,20 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       ALTER TABLE agents ADD COLUMN style_custom TEXT;
     `);
   },
+  (db) => {
+    // #92 — the `normal` preset is gone, so rows holding it are cleared.
+    //
+    // 🛑 NOT A NO-OP: one room was already set to it. `resolveStyle` returns
+    // undefined for an unknown preset, so the row would have pushed nothing
+    // while the column still read "normal" — a style configured and silently
+    // inert, which is the half-written state this feature already refuses.
+    //
+    // ⚠️ A SEPARATE MIGRATION, per migration 8's docblock.
+    db.exec(`
+      UPDATE rooms  SET style = NULL, style_custom = NULL WHERE style = 'normal';
+      UPDATE agents SET style = NULL, style_custom = NULL WHERE style = 'normal';
+    `);
+  },
 ];
 
 function tx(db: Db, fn: () => void): void {

@@ -1031,8 +1031,11 @@ export function answerApproval(db: Db, id: number, decision: 'approve' | 'deny')
  * belongs in `custom`, where they pay for it knowingly.
  */
 export const STYLE_PRESETS: Record<string, string> = {
-  normal:
-    'Write normally for this room. Explain mechanism and tradeoffs where they matter.',
+  // 🛑 NO `normal` PRESET. It pushed ~14 words telling an agent to write the way
+  // it already writes, and could only matter as an override of a stronger
+  // default — which it would lose, because this repo's operator has a style
+  // guide injected into EVERY message by a hook. Dropped on lee's call: "drop
+  // normal". `none` already means "no instruction".
   succinct:
     'Answer in the first line. One idea per sentence. Rank rather than list. No preamble. Keep it under ten lines.',
 };
@@ -1157,7 +1160,7 @@ export function hasCustomStyle(db: Db, room: string): boolean {
 }
 
 export function nextStyle(current: string | null, hasCustom: boolean): string | null {
-  const order: (string | null)[] = [null, 'normal', 'succinct'];
+  const order: (string | null)[] = [null, 'succinct'];
 
   if (hasCustom) order.push('custom');
 
