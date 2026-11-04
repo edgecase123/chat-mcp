@@ -223,3 +223,29 @@ test('a room row carries its style so the pane can render it', () => {
 
   assert.equal(room?.style, 'succinct', 'Room.style did not survive the hydrator');
 });
+
+/**
+ * 🛑 `myRooms` IS THE QUERY THE WEB UI READS, AND IT WAS THE ONE I MISSED.
+ *
+ * Three queries build a Room. I added `style` to the two that spell the columns
+ * as `name, created_at, created_by`, and `myRooms` spells them `r.name,
+ * r.created_at, r.created_by` — so my grep did not match it and my test used
+ * `allRooms`.
+ *
+ * The visible symptom was the web dropdown never persisting: the POST wrote the
+ * row, `/api/whoami` read it back through `myRooms` as undefined, and the
+ * selector re-rendered as "none".
+ */
+test('myRooms carries the style, because that is what the web UI reads', () => {
+  const db = freshDb();
+  db.prepare('INSERT INTO room_members (room_name, handle, joined_at) VALUES (?, ?, ?)').run(
+    '#gate',
+    'claude2',
+    1,
+  );
+  dao.setRoomStyle(db, '#gate', 'succinct');
+
+  const mine = dao.myRooms(db, 'claude2').find((r) => r.name === '#gate');
+
+  assert.equal(mine?.style, 'succinct', 'myRooms dropped the style the web UI needs');
+});
