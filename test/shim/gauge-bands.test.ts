@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { BANDS, nextGaugeState, warningBody, deliveryFor, type Threshold } from '../../src/shim/gauge.js';
+import { BANDS, nextGaugeState, warningBody, deliveryFor, PLANNING_BAND, type Threshold } from '../../src/shim/gauge.js';
 
 /**
  * 🛑 THE STATE MACHINE HAD NO TEST AT ALL BEFORE THIS FILE.
@@ -118,22 +118,45 @@ test('🛑 neither report_context hardcodes a band number for routing', () => {
   }
 });
 
-test("the web gauge's colours mirror the ROOM-POST bands, and its comment says which", () => {
-  // claude1's 🟡 on PR 110: logic.js hardcodes 95/85/70 under a comment
-  // claiming it matches the bus. #105 adds a band the UI deliberately does
-  // NOT colour, because a DM-only level earns no visual escalation.
+test('🛑 the web gauge colours every band EXCEPT the planning one', () => {
+  // claude1 on PR 113: the previous version of this test asserted the coloured
+  // set was [85, 95] and never looked at 70, which IS coloured and IS a dm. So
+  // it certified a comment that was false in a new way. The rule is the
+  // exclusion, and every included band is now checked by name.
   const logic = readFileSync(new URL('../../web/assets/logic.js', import.meta.url), 'utf8');
 
-  const roomBands = BANDS.filter((b) => deliveryFor(b.warn as Threshold) !== 'dm').map((b) => b.warn);
-  assert.deepEqual(roomBands, [85, 95], 'the room-post bands moved; the UI comment and this test both need rereading');
+  const coloured = BANDS.map((b) => b.warn).filter((n) => n !== PLANNING_BAND);
+  assert.deepEqual(coloured, [70, 85, 95], 'the coloured set moved; logic.js and its comment both need rereading');
 
-  for (const n of roomBands) {
-    assert.ok(logic.includes(`>= ${n}`), `logic.js does not band on ${n}`);
+  for (const n of coloured) {
+    assert.ok(logic.includes(`>= ${n}`), `logic.js does not band on ${n}, which is not the planning band`);
   }
 
   assert.doesNotMatch(
     logic,
-    />= 50/,
-    'logic.js colours the 50 band. lee chose DM-only, so 50 earns no colour.',
+    new RegExp(`>= ${PLANNING_BAND}\\b`),
+    'logic.js colours the planning band. A plan is not an escalation.',
   );
+});
+
+test('🛑 no band names its own number in its copy, because it is read up to the NEXT band', () => {
+  // claude1 on PR 113: `fire` holds the highest band crossed, so a fresh peer
+  // at 68% fires 50 and read "68.0% context — half of it".
+  const edges: Array<[Threshold, number]> = [
+    [50, 69.9],
+    [70, 84.9],
+    [85, 94.9],
+    [95, 100],
+  ];
+
+  for (const [level, top] of edges) {
+    const body = warningBody('claude2', level, top);
+
+    assert.ok(body.includes(top.toFixed(1)), `band ${level} does not report the percent it was given`);
+    assert.doesNotMatch(
+      body,
+      /half of it|exactly|three quarters/i,
+      `band ${level} claims a fraction, but its copy is read from ${level}% up to ${top}%`,
+    );
+  }
 });

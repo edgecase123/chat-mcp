@@ -898,12 +898,12 @@ export function gaugeDisplay(peer) {
 
   const percent = Math.round((used / total) * 100);
 
-  // 🛑 THE THREE BANDS THE BUS POSTS TO A ROOM, NOT ALL FOUR IT WARNS ON.
-  // The bus also DMs at 50 (#105), and lee ruled that level DM-only, so it
-  // earns no colour here. An earlier comment said "the bands the bus already
-  // warns on", which stopped being true the moment a fourth band landed.
-  // Pinned by `the web gauge's colours mirror the ROOM-POST bands` in
-  // test/shim/gauge-bands.test.ts.
+  // 🛑 EVERY BUS BAND EXCEPT THE PLANNING ONE. Not "the bands the bus warns
+  // on" (it warns at 50 too) and not "the bands it posts to a room" (70 is a
+  // DM and is coloured here). Both of those were written and both were false.
+  // The rule is the exclusion: 50 asks for a plan, and a plan is not an
+  // escalation, so it earns no colour. Pinned by `the web gauge colours every
+  // band EXCEPT the planning one` in test/shim/gauge-bands.test.ts.
   const band = percent >= 95 ? 'crit' : percent >= 85 ? 'warn' : percent >= 70 ? 'soft' : 'ok';
 
   return { show: true, percent, band, title: `Context ${percent}% — ${used.toLocaleString()} of ${total.toLocaleString()} tokens` };

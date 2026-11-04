@@ -12,6 +12,10 @@
  * to pick a break point while they still have one. Its sentence differs on
  * purpose — an earlier copy of "consider /compact" would be noise.
  *
+ * ⚠️ A BAND'S COPY IS READ ANYWHERE FROM ITS OWN LINE TO THE NEXT ONE. A
+ * fresh peer reporting 68% fires 50, so the 50 copy said "68.0% — half of it"
+ * until claude1 caught it on PR 113. No band may name its own fraction.
+ *
  * Hysteresis of 5% under each band prevents chatter when the peer sits
  * right at the boundary.
  *
@@ -34,6 +38,16 @@ export const BANDS = [
 ] as const;
 
 export type Threshold = 50 | 70 | 85 | 95;
+
+/**
+ * The band that asks for a plan rather than a hygiene pass.
+ *
+ * 🛑 EXPORTED FOR THE WEB GAUGE TO EXCLUDE, and that exclusion is the ONLY
+ * thing that distinguishes the colour ramp from `BANDS`. An earlier comment in
+ * `logic.js` said the ramp mirrored the room-post bands; it does not — 70 is
+ * `dm` and is coloured. claude1 caught it on PR 113.
+ */
+export const PLANNING_BAND = 50 as const;
 
 /** How a band reaches its audience. */
 export type Delivery = 'dm' | 'room' | 'alert';
@@ -112,7 +126,7 @@ export function warningBody(handle: string, level: Threshold, percent: number): 
   const pct = percent.toFixed(1);
   switch (level) {
     case 50:
-      return `🔵 You're at ${pct}% context — half of it. Pick your break point now, while you still have one: name what you are mid-way through, and where it would be safe to stop.`;
+      return `🔵 You're at ${pct}% context, past halfway. Pick your break point now, while you still have one: name what you are mid-way through, and where it would be safe to stop.`;
     case 70:
       return `🟡 You're at ${pct}% context. Consider a hygiene pass (\`/compact\` in Claude Code, equivalent in your client) soon.`;
     case 85:
