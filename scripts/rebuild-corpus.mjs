@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/storage/db.ts';
 import { normalise } from '../test/support/would-refuse.ts';
 import { carryOver } from '../test/support/carry-over.ts';
+import { corpusAge, maxAgeDays } from '../test/support/corpus-age.ts';
 
 const FIXTURE = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -43,6 +44,37 @@ const rows = db
      ORDER BY id`,
   )
   .all();
+
+/**
+ * When each approval happened, keyed by id, for EVERY row rather than the
+ * filtered set above.
+ *
+ * 🛑 THE FILTER WOULD LEAVE NINE PERMITS UNDATED. It selects the rows a
+ * refusal is derived from. A permit is carried over from a pending file and
+ * its approval was answered under a handle the filter does not match, so
+ * stamping one needs the whole table.
+ *
+ * 🛑 THE DATE IS LOOKED UP, NEVER WRITTEN BY HAND. A record whose id is not
+ * in the database stays UNSTAMPED and `corpus-staleness.test.ts` names it.
+ * A plausible hand-written date is how an age check certifies a memory.
+ */
+const capturedAtById = new Map(
+  db
+    .prepare('SELECT id, created_at FROM approvals')
+    .all()
+    .map((r) => [r.id, new Date(Number(r.created_at)).toISOString()]),
+);
+
+/** Stamp one record from its own approval id(s), or leave it unstamped. */
+const stamp = (record) => {
+  const ids = record.approvalIds ?? (record.approvalId === undefined ? [] : [record.approvalId]);
+  const stamps = ids.map((id) => capturedAtById.get(id)).filter((s) => s !== undefined);
+
+  // ⚠️ THE LATEST OF THEM. A `refused_under_grant` answers several approvals
+  // before its target is checked, so the measurement is as old as its newest
+  // input, not its first.
+  return stamps.length === 0 ? record : { ...record, capturedAt: stamps.sort().at(-1) };
+};
 
 const best = new Map();
 
@@ -113,7 +145,9 @@ const underGrant = carryOver({
   pending: pendingUnderGrant,
 });
 
-writeFileSync(FIXTURE, `${JSON.stringify([...refused, ...underGrant, ...permits], null, 2)}\n`);
+const records = [...refused, ...underGrant, ...permits].map(stamp);
+
+writeFileSync(FIXTURE, `${JSON.stringify(records, null, 2)}\n`);
 
 const recorded = refused.filter((r) => r.allowlist !== null);
 const total = refused.length + underGrant.length + permits.length;
@@ -124,6 +158,21 @@ console.log(`  refused UNDER a grant              : ${underGrant.length}`);
 console.log(`  measured permits                   : ${permits.length}`);
 console.log(`  records present but SILENT         : ${refused.length - recorded.length}`);
 console.log(`\nreal coverage is ${recorded.length + underGrant.length + permits.length}, not ${total}.`);
+
+/**
+ * 🛑 AGE IS PART OF WHAT THE FIXTURE IS WORTH, so it is printed beside
+ * coverage. A corpus answers from what children did on a given day, and a
+ * CLI change can make a recorded refusal wrong without changing a byte here.
+ * `corpus-staleness.test.ts` enforces the ceiling; this just says it out loud
+ * at the moment someone is looking.
+ */
+const age = corpusAge(records, Date.now());
+
+console.log(`\nnewest capture is ${age.ageDays} day(s) old, ceiling ${maxAgeDays()}.`);
+
+if (age.unstamped > 0) {
+  console.log(`  ⚠️ ${age.unstamped} of ${age.total} records carry NO date — their approval id is not in the database.`);
+}
 
 // 🛑 CONSUMED, so a merged file cannot be merged twice or read as still waiting.
 for (const [file, rows, label] of [

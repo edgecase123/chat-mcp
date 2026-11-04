@@ -4,42 +4,48 @@
     "approvalId": 8,
     "attempted": "rm /var/folders/T/e2e/work/README.md && ls -la /var/folders/T/e2e/work/",
     "allowlist": null,
-    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
+    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'.",
+    "capturedAt": "2026-10-31T15:24:01.733Z"
   },
   {
     "outcome": "refused",
     "approvalId": 9,
     "attempted": "rm /private/var/folders/T/e2e/work/README.md && ls -la /private/var/folders/T/e2e/work/",
     "allowlist": null,
-    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
+    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'.",
+    "capturedAt": "2026-10-31T15:24:13.090Z"
   },
   {
     "outcome": "refused",
     "approvalId": 10,
     "attempted": "mcp__chat__list_agents",
     "allowlist": null,
-    "refusal": "Claude requested permissions to use mcp__chat__list_agents, but you haven't granted it yet."
+    "refusal": "Claude requested permissions to use mcp__chat__list_agents, but you haven't granted it yet.",
+    "capturedAt": "2026-10-31T15:24:17.897Z"
   },
   {
     "outcome": "refused",
     "approvalId": 11,
     "attempted": "rm /private/var/folders/T/e2e/work/README.md && ls -la /private/var/folders/T/e2e/work",
     "allowlist": null,
-    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
+    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'.",
+    "capturedAt": "2026-10-31T15:32:21.533Z"
   },
   {
     "outcome": "refused",
     "approvalId": 14,
     "attempted": "rm /private/var/folders/T/e2e/work/README.md && echo \"removed\" && ls -la /private/var/folders/T/e2e/work",
     "allowlist": null,
-    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
+    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'.",
+    "capturedAt": "2026-10-31T15:39:00.509Z"
   },
   {
     "outcome": "refused",
     "approvalId": 15,
     "attempted": "rm /private/var/folders/T/e2e/work/README.md; echo \"exit=$?\"; ls -la /private/var/folders/T/e2e/work",
     "allowlist": null,
-    "refusal": "This Bash command contains multiple operations. The following parts require approval: rm /private/var/folders/T/e2e/work/README.md, echo \"exit=$?\""
+    "refusal": "This Bash command contains multiple operations. The following parts require approval: rm /private/var/folders/T/e2e/work/README.md, echo \"exit=$?\"",
+    "capturedAt": "2026-10-31T15:39:12.831Z"
   },
   {
     "outcome": "refused",
@@ -52,28 +58,32 @@
       "mcp__chat__send",
       "mcp__chat__room_send"
     ],
-    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'."
+    "refusal": "rm in '/private/var/folders/T/e2e/work/README.md' was blocked. For security, Claude Code may only remove files from the allowed working directories for this session: '/private/var/folders/T/e2e'.",
+    "capturedAt": "2026-10-31T17:19:11.350Z"
   },
   {
     "outcome": "refused",
     "approvalId": 17,
     "attempted": "mkdir -p /private/var/folders/T/e2e/work && touch /var/folders/T/e2e/work/created-by-agent.txt && ls -l /var/folders/T/e2e/work/created-by-agent.txt",
     "allowlist": null,
-    "refusal": "This Bash command contains multiple operations. The following parts require approval: mkdir -p /var/folders/T/e2e/work, touch /var/folders/T/e2e/work/created-by-agent.txt"
+    "refusal": "This Bash command contains multiple operations. The following parts require approval: mkdir -p /var/folders/T/e2e/work, touch /var/folders/T/e2e/work/created-by-agent.txt",
+    "capturedAt": "2026-10-31T15:44:29.197Z"
   },
   {
     "outcome": "refused",
     "approvalId": 19,
     "attempted": "touch /private/var/folders/T/e2e/work/created-by-agent.txt && ls -l /private/var/folders/T/e2e/work/created-by-agent.txt",
     "allowlist": null,
-    "refusal": "touch in '/var/folders/T/e2e/work/created-by-agent.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/private/var/folders/T/e2e'."
+    "refusal": "touch in '/var/folders/T/e2e/work/created-by-agent.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/private/var/folders/T/e2e'.",
+    "capturedAt": "2026-10-31T15:48:02.572Z"
   },
   {
     "outcome": "refused",
     "approvalId": 22,
     "attempted": "touch /private/var/folders/T/e2e/work/created-by-agent.txt && ls -l /private/var/folders/T/e2e/work/created-by-agent.txt",
     "allowlist": null,
-    "refusal": "touch in '/private/var/folders/T/e2e/work/created-by-agent.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/private/var/folders/T/e2e'."
+    "refusal": "touch in '/private/var/folders/T/e2e/work/created-by-agent.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/private/var/folders/T/e2e'.",
+    "capturedAt": "2026-10-31T15:51:53.006Z"
   },
   {
     "outcome": "refused",
@@ -86,28 +96,32 @@
       "mcp__chat__send",
       "mcp__chat__room_send"
     ],
-    "refusal": "Claude requested permissions to use mcp__chat__set_status, but you haven't granted it yet."
+    "refusal": "Claude requested permissions to use mcp__chat__set_status, but you haven't granted it yet.",
+    "capturedAt": "2026-10-31T17:06:33.820Z"
   },
   {
     "outcome": "refused",
     "approvalId": 26,
     "attempted": "cd /private/var/folders/T/e2e/work && git status && git log --oneline -5 && git remote -v",
     "allowlist": null,
-    "refusal": "This command changes directory before running a version-control command, which can pick up untrusted hooks or repository configuration from the target directory. Approve only if you trust it."
+    "refusal": "This command changes directory before running a version-control command, which can pick up untrusted hooks or repository configuration from the target directory. Approve only if you trust it.",
+    "capturedAt": "2026-10-31T16:25:42.694Z"
   },
   {
     "outcome": "refused",
     "approvalId": 27,
     "attempted": "git -C /private/var/folders/T/e2e/work push -u origin main",
     "allowlist": null,
-    "refusal": "This command requires approval"
+    "refusal": "This command requires approval",
+    "capturedAt": "2026-10-31T16:25:50.089Z"
   },
   {
     "outcome": "refused",
     "approvalId": 31,
     "attempted": "git -C /private/var/folders/T/e2e/work status --short --branch; git -C /private/var/folders/T/e2e/work log --oneline -5; git -C /private/var/folders/T/e2e/work remote -v",
     "allowlist": null,
-    "refusal": "This Bash command contains multiple operations. The following parts require approval: git -C /private/var/folders/T/e2e/work status --short --branch, git -C /private/var/folders/T/e2e/work log --oneline -5, git -C /private/var/folders/T/e2e/work remote -v"
+    "refusal": "This Bash command contains multiple operations. The following parts require approval: git -C /private/var/folders/T/e2e/work status --short --branch, git -C /private/var/folders/T/e2e/work log --oneline -5, git -C /private/var/folders/T/e2e/work remote -v",
+    "capturedAt": "2026-10-31T16:28:56.935Z"
   },
   {
     "outcome": "refused",
@@ -120,7 +134,8 @@
       "mcp__chat__send",
       "mcp__chat__room_send"
     ],
-    "refusal": "touch in '/var/folders/T/e2e/work/made.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/private/var/folders/T/e2e'."
+    "refusal": "touch in '/var/folders/T/e2e/work/made.txt' was blocked. For security, Claude Code may only create or modify files in the allowed working directories for this session: '/private/var/folders/T/e2e'.",
+    "capturedAt": "2026-10-31T17:19:13.569Z"
   },
   {
     "outcome": "refused",
@@ -133,7 +148,8 @@
       "mcp__chat__send",
       "mcp__chat__room_send"
     ],
-    "refusal": "This command changes directory before running a version-control command, which can pick up untrusted hooks or repository configuration from the target directory. Approve only if you trust it."
+    "refusal": "This command changes directory before running a version-control command, which can pick up untrusted hooks or repository configuration from the target directory. Approve only if you trust it.",
+    "capturedAt": "2026-10-31T17:19:15.584Z"
   },
   {
     "outcome": "refused",
@@ -146,14 +162,16 @@
       "mcp__chat__send",
       "mcp__chat__room_send"
     ],
-    "refusal": "This Bash command contains multiple operations. The following part requires approval: env"
+    "refusal": "This Bash command contains multiple operations. The following part requires approval: env",
+    "capturedAt": "2026-10-31T17:19:17.055Z"
   },
   {
     "outcome": "permitted",
     "approvalId": 25,
     "attempted": "mcp__chat__set_status",
     "allowlistEntry": "mcp__chat__set_status",
-    "evidence": "run 13, 2026-10-31: after lee approved approval 25, agents.focus for e2e-62471-agent read e2e-ok-62471, so the child really used the tool. HISTORICAL — that row is transient and was cleared when the agent deregistered, so this is not re-readable. The run-13 log and ~/context/main-dev/claude2-run7-findings.md hold it."
+    "evidence": "run 13, 2026-10-31: after lee approved approval 25, agents.focus for e2e-62471-agent read e2e-ok-62471, so the child really used the tool. HISTORICAL — that row is transient and was cleared when the agent deregistered, so this is not re-readable. The run-13 log and ~/context/main-dev/claude2-run7-findings.md hold it.",
+    "capturedAt": "2026-10-31T16:03:35.429Z"
   },
   {
     "outcome": "permitted",
@@ -161,7 +179,8 @@
     "approvalId": 41,
     "attempted": "rm /var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-OC75fc/work/README.md",
     "allowlistEntry": "Bash(rm /private/var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-OC75fc/work/README.md)",
-    "evidence": "2026-10-31: remove a file inside the allowed directory — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends."
+    "evidence": "2026-10-31: remove a file inside the allowed directory — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.",
+    "capturedAt": "2026-10-31T17:34:55.155Z"
   },
   {
     "outcome": "permitted",
@@ -169,7 +188,8 @@
     "approvalId": 42,
     "attempted": "touch /var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-TpyHwP/work/made.txt",
     "allowlistEntry": "Bash(touch /private/var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-TpyHwP/work/made.txt)",
-    "evidence": "2026-10-31: touch a file inside the allowed directory — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends."
+    "evidence": "2026-10-31: touch a file inside the allowed directory — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.",
+    "capturedAt": "2026-10-31T17:35:06.966Z"
   },
   {
     "outcome": "permitted",
@@ -177,7 +197,8 @@
     "approvalId": 43,
     "attempted": "git -C /var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-4tN4R8/work tag permit-12241",
     "allowlistEntry": "Bash(git -C /private/var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-4tN4R8/work tag permit-12241)",
-    "evidence": "2026-10-31: create a git tag in the scratch repo — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends."
+    "evidence": "2026-10-31: create a git tag in the scratch repo — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.",
+    "capturedAt": "2026-10-31T17:35:15.641Z"
   },
   {
     "outcome": "permitted",
@@ -185,7 +206,8 @@
     "approvalId": 44,
     "attempted": "mcp__chat__set_status with status \"tool\" and focus exactly \"permit-ok-12241\"",
     "allowlistEntry": "mcp__chat__set_status",
-    "evidence": "2026-10-31: publish a status over MCP — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends."
+    "evidence": "2026-10-31: publish a status over MCP — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.",
+    "capturedAt": "2026-10-31T17:35:23.102Z"
   },
   {
     "outcome": "permitted",
@@ -193,7 +215,8 @@
     "approvalId": 45,
     "attempted": "rm /var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-Tbv1Ok/work/README.md",
     "allowlistEntry": "Bash(rm /private/var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-Tbv1Ok/work/README.md)",
-    "evidence": "2026-10-31: remove a file inside the allowed directory — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends."
+    "evidence": "2026-10-31: remove a file inside the allowed directory — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.",
+    "capturedAt": "2026-10-31T22:10:46.979Z"
   },
   {
     "outcome": "permitted",
@@ -201,7 +224,8 @@
     "approvalId": 46,
     "attempted": "touch /var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-KCBpTu/work/made.txt",
     "allowlistEntry": "Bash(touch /private/var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-KCBpTu/work/made.txt)",
-    "evidence": "2026-10-31: touch a file inside the allowed directory — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends."
+    "evidence": "2026-10-31: touch a file inside the allowed directory — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.",
+    "capturedAt": "2026-10-31T22:11:00.708Z"
   },
   {
     "outcome": "permitted",
@@ -209,7 +233,8 @@
     "approvalId": 47,
     "attempted": "git -C /var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-DvQRLK/work tag permit-51071",
     "allowlistEntry": "Bash(git -C /private/var/folders/yw/wl4kmwmd73b7sqfmqgy9yc0r0000gn/T/chat-mcp-e2e-DvQRLK/work tag permit-51071)",
-    "evidence": "2026-10-31: create a git tag in the scratch repo — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends."
+    "evidence": "2026-10-31: create a git tag in the scratch repo — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.",
+    "capturedAt": "2026-10-31T22:11:09.719Z"
   },
   {
     "outcome": "permitted",
@@ -217,6 +242,7 @@
     "approvalId": 48,
     "attempted": "mcp__chat__set_status with status \"tool\" and focus exactly \"permit-ok-51071\"",
     "allowlistEntry": "mcp__chat__set_status",
-    "evidence": "2026-10-31: publish a status over MCP — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends."
+    "evidence": "2026-10-31: publish a status over MCP — the target moved after the grant was added. HISTORICAL: the scratch directory is deleted when this run ends.",
+    "capturedAt": "2026-10-31T22:11:19.076Z"
   }
 ]
