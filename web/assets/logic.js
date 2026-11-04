@@ -765,3 +765,27 @@ export function clearResultText(count, target) {
   if (count === 0) return `${target} was already empty`;
   return `cleared ${count} message${count === 1 ? '' : 's'} ${where}`;
 }
+
+/**
+ * What the style selector should do with a chosen value (#92).
+ *
+ * 🛑 DECIDED FROM VALUES ALONE, so it is testable without a DOM — the rule
+ * app.js states at the top of itself. Returns the action and, for a revert, the
+ * value to put back.
+ *
+ * `custom` is refused here rather than offered-and-failed. The server demands
+ * markdown with it and a header select has nowhere to type multi-line markdown.
+ * The option still EXISTS in the list because a room can be in that state, set
+ * through the `set_style` tool, and the selector has to be able to show it.
+ */
+export function styleSelection(chosen, currentStyle) {
+  if (chosen === 'custom') {
+    return {
+      action: 'refuse',
+      revertTo: currentStyle ?? '',
+      message: 'Custom styles need markdown. Set one with the set_style tool, then it appears here.',
+    };
+  }
+
+  return { action: 'save', style: chosen === '' ? null : chosen };
+}

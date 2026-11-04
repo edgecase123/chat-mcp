@@ -302,6 +302,9 @@ html, body {
   padding: 12px 20px;
   border-bottom: 1px solid var(--border);
   background: var(--bg);
+  /* #92 — anchors the style selector top-right. Absolute rather than flex so
+     the existing title-over-meta stack is untouched. */
+  position: relative;
 }
 .pane__title {
   margin: 0;
@@ -312,6 +315,27 @@ html, body {
 .pane__meta {
   margin-top: 2px;
   color: var(--fg-faint);
+  font-size: 12px;
+}
+
+/* #92 — conversation style selector, beside the room name and member count. */
+.pane__style {
+  position: absolute;
+  top: 12px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-faint);
+}
+.pane__style-select {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font: inherit;
   font-size: 12px;
 }
 

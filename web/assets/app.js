@@ -12,6 +12,7 @@ import {
   shouldShowJump,
   suggestionsFor,
   enterShouldSend,
+  styleSelection,
   menuEntriesFor,
   mentionSuggestionsFor,
   pushHistory,
@@ -66,6 +67,8 @@ const el = {
   sidebar: document.getElementById('sidebar'),
   paneTitle: document.getElementById('pane-title'),
   paneMeta: document.getElementById('pane-meta'),
+  paneStyleWrap: document.getElementById('pane-style-wrap'),
+  paneStyle: document.getElementById('pane-style'),
   messages: document.getElementById('messages'),
   jumpNewest: document.getElementById('jump-newest'),
   suggest: document.getElementById('composer-suggest'),
@@ -579,6 +582,7 @@ function renderPaneHeader() {
   if (!state.currentTarget) {
     el.paneTitle.textContent = 'select a peer or room';
     el.paneMeta.textContent = 'type /help for commands';
+    if (el.paneStyleWrap) el.paneStyleWrap.hidden = true;
     el.composerInput.placeholder = 'Type /dm <peer> or /join #room to get started. /help for commands.';
     return;
   }
@@ -587,10 +591,17 @@ function renderPaneHeader() {
     el.paneTitle.textContent = state.currentTarget;
     const room = state.rooms.find((r) => r.name === state.currentTarget);
     el.paneMeta.textContent = room ? `${room.member_count ?? '?'} members` : '';
+    // #92 — the style selector belongs to rooms only. A DM has no shared room
+    // to carry one, and the empty state has no target at all.
+    if (el.paneStyleWrap && el.paneStyle) {
+      el.paneStyleWrap.hidden = !room;
+      if (room) el.paneStyle.value = room.style ?? '';
+    }
   } else {
     el.paneTitle.textContent = `DM · ${state.currentTarget}`;
     const peer = state.peers.find((p) => p.handle === state.currentTarget);
     el.paneMeta.textContent = peer ? (peer.online ? 'online' : 'offline') : '';
+    if (el.paneStyleWrap) el.paneStyleWrap.hidden = true;
   }
   el.composerInput.focus();
 }
@@ -1290,6 +1301,42 @@ el.messages.addEventListener('scroll', () => {
 });
 
 el.jumpNewest.addEventListener('click', jumpToNewest);
+
+// #92 — saving a room's conversation style.
+//
+// 🛑 `custom` IS REFUSED HERE AND SAYS WHY. The server demands markdown with
+// it, and this header has nowhere to type multi-line markdown — so offering the
+// option and failing silently would be worse than not offering it. The option
+// stays in the list because it is a real state a room can be IN, set through
+// the `set_style` MCP tool, and the selector has to be able to show it.
+if (el.paneStyle) {
+  el.paneStyle.addEventListener('change', async () => {
+    const room = state.currentTarget;
+    const chosen = el.paneStyle.value;
+
+    if (!room || !room.startsWith('#')) return;
+
+    const current = state.rooms.find((r) => r.name === room);
+    const decision = styleSelection(chosen, current?.style ?? null);
+
+    if (decision.action === 'refuse') {
+      el.paneStyle.value = decision.revertTo;
+      alert(decision.message);
+      return;
+    }
+
+    try {
+      await api('/api/rooms/style', {
+        method: 'POST',
+        body: JSON.stringify({ room, style: decision.style }),
+      });
+      await refresh();
+    } catch (e) {
+      console.error('could not save the style', e);
+      el.paneStyle.value = current?.style ?? '';
+    }
+  });
+}
 
 // Anywhere else closes an open (...) menu. The button and the menu both
 // stopPropagation, so this only ever fires for a click outside them.

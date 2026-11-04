@@ -294,6 +294,7 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   if (path === '/api/messages' && req.method === 'POST') return handlePostMessage(req, res, ctx);
   if (path === '/api/rooms/join' && req.method === 'POST') return handleRoomJoin(req, res, ctx);
   if (path === '/api/rooms/leave' && req.method === 'POST') return handleRoomLeave(req, res, ctx);
+  if (path === '/api/rooms/style' && req.method === 'POST') return handleRoomStyle(req, res, ctx);
   if (path === '/api/kick' && req.method === 'POST') return handleKick(req, res, ctx);
   if (path === '/api/rooms/delete' && req.method === 'POST') return handleRoomDelete(req, res, ctx);
   if (path === '/api/rooms/read' && req.method === 'POST') return handleRoomRead(req, res, ctx);
@@ -421,6 +422,43 @@ async function handleRoomJoin(req: IncomingMessage, res: ServerResponse, ctx: Ro
     }
   }
   respondJson(res, { ok: true, was_new_member: result.was_new_member });
+}
+
+/**
+ * #92 — set a room's conversation style from the web selector.
+ *
+ * A POST because it mutates, like every other room write here. `style: null`
+ * clears it.
+ */
+async function handleRoomStyle(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+  const body = (await readJsonBody(req)) as { room?: string; style?: string | null; custom?: string };
+
+  if (!body.room) return respondJson(res, { error: 'room required' }, 400);
+
+  if (!dao.roomExists(ctx.db, body.room)) {
+    return respondJson(res, { error: `no such room ${body.room}` }, 404);
+  }
+
+  // 🛑 MEMBERSHIP, NOT JUST EXISTENCE. Every other write here is scoped to the
+  // caller's own rooms, and a style is an instruction to everyone in one.
+  if (!dao.isRoomMember(ctx.db, body.room, ctx.handle)) {
+    return respondJson(res, { error: `not a member of ${body.room}` }, 403);
+  }
+
+  const style = body.style ?? null;
+
+  if (style !== null) {
+    try {
+      dao.assertStyleName(style);
+      dao.assertStyleCustom(style, body.custom);
+    } catch (e) {
+      return respondJson(res, { error: (e as Error).message }, 400);
+    }
+  }
+
+  dao.setRoomStyle(ctx.db, body.room, style, body.custom);
+
+  respondJson(res, { ok: true, style });
 }
 
 async function handleRoomLeave(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
