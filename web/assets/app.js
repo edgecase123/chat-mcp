@@ -31,6 +31,7 @@ import {
   dropNameText,
   clearConfirmText,
   clearResultText,
+  gaugeDisplay,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -206,6 +207,7 @@ function renderSidebar() {
         online: p.online,
         active: state.currentTarget === p.handle,
         kind: 'peer',
+        gauge: gaugeDisplay(p),
       }))),
   ]);
   el.sidebar.appendChild(peersSection);
@@ -247,7 +249,7 @@ function renderSidebar() {
   }
 }
 
-function sidebarItem({ label, target, online, active, kind, unread = 0 }) {
+function sidebarItem({ label, target, online, active, kind, unread = 0, gauge = null }) {
   const open = state.openMenuFor === target;
   return h('div', {
     className: `sidebar__item${online ? ' is-online' : ''}${active ? ' is-active' : ''}`,
@@ -256,6 +258,15 @@ function sidebarItem({ label, target, online, active, kind, unread = 0 }) {
     h('span', { className: 'sidebar__item-dot' }),
     h('span', { className: 'sidebar__item-label' }, [label]),
     unread > 0 ? h('span', { className: 'sidebar__item-unread' }, [`(${unread})`]) : null,
+    // #103 — a stale reading shows a dash, never its last number. The digits
+    // are what people act on, so a greyed-out 100% would repeat the 28-day
+    // incident rather than end it.
+    gauge?.show
+      ? h('span', {
+          className: `sidebar__item-gauge is-${gauge.band}`,
+          title: gauge.title,
+        }, [gauge.percent === null ? '–' : `${gauge.percent}%`])
+      : null,
     h('button', {
       className: 'sidebar__item-actions',
       type: 'button',
