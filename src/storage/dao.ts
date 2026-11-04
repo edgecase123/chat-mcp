@@ -1,4 +1,5 @@
 import type { Db } from './db.js';
+import type { ClaimRow } from '../claims/lifecycle.js';
 
 export type AgentStatus = 'idle' | 'thinking' | 'tool' | 'blocked' | 'error' | 'offline';
 export type MessageKind = 'chat' | 'dispatch' | 'alert';
@@ -1199,4 +1200,77 @@ export function nextStyle(current: string | null, hasCustom: boolean): string | 
   // index 0 is `null`, not the first named style, and my own test read it the
   // other way.
   return order[at === -1 ? 0 : (at + 1) % order.length] ?? null;
+}
+
+/* ------------------------------------------------------------------------- *
+ * #101 — claims on shared resources
+ *
+ * 🛑 THESE FUNCTIONS DECIDE NOTHING. Every rule about conflict, renewal,
+ * expiry and ownership lives in `src/claims/lifecycle.ts`, pure and tested
+ * without a database. A lock that is wrong is silent, so the logic has to be
+ * reachable by a unit test rather than only by two agents colliding.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * The newest claim row for a resource, live or not.
+ *
+ * 🛑 NEWEST, NOT NEWEST-LIVE. `decideClaim` needs to tell an expired claim
+ * (a failsafe fired, say so) from a released one (a clean handover, say
+ * nothing), and a query that filters to live rows throws that away.
+ */
+export function latestClaim(db: Db, resource: string): ClaimRow | null {
+  const row = db
+    .prepare('SELECT * FROM claims WHERE resource = ? ORDER BY id DESC LIMIT 1')
+    .get(resource) as unknown as ClaimRow | undefined;
+
+  return row ?? null;
+}
+
+/** Every claim still held at `now`, newest first. */
+export function liveClaims(db: Db, now: number): ClaimRow[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM claims c
+        WHERE c.released_at IS NULL AND c.expires_at > ?
+          AND c.id = (SELECT MAX(id) FROM claims WHERE resource = c.resource)
+        ORDER BY c.id DESC`,
+    )
+    .all(now) as unknown as ClaimRow[];
+
+  return rows;
+}
+
+/** Write a claim. The caller has already been told it may. */
+export function insertClaim(
+  db: Db,
+  input: { resource: string; holder: string; note: string | null; claimed_at: number; expires_at: number },
+): ClaimRow {
+  const info = db
+    .prepare('INSERT INTO claims (resource, holder, note, claimed_at, expires_at) VALUES (?, ?, ?, ?, ?)')
+    .run(input.resource, input.holder, input.note, input.claimed_at, input.expires_at);
+
+  return latestClaimById(db, Number(info.lastInsertRowid));
+}
+
+/** Extend a live claim's expiry in place, so the row keeps its claimed_at. */
+export function renewClaim(db: Db, id: number, expires_at: number): ClaimRow {
+  db.prepare('UPDATE claims SET expires_at = ? WHERE id = ?').run(expires_at, id);
+
+  return latestClaimById(db, id);
+}
+
+/** Mark a claim released. Returns false if the row was already released. */
+export function releaseClaim(db: Db, id: number, released_at: number): boolean {
+  const info = db
+    .prepare('UPDATE claims SET released_at = ? WHERE id = ? AND released_at IS NULL')
+    .run(released_at, id);
+
+  return Number(info.changes) > 0;
+}
+
+function latestClaimById(db: Db, id: number): ClaimRow {
+  const row = db.prepare('SELECT * FROM claims WHERE id = ?').get(id) as unknown as ClaimRow | undefined;
+  if (row === undefined) throw new Error(`claim ${id} vanished immediately after being written`);
+
+  return row;
 }

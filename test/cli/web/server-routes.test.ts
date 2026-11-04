@@ -398,3 +398,75 @@ test('a malformed room name is refused, not quietly treated as a DM', async () =
     close(h);
   }
 });
+
+// ── /api/claims (#101) ───────────────────────────────────────────────────
+
+/**
+ * 🛑 THE MINUTES ARE THE SERVER'S, NOT THE BROWSER'S. A tab left open
+ * overnight would render ages against a stale clock, and the UI already
+ * carried one copy of a bus threshold that drifted (the gauge bands, PR 113).
+ */
+test('a live claim is served with its holder and a server-side age', async () => {
+  const h = await harness();
+  const now = Date.now();
+  dao.insertClaim(h.db, {
+    resource: 'reset-and-test.sh',
+    holder: 'peer-a',
+    note: 'mode=all',
+    claimed_at: now - 41 * 60_000,
+    expires_at: now + 199 * 60_000,
+  });
+
+  const res = await raw(h, { path: '/api/claims' });
+  const body = JSON.parse(res.body) as { claims: Array<Record<string, unknown>> };
+
+  assert.equal(res.status, 200);
+  assert.equal(body.claims.length, 1);
+  assert.equal(body.claims[0]?.resource, 'reset-and-test.sh');
+  assert.equal(body.claims[0]?.holder, 'peer-a');
+  assert.equal(body.claims[0]?.note, 'mode=all');
+  assert.equal(body.claims[0]?.held_for_minutes, 41);
+  assert.equal(body.claims[0]?.expires_in_minutes, 199);
+  close(h);
+});
+
+test('a released claim and an expired one are both absent', async () => {
+  const h = await harness();
+  const now = Date.now();
+
+  const released = dao.insertClaim(h.db, {
+    resource: 'released-thing', holder: 'peer-a', note: null, claimed_at: now - 1000, expires_at: now + 60_000,
+  });
+  dao.releaseClaim(h.db, released.id, now);
+  dao.insertClaim(h.db, {
+    resource: 'expired-thing', holder: 'peer-b', note: null, claimed_at: now - 120_000, expires_at: now - 1,
+  });
+
+  const body = JSON.parse((await raw(h, { path: '/api/claims' })).body) as { claims: unknown[] };
+
+  // 🛑 BOTH, IN ONE TEST. Either alone would pass against a query that
+  // filtered on the other condition and ignored this one.
+  assert.deepEqual(body.claims, []);
+  close(h);
+});
+
+test('an empty claims list is an empty array, never a missing key', async () => {
+  // The panel renders "(nothing claimed)" from a length check, so a missing
+  // key would throw in the browser rather than render the empty state.
+  const h = await harness();
+
+  const body = JSON.parse((await raw(h, { path: '/api/claims' })).body) as { claims: unknown[] };
+
+  assert.deepEqual(body.claims, []);
+  close(h);
+});
+
+test('a rebound GET to /api/claims is refused like every other route', async () => {
+  // It is a read, but it names who is running what on this machine.
+  const h = await harness();
+
+  const res = await raw(h, { path: '/api/claims', host: 'evil.example.com' });
+
+  assert.equal(res.status, 403);
+  close(h);
+});

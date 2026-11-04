@@ -921,3 +921,54 @@ export function ageLabel(ms) {
 
   return `${Math.floor(hours / 24)}d`;
 }
+
+/**
+ * One row of the claims panel (#101).
+ *
+ * 🛑 A CLAIM IS A LOCK, SO THE AGE IS THE INTERESTING NUMBER. "held 41m" is
+ * what tells an operator a gate has overrun; the expiry is a failsafe nobody
+ * should be planning around, so it is the quieter half.
+ *
+ * 🛑 PURE, AND EXPORTED FOR ITS OWN TEST. The bus computes the minutes; this
+ * only decides what the operator reads, which is the part that was prose in a
+ * chat message before #101.
+ */
+export function claimRow(claim, { me } = {}) {
+  const held = claim.held_for_minutes;
+  const left = claim.expires_in_minutes;
+
+  return {
+    resource: claim.resource,
+    holder: claim.holder,
+    mine: claim.holder === me,
+    note: claim.note || null,
+    // ⚠️ The age, never a clock time. An operator reading "held 41m" does not
+    // have to subtract anything, which is the whole reason the panel exists.
+    age: `held ${durationLabel(held)}`,
+    expiry: `failsafe in ${durationLabel(left)}`,
+    // 🛑 STALE IS A CLAIM OUTLIVING ANY LEGITIMATE HOLD, not one near expiry.
+    // The failsafe is four hours; a full gate is about 23 minutes. So an hour
+    // is the line where "still running" stops being the likely explanation.
+    stale: held >= 60,
+  };
+}
+
+/** Minutes as something read at a glance. Shared by both halves of a claim row. */
+function durationLabel(mins) {
+  if (mins < 60) return `${mins}m`;
+
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
+/**
+ * What the claims panel says when it is empty.
+ *
+ * 🛑 NOT A BLANK. An empty panel and a panel that failed to load look
+ * identical, and that ambiguity is the #103 incident in a different place.
+ */
+export function claimsPanelEmpty() {
+  return '(nothing claimed)';
+}

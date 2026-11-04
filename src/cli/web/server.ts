@@ -302,6 +302,7 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   if (path === '/api/messages/clear' && req.method === 'POST')
     return handleMessagesClear(req, res, ctx);
   if (path === '/api/approvals' && req.method === 'GET') return handleGetApprovals(res, ctx);
+  if (path === '/api/claims' && req.method === 'GET') return handleGetClaims(res, ctx);
   if (path === '/api/approvals/answer' && req.method === 'POST')
     return handleAnswerApproval(req, res, ctx);
   if (path === '/api/files' && req.method === 'GET') return handleFileHints(url, res);
@@ -570,6 +571,28 @@ async function handleKick(req: IncomingMessage, res: ServerResponse, ctx: RouteC
  */
 export function approvalsSignature(approvals: readonly { id: number }[]): string {
   return approvals.map((a) => a.id).join(',');
+}
+
+/**
+ * Live claims on shared resources (#101).
+ *
+ * 🛑 THE MINUTES ARE COMPUTED HERE, not in the browser. `logic.js` already
+ * holds one copy of a threshold that drifted from the bus (the gauge bands on
+ * PR 113), and a second clock is the same shape — a tab left open overnight
+ * would render ages against a stale `Date.now()`.
+ */
+function handleGetClaims(res: ServerResponse, ctx: RouteContext): void {
+  const now = Date.now();
+
+  respondJson(res, {
+    claims: dao.liveClaims(ctx.db, now).map((c) => ({
+      resource: c.resource,
+      holder: c.holder,
+      note: c.note,
+      held_for_minutes: Math.max(1, Math.round((now - c.claimed_at) / 60_000)),
+      expires_in_minutes: Math.max(1, Math.round(Math.max(0, c.expires_at - now) / 60_000)),
+    })),
+  });
 }
 
 function handleGetApprovals(res: ServerResponse, ctx: RouteContext): void {
