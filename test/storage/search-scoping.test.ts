@@ -171,3 +171,49 @@ test('truncated is TRUE when there is at least one more row than the limit', () 
   assert.equal(r.hits.length, 3, 'the extra probe row must not be returned to the caller');
   assert.equal(r.truncated, true);
 });
+
+/**
+ * 🛑 DECIDED by lee, 2026-11-04: *"no, the should be able to see room history
+ * after joining"*.
+ *
+ * So `search` and `room_inbox` differ ON PURPOSE, and the split is their job:
+ * `room_inbox` is unread DELIVERY and anchors its watermark at the join so a
+ * new member is not flooded; `search` is a deliberate LOOKUP and reading the
+ * room's history is the whole point of it.
+ *
+ * ⚠️ THIS TEST EXISTS BECAUSE NEITHER DIRECTION WAS COVERED. Every other room
+ * test here posts AFTER the join, so all of them were blind to this either
+ * way. Raised by claude1; without a test the ruling is one refactor from being
+ * silently reversed.
+ */
+test('🛑 a member CAN search what was said in a room before they joined', () => {
+  const db = freshDb();
+  dao.joinRoom(db, '#shared', 'claude1');
+  const before = dm(db, 'claude1', '#shared', 'HERITAGE said before claude2 arrived');
+  dao.joinRoom(db, '#shared', 'claude2');
+  const after = dm(db, 'claude1', '#shared', 'HERITAGE said after claude2 arrived');
+
+  // 🛑 THE TIMES ARE SET BY HAND, AND THE FIRST VERSION OF THIS TEST WAS
+  // VACUOUS WITHOUT IT. `insertMessage` and `joinRoom` both stamp `Date.now()`,
+  // so in one millisecond every row shares a timestamp and `sent_at >=
+  // joined_at` holds for the pre-join message too. Injecting a `joined_at`
+  // floor — the policy lee ruled against — left the test GREEN.
+  db.prepare('UPDATE messages SET sent_at = ? WHERE id = ?').run(1_000, before.id);
+  db.prepare('UPDATE room_members SET joined_at = ? WHERE room_name = ? AND handle = ?').run(2_000, '#shared', 'claude2');
+  db.prepare('UPDATE messages SET sent_at = ? WHERE id = ?').run(3_000, after.id);
+
+  assert.deepEqual(bodies(dao.searchMessages(db, { pattern: '%HERITAGE%', limit: 50, caller: 'claude2' })), [
+    'HERITAGE said after claude2 arrived',
+    'HERITAGE said before claude2 arrived',
+  ]);
+});
+
+/** The control: a non-member still sees neither, so the test above is not vacuous. */
+test('a non-member sees neither the pre-join nor the post-join message', () => {
+  const db = freshDb();
+  dao.joinRoom(db, '#shared', 'claude1');
+  dm(db, 'claude1', '#shared', 'HERITAGE one');
+  dm(db, 'claude1', '#shared', 'HERITAGE two');
+
+  assert.deepEqual(bodies(dao.searchMessages(db, { pattern: '%HERITAGE%', limit: 50, caller: 'claude2' })), []);
+});
