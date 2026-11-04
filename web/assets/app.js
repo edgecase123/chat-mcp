@@ -37,6 +37,7 @@ import {
   messageIdLabel,
   highlightSegments,
   messageMatchesSearch,
+  searchableText,
   searchFilterEmpty,
 } from './logic.js';
 //
@@ -530,6 +531,9 @@ function freshDurationMs() {
  * against `&` — which is the same mismatch one layer down. `textContent` of a
  * parse is what the highlighter walks, by construction.
  *
+ * ⚠️ PLUS EVERY `a[href]`, WHICH `textContent` CANNOT SEE. See
+ * `searchableText` for why that is worth an unmarkable hit.
+ *
  * Cached per message object. `refresh()` replaces `state.messages` wholesale on
  * every wake, so this costs one parse per fetch rather than one per keystroke.
  */
@@ -537,7 +541,8 @@ function renderedText(m) {
   if (m.__renderedText === undefined) {
     const probe = document.createElement('div');
     probe.innerHTML = m.body_html || '';
-    m.__renderedText = probe.textContent ?? '';
+    const hrefs = [...probe.querySelectorAll('a[href]')].map((a) => a.getAttribute('href') ?? '');
+    m.__renderedText = searchableText(probe.textContent ?? '', hrefs);
   }
 
   return m.__renderedText;
@@ -648,12 +653,10 @@ function renderMessages({ forceBottom = false } = {}) {
   // RENDERED text hid rows whose exact characters were on screen: the term
   // "see --color-card" returned nothing against `see \`--color-card\` here`.
   //
-  // ⚠️ THIS DOES NOT MAKE EVERY SHOWN ROW CARRY A MARK, and an earlier version
-  // of this comment claimed it did. `highlightInPlace` works per TEXT NODE, so
-  // a term spanning a code span matches the concatenated text and appears in no
-  // single node. The row is FOUND, which is the half that matters; marking
-  // across nodes needs offset mapping and is not done here. Measured: that term
-  // gives 1 row, 0 marks.
+  // ⚠️ A SHOWN ROW DOES NOT ALWAYS CARRY A MARK, and an earlier version of this
+  // comment claimed it always would. Two independent reasons, both measured at
+  // 1 row and 0 marks: a term spanning a code span appears in no single text
+  // node, and an href hit lives in an attribute. See `searchableText`.
   const visible =
     term.length === 0 ? state.messages : state.messages.filter((m) => messageMatchesSearch(renderedText(m), term));
 
