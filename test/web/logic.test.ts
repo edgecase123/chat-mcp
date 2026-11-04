@@ -29,6 +29,7 @@ import {
   shouldShowJump,
   streamPlan,
   messageIdLabel,
+  highlightSegments,
   suggestionsFor,
 // @ts-expect-error — plain JS with JSDoc types, deliberately not compiled.
   pathsFromUriList,
@@ -1305,4 +1306,83 @@ test('🛑 the id label carries the words, so a bare number is never ambiguous',
 test('the id label does not group or pad the number, so it can be pasted back', () => {
   assert.equal(messageIdLabel(1000), 'Message ID: 1000');
   assert.equal(messageIdLabel(7), 'Message ID: 7');
+});
+
+// ── the search box and term highlighting (#102) ──────────────────────────
+
+/**
+ * 🛑 SEGMENTS, NOT MARKED-UP TEXT. `matchRanges` returns offsets precisely so
+ * nothing injects `<mark>` into markdown source — which corrupts a code span
+ * or a link — or into rendered HTML, where it can land inside a tag. The
+ * caller turns these segments into text nodes and `<mark>` elements, which
+ * cannot do either.
+ */
+test('🛑 a term with no match yields ONE unhit segment, never an empty list', () => {
+  // An empty list would erase the text node it was derived from.
+  assert.deepEqual(highlightSegments('nothing here', 'absent'), [{ text: 'nothing here', hit: false }]);
+});
+
+test('an empty term yields the text untouched, so an empty box highlights nothing', () => {
+  assert.deepEqual(highlightSegments('some text', ''), [{ text: 'some text', hit: false }]);
+  assert.deepEqual(highlightSegments('some text', '   '), [{ text: 'some text', hit: false }]);
+});
+
+test('a single match splits into before, hit, after', () => {
+  assert.deepEqual(highlightSegments('the gate is held', 'gate'), [
+    { text: 'the ', hit: false },
+    { text: 'gate', hit: true },
+    { text: ' is held', hit: false },
+  ]);
+});
+
+test('two matches both split, and the text between them is one segment', () => {
+  assert.deepEqual(highlightSegments('gate then gate', 'gate'), [
+    { text: 'gate', hit: true },
+    { text: ' then ', hit: false },
+    { text: 'gate', hit: true },
+  ]);
+});
+
+test('a match at the very start emits no empty leading segment', () => {
+  // An empty text node renders nothing but still counts as a child, and a
+  // `<mark>` wrapping nothing is worse.
+  assert.deepEqual(highlightSegments('gate held', 'gate'), [
+    { text: 'gate', hit: true },
+    { text: ' held', hit: false },
+  ]);
+});
+
+test('a match at the very end emits no empty trailing segment', () => {
+  assert.deepEqual(highlightSegments('held gate', 'gate'), [
+    { text: 'held ', hit: false },
+    { text: 'gate', hit: true },
+  ]);
+});
+
+test('the match is case-insensitive but the ORIGINAL case is preserved', () => {
+  // Returning the lower-cased needle would rewrite the operator's transcript.
+  assert.deepEqual(highlightSegments('CLAIMING the Gate', 'gate'), [
+    { text: 'CLAIMING the ', hit: false },
+    { text: 'Gate', hit: true },
+  ]);
+});
+
+test('🛑 the term is LITERAL, so regex and SQL wildcards match themselves', () => {
+  // The same defect `likePattern` exists to stop, on the other side.
+  assert.deepEqual(highlightSegments('at 100% now', '100%'), [
+    { text: 'at ', hit: false },
+    { text: '100%', hit: true },
+    { text: ' now', hit: false },
+  ]);
+  assert.deepEqual(highlightSegments('a.c and abc', 'a.c'), [
+    { text: 'a.c', hit: true },
+    { text: ' and abc', hit: false },
+  ]);
+});
+
+test('adjacent matches do not nest or overlap', () => {
+  assert.deepEqual(highlightSegments('aaaa', 'aa'), [
+    { text: 'aa', hit: true },
+    { text: 'aa', hit: true },
+  ]);
 });

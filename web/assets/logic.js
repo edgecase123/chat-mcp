@@ -1052,6 +1052,44 @@ export function matchRanges(text, term) {
 }
 
 /**
+ * A string split into the parts that match a term and the parts that do not.
+ *
+ * 🛑 SEGMENTS, NOT MARKED-UP TEXT, FOR THE SAME REASON `matchRanges` RETURNS
+ * OFFSETS. Injecting `<mark>` into markdown source corrupts a code span or a
+ * link; injecting it into rendered HTML can land inside a tag and is an
+ * injection hazard. The caller turns these into text nodes and `<mark>`
+ * elements, which can do neither.
+ *
+ * 🛑 NO EMPTY SEGMENTS. A `<mark>` wrapping nothing is a stray element, and an
+ * empty text node is a child that renders nothing. A term that matches nothing
+ * still returns ONE segment, because an empty list would erase the text.
+ *
+ * ⚠️ THE ORIGINAL CASE SURVIVES. The match is case-insensitive, but the
+ * segment carries the text as written — slicing the needle in would rewrite
+ * the operator's own transcript.
+ *
+ * @param {string} text
+ * @param {string} term
+ * @returns {{ text: string, hit: boolean }[]}
+ */
+export function highlightSegments(text, term) {
+  const ranges = matchRanges(text, term);
+  if (ranges.length === 0) return [{ text, hit: false }];
+
+  const out = [];
+  let at = 0;
+
+  for (const r of ranges) {
+    if (r.start > at) out.push({ text: text.slice(at, r.start), hit: false });
+    out.push({ text: text.slice(r.start, r.end), hit: true });
+    at = r.end;
+  }
+  if (at < text.length) out.push({ text: text.slice(at), hit: false });
+
+  return out;
+}
+
+/**
  * Whether a message belongs in a filtered view.
  *
  * 🛑 THE SAME MATCH RULE AS THE HIGHLIGHT. A filter that kept a message the
