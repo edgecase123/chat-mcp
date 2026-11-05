@@ -36,7 +36,9 @@ import {
   claimsPanelEmpty,
   messageIdLabel,
   highlightSegments,
+  jumpUrgency,
   messageMatchesSearch,
+  nextUnreadSince,
   searchableText,
   searchFilterEmpty,
 } from './logic.js';
@@ -66,6 +68,7 @@ const state = {
   // forgotten setting.
   searchTerm: '',
   unreadBelow: 0,   // messages that arrived while the reader was scrolled up
+  unreadSince: null, // when the OLDEST of them arrived (#121), ms, or null
   suggest: null,     // { items, index, kind, token } while the composer popover is open
   history: { entries: [], index: null, draft: null },
   // 🛑 NOT in `messages`. refresh() reassigns that wholesale on every wake,
@@ -491,8 +494,49 @@ function jumpToNewest() {
   renderJumpNewest();
 }
 
+/**
+ * The one timer behind the escalation (#121).
+ *
+ * 🛑 ONE INTERVAL, RE-ARMED, NEVER ONE PER ARRIVAL. A timer started per
+ * message would stack: ten arrivals would tick ten times a second and each
+ * would outlive the clear.
+ */
+let urgencyTimer = null;
+
+function stopUrgencyTimer() {
+  if (urgencyTimer === null) return;
+  clearInterval(urgencyTimer);
+  urgencyTimer = null;
+}
+
+/**
+ * ⚠️ POLLED, NOT SCHEDULED PER THRESHOLD. One second is well under the 3s
+ * first step, and a `setTimeout` per threshold has to be cancelled on three
+ * separate clear paths — this one is idempotent and stops itself.
+ */
+function startUrgencyTimer() {
+  if (urgencyTimer !== null) return;
+  urgencyTimer = setInterval(renderJumpNewest, 1000);
+}
+
 function renderJumpNewest() {
   el.jumpNewest.hidden = !shouldShowJump(state.unreadBelow, streamGeometry());
+
+  // 🛑 THE CLOCK IS CLEARED EVEN WHEN THE PILL IS HIDDEN. `shouldShowJump` is
+  // true for "scrolled far up with nothing new" too, so hidden and
+  // "nothing waiting" are different states and only the latter stops the timer.
+  state.unreadSince = nextUnreadSince(state.unreadSince, state.unreadBelow, Date.now());
+
+  if (state.unreadSince === null) {
+    stopUrgencyTimer();
+    el.jumpNewest.removeAttribute('data-urgency');
+  } else {
+    startUrgencyTimer();
+    const level = jumpUrgency(Date.now() - state.unreadSince);
+    if (level === 0) el.jumpNewest.removeAttribute('data-urgency');
+    else el.jumpNewest.setAttribute('data-urgency', String(level));
+  }
+
   if (el.jumpNewest.hidden) return;
   const label = jumpLabel(state.unreadBelow);
   if (el.jumpNewest.textContent !== label) el.jumpNewest.textContent = label;
