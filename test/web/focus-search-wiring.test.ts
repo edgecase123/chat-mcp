@@ -62,3 +62,24 @@ test('IS_MAC is derived from the platform, not hardcoded', () => {
   assert.notEqual(found, null, 'IS_MAC is not declared');
   assert.match(found![0], /navigator\./, `IS_MAC does not read navigator: ${found![0]}`);
 });
+
+const HTML = readFileSync(new URL('../../web/index.html', import.meta.url), 'utf8');
+
+test('🛑 app.js OVERWRITES the placeholder from the same platform flag', () => {
+  // The markup is served to every platform, so a combo in the HTML would be
+  // wrong for half of the readers. `searchPlaceholder` must read `IS_MAC`, the
+  // same flag the binding reads, or the box can advertise a dead key.
+  const found = APP_CODE.match(/el\.paneSearch\.placeholder = .*/);
+
+  assert.notEqual(found, null, 'nothing sets the placeholder at boot');
+  assert.match(found![0], /searchPlaceholder\(IS_MAC\)/, found![0]);
+});
+
+test('🛑 THE STATIC PLACEHOLDER NAMES NO COMBO', () => {
+  // It is the no-JS fallback. A combo baked here is wrong on one platform and
+  // can never be corrected, because nothing re-reads the attribute.
+  const found = HTML.match(/id="pane-search"[\s\S]{0,200}?placeholder="([^"]*)"/);
+
+  assert.notEqual(found, null, 'the filter box has no placeholder attribute');
+  assert.doesNotMatch(found![1], /Cmd|Ctrl|⌘|-F\b/, `the static fallback hardcodes a combo: ${found![1]}`);
+});

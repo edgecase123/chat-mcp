@@ -22,6 +22,7 @@ import {
   historyStep,
   historyKeyApplies,
   focusSearchKeyApplies,
+  searchPlaceholder,
   messageMarkdown,
   cheatSheet,
   commandBlock,
@@ -1863,6 +1864,10 @@ document.addEventListener('keydown', (e) => {
 // rather than the source of truth. iPadOS reports "MacIntel" and takes Cmd too,
 // so landing there is correct.
 const IS_MAC = /mac|iphone|ipad/i.test(navigator.userAgentData?.platform || navigator.platform || '');
+
+// The box names the key that reaches it. The HTML ships a bare "Search" as the
+// no-JS fallback, because the combo differs per platform and the markup does not.
+el.paneSearch.placeholder = searchPlaceholder(IS_MAC);
 
 // Cmd-F on macOS, Ctrl-F everywhere else, focuses the conversation filter.
 //

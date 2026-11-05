@@ -1307,3 +1307,20 @@ export function focusSearchKeyApplies(e, isMac) {
     ? e.metaKey === true && e.ctrlKey !== true
     : e.ctrlKey === true && e.metaKey !== true;
 }
+
+/**
+ * The filter box's placeholder, naming the shortcut that reaches it.
+ *
+ * 🛑 THE COMBO CANNOT LIVE IN THE HTML, because it differs per platform and the
+ * markup is served to both. The static attribute is the no-JS fallback and this
+ * overwrites it at boot.
+ *
+ * ⚠️ READS THE SAME `isMac` AS `focusSearchKeyApplies`. A second platform test
+ * here could disagree with the binding, and then the box would advertise a key
+ * that does nothing.
+ *
+ * @param {boolean} isMac
+ */
+export function searchPlaceholder(isMac) {
+  return isMac ? 'Search (Cmd-F)' : 'Search (Ctrl-F)';
+}

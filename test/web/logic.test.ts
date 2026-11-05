@@ -22,6 +22,7 @@ import {
   historyStep,
   historyKeyApplies,
   focusSearchKeyApplies,
+  searchPlaceholder,
   atTokenAt,
   cheatSheet,
   commandBlock,
@@ -638,6 +639,53 @@ test('a malformed event does not throw', () => {
   assert.equal(focusSearchKeyApplies(undefined, true), false);
   // @ts-expect-error — same.
   assert.equal(focusSearchKeyApplies({}, true), false);
+});
+
+// ── the placeholder that advertises the shortcut ────────────────────────
+
+test('each platform is offered its own combo', () => {
+  assert.equal(searchPlaceholder(true), 'Search (Cmd-F)');
+  assert.equal(searchPlaceholder(false), 'Search (Ctrl-F)');
+});
+
+/** The modifier and letter the placeholder advertises, parsed back out of it. */
+function advertised(isMac: boolean) {
+  const m = searchPlaceholder(isMac).match(/\((Cmd|Ctrl)-([A-Za-z])\)/);
+
+  assert.notEqual(m, null, `the placeholder names no combo: ${searchPlaceholder(isMac)}`);
+
+  return { modifier: m![1], key: m![2] };
+}
+
+test('🛑 THE COMBO THE BOX ADVERTISES IS ONE THE BINDING ACCEPTS', () => {
+  // A string test on the placeholder would pass while the box advertised a key
+  // that does nothing. This feeds the advertised combo back to the predicate,
+  // so the copy and the binding cannot drift apart.
+  for (const isMac of [true, false]) {
+    const { modifier, key } = advertised(isMac);
+    const e = { key, metaKey: modifier === 'Cmd', ctrlKey: modifier === 'Ctrl' };
+
+    assert.equal(focusSearchKeyApplies(e, isMac), true, `${modifier}-${key} on isMac=${isMac}`);
+  }
+});
+
+test('🛑 NEITHER PLATFORM ADVERTISES THE OTHER ONE\'S COMBO', () => {
+  // The negative half. Without it the test above passes for a predicate that
+  // accepts everything, which is the exact `metaKey || ctrlKey` bug.
+  const mac = advertised(true);
+  const other = advertised(false);
+
+  assert.notEqual(mac.modifier, other.modifier, 'both platforms name the same modifier');
+  assert.equal(
+    focusSearchKeyApplies({ key: other.key, ctrlKey: true }, true),
+    false,
+    'macOS advertises Cmd and the predicate also takes Ctrl',
+  );
+  assert.equal(
+    focusSearchKeyApplies({ key: mac.key, metaKey: true }, false),
+    false,
+    'Windows advertises Ctrl and the predicate also takes Super',
+  );
 });
 
 // ── the per-message copy button ─────────────────────────────────────────
