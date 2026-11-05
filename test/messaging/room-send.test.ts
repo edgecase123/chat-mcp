@@ -14,7 +14,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-roomsend-'));
 const { DatabaseSync } = await import('node:sqlite');
 const { migrate } = await import('../../src/storage/db.js');
 const dao = await import('../../src/storage/dao.js');
-const { sendToRoom, NotARoomMemberError } = await import('../../src/messaging/room-send.js');
+const { sendToRoom, NotARoomMemberError, RoomSendInputError } = await import('../../src/messaging/room-send.js');
 
 const NOTIFY = join(process.env.CHAT_MCP_HOME, 'notify');
 
@@ -200,4 +200,49 @@ test('a malformed room name is refused', () => {
       from: 'gate', room: 'gate', body: 'x', advanceOwnRead: false,
     }));
   } finally { db.close(); }
+});
+
+// ── error classification (claude1's 2nd review of PR 128) ────────────────
+
+/**
+ * 🛑 A CALLER MISTAKE AND A BROKEN MACHINE MUST NOT LOOK THE SAME.
+ *
+ * The web handler maps `RoomSendInputError` to a 4xx. It once caught plain
+ * `Error`, which meant a failed SQLite write would have been reported to the
+ * client as its own 400.
+ */
+test('🚨 every caller-mistake error is a RoomSendInputError', () => {
+  const db = room(['claude1', 'claude2']);
+  try {
+    const cases: Array<[string, () => void]> = [
+      ['over cap', () => sendToRoom(db, {
+        from: 'claude1', room: '#gate', body: 'a'.repeat(64 * 1024 + 1), advanceOwnRead: false,
+      })],
+      ['bad room name', () => sendToRoom(db, {
+        from: 'claude1', room: 'gate', body: 'x', advanceOwnRead: false,
+      })],
+      ['not a member', () => sendToRoom(db, {
+        from: 'nobody', room: '#gate', body: 'x', advanceOwnRead: false,
+      })],
+    ];
+
+    for (const [name, run] of cases) {
+      assert.throws(run, (e: unknown) => e instanceof RoomSendInputError, `${name} is an input error`);
+    }
+    assert.equal(cases.length, 3, 'the denominator: every throw path above the write');
+  } finally { db.close(); }
+});
+
+/**
+ * ⚠️ THE CONTROL FOR THE TEST ABOVE. Without it, making EVERY error a
+ * `RoomSendInputError` would pass — and that is the bug in the other direction.
+ */
+test('🚨 control — a broken database is NOT a RoomSendInputError', () => {
+  const db = room();
+  db.close();
+
+  assert.throws(
+    () => sendToRoom(db, { from: 'gate', room: '#gate', body: 'x', advanceOwnRead: false }),
+    (e: unknown) => e instanceof Error && !(e instanceof RoomSendInputError),
+  );
 });

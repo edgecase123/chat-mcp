@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { openDb, type Db } from '../../storage/db.js';
 import { NotifyBus, notifyPeer } from '../../notify/bus.js';
-import { NotARoomMemberError, sendToRoom } from '../../messaging/room-send.js';
+import { NotARoomMemberError, RoomSendInputError, sendToRoom } from '../../messaging/room-send.js';
 import { answerAndNotify } from '../../supervise/answer.js';
 import * as dao from '../../storage/dao.js';
 import { parseSearch, snippet } from '../../search/query.js';
@@ -481,7 +481,12 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
       if (e instanceof NotARoomMemberError) {
         return respondJson(res, { error: 'not a member of room' }, 403);
       }
-      return respondJson(res, { error: (e as Error).message }, 400);
+      // 🛑 ONLY caller mistakes become a 4xx. A failed write or a full disk
+      // must stay a 500, so anything else is rethrown to the catch-all.
+      if (e instanceof RoomSendInputError) {
+        return respondJson(res, { error: e.message }, 400);
+      }
+      throw e;
     }
     respondJson(res, { id: sent.id, sent_at: sent.sent_at });
   } else {

@@ -6,14 +6,34 @@ import { assertRoomName } from '../util/naming.js';
 
 export const MAX_BODY_BYTES = 64 * 1024;
 
-/** Thrown instead of a bare Error so callers can map it to their own shape. */
-export class NotARoomMemberError extends Error {
+/**
+ * 🛑 THE BASE CLASS IS THE POINT, not the subclasses. A caller must be able to
+ * map CALLER MISTAKES to a 4xx while letting a failed write or a full disk stay
+ * a 5xx. Catching `Error` answers 400 for both.
+ */
+export class RoomSendInputError extends Error {}
+
+export class NotARoomMemberError extends RoomSendInputError {
   constructor(
     readonly room: string,
     readonly handle: string,
   ) {
     super(`${handle} is not a member of ${room}`);
     this.name = 'NotARoomMemberError';
+  }
+}
+
+export class BodyTooLargeError extends RoomSendInputError {
+  constructor(readonly bytes: number) {
+    super(`Message body exceeds ${MAX_BODY_BYTES}-byte cap`);
+    this.name = 'BodyTooLargeError';
+  }
+}
+
+export class InvalidRoomNameError extends RoomSendInputError {
+  constructor(readonly room: string, cause: Error) {
+    super(cause.message);
+    this.name = 'InvalidRoomNameError';
   }
 }
 
@@ -47,10 +67,14 @@ export interface SendToRoomResult {
 export function sendToRoom(db: Db, input: SendToRoomInput): SendToRoomResult {
   const { from, room, body, kind, advanceOwnRead } = input;
 
-  assertRoomName(room);
-  if (Buffer.byteLength(body, 'utf8') > MAX_BODY_BYTES) {
-    throw new Error(`Message body exceeds ${MAX_BODY_BYTES}-byte cap`);
+  try {
+    assertRoomName(room);
+  } catch (e) {
+    throw new InvalidRoomNameError(room, e as Error);
   }
+
+  const bytes = Buffer.byteLength(body, 'utf8');
+  if (bytes > MAX_BODY_BYTES) throw new BodyTooLargeError(bytes);
   if (!dao.isRoomMember(db, room, from)) throw new NotARoomMemberError(room, from);
 
   const sent = dao.insertMessage(db, { from, to: room, body, kind });
