@@ -29,11 +29,31 @@ const MIN_POP = 120;
 /** WCAG 2.1 AA for body-sized text. The mark is body-sized. */
 const MIN_CONTRAST = 4.5;
 
-function markOn(selector: string) {
-  return {
-    pop: channelDistance(token(selector, 'mark-bg'), token(selector, 'bg')),
-    contrast: contrastRatio(token(selector, 'mark-bg'), token(selector, 'mark-fg')),
-  };
+/**
+ * 🛑 A MARK RENDERS ON TWO GROUNDS TODAY, NOT ONE. `--bg` is the page, and
+ * `.message__body code.inline` and `.message__body pre` both set
+ * `background: var(--bg-inset)` — so a hit inside a code span sits on neither
+ * the page nor the panel. Measuring only `--bg` would let a mark that vanishes
+ * on inset pass. Raised by claude1 on PR 120, who measured it and found the
+ * floor held; this asserts it instead of saying it.
+ *
+ * ⚠️ `--bg-elevated` IS NOT REACHABLE BY A MARK TODAY, and is covered anyway.
+ * Checked: it is set by `.topbar`, `.sidebar`, `.item-menu`, `.composer`,
+ * `.composer-suggest` and `.toast`, none of which contain a `.message__body`.
+ * It stays in the list as cheap insurance for the day a panel wraps messages,
+ * NOT because a hit lands there now.
+ */
+const GROUNDS = ['bg', 'bg-inset', 'bg-elevated'] as const;
+
+function popOnEveryGround(selector: string): { ground: string; pop: number }[] {
+  return GROUNDS.map((ground) => ({
+    ground,
+    pop: channelDistance(token(selector, 'mark-bg'), token(selector, ground)),
+  }));
+}
+
+function contrastOn(selector: string): number {
+  return contrastRatio(token(selector, 'mark-bg'), token(selector, 'mark-fg'));
 }
 
 test('🛑 the sweep found every theme block — the denominator, not just the result', () => {
@@ -46,17 +66,23 @@ test('🛑 the sweep found every theme block — the denominator, not just the r
   assert.ok(selectors.includes(':root'), `:root is missing from ${selectors.join(', ')}`);
 });
 
-test('🛑 the mark STANDS OUT from the page, in every theme', () => {
-  const quiet = themeSelectors()
-    .map((selector) => ({ selector, ...markOn(selector) }))
-    .filter(({ pop }) => pop < MIN_POP);
+test('🛑 the mark STANDS OUT from EVERY ground it can render on, in every theme', () => {
+  const quiet = themeSelectors().flatMap((selector) =>
+    popOnEveryGround(selector)
+      .filter(({ pop }) => pop < MIN_POP)
+      .map((r) => ({ selector, ...r })),
+  );
 
-  assert.deepEqual(quiet, [], `below the ${MIN_POP} pop floor: ${quiet.map((q) => `${q.selector} at ${q.pop}`).join(', ')}`);
+  assert.deepEqual(
+    quiet,
+    [],
+    `below the ${MIN_POP} pop floor: ${quiet.map((q) => `${q.selector} on --${q.ground} at ${q.pop}`).join(', ')}`,
+  );
 });
 
 test('🛑 the marked word stays READABLE, in every theme', () => {
   const unreadable = themeSelectors()
-    .map((selector) => ({ selector, ...markOn(selector) }))
+    .map((selector) => ({ selector, contrast: contrastOn(selector) }))
     .filter(({ contrast }) => contrast < MIN_CONTRAST);
 
   assert.deepEqual(

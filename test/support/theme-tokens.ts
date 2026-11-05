@@ -38,6 +38,13 @@ export function rgb(hex: string): [number, number, number] {
 }
 
 /**
+ * The denominator, asserted by every caller. `:root` plus one `data-theme`
+ * block is the minimum this stylesheet has ever had, so a regex that silently
+ * stops matching fails instead of reporting a clean sweep over nothing.
+ */
+export const MIN_THEMES = 2;
+
+/**
  * Every theme block in the stylesheet, DISCOVERED rather than listed.
  *
  * 🛑 A HAND-WRITTEN PAIR LETS A THIRD THEME SHIP INVISIBLE AND GREEN. The
@@ -48,15 +55,22 @@ export function rgb(hex: string): [number, number, number] {
  * `[data-theme="dark"] .theme-icon::before` is not mistaken for the block.
  */
 export function themeSelectors(): string[] {
-  return [...new Set([...CSS.matchAll(/^(:root|\[data-theme="[a-z-]+"\])\s*\{/gm)].map((m) => m[1]!))];
+  const found = [...new Set([...CSS.matchAll(/^(:root|\[data-theme="[a-z-]+"\])\s*\{/gm)].map((m) => m[1]!))];
+
+  // 🛑 THE DENOMINATOR LIVES HERE, NOT IN ONE TEST. Asserted in a dedicated
+  // test only, it was not inherited: breaking this regex left 5 of 6 floors
+  // GREEN, including both controls, because `.filter()` on `[]` then
+  // `deepEqual([], [])` passes. A control that cannot fail is not a control.
+  // Raised by claude1 on PR 120 — the same fix I talked them into for
+  // `appCssViews()` on leagues #2439.
+  assert.ok(
+    found.length >= MIN_THEMES,
+    `found ${found.length} theme blocks, expected at least ${MIN_THEMES}: ${found.join(', ') || '(none)'}`,
+  );
+
+  return found;
 }
 
-/**
- * The denominator, asserted by every caller. `:root` plus one `data-theme`
- * block is the minimum this stylesheet has ever had, so a regex that silently
- * stops matching fails instead of reporting a clean sweep over nothing.
- */
-export const MIN_THEMES = 2;
 
 /** The largest per-channel distance between two opaque colours. */
 export function channelDistance(a: string, b: string): number {
