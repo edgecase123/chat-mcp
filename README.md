@@ -59,6 +59,14 @@ Launches a foreground localhost HTTP server on **port 3737** (or a random free p
 - Message pane with native browser scroll, real-time updates via SSE, server-side markdown rendering (bold, italic, code, code blocks, links, tables)
 - Multi-line composer (Enter sends, Shift-Enter inserts newline — no terminal quirks to fight)
 - Light + dark themes with a header toggle, honors `prefers-color-scheme` on first visit
+- Filter the open conversation from the box in the pane header. **`Cmd-F` on
+  macOS, `Ctrl-F` elsewhere** focuses it and selects whatever is in it, so a
+  second press replaces the term. `Enter` walks the matches, `Shift-Enter`
+  walks back, `Escape` clears the box.
+- Every message id is a link. `#m12582` in the URL opens that message in the
+  conversation it belongs to and marks it briefly, so "see 12582" from an
+  agent is something a human can actually follow.
+- The pane header names who owns a room, next to the member count.
 
 Design principles: **no persistent daemon** (exits when the last browser tab closes + 60s idle timeout, or on Ctrl-C), **no shared ports** (binds `127.0.0.1` on an OS-assigned free port), **no cloud, no auth** (localhost-only). State lives in `~/.chat-mcp/` exactly like the terminal CLI. MCP shims are unaffected.
 
@@ -436,11 +444,25 @@ All tools are namespaced under `chat.` in the client:
 | `room_inbox` | `room?`, `limit?=50`, `since_id?` | Unread room messages, from one room or all. Per-member watermark. `since_id` fetches only what follows a known id, requires `room`, and marks nothing read. |
 | `room_members` | `room` | Handles that are current members (includes offline). |
 | `room_boot` | `room`, `handle` | Boot another peer from a room (caller must be a member; posts a system announcement). |
-| `room_delete` | `room` | Delete a room entirely (caller must be a member). |
+| `room_delete` | `room` | Delete a room entirely. Owner-only while the owner is still a member — see **Rooms**. |
 
 ### Rooms
 
 Rooms are named multi-peer channels prefixed with `#`. Membership is explicit (`room_join` / `room_leave`) and persistent across sessions. Only current members receive messages sent to a room. A new member's unread starts at the join, so `room_inbox` never shows anything older — but `search` reads the room's full history, which is deliberate. First joiner implicitly creates the room.
+
+**Deleting a room is owner-only, with one deliberate exception.** The first
+joiner owns it, and while they are still a member nobody else can delete it.
+If the owner leaves, any remaining member can — because `room_leave` does not
+transfer ownership, and an unconditional owner-only rule would leave that room
+undeletable by anyone.
+
+```
+owner is still a member   only the owner can delete
+owner has left            any member can
+```
+
+Deletion takes the room's entire message history with it and does not come
+back. Nothing inherits ownership and nothing is written on leave.
 
 When someone joins a room they aren't already in, the bus posts a system announcement (`<handle> joined <room>`, `from="system"`) visible to every other member on their next `room_inbox` and via a real-time notify event. The joiner's own watermark is anchored past the announcement, so they don't see the "you joined" line. Idempotent re-joins do not re-announce.
 
