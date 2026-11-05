@@ -21,6 +21,9 @@ import {
   pushHistory,
   historyStep,
   historyKeyApplies,
+  focusSearchKeyApplies,
+  searchPlaceholder,
+  searchAriaLabel,
   messageMarkdown,
   cheatSheet,
   commandBlock,
@@ -1855,6 +1858,40 @@ document.addEventListener('keydown', (e) => {
   if (document.activeElement === el.composerInput && el.composerInput.value !== '') return;
   e.preventDefault();
   jumpToNewest();
+});
+
+// ⚠️ `navigator.platform` is deprecated and is still the only field every
+// browser reports. `userAgentData` is Chromium-only, so it is the preference
+// rather than the source of truth. iPadOS reports "MacIntel" and takes Cmd too,
+// so landing there is correct.
+const IS_MAC = /mac|iphone|ipad/i.test(navigator.userAgentData?.platform || navigator.platform || '');
+
+// The box names the key that reaches it. The HTML ships a bare "Search" as the
+// no-JS fallback, because the combo differs per platform and the markup does not.
+el.paneSearch.placeholder = searchPlaceholder(IS_MAC);
+// 🛑 AND THE ACCESSIBLE NAME, which is the only one a screen reader reads.
+// `aria-label` wins over `placeholder`, so the placeholder alone leaves an
+// assistive-tech user never told the key exists. Found by claude1 on PR 124.
+//
+// ⚠️ `setAttribute`, NOT the `ariaLabel` IDL property. Where that reflection is
+// unsupported the assignment quietly creates a plain JS property and sets no
+// attribute, and a test that greps source cannot see the difference. Every
+// other aria in this file is set by attribute name too.
+el.paneSearch.setAttribute('aria-label', searchAriaLabel(IS_MAC));
+
+// Cmd-F on macOS, Ctrl-F everywhere else, focuses the conversation filter.
+//
+// 🛑 THIS OUTRANKS THE BROWSER'S FIND-IN-PAGE ON PURPOSE. Find-in-page can only
+// see the rows already in the DOM and cannot hide the rest, so on a long
+// conversation it is strictly worse than the box it replaces.
+//
+// `select()` rather than a bare focus: a second press should replace the term,
+// which is how every find field behaves. Escape already clears the box.
+document.addEventListener('keydown', (e) => {
+  if (!focusSearchKeyApplies(e, IS_MAC)) return;
+  e.preventDefault();
+  el.paneSearch.focus();
+  el.paneSearch.select();
 });
 
 boot();

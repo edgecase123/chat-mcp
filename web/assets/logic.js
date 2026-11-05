@@ -1281,3 +1281,69 @@ export function searchableText(text, hrefs = []) {
 
   return extra.length === 0 ? text : `${text}\n${extra.join('\n')}`;
 }
+
+/**
+ * Does this keystroke mean "focus the conversation filter"?
+ *
+ * 🛑 THE PLATFORM SPLIT IS LOAD-BEARING, NOT COSMETIC. On macOS `Ctrl-F` is a
+ * system text binding that moves the caret one character right, so claiming it
+ * would break the composer. `metaKey || ctrlKey` reads as tolerant and is the
+ * bug. Each platform gets exactly one modifier.
+ *
+ * Cmd-F and Ctrl-F are the BROWSER's find-in-page, which is an app shortcut the
+ * page outranks. The caller owes the `preventDefault()`.
+ *
+ * ⚠️ `shiftKey` and `altKey` are rejected rather than ignored. Cmd-Shift-F is
+ * unbound today, and swallowing it now would make a later binding look broken.
+ *
+ * @param {{ key: string, metaKey?: boolean, ctrlKey?: boolean, shiftKey?: boolean, altKey?: boolean }} e
+ * @param {boolean} isMac
+ */
+export function focusSearchKeyApplies(e, isMac) {
+  if (typeof e?.key !== 'string' || e.key.toLowerCase() !== 'f') return false;
+  if (e.shiftKey || e.altKey) return false;
+
+  return isMac
+    ? e.metaKey === true && e.ctrlKey !== true
+    : e.ctrlKey === true && e.metaKey !== true;
+}
+
+/**
+ * The filter box's placeholder, naming the shortcut that reaches it.
+ *
+ * 🛑 THE COMBO CANNOT LIVE IN THE HTML, because it differs per platform and the
+ * markup is served to both. The static attribute is the no-JS fallback and this
+ * overwrites it at boot.
+ *
+ * ⚠️ READS THE SAME `isMac` AS `focusSearchKeyApplies`. A second platform test
+ * here could disagree with the binding, and then the box would advertise a key
+ * that does nothing.
+ *
+ * @param {boolean} isMac
+ */
+export function searchPlaceholder(isMac) {
+  return `Search (${searchCombo(isMac)})`;
+}
+
+/** The combo both labels name, so they cannot disagree with each other. */
+function searchCombo(isMac) {
+  return isMac ? 'Cmd-F' : 'Ctrl-F';
+}
+
+/**
+ * The filter box's accessible name, which must ALSO name the shortcut.
+ *
+ * 🛑 THE PLACEHOLDER REACHES SIGHTED USERS ONLY. `aria-label` wins over
+ * `placeholder` in the accessible-name computation, so with the hint in the
+ * placeholder alone an assistive-tech user is never told the key exists.
+ * Measured in Chromium: the accessible name was the aria-label and
+ * `getByRole('searchbox', { name: 'Search (Cmd-F)' })` matched nothing.
+ *
+ * ⚠️ THE DESCRIPTION IS KEPT, NOT REPLACED. "Filter and highlight" is what the
+ * box does, and a name trimmed to "Search" would lose the highlighting half.
+ *
+ * @param {boolean} isMac
+ */
+export function searchAriaLabel(isMac) {
+  return `Filter and highlight messages in this conversation (${searchCombo(isMac)})`;
+}

@@ -21,6 +21,9 @@ import {
   pushHistory,
   historyStep,
   historyKeyApplies,
+  focusSearchKeyApplies,
+  searchPlaceholder,
+  searchAriaLabel,
   atTokenAt,
   cheatSheet,
   commandBlock,
@@ -583,6 +586,160 @@ test('a single-line value gives both keys to history', () => {
 test('an out-of-range caret does not throw', () => {
   assert.equal(historyKeyApplies('one', 999, -1), true);
   assert.equal(historyKeyApplies('', 0, 1), true);
+});
+
+// ── the shortcut that focuses the conversation filter ──────────────────
+
+/** A keydown event, as much of one as the predicate reads. */
+const key = (k: string, mods: Record<string, boolean> = {}) => ({ key: k, ...mods });
+
+test('🛑 macOS gets Cmd-F and must NOT get Ctrl-F', () => {
+  // Ctrl-F on macOS is a SYSTEM text binding: it moves the caret one character
+  // right. Claiming it would break the composer, and `metaKey || ctrlKey` does
+  // exactly that while looking tolerant.
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true }), true), true, 'Cmd-F');
+  assert.equal(focusSearchKeyApplies(key('f', { ctrlKey: true }), true), false, 'Ctrl-F is the caret');
+});
+
+test('Windows and Linux get Ctrl-F and must NOT get Cmd-F', () => {
+  // The Super/Windows key reaches the page as `metaKey` and is the OS menu.
+  assert.equal(focusSearchKeyApplies(key('f', { ctrlKey: true }), false), true, 'Ctrl-F');
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true }), false), false, 'Super-F is the OS');
+});
+
+test('an unmodified f is just a letter, on both platforms', () => {
+  assert.equal(focusSearchKeyApplies(key('f'), true), false);
+  assert.equal(focusSearchKeyApplies(key('f'), false), false);
+});
+
+test('Shift and Alt are rejected rather than ignored', () => {
+  // Cmd-Shift-F is unbound today. Swallowing it now would make a later binding
+  // look broken, with nothing in the handler to point at.
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, shiftKey: true }), true), false, 'Cmd-Shift-F');
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, altKey: true }), true), false, 'Cmd-Alt-F');
+  assert.equal(focusSearchKeyApplies(key('f', { ctrlKey: true, shiftKey: true }), false), false, 'Ctrl-Shift-F');
+});
+
+test('both modifiers at once is neither platform\'s combo', () => {
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, ctrlKey: true }), true), false);
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, ctrlKey: true }), false), false);
+});
+
+test('a capital F still applies, because Caps Lock reports it', () => {
+  assert.equal(focusSearchKeyApplies(key('F', { metaKey: true }), true), true);
+});
+
+test('another letter never applies, however it is modified', () => {
+  assert.equal(focusSearchKeyApplies(key('g', { metaKey: true }), true), false);
+  assert.equal(focusSearchKeyApplies(key('Enter', { ctrlKey: true }), false), false);
+});
+
+test('a malformed event does not throw', () => {
+  // @ts-expect-error — deliberately wrong shape; `undefined` arrives from a
+  // synthetic event in a test double before it does from a browser.
+  assert.equal(focusSearchKeyApplies(undefined, true), false);
+  // @ts-expect-error — same.
+  assert.equal(focusSearchKeyApplies({}, true), false);
+});
+
+// ── the two labels that advertise the shortcut ─────────────────────────
+
+/**
+ * 🛑 BOTH LABELS ARE SWEPT, NOT JUST THE PLACEHOLDER. `aria-label` wins over
+ * `placeholder` in the accessible-name computation, so a hint in the
+ * placeholder alone reaches sighted users only. Found by claude1 on PR 124 and
+ * measured in Chromium: the accessible name was the aria-label, and
+ * `getByRole('searchbox', { name: 'Search (Cmd-F)' })` matched nothing.
+ */
+const SHORTCUT_LABELS: Array<[string, (isMac: boolean) => string]> = [
+  ['placeholder', searchPlaceholder],
+  ['aria-label', searchAriaLabel],
+];
+
+/**
+ * How many (label, platform) pairs the sweep below MUST reach.
+ *
+ * 🛑 A LITERAL, NOT `SHORTCUT_LABELS.length * 2`. Derived from the list it is
+ * meant to police, the check reads `0 === 0` on an empty list and passes. That
+ * is not hypothetical: the first version of this file did exactly that, and
+ * emptying `SHORTCUT_LABELS` killed none of 199 tests.
+ */
+const SHORTCUT_LABEL_PAIRS = 4;
+
+test('🛑 the sweep covers BOTH labels by name — the denominator', () => {
+  // Adding a third label must fail here first, so nobody can add one that the
+  // drift test below silently never reaches.
+  assert.deepEqual(
+    SHORTCUT_LABELS.map(([name]) => name),
+    ['placeholder', 'aria-label'],
+  );
+  assert.equal(SHORTCUT_LABELS.length * 2, SHORTCUT_LABEL_PAIRS);
+});
+
+test('each platform is offered its own combo, in both labels', () => {
+  assert.equal(searchPlaceholder(true), 'Search (Cmd-F)');
+  assert.equal(searchPlaceholder(false), 'Search (Ctrl-F)');
+  assert.match(searchAriaLabel(true), /\(Cmd-F\)$/);
+  assert.match(searchAriaLabel(false), /\(Ctrl-F\)$/);
+});
+
+test('🛑 the accessible name KEEPS the description, it does not replace it', () => {
+  // Trimmed to "Search (Cmd-F)" the name would lose the highlighting half of
+  // what the box does, and the name is all a screen reader gets.
+  assert.match(searchAriaLabel(true), /filter and highlight/i);
+});
+
+/** The modifier and letter a label advertises, parsed back out of it. */
+function advertised(label: string, text: string) {
+  const m = text.match(/\((Cmd|Ctrl)-([A-Za-z])\)/);
+
+  assert.notEqual(m, null, `the ${label} names no combo: ${text}`);
+
+  return { modifier: m![1], key: m![2] };
+}
+
+test('🛑 EVERY COMBO EITHER LABEL ADVERTISES IS ONE THE BINDING ACCEPTS', () => {
+  // A string test on the copy would pass while a label advertised a key that
+  // does nothing. This feeds each advertised combo back to the predicate.
+  let checked = 0;
+
+  for (const [label, fn] of SHORTCUT_LABELS) {
+    for (const isMac of [true, false]) {
+      const { modifier, key } = advertised(label, fn(isMac));
+      const e = { key, metaKey: modifier === 'Cmd', ctrlKey: modifier === 'Ctrl' };
+
+      assert.equal(focusSearchKeyApplies(e, isMac), true, `${label}: ${modifier}-${key} on isMac=${isMac}`);
+      checked += 1;
+    }
+  }
+
+  assert.equal(checked, SHORTCUT_LABEL_PAIRS, `only ${checked} of ${SHORTCUT_LABEL_PAIRS} combos were checked`);
+});
+
+test('🛑 NO LABEL ADVERTISES THE OTHER PLATFORM\'S COMBO', () => {
+  // The negative half. Without it the test above passes for a predicate that
+  // accepts everything, which is the exact `metaKey || ctrlKey` bug.
+  let checked = 0;
+
+  for (const [label, fn] of SHORTCUT_LABELS) {
+    const mac = advertised(label, fn(true));
+    const other = advertised(label, fn(false));
+
+    assert.notEqual(mac.modifier, other.modifier, `${label}: both platforms name the same modifier`);
+    assert.equal(
+      focusSearchKeyApplies({ key: other.key, ctrlKey: true }, true),
+      false,
+      `${label}: macOS advertises Cmd and the predicate also takes Ctrl`,
+    );
+    assert.equal(
+      focusSearchKeyApplies({ key: mac.key, metaKey: true }, false),
+      false,
+      `${label}: Windows advertises Ctrl and the predicate also takes Super`,
+    );
+    checked += 2;
+  }
+
+  assert.equal(checked, SHORTCUT_LABEL_PAIRS, `only ${checked} of ${SHORTCUT_LABEL_PAIRS} combos were checked`);
 });
 
 // ── the per-message copy button ─────────────────────────────────────────
