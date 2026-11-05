@@ -12,6 +12,8 @@ import {
   enterShouldSend,
   isPinnedToBottom,
   jumpLabel,
+  messageHash,
+  messageIdFromHash,
   menuEntriesFor,
   mentionSuggestionsFor,
   mentionTokenAt,
@@ -1385,4 +1387,48 @@ test('adjacent matches do not nest or overlap', () => {
     { text: 'aa', hit: true },
     { text: 'aa', hit: true },
   ]);
+});
+
+/**
+ * 🛑 LINKING TO A MESSAGE (#104). The fragment and the server's `around_id`
+ * have to agree about what an id is, or a link opens the wrong message.
+ */
+
+test('a message hash carries the id alone, not the conversation', () => {
+  assert.equal(messageHash(12582), '#m12582');
+});
+
+test('🛑 a hash round-trips through its own parser', () => {
+  for (const id of [1, 42, 12582, 9007199254740991]) {
+    assert.equal(messageIdFromHash(messageHash(id)), id, `id ${id}`);
+  }
+});
+
+test('🛑 a loose or truncated fragment resolves to NOTHING, never to a number', () => {
+  // `parseInt` would give 12 for the first and NaN for the second, so a
+  // hand-edited link would open the wrong message or send NaN to the server.
+  assert.equal(messageIdFromHash('#m12x'), null);
+  assert.equal(messageIdFromHash('#m'), null);
+  assert.equal(messageIdFromHash('#m-3'), null);
+  assert.equal(messageIdFromHash('#m0'), null, 'ids start at 1');
+  assert.equal(messageIdFromHash('#m1.5'), null);
+  assert.equal(messageIdFromHash('#m 12'), null);
+  assert.equal(messageIdFromHash('#message12'), null);
+  assert.equal(messageIdFromHash('#12582'), null, 'the m prefix is required');
+});
+
+test('an absent or empty hash is nothing, not a crash', () => {
+  assert.equal(messageIdFromHash(''), null);
+  assert.equal(messageIdFromHash('#'), null);
+  assert.equal(messageIdFromHash(undefined), null);
+  assert.equal(messageIdFromHash(null), null);
+});
+
+test('the leading # is optional, because `location.hash` includes it', () => {
+  assert.equal(messageIdFromHash('m99'), 99);
+  assert.equal(messageIdFromHash('#m99'), 99);
+});
+
+test('⚠️ an id past MAX_SAFE_INTEGER is nothing, not a rounded id', () => {
+  assert.equal(messageIdFromHash('#m9007199254740993'), null);
 });

@@ -1074,6 +1074,40 @@ export function messageIdLabel(id) {
 }
 
 /**
+ * The fragment that links to one message (#104).
+ *
+ * 🛑 THE ID ALONE, NOT THE CONVERSATION TOO. Ids are globally unique and the
+ * server resolves the target, so a link cannot name a conversation that
+ * disagrees with the message in it.
+ *
+ * @param {number} id
+ */
+export function messageHash(id) {
+  return `#m${id}`;
+}
+
+/**
+ * The id a fragment points at, or null if it points at nothing.
+ *
+ * ⚠️ REFUSES WHAT `parseInt` WOULD TAKE. `#m12x` and `#m` would otherwise
+ * become 12 and NaN, so a hand-edited or truncated link would either open the
+ * wrong message or send NaN to the server. Mirrors `parseAroundId` on the
+ * server deliberately — the two have to agree about what an id is.
+ *
+ * @param {string} hash  `location.hash`, with or without the leading #
+ * @returns {number|null}
+ */
+export function messageIdFromHash(hash) {
+  const m = /^#?m([0-9]+)$/.exec(hash ?? '');
+
+  if (m === null) return null;
+
+  const id = Number(m[1]);
+
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/**
  * Every place a search term appears in a string (#102).
  *
  * 🛑 RANGES, NOT A REPLACED STRING. Returning marked-up text would mean
