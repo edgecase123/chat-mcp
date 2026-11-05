@@ -1074,6 +1074,84 @@ export function messageIdLabel(id) {
 }
 
 /**
+ * The next match to focus when the reader presses Enter in the filter.
+ *
+ * 🛑 WRAPS, AND THE FIRST PRESS GOES TO THE FIRST MATCH. Starting at -1 means
+ * `current + 1` is 0, so no special case is needed for "nothing focused yet".
+ *
+ * ⚠️ RETURNS -1 WHEN THERE IS NOTHING TO FOCUS, rather than 0. A caller that
+ * got 0 for an empty list would reveal a row that does not exist.
+ *
+ * @param {number} current  the focused index, or -1 for none
+ * @param {number} total    how many matches there are
+ * @param {1|-1} delta      forward on Enter, back on Shift-Enter
+ */
+export function nextMatchIndex(current, total, delta = 1) {
+  if (!Number.isFinite(total) || total <= 0) return -1;
+
+  const from = Number.isFinite(current) ? current : -1;
+
+  // 🛑 "NOTHING FOCUSED" IS NOT INDEX -1 FOR BOTH DIRECTIONS. Forward from
+  // nothing is the first match; BACK from nothing is the LAST, the way
+  // find-in-page behaves. Modular arithmetic alone gave index 1 of 3 here,
+  // which a test caught.
+  if (from < 0) return delta > 0 ? 0 : total - 1;
+
+  // `+ total` because -1 % n is -1 in JS, which would index off the front.
+  return (((from + delta) % total) + total) % total;
+}
+
+/**
+ * What the filter box reports about the focused match.
+ *
+ * 🛑 BOTH NUMBERS, ALWAYS. "3" alone does not say whether more follow, which
+ * is the whole question a reader pressing Enter is asking.
+ *
+ * @param {number} index  the focused index, or -1
+ * @param {number} total
+ */
+export function matchPositionLabel(index, total) {
+  if (total <= 0) return '';
+  if (index < 0) return `${total} match${total === 1 ? '' : 'es'}`;
+
+  return `${index + 1} of ${total}`;
+}
+
+/**
+ * The fragment that links to one message (#104).
+ *
+ * 🛑 THE ID ALONE, NOT THE CONVERSATION TOO. Ids are globally unique and the
+ * server resolves the target, so a link cannot name a conversation that
+ * disagrees with the message in it.
+ *
+ * @param {number} id
+ */
+export function messageHash(id) {
+  return `#m${id}`;
+}
+
+/**
+ * The id a fragment points at, or null if it points at nothing.
+ *
+ * ⚠️ REFUSES WHAT `parseInt` WOULD TAKE. `#m12x` and `#m` would otherwise
+ * become 12 and NaN, so a hand-edited or truncated link would either open the
+ * wrong message or send NaN to the server. Mirrors `parseAroundId` on the
+ * server deliberately — the two have to agree about what an id is.
+ *
+ * @param {string} hash  `location.hash`, with or without the leading #
+ * @returns {number|null}
+ */
+export function messageIdFromHash(hash) {
+  const m = /^#?m([0-9]+)$/.exec(hash ?? '');
+
+  if (m === null) return null;
+
+  const id = Number(m[1]);
+
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+/**
  * Every place a search term appears in a string (#102).
  *
  * 🛑 RANGES, NOT A REPLACED STRING. Returning marked-up text would mean

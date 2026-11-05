@@ -23,6 +23,13 @@ import {
   resolveHintQuery,
 } from './file-hints.js';
 import { packageVersion } from '../../util/version.js';
+import {
+  aroundWindow,
+  parseAroundId,
+  parseMessageLimit,
+  readerIsPartyToDm,
+  targetForMessage,
+} from '../../search/around.js';
 
 const VERSION = packageVersion();
 
@@ -292,6 +299,8 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   }
 
   if (path === '/api/whoami') return handleWhoami(res, ctx);
+  if (path === '/api/messages' && req.method === 'GET' && url.searchParams.has('around_id'))
+    return handleMessagesAround(url, res, ctx);
   if (path === '/api/messages' && req.method === 'GET') return handleGetMessages(url, res, ctx);
   if (path === '/api/messages' && req.method === 'POST') return handlePostMessage(req, res, ctx);
   if (path === '/api/rooms/join' && req.method === 'POST') return handleRoomJoin(req, res, ctx);
@@ -361,9 +370,70 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
   });
 }
 
+/**
+ * A window centred on one message, so a link to an id can be opened (#104).
+ *
+ * 🛑 THIS MUST NOT BE A SOFTER DOOR THAN `target=` ON THE SAME ROUTE.
+ * `handleGetMessages` refuses a room the caller is not a member of, so the
+ * same check runs here — and a DM requires the caller to be a party to it.
+ * `/api/search` is deliberately unscoped because it is lee's own UI behind the
+ * rebinding guard, but THIS route already chose the stricter rule and an
+ * id-based lookup that relaxed it would be a bypass, not a precedent.
+ *
+ * ⚠️ 404 FOR BOTH "no such id" AND "not yours", deliberately. Distinguishing
+ * them would turn the endpoint into an oracle for which ids exist in
+ * conversations the reader cannot see.
+ */
+function handleMessagesAround(url: URL, res: ServerResponse, ctx: RouteContext): void {
+  const parsed = parseAroundId(url.searchParams.get('around_id'));
+
+  if (!parsed.ok) return respondJson(res, { error: parsed.reason }, 400);
+
+  const lim = parseMessageLimit(url.searchParams.get('limit'));
+
+  if (!lim.ok) return respondJson(res, { error: lim.reason }, 400);
+
+  const limit = lim.limit;
+  const row = ctx.db
+    .prepare('SELECT from_handle, to_handle FROM messages WHERE id = ?')
+    .get(parsed.id) as { from_handle: string; to_handle: string } | undefined;
+
+  if (row === undefined) return respondJson(res, { error: 'no such message' }, 404);
+
+  const target = targetForMessage(row, ctx.handle);
+  const isRoom = target.startsWith('#');
+
+  if (isRoom && !dao.isRoomMember(ctx.db, target, ctx.handle)) {
+    return respondJson(res, { error: 'no such message' }, 404);
+  }
+  if (!isRoom && !readerIsPartyToDm(row, ctx.handle)) {
+    return respondJson(res, { error: 'no such message' }, 404);
+  }
+
+  const { before, after } = aroundWindow(limit);
+  const older = isRoom
+    ? recentRoomMessages(ctx.db, target, before + 1, parsed.id + 1)
+    : recentDmMessages(ctx.db, ctx.handle, target, before + 1, parsed.id + 1);
+  const newer = isRoom
+    ? roomMessagesAfter(ctx.db, target, parsed.id, after)
+    : dmMessagesAfter(ctx.db, ctx.handle, target, parsed.id, after);
+
+  respondJson(res, {
+    target,
+    anchor_id: parsed.id,
+    messages: [...older, ...newer].map(hydrateForClient),
+  });
+}
+
 function handleGetMessages(url: URL, res: ServerResponse, ctx: RouteContext): void {
   const target = url.searchParams.get('target');
-  const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit') ?? '100', 10)));
+  // 🛑 VALIDATED, NOT CLAMPED. `?limit=abc` used to reach `LIMIT NaN` and 500
+  // with the raw SQL message in the body. See `parseMessageLimit`.
+  const lim = parseMessageLimit(url.searchParams.get('limit'));
+
+  if (!lim.ok) return respondJson(res, { error: lim.reason }, 400);
+
+  const limit = lim.limit;
   const beforeIdRaw = url.searchParams.get('before_id');
   const beforeId = beforeIdRaw ? parseInt(beforeIdRaw, 10) : undefined;
   if (!target) return respondJson(res, { error: 'target required' }, 400);
@@ -758,6 +828,39 @@ function recentRoomMessages(db: Db, room: string, limit: number, beforeId?: numb
     .prepare(`SELECT id, from_handle, to_handle, body, sent_at, delivered_at, read_at, kind FROM messages WHERE ${where} ORDER BY id DESC LIMIT ?`)
     .all(...args) as unknown as MessageRow[];
   return rows.reverse().map(toMessage);
+}
+
+/**
+ * The rows immediately AFTER an id, ascending.
+ *
+ * ⚠️ `recentRoomMessages` walks BACKWARDS from the newest, so it cannot reach
+ * forwards from an anchor without fetching the whole tail. These two are the
+ * forward half of the window and nothing else uses them yet.
+ */
+function roomMessagesAfter(db: Db, room: string, afterId: number, limit: number): dao.Message[] {
+  if (limit <= 0) return [];
+  const rows = db
+    .prepare(
+      `SELECT id, from_handle, to_handle, body, sent_at, delivered_at, read_at, kind
+       FROM messages WHERE to_handle = ? AND id > ? ORDER BY id ASC LIMIT ?`,
+    )
+    .all(room, afterId, limit) as unknown as MessageRow[];
+
+  return rows.map(toMessage);
+}
+
+function dmMessagesAfter(db: Db, me: string, peer: string, afterId: number, limit: number): dao.Message[] {
+  if (limit <= 0) return [];
+  const rows = db
+    .prepare(
+      `SELECT id, from_handle, to_handle, body, sent_at, delivered_at, read_at, kind
+       FROM messages
+       WHERE ((from_handle = ? AND to_handle = ?) OR (from_handle = ? AND to_handle = ?))
+         AND id > ? ORDER BY id ASC LIMIT ?`,
+    )
+    .all(me, peer, peer, me, afterId, limit) as unknown as MessageRow[];
+
+  return rows.map(toMessage);
 }
 
 function recentDmMessages(db: Db, me: string, peer: string, limit: number, beforeId?: number): dao.Message[] {

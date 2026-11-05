@@ -525,13 +525,27 @@ html, body {
 
 /* #104 — quieter than the time, because it is reference data rather than
    something read on every line. Selectable so it can be pasted to a peer. */
+/* #104 — which row the reader was sent to. 🛑 A BACKGROUND, NOT A BORDER: the
+   rows are separated by 1px borders already, and a second one on an arriving
+   row shifts every line below it. app.js strips the class on a timer; the
+   duration lives there because only JS can time it. */
+.message.is-linked {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 4px;
+}
 .message__id {
   color: var(--fg-faint);
   font-family: var(--font-mono);
   font-size: 11px;
   opacity: 0.75;
+  text-decoration: none;
   user-select: text;
+}.message__id:hover {
+  color: var(--accent);
+  opacity: 1;
+  text-decoration: underline;
 }
+
 .message__kind {
   font-size: 10px;
   font-weight: 700;

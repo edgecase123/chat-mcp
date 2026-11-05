@@ -34,10 +34,14 @@ import {
   gaugeDisplay,
   claimRow,
   claimsPanelEmpty,
+  matchPositionLabel,
+  messageHash,
+  messageIdFromHash,
   messageIdLabel,
   highlightSegments,
   jumpUrgency,
   messageMatchesSearch,
+  nextMatchIndex,
   nextUnreadSince,
   searchableText,
   searchFilterEmpty,
@@ -69,6 +73,8 @@ const state = {
   searchTerm: '',
   unreadBelow: 0,   // messages that arrived while the reader was scrolled up
   unreadSince: null, // when the OLDEST of them arrived (#121), ms, or null
+  linkedId: null,    // the message a link sent us to (#104), marked until it expires
+  matchIndex: -1,    // which filter match Enter has walked to, -1 for none
   suggest: null,     // { items, index, kind, token } while the composer popover is open
   history: { entries: [], index: null, draft: null },
   // 🛑 NOT in `messages`. refresh() reassigns that wholesale on every wake,
@@ -631,20 +637,27 @@ function messageNode(m, { fresh: arriving = false, term = '' } = {}) {
   // still read as a flash.
   const fresh = arriving && !isSelf;
   const kind = m.kind || 'chat';
-  const cls = ['message', isSelf ? 'is-self' : '', kind === 'dispatch' ? 'is-dispatch' : '', kind === 'alert' ? 'is-alert' : '', fresh ? 'is-fresh' : '']
+  const cls = ['message', isSelf ? 'is-self' : '', kind === 'dispatch' ? 'is-dispatch' : '', kind === 'alert' ? 'is-alert' : '', fresh ? 'is-fresh' : '', m.id === state.linkedId ? 'is-linked' : '']
     .filter(Boolean).join(' ');
   const meta = h('div', { className: 'message__meta' }, [
     h('span', { className: 'message__from' }, [m.from_handle]),
     h('span', { className: 'message__time' }, [fmtTime(m.sent_at)]),
     // #104 — the id was unreachable from the UI, so "see 12582" meant nothing
     // to the human reading it.
-    h('span', { className: 'message__id' }, [messageIdLabel(m.id)]),
+    // #104 — the id is the LINK, so the affordance is where the number is.
+    // `href` rather than a click handler: middle-click, copy-link and the
+    // browser's own history all come free, and the fragment survives a reload.
+    h('a', { className: 'message__id', href: messageHash(m.id), title: 'Link to this message' }, [
+      messageIdLabel(m.id),
+    ]),
     kind !== 'chat' ? h('span', { className: 'message__kind' }, [kind.toUpperCase()]) : null,
     copyButton(m),
   ]);
   const body = h('div', { className: 'message__body', html: m.body_html || '' });
   if (term.length > 0) highlightInPlace(body, term);
-  const li = h('li', { className: cls }, [meta, body]);
+  // #104 — a stable hook for reaching one row by id. The rendered label is
+  // prose and the `.message__id` href is a fragment, so neither is a selector.
+  const li = h('li', { className: cls, 'data-message-id': m.id }, [meta, body]);
 
   // 🛑 DROP THE CLASS ONCE IT HAS PLAYED. Left on, the next reflow replays the
   // shimmer on an old message, and `prefers-reduced-motion` fires no
@@ -659,6 +672,92 @@ function messageNode(m, { fresh: arriving = false, term = '' } = {}) {
   }
 
   return li;
+}
+
+/**
+ * Scroll one message into view and mark it briefly (#104).
+ *
+ * 🛑 THE MARK IS A CLASS ON A TIMER, NOT A SCROLL SIDE EFFECT. A reader who
+ * follows a link to a busy room needs to know WHICH row they were sent to, and
+ * `scrollIntoView` alone leaves them guessing at a screen of similar rows.
+ *
+ * ⚠️ RETURNS FALSE WHEN THE ROW IS NOT RENDERED, rather than throwing. The
+ * window around an anchor is bounded, so a caller can ask for an id that is
+ * not on screen and has to be able to tell.
+ *
+ * @param {number} id
+ * @returns {boolean} whether the row was found
+ */
+function revealMessage(id) {
+  const row = el.messages.querySelector(`li.message[data-message-id="${id}"]`);
+
+  if (row === null) return false;
+
+  row.scrollIntoView({ block: 'center', behavior: 'instant' });
+
+  // 🛑 THE MARK LIVES IN STATE, NOT ONLY ON THE NODE. `messageNode` builds a
+  // fresh li on every full render, so a class set only on the node is dropped
+  // by the next rebuild — and a wake can rebuild inside the mark's 2.2s.
+  // ⚠️ The earlier version of this comment cited a measurement that was
+  // invalid: the "cold load" it described was a hash-only navigation, which
+  // does not reload the document. The reason above holds by construction.
+  // 🛑 EXACTLY ONE ROW IS EVER MARKED. Walking the filter with Enter re-arms
+  // the timer each press, so without this the PREVIOUS row keeps its class and
+  // the reader sees three "current" matches instead of one. Measured: three
+  // presses left markedCount at 3.
+  for (const other of el.messages.querySelectorAll('li.is-linked')) {
+    other.classList.remove('is-linked');
+  }
+
+  state.linkedId = id;
+  void row.offsetWidth;
+  row.classList.add('is-linked');
+
+  clearTimeout(linkedTimer);
+  linkedTimer = setTimeout(() => {
+    state.linkedId = null;
+    for (const n of el.messages.querySelectorAll('li.is-linked')) n.classList.remove('is-linked');
+  }, LINKED_MARK_MS);
+
+  return true;
+}
+
+/** One timer, re-armed, so following two links does not leave the first running. */
+let linkedTimer = null;
+
+/** How long a linked row stays marked. One home, read by the stylesheet too. */
+const LINKED_MARK_MS = 2200;
+
+/**
+ * Open whatever `location.hash` points at (#104).
+ *
+ * 🛑 THE SERVER RESOLVES THE CONVERSATION, so the fragment is the id alone and
+ * cannot name a target that disagrees with the message.
+ *
+ * ⚠️ A 404 IS LEFT ALONE, DELIBERATELY. The id may be real and in a room this
+ * reader is not in, and the endpoint answers the same way for both — so
+ * clearing the hash or guessing a target would be inventing information.
+ */
+async function openHashTarget() {
+  const id = messageIdFromHash(location.hash);
+
+  if (id === null) return;
+
+  let payload;
+  try {
+    const res = await fetch(`/api/messages?around_id=${id}&limit=200`);
+    if (!res.ok) return;
+    payload = await res.json();
+  } catch {
+    return;
+  }
+
+  if (payload.target !== state.currentTarget) await selectTarget(payload.target);
+  // The window around the anchor replaces what the stream holds, because the
+  // anchor can be far older than the tail `fetchMessages` would have loaded.
+  state.messages = payload.messages;
+  renderMessages({ forceBottom: false });
+  revealMessage(payload.anchor_id);
 }
 
 /** Ephemeral panels sit after the messages, so growing the list means lifting
@@ -1356,6 +1455,10 @@ async function tryDispatchSlashCommand(input) {
 // #102 — filter and highlight the open conversation as the term is typed.
 el.paneSearch.addEventListener('input', () => {
   state.searchTerm = el.paneSearch.value;
+  // 🛑 A NEW TERM INVALIDATES THE WALK. "3 of 12" against a different term is
+  // a position in a list that no longer exists, and the next Enter would jump
+  // somewhere the reader never chose.
+  state.matchIndex = -1;
   // 🛑 NOT forceBottom. Filtering while scrolled up must not yank the reader
   // to the newest hit; the jump affordance already offers that.
   renderMessages();
@@ -1368,7 +1471,34 @@ el.paneSearch.addEventListener('keydown', (e) => {
   e.preventDefault();
   el.paneSearch.value = '';
   state.searchTerm = '';
+  state.matchIndex = -1;
   renderMessages();
+});
+
+/**
+ * Enter walks the filter's matches, Shift-Enter walks back.
+ *
+ * 🛑 FOCUS STAYS IN THE INPUT. Moving DOM focus to the row would take it off
+ * the box, and the reader's NEXT Enter would go nowhere — the same trap as a
+ * find-in-page field. The mark is the position indicator instead.
+ *
+ * ⚠️ WALKS `state.renderedIds`, which is what the filter actually produced,
+ * not a recount of the term. A second matcher here could disagree with the one
+ * that built the list, and then the count and the rows would differ.
+ */
+el.paneSearch.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+
+  const ids = state.renderedIds;
+
+  if (state.searchTerm.trim() === '' || ids.length === 0) return;
+
+  state.matchIndex = nextMatchIndex(state.matchIndex, ids.length, e.shiftKey ? -1 : 1);
+  const id = ids[state.matchIndex];
+
+  if (id !== undefined) revealMessage(id);
+  el.paneSearch.title = matchPositionLabel(state.matchIndex, ids.length);
 });
 
 el.composerInput.addEventListener('input', () => {
@@ -1592,6 +1722,12 @@ async function boot() {
   renderMessages({ forceBottom: true });
   wireFileDrop();
   connectSse();
+
+  // 🛑 AFTER THE FIRST RENDER, NOT BEFORE. A pasted link has to find a built
+  // sidebar and a resolved handle, and the docblock above is explicit that
+  // boot does not call refresh() — so a new view listed only there is
+  // invisible on a cold open, which is exactly what a link IS.
+  await openHashTarget();
 }
 
 // Scrolling back down by hand is the same intent as pressing the jump.
@@ -1603,6 +1739,10 @@ el.messages.addEventListener('scroll', () => {
 });
 
 el.jumpNewest.addEventListener('click', jumpToNewest);
+
+// #104 — the fragment is the route. `hashchange` covers clicking an id link in
+// the open conversation; the load call covers a pasted link and a reload.
+window.addEventListener('hashchange', () => { void openHashTarget(); });
 
 // #92 — the custom-style editor.
 function openStyleEditor(room, markdown) {
