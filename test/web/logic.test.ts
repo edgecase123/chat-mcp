@@ -24,6 +24,7 @@ import {
   focusSearchKeyApplies,
   searchPlaceholder,
   searchAriaLabel,
+  roomMetaLabel,
   atTokenAt,
   cheatSheet,
   commandBlock,
@@ -1588,4 +1589,26 @@ test('the leading # is optional, because `location.hash` includes it', () => {
 
 test('⚠️ an id past MAX_SAFE_INTEGER is nothing, not a rounded id', () => {
   assert.equal(messageIdFromHash('#m9007199254740993'), null);
+});
+
+// ── the room meta line names the owner (#89) ────────────────────────────
+
+test('the room line carries the member count AND the owner', () => {
+  assert.equal(roomMetaLabel({ member_count: 4, created_by: 'claude1' }), '4 members · owned by claude1');
+});
+
+test('a room with no owner field degrades to the count alone', () => {
+  // The field is NOT NULL server-side, so this is the shape an older cached
+  // payload has, not a state the database can produce.
+  assert.equal(roomMetaLabel({ member_count: 2 }), '2 members');
+});
+
+test('an unknown member count keeps the question mark rather than printing undefined', () => {
+  assert.equal(roomMetaLabel({ created_by: 'lee' }), '? members · owned by lee');
+});
+
+test('no room at all is an empty line, never the word undefined', () => {
+  // renderPaneHeader passes the result of `.find()`, which misses.
+  assert.equal(roomMetaLabel(undefined), '');
+  assert.equal(roomMetaLabel(null), '');
 });

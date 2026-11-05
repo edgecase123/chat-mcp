@@ -15,12 +15,19 @@ export async function runDeleteRoom(opts: DeleteRoomOpts): Promise<void> {
 
   const db = openDb();
   try {
-    if (!dao.isRoomMember(db, opts.room, caller)) {
+    const result = dao.deleteRoom(db, opts.room, caller);
+
+    if (!result.ok && result.reason === 'not-a-member') {
       throw new Error(
         `Cannot delete ${opts.room}: ${caller} is not a member. Join first, or ask a current member to delete.`,
       );
     }
-    const deleted = dao.deleteRoom(db, opts.room);
+    if (!result.ok && result.reason === 'owner-only') {
+      throw new Error(
+        `Cannot delete ${opts.room}: only ${result.owner} created it and is still a member.`,
+      );
+    }
+    const deleted = result.ok;
     if (opts.json) {
       process.stdout.write(`${JSON.stringify({ room: opts.room, deleted })}\n`);
     } else {

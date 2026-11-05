@@ -251,11 +251,16 @@ export async function runCli(opts: CliOptions): Promise<void> {
       console.log(dim(`  ${(e as Error).message}`));
       return;
     }
-    if (!dao.isRoomMember(db, roomArg, opts.handle)) {
+    const result = dao.deleteRoom(db, roomArg, opts.handle);
+    if (!result.ok && result.reason === 'not-a-member') {
       console.log(dim(`  cannot delete ${roomArg}: you are not a member`));
       return;
     }
-    const deleted = dao.deleteRoom(db, roomArg);
+    if (!result.ok && result.reason === 'owner-only') {
+      console.log(dim(`  cannot delete ${roomArg}: only ${result.owner} can, while they are a member`));
+      return;
+    }
+    const deleted = result.ok;
     if (deleted) {
       if (mode.kind === 'room' && mode.roomName === roomArg) {
         mode = { kind: 'top' };

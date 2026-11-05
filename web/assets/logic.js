@@ -1347,3 +1347,26 @@ function searchCombo(isMac) {
 export function searchAriaLabel(isMac) {
   return `Filter and highlight messages in this conversation (${searchCombo(isMac)})`;
 }
+
+/**
+ * The room line under the pane title: member count, then who owns it (#89).
+ *
+ * 🛑 `created_by` WAS WRITE-ONLY. The column has existed since rooms were
+ * added and nothing read it, so no surface could say who owns a room. It
+ * already reaches the client in `/api/whoami`, so this consumes a field rather
+ * than adding one.
+ *
+ * ⚠️ THE OWNER MAY HAVE LEFT, and this does not say so. The label states who
+ * created the room, which is what the column means; whether they are still
+ * present is what `roomDeleteVerdict` decides, server-side, and duplicating
+ * that judgement here would be free to drift from it.
+ *
+ * @param {{ member_count?: number, created_by?: string } | undefined} room
+ */
+export function roomMetaLabel(room) {
+  if (room === undefined || room === null) return '';
+
+  const members = `${room.member_count ?? '?'} members`;
+
+  return room.created_by ? `${members} · owned by ${room.created_by}` : members;
+}

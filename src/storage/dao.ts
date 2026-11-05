@@ -505,16 +505,77 @@ export function leaveRoom(db: Db, room: string, handle: string): boolean {
 }
 
 /**
- * Delete a room entirely. `rooms → room_members` cascades on FK; `room_reads`
- * and `messages` (to_handle = room name) are cleaned up here since neither
- * has an FK back to `rooms`. Idempotent — no error on unknown room.
- * Authorization is a caller-layer concern (shim tool checks membership).
+ * Who may delete a room (#89).
+ *
+ * 🛑 THE FALLBACK IS THE RULE, NOT A CONVENIENCE. `leaveRoom` never touches
+ * `rooms.created_by`, so a creator can walk out of their own room and leave it
+ * owned by a non-member. An unconditional owner-only check would make that
+ * room undeletable by anybody, which is worse than the member-only rule it
+ * replaced. So ownership has teeth only while the owner is present, and a
+ * departed owner lands the caller on exactly the old check.
+ *
+ * Decided by lee, 2026-11-04, over a label alone and over an inheritance rule.
  */
-export function deleteRoom(db: Db, room: string): boolean {
+export type RoomDeleteVerdict = 'allow' | 'not-a-member' | 'owner-only';
+
+export function roomDeleteVerdict(opts: {
+  readonly caller: string;
+  readonly owner: string | undefined;
+  readonly callerIsMember: boolean;
+  readonly ownerIsMember: boolean;
+}): RoomDeleteVerdict {
+  if (!opts.callerIsMember) return 'not-a-member';
+  if (opts.owner === undefined) return 'allow';
+  if (opts.owner === opts.caller) return 'allow';
+
+  return opts.ownerIsMember ? 'owner-only' : 'allow';
+}
+
+export type RoomDeleteResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: 'not-found' }
+  | { readonly ok: false; readonly reason: 'not-a-member' }
+  | { readonly ok: false; readonly reason: 'owner-only'; readonly owner: string };
+
+/**
+ * Delete a room entirely, if `caller` is allowed to. `rooms → room_members`
+ * cascades on FK; `room_reads` and `messages` (to_handle = room name) are
+ * cleaned up here since neither has an FK back to `rooms`.
+ *
+ * 🛑 AUTHORISATION LIVES HERE, NOT IN THE CALLERS. It used to be "a
+ * caller-layer concern", and that sentence was the defect: five call sites
+ * each did their own membership check, so the owner-only rule added to the web
+ * route left every other surface — the MCP tool agents actually use, the two
+ * CLIs and the oneshot — enforcing the old rule. Found by claude1 on PR 125.
+ *
+ * ⚠️ TAKING `caller` IS THE POINT. A sixth call site cannot compile without
+ * supplying one, and cannot ignore the verdict without discarding a union it
+ * has to narrow. A guard the callers opt into is a guard one of them forgets.
+ *
+ * 🛑 NOT IDEMPOTENT ANY MORE, DELIBERATELY. It used to return `false` for an
+ * unknown room; it now returns `not-found`, because a caller that cannot tell
+ * "gone" from "refused" cannot report either one.
+ */
+export function deleteRoom(db: Db, room: string, caller: string): RoomDeleteResult {
+  const owner = roomOwner(db, room);
+
+  if (owner === undefined) return { ok: false, reason: 'not-found' };
+
+  const verdict = roomDeleteVerdict({
+    caller,
+    owner,
+    callerIsMember: isRoomMember(db, room, caller),
+    ownerIsMember: isRoomMember(db, room, owner),
+  });
+
+  if (verdict === 'not-a-member') return { ok: false, reason: 'not-a-member' };
+  if (verdict === 'owner-only') return { ok: false, reason: 'owner-only', owner };
+
   db.prepare(`DELETE FROM room_reads WHERE room_name = ?`).run(room);
   db.prepare(`DELETE FROM messages WHERE to_handle = ?`).run(room);
-  const info = db.prepare(`DELETE FROM rooms WHERE name = ?`).run(room);
-  return info.changes > 0;
+  db.prepare(`DELETE FROM rooms WHERE name = ?`).run(room);
+
+  return { ok: true };
 }
 
 /**
@@ -538,6 +599,22 @@ export function isRoomMember(db: Db, room: string, handle: string): boolean {
     `SELECT 1 AS x FROM room_members WHERE room_name = ? AND handle = ?`,
   ).get(room, handle) as unknown as { x: number } | undefined;
   return row !== undefined;
+}
+
+/**
+ * Who created the room, or `undefined` if it does not exist (#89).
+ *
+ * 🛑 THE OWNER MAY NOT BE A MEMBER. `leaveRoom` drops the `room_members` row
+ * and never touches this column, so a creator can walk out of their own room.
+ * Callers that gate on ownership must check membership separately — see
+ * `roomDeleteVerdict`, which is why an unconditional owner-only rule would
+ * lock such a room for everyone.
+ */
+export function roomOwner(db: Db, room: string): string | undefined {
+  const row = db.prepare(
+    `SELECT created_by FROM rooms WHERE name = ?`,
+  ).get(room) as unknown as { created_by: string } | undefined;
+  return row?.created_by;
 }
 
 /** Members of a room, in join order. Includes offline members. */
