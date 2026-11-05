@@ -1,11 +1,8 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as dao from '../../storage/dao.js';
-import { notifyPeer } from '../../notify/bus.js';
-import { assertRoomName } from '../../util/naming.js';
+import { MAX_BODY_BYTES, NotARoomMemberError, sendToRoom } from '../../messaging/room-send.js';
 import type { ShimContext } from '../index.js';
-
-const MAX_BODY_BYTES = 64 * 1024;
 
 export function installRoomSend(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
@@ -24,23 +21,20 @@ export function installRoomSend(server: McpServer, ctx: ShimContext): void {
       },
     },
     async ({ room, body, kind }) => {
-      assertRoomName(room);
-      if (Buffer.byteLength(body, 'utf8') > MAX_BODY_BYTES) {
-        throw new Error(`Message body exceeds ${MAX_BODY_BYTES}-byte cap`);
-      }
-      if (!dao.isRoomMember(ctx.db, room, ctx.handle)) {
-        throw new Error(`Not a member of ${room}. Call room_join first.`);
-      }
       dao.touchLastSeen(ctx.db, ctx.handle);
-      const result = dao.insertMessage(ctx.db, { from: ctx.handle, to: room, body, kind });
 
-      // Notify all currently-online members except sender. Offline members
-      // pick it up via room_inbox when they come online.
-      const members = dao.roomMembers(ctx.db, room);
-      for (const member of members) {
-        if (member === ctx.handle) continue;
-        const unread = dao.totalUnreadFor(ctx.db, member);
-        notifyPeer(member, { id: result.id, to: room, from: ctx.handle, ts: result.sent_at, body, kind, unread });
+      let result;
+      try {
+        // advanceOwnRead: false — an agent's own post must stay out of its
+        // `room_inbox`, which `roomUnread` already handles by author.
+        result = sendToRoom(ctx.db, {
+          from: ctx.handle, room, body, kind, advanceOwnRead: false,
+        });
+      } catch (e) {
+        if (e instanceof NotARoomMemberError) {
+          throw new Error(`Not a member of ${room}. Call room_join first.`);
+        }
+        throw e;
       }
 
       return {
@@ -51,7 +45,7 @@ export function installRoomSend(server: McpServer, ctx: ShimContext): void {
               message_id: result.id,
               sent_at: result.sent_at,
               room,
-              notified: members.length - 1,
+              notified: result.notified,
             }),
           },
         ],

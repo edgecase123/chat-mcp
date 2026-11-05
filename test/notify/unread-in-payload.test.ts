@@ -178,7 +178,10 @@ test('🚨 a room I am not a member of is not counted', () => {
 test('🚨 every live send path passes unread to notifyPeer', () => {
   const live = [
     'src/shim/tools/send.ts',
-    'src/shim/tools/room_send.ts',
+    // \u2b50 ROOM SENDS MOVED HERE from `shim/tools/room_send.ts`, and this is
+    // now the ONE room path behind the MCP tool, the web UI and the TUI. The
+    // guard got stronger: three callers, one place to check.
+    'src/messaging/room-send.ts',
     'src/cli/web/server.ts',
   ];
 

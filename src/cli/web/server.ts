@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { openDb, type Db } from '../../storage/db.js';
 import { NotifyBus, notifyPeer } from '../../notify/bus.js';
+import { NotARoomMemberError, RoomSendInputError, sendToRoom } from '../../messaging/room-send.js';
 import { answerAndNotify } from '../../supervise/answer.js';
 import * as dao from '../../storage/dao.js';
 import { parseSearch, snippet } from '../../search/query.js';
@@ -467,12 +468,25 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
     if (!dao.isRoomMember(ctx.db, room, ctx.handle)) {
       return respondJson(res, { error: 'not a member of room' }, 403);
     }
-    const sent = dao.insertMessage(ctx.db, { from: ctx.handle, to: room, body: bodyText, kind });
-    dao.advanceRoomRead(ctx.db, room, ctx.handle, sent.id);
-    for (const member of dao.roomMembers(ctx.db, room)) {
-      if (member === ctx.handle) continue;
-      const unread = dao.totalUnreadFor(ctx.db, member);
-      notifyPeer(member, { id: sent.id, to: room, from: ctx.handle, ts: sent.sent_at, body: bodyText, kind, unread });
+    // \u{1F6D1} MAPPED, NOT THROWN. `sendToRoom` enforces the 64 KB cap, and an
+    // unwrapped throw reaches the `createServer` catch-all as a 500 \u2014 a
+    // client error reported as a server one. `handleRoomJoin` below does the
+    // same mapping for an invalid room name.
+    let sent;
+    try {
+      sent = sendToRoom(ctx.db, {
+        from: ctx.handle, room, body: bodyText, kind, advanceOwnRead: true,
+      });
+    } catch (e) {
+      if (e instanceof NotARoomMemberError) {
+        return respondJson(res, { error: 'not a member of room' }, 403);
+      }
+      // 🛑 ONLY caller mistakes become a 4xx. A failed write or a full disk
+      // must stay a 500, so anything else is rethrown to the catch-all.
+      if (e instanceof RoomSendInputError) {
+        return respondJson(res, { error: e.message }, 400);
+      }
+      throw e;
     }
     respondJson(res, { id: sent.id, sent_at: sent.sent_at });
   } else {
