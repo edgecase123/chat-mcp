@@ -572,60 +572,25 @@ async function handleRoomRead(req: IncomingMessage, res: ServerResponse, ctx: Ro
  * dao.deleteRoom states that authorization is the caller's concern. The shim
  * tool checks membership; this is the other caller, so it checks too.
  */
-/**
- * Who may delete a room (#89).
- *
- * 🛑 THE FALLBACK IS THE RULE, NOT A CONVENIENCE. `leaveRoom` never touches
- * `rooms.created_by`, so a creator can walk out of their own room and leave it
- * owned by a non-member. An unconditional owner-only check would make that
- * room undeletable by anybody, which is a worse outcome than the member-only
- * rule it replaced.
- *
- * ⚠️ So ownership has teeth only while the owner is present. That is never
- * weaker than the behaviour before this: a departed owner lands the caller on
- * exactly the old member-only check.
- *
- * Decided by lee, 2026-11-04, over a label alone and over an inheritance rule.
- */
-export type RoomDeleteVerdict = 'allow' | 'not-a-member' | 'owner-only';
-
-export function roomDeleteVerdict(opts: {
-  readonly caller: string;
-  readonly owner: string | undefined;
-  readonly callerIsMember: boolean;
-  readonly ownerIsMember: boolean;
-}): RoomDeleteVerdict {
-  if (!opts.callerIsMember) return 'not-a-member';
-  if (opts.owner === undefined) return 'allow';
-  if (opts.owner === opts.caller) return 'allow';
-
-  return opts.ownerIsMember ? 'owner-only' : 'allow';
-}
-
 async function handleRoomDelete(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
   const body = (await readJsonBody(req)) as { room?: string };
   const room = body.room;
   if (!room) return respondJson(res, { error: 'room required' }, 400);
 
-  const owner = dao.roomOwner(ctx.db, room);
-  const verdict = roomDeleteVerdict({
-    caller: ctx.handle,
-    owner,
-    callerIsMember: dao.isRoomMember(ctx.db, room, ctx.handle),
-    ownerIsMember: owner !== undefined && dao.isRoomMember(ctx.db, room, owner),
-  });
+  // 🛑 THE RULE IS IN `dao.deleteRoom`, NOT HERE. It was here on the first cut
+  // of #89, and four other surfaces kept deleting under the old member-only
+  // check. This handler only turns a reason into a status code.
+  const result = dao.deleteRoom(ctx.db, room, ctx.handle);
 
-  if (verdict === 'not-a-member') {
+  if (result.ok) return respondJson(res, { ok: true });
+  if (result.reason === 'not-found') return respondJson(res, { error: `${room} does not exist` }, 404);
+  if (result.reason === 'not-a-member') {
     return respondJson(res, { error: `you are not a member of ${room}` }, 403);
   }
-  if (verdict === 'owner-only') {
-    // Names the owner on purpose: the caller is already a member, so the
-    // handle is not news to them, and "ask claude1" is actionable where
-    // "refused" is not.
-    return respondJson(res, { error: `only ${owner} can delete ${room}` }, 403);
-  }
-  if (!dao.deleteRoom(ctx.db, room)) return respondJson(res, { error: `${room} does not exist` }, 404);
-  respondJson(res, { ok: true });
+
+  // Names the owner on purpose: the caller is already a member, so the handle
+  // is not news to them, and "ask claude1" is actionable where "refused" is not.
+  return respondJson(res, { error: `only ${result.owner} can delete ${room}` }, 403);
 }
 
 /**

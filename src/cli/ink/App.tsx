@@ -333,10 +333,13 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             return setStatus((e as Error).message);
           }
           if (verb === 'delete') {
-            if (!dao.isRoomMember(db, roomArg, handle)) return setStatus(`not a member of ${roomArg} — /join first`);
+            // ⚠️ `notifyList` MUST be read before the delete: `room_members`
+            // is gone afterwards and the loop below would notify nobody.
             const notifyList = dao.roomMembers(db, roomArg).filter((h) => h !== handle);
-            const ok = dao.deleteRoom(db, roomArg);
-            if (!ok) return setStatus(`${roomArg} does not exist`);
+            const result = dao.deleteRoom(db, roomArg, handle);
+            if (!result.ok && result.reason === 'not-a-member') return setStatus(`not a member of ${roomArg} — /join first`);
+            if (!result.ok && result.reason === 'owner-only') return setStatus(`only ${result.owner} can delete ${roomArg}`);
+            if (!result.ok) return setStatus(`${roomArg} does not exist`);
             // If we were viewing the room, bounce home.
             if (view.kind === 'room' && view.room === roomArg) setView({ kind: 'home' });
             for (const member of notifyList) {

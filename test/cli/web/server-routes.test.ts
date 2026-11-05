@@ -5,7 +5,7 @@ import { createServer, request as httpRequest, type Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { migrate } from '../../../src/storage/db.js';
 import * as dao from '../../../src/storage/dao.js';
-import { route, roomDeleteVerdict, type RouteContext } from '../../../src/cli/web/server.js';
+import { route, type RouteContext } from '../../../src/cli/web/server.js';
 
 /**
  * 🛑 THESE ENDPOINTS DESTROY DATA. /api/kick deletes an agent and every room
@@ -353,34 +353,6 @@ test('a non-member is still refused BEFORE ownership is considered', async () =>
   } finally {
     close(h);
   }
-});
-
-// ── the verdict rule on its own ──────────────────────────────────────────
-
-const V = (caller: string, owner: string | undefined, callerIsMember: boolean, ownerIsMember: boolean) =>
-  roomDeleteVerdict({ caller, owner, callerIsMember, ownerIsMember });
-
-test('membership is checked before ownership, so a stranger never learns the owner', () => {
-  assert.equal(V('me', 'them', false, true), 'not-a-member');
-  assert.equal(V('me', 'them', false, false), 'not-a-member');
-  // Even owning it does not help once you have left.
-  assert.equal(V('me', 'me', false, false), 'not-a-member');
-});
-
-test('the owner is allowed, and a present non-owner is not', () => {
-  assert.equal(V('me', 'me', true, true), 'allow');
-  assert.equal(V('me', 'them', true, true), 'owner-only');
-});
-
-test('🛑 A DEPARTED OWNER FALLS BACK TO MEMBER-ONLY', () => {
-  // The lockout case. Without this branch the room is undeletable forever.
-  assert.equal(V('me', 'them', true, false), 'allow');
-});
-
-test('a room with no owner row cannot lock either', () => {
-  // `created_by` is NOT NULL, so undefined means the room does not exist and
-  // the 404 past this check is the right answer, not a 403.
-  assert.equal(V('me', undefined, true, false), 'allow');
 });
 
 // ── POST /api/messages/clear (#88) ───────────────────────────────────────

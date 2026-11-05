@@ -19,15 +19,32 @@ export function installRoomDelete(server: McpServer, ctx: ShimContext): void {
       assertRoomName(room);
       dao.touchLastSeen(ctx.db, ctx.handle);
 
-      if (!dao.isRoomMember(ctx.db, room, ctx.handle)) {
-        throw new Error(
-          `Cannot delete ${room}: caller is not a member. Join first to confirm the room exists, or ask a current member to delete.`,
-        );
+      // 🛑 THE MEMBERSHIP CHECK USED TO LIVE HERE AND IS NOW IN
+      // `dao.deleteRoom`, with the owner-only rule beside it. This is the path
+      // agents actually delete through, and the first cut of #89 gated only the
+      // web route — so this tool kept enforcing the old rule.
+      const result = dao.deleteRoom(ctx.db, room, ctx.handle);
+
+      if (!result.ok) {
+        if (result.reason === 'not-a-member') {
+          throw new Error(
+            `Cannot delete ${room}: caller is not a member. Join first to confirm the room exists, or ask a current member to delete.`,
+          );
+        }
+        if (result.reason === 'owner-only') {
+          throw new Error(
+            `Cannot delete ${room}: only ${result.owner} created it and is still a member. Ask them, or wait until they leave.`,
+          );
+        }
+        // `not-found`. Reported as a value, not thrown: the old tool answered
+        // `{ deleted: false }` here and a caller may be relying on that.
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ room, deleted: false }) }],
+        };
       }
 
-      const deleted = dao.deleteRoom(ctx.db, room);
       return {
-        content: [{ type: 'text', text: JSON.stringify({ room, deleted }) }],
+        content: [{ type: 'text', text: JSON.stringify({ room, deleted: true }) }],
       };
     },
   );
