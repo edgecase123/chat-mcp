@@ -87,10 +87,17 @@ test('🛑 THE STATIC PLACEHOLDER NAMES NO COMBO', () => {
 test('🛑 app.js OVERWRITES THE ACCESSIBLE NAME TOO, from the same flag', () => {
   // `aria-label` wins over `placeholder`, so setting only the placeholder
   // leaves a screen-reader user never told the key exists.
-  const found = APP_CODE.match(/el\.paneSearch\.ariaLabel = .*/);
+  const found = APP_CODE.match(/el\.paneSearch\.setAttribute\('aria-label'.*/);
 
-  assert.notEqual(found, null, 'nothing sets the accessible name at boot');
+  assert.notEqual(found, null, 'nothing sets the aria-label ATTRIBUTE at boot');
   assert.match(found![0], /searchAriaLabel\(IS_MAC\)/, found![0]);
+});
+
+test('🛑 THE ACCESSIBLE NAME IS SET BY ATTRIBUTE, NEVER BY IDL REFLECTION', () => {
+  // `el.paneSearch.ariaLabel = …` is a silent no-op where the reflection is
+  // unsupported: it creates a plain JS property and sets no attribute, and a
+  // source grep cannot tell the two apart. Raised by claude1 on PR 124.
+  assert.doesNotMatch(APP_CODE, /\.ariaLabel\s*=/, 'an ariaLabel IDL assignment is back');
 });
 
 test('🛑 THE STATIC aria-label NAMES NO COMBO EITHER', () => {

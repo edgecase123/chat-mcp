@@ -1872,7 +1872,12 @@ el.paneSearch.placeholder = searchPlaceholder(IS_MAC);
 // 🛑 AND THE ACCESSIBLE NAME, which is the only one a screen reader reads.
 // `aria-label` wins over `placeholder`, so the placeholder alone leaves an
 // assistive-tech user never told the key exists. Found by claude1 on PR 124.
-el.paneSearch.ariaLabel = searchAriaLabel(IS_MAC);
+//
+// ⚠️ `setAttribute`, NOT the `ariaLabel` IDL property. Where that reflection is
+// unsupported the assignment quietly creates a plain JS property and sets no
+// attribute, and a test that greps source cannot see the difference. Every
+// other aria in this file is set by attribute name too.
+el.paneSearch.setAttribute('aria-label', searchAriaLabel(IS_MAC));
 
 // Cmd-F on macOS, Ctrl-F everywhere else, focuses the conversation filter.
 //
