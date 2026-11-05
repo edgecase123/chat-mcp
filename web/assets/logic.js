@@ -1281,3 +1281,29 @@ export function searchableText(text, hrefs = []) {
 
   return extra.length === 0 ? text : `${text}\n${extra.join('\n')}`;
 }
+
+/**
+ * Does this keystroke mean "focus the conversation filter"?
+ *
+ * 🛑 THE PLATFORM SPLIT IS LOAD-BEARING, NOT COSMETIC. On macOS `Ctrl-F` is a
+ * system text binding that moves the caret one character right, so claiming it
+ * would break the composer. `metaKey || ctrlKey` reads as tolerant and is the
+ * bug. Each platform gets exactly one modifier.
+ *
+ * Cmd-F and Ctrl-F are the BROWSER's find-in-page, which is an app shortcut the
+ * page outranks. The caller owes the `preventDefault()`.
+ *
+ * ⚠️ `shiftKey` and `altKey` are rejected rather than ignored. Cmd-Shift-F is
+ * unbound today, and swallowing it now would make a later binding look broken.
+ *
+ * @param {{ key: string, metaKey?: boolean, ctrlKey?: boolean, shiftKey?: boolean, altKey?: boolean }} e
+ * @param {boolean} isMac
+ */
+export function focusSearchKeyApplies(e, isMac) {
+  if (typeof e?.key !== 'string' || e.key.toLowerCase() !== 'f') return false;
+  if (e.shiftKey || e.altKey) return false;
+
+  return isMac
+    ? e.metaKey === true && e.ctrlKey !== true
+    : e.ctrlKey === true && e.metaKey !== true;
+}

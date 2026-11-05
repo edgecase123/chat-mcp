@@ -21,6 +21,7 @@ import {
   pushHistory,
   historyStep,
   historyKeyApplies,
+  focusSearchKeyApplies,
   atTokenAt,
   cheatSheet,
   commandBlock,
@@ -583,6 +584,60 @@ test('a single-line value gives both keys to history', () => {
 test('an out-of-range caret does not throw', () => {
   assert.equal(historyKeyApplies('one', 999, -1), true);
   assert.equal(historyKeyApplies('', 0, 1), true);
+});
+
+// ── the shortcut that focuses the conversation filter ──────────────────
+
+/** A keydown event, as much of one as the predicate reads. */
+const key = (k: string, mods: Record<string, boolean> = {}) => ({ key: k, ...mods });
+
+test('🛑 macOS gets Cmd-F and must NOT get Ctrl-F', () => {
+  // Ctrl-F on macOS is a SYSTEM text binding: it moves the caret one character
+  // right. Claiming it would break the composer, and `metaKey || ctrlKey` does
+  // exactly that while looking tolerant.
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true }), true), true, 'Cmd-F');
+  assert.equal(focusSearchKeyApplies(key('f', { ctrlKey: true }), true), false, 'Ctrl-F is the caret');
+});
+
+test('Windows and Linux get Ctrl-F and must NOT get Cmd-F', () => {
+  // The Super/Windows key reaches the page as `metaKey` and is the OS menu.
+  assert.equal(focusSearchKeyApplies(key('f', { ctrlKey: true }), false), true, 'Ctrl-F');
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true }), false), false, 'Super-F is the OS');
+});
+
+test('an unmodified f is just a letter, on both platforms', () => {
+  assert.equal(focusSearchKeyApplies(key('f'), true), false);
+  assert.equal(focusSearchKeyApplies(key('f'), false), false);
+});
+
+test('Shift and Alt are rejected rather than ignored', () => {
+  // Cmd-Shift-F is unbound today. Swallowing it now would make a later binding
+  // look broken, with nothing in the handler to point at.
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, shiftKey: true }), true), false, 'Cmd-Shift-F');
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, altKey: true }), true), false, 'Cmd-Alt-F');
+  assert.equal(focusSearchKeyApplies(key('f', { ctrlKey: true, shiftKey: true }), false), false, 'Ctrl-Shift-F');
+});
+
+test('both modifiers at once is neither platform\'s combo', () => {
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, ctrlKey: true }), true), false);
+  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, ctrlKey: true }), false), false);
+});
+
+test('a capital F still applies, because Caps Lock reports it', () => {
+  assert.equal(focusSearchKeyApplies(key('F', { metaKey: true }), true), true);
+});
+
+test('another letter never applies, however it is modified', () => {
+  assert.equal(focusSearchKeyApplies(key('g', { metaKey: true }), true), false);
+  assert.equal(focusSearchKeyApplies(key('Enter', { ctrlKey: true }), false), false);
+});
+
+test('a malformed event does not throw', () => {
+  // @ts-expect-error — deliberately wrong shape; `undefined` arrives from a
+  // synthetic event in a test double before it does from a browser.
+  assert.equal(focusSearchKeyApplies(undefined, true), false);
+  // @ts-expect-error — same.
+  assert.equal(focusSearchKeyApplies({}, true), false);
 });
 
 // ── the per-message copy button ─────────────────────────────────────────

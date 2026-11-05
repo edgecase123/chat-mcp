@@ -21,6 +21,7 @@ import {
   pushHistory,
   historyStep,
   historyKeyApplies,
+  focusSearchKeyApplies,
   messageMarkdown,
   cheatSheet,
   commandBlock,
@@ -1855,6 +1856,27 @@ document.addEventListener('keydown', (e) => {
   if (document.activeElement === el.composerInput && el.composerInput.value !== '') return;
   e.preventDefault();
   jumpToNewest();
+});
+
+// ⚠️ `navigator.platform` is deprecated and is still the only field every
+// browser reports. `userAgentData` is Chromium-only, so it is the preference
+// rather than the source of truth. iPadOS reports "MacIntel" and takes Cmd too,
+// so landing there is correct.
+const IS_MAC = /mac|iphone|ipad/i.test(navigator.userAgentData?.platform || navigator.platform || '');
+
+// Cmd-F on macOS, Ctrl-F everywhere else, focuses the conversation filter.
+//
+// 🛑 THIS OUTRANKS THE BROWSER'S FIND-IN-PAGE ON PURPOSE. Find-in-page can only
+// see the rows already in the DOM and cannot hide the rest, so on a long
+// conversation it is strictly worse than the box it replaces.
+//
+// `select()` rather than a bare focus: a second press should replace the term,
+// which is how every find field behaves. Escape already clears the box.
+document.addEventListener('keydown', (e) => {
+  if (!focusSearchKeyApplies(e, IS_MAC)) return;
+  e.preventDefault();
+  el.paneSearch.focus();
+  el.paneSearch.select();
 });
 
 boot();
