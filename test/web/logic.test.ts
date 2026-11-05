@@ -23,6 +23,7 @@ import {
   historyKeyApplies,
   focusSearchKeyApplies,
   searchPlaceholder,
+  searchAriaLabel,
   atTokenAt,
   cheatSheet,
   commandBlock,
@@ -641,51 +642,104 @@ test('a malformed event does not throw', () => {
   assert.equal(focusSearchKeyApplies({}, true), false);
 });
 
-// ── the placeholder that advertises the shortcut ────────────────────────
+// ── the two labels that advertise the shortcut ─────────────────────────
 
-test('each platform is offered its own combo', () => {
-  assert.equal(searchPlaceholder(true), 'Search (Cmd-F)');
-  assert.equal(searchPlaceholder(false), 'Search (Ctrl-F)');
+/**
+ * 🛑 BOTH LABELS ARE SWEPT, NOT JUST THE PLACEHOLDER. `aria-label` wins over
+ * `placeholder` in the accessible-name computation, so a hint in the
+ * placeholder alone reaches sighted users only. Found by claude1 on PR 124 and
+ * measured in Chromium: the accessible name was the aria-label, and
+ * `getByRole('searchbox', { name: 'Search (Cmd-F)' })` matched nothing.
+ */
+const SHORTCUT_LABELS: Array<[string, (isMac: boolean) => string]> = [
+  ['placeholder', searchPlaceholder],
+  ['aria-label', searchAriaLabel],
+];
+
+/**
+ * How many (label, platform) pairs the sweep below MUST reach.
+ *
+ * 🛑 A LITERAL, NOT `SHORTCUT_LABELS.length * 2`. Derived from the list it is
+ * meant to police, the check reads `0 === 0` on an empty list and passes. That
+ * is not hypothetical: the first version of this file did exactly that, and
+ * emptying `SHORTCUT_LABELS` killed none of 199 tests.
+ */
+const SHORTCUT_LABEL_PAIRS = 4;
+
+test('🛑 the sweep covers BOTH labels by name — the denominator', () => {
+  // Adding a third label must fail here first, so nobody can add one that the
+  // drift test below silently never reaches.
+  assert.deepEqual(
+    SHORTCUT_LABELS.map(([name]) => name),
+    ['placeholder', 'aria-label'],
+  );
+  assert.equal(SHORTCUT_LABELS.length * 2, SHORTCUT_LABEL_PAIRS);
 });
 
-/** The modifier and letter the placeholder advertises, parsed back out of it. */
-function advertised(isMac: boolean) {
-  const m = searchPlaceholder(isMac).match(/\((Cmd|Ctrl)-([A-Za-z])\)/);
+test('each platform is offered its own combo, in both labels', () => {
+  assert.equal(searchPlaceholder(true), 'Search (Cmd-F)');
+  assert.equal(searchPlaceholder(false), 'Search (Ctrl-F)');
+  assert.match(searchAriaLabel(true), /\(Cmd-F\)$/);
+  assert.match(searchAriaLabel(false), /\(Ctrl-F\)$/);
+});
 
-  assert.notEqual(m, null, `the placeholder names no combo: ${searchPlaceholder(isMac)}`);
+test('🛑 the accessible name KEEPS the description, it does not replace it', () => {
+  // Trimmed to "Search (Cmd-F)" the name would lose the highlighting half of
+  // what the box does, and the name is all a screen reader gets.
+  assert.match(searchAriaLabel(true), /filter and highlight/i);
+});
+
+/** The modifier and letter a label advertises, parsed back out of it. */
+function advertised(label: string, text: string) {
+  const m = text.match(/\((Cmd|Ctrl)-([A-Za-z])\)/);
+
+  assert.notEqual(m, null, `the ${label} names no combo: ${text}`);
 
   return { modifier: m![1], key: m![2] };
 }
 
-test('🛑 THE COMBO THE BOX ADVERTISES IS ONE THE BINDING ACCEPTS', () => {
-  // A string test on the placeholder would pass while the box advertised a key
-  // that does nothing. This feeds the advertised combo back to the predicate,
-  // so the copy and the binding cannot drift apart.
-  for (const isMac of [true, false]) {
-    const { modifier, key } = advertised(isMac);
-    const e = { key, metaKey: modifier === 'Cmd', ctrlKey: modifier === 'Ctrl' };
+test('🛑 EVERY COMBO EITHER LABEL ADVERTISES IS ONE THE BINDING ACCEPTS', () => {
+  // A string test on the copy would pass while a label advertised a key that
+  // does nothing. This feeds each advertised combo back to the predicate.
+  let checked = 0;
 
-    assert.equal(focusSearchKeyApplies(e, isMac), true, `${modifier}-${key} on isMac=${isMac}`);
+  for (const [label, fn] of SHORTCUT_LABELS) {
+    for (const isMac of [true, false]) {
+      const { modifier, key } = advertised(label, fn(isMac));
+      const e = { key, metaKey: modifier === 'Cmd', ctrlKey: modifier === 'Ctrl' };
+
+      assert.equal(focusSearchKeyApplies(e, isMac), true, `${label}: ${modifier}-${key} on isMac=${isMac}`);
+      checked += 1;
+    }
   }
+
+  assert.equal(checked, SHORTCUT_LABEL_PAIRS, `only ${checked} of ${SHORTCUT_LABEL_PAIRS} combos were checked`);
 });
 
-test('🛑 NEITHER PLATFORM ADVERTISES THE OTHER ONE\'S COMBO', () => {
+test('🛑 NO LABEL ADVERTISES THE OTHER PLATFORM\'S COMBO', () => {
   // The negative half. Without it the test above passes for a predicate that
   // accepts everything, which is the exact `metaKey || ctrlKey` bug.
-  const mac = advertised(true);
-  const other = advertised(false);
+  let checked = 0;
 
-  assert.notEqual(mac.modifier, other.modifier, 'both platforms name the same modifier');
-  assert.equal(
-    focusSearchKeyApplies({ key: other.key, ctrlKey: true }, true),
-    false,
-    'macOS advertises Cmd and the predicate also takes Ctrl',
-  );
-  assert.equal(
-    focusSearchKeyApplies({ key: mac.key, metaKey: true }, false),
-    false,
-    'Windows advertises Ctrl and the predicate also takes Super',
-  );
+  for (const [label, fn] of SHORTCUT_LABELS) {
+    const mac = advertised(label, fn(true));
+    const other = advertised(label, fn(false));
+
+    assert.notEqual(mac.modifier, other.modifier, `${label}: both platforms name the same modifier`);
+    assert.equal(
+      focusSearchKeyApplies({ key: other.key, ctrlKey: true }, true),
+      false,
+      `${label}: macOS advertises Cmd and the predicate also takes Ctrl`,
+    );
+    assert.equal(
+      focusSearchKeyApplies({ key: mac.key, metaKey: true }, false),
+      false,
+      `${label}: Windows advertises Ctrl and the predicate also takes Super`,
+    );
+    checked += 2;
+  }
+
+  assert.equal(checked, SHORTCUT_LABEL_PAIRS, `only ${checked} of ${SHORTCUT_LABEL_PAIRS} combos were checked`);
 });
 
 // ── the per-message copy button ─────────────────────────────────────────

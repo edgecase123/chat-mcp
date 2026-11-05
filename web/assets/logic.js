@@ -1322,5 +1322,28 @@ export function focusSearchKeyApplies(e, isMac) {
  * @param {boolean} isMac
  */
 export function searchPlaceholder(isMac) {
-  return isMac ? 'Search (Cmd-F)' : 'Search (Ctrl-F)';
+  return `Search (${searchCombo(isMac)})`;
+}
+
+/** The combo both labels name, so they cannot disagree with each other. */
+function searchCombo(isMac) {
+  return isMac ? 'Cmd-F' : 'Ctrl-F';
+}
+
+/**
+ * The filter box's accessible name, which must ALSO name the shortcut.
+ *
+ * 🛑 THE PLACEHOLDER REACHES SIGHTED USERS ONLY. `aria-label` wins over
+ * `placeholder` in the accessible-name computation, so with the hint in the
+ * placeholder alone an assistive-tech user is never told the key exists.
+ * Measured in Chromium: the accessible name was the aria-label and
+ * `getByRole('searchbox', { name: 'Search (Cmd-F)' })` matched nothing.
+ *
+ * ⚠️ THE DESCRIPTION IS KEPT, NOT REPLACED. "Filter and highlight" is what the
+ * box does, and a name trimmed to "Search" would lose the highlighting half.
+ *
+ * @param {boolean} isMac
+ */
+export function searchAriaLabel(isMac) {
+  return `Filter and highlight messages in this conversation (${searchCombo(isMac)})`;
 }

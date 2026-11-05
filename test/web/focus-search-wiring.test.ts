@@ -83,3 +83,20 @@ test('🛑 THE STATIC PLACEHOLDER NAMES NO COMBO', () => {
   assert.notEqual(found, null, 'the filter box has no placeholder attribute');
   assert.doesNotMatch(found![1], /Cmd|Ctrl|⌘|-F\b/, `the static fallback hardcodes a combo: ${found![1]}`);
 });
+
+test('🛑 app.js OVERWRITES THE ACCESSIBLE NAME TOO, from the same flag', () => {
+  // `aria-label` wins over `placeholder`, so setting only the placeholder
+  // leaves a screen-reader user never told the key exists.
+  const found = APP_CODE.match(/el\.paneSearch\.ariaLabel = .*/);
+
+  assert.notEqual(found, null, 'nothing sets the accessible name at boot');
+  assert.match(found![0], /searchAriaLabel\(IS_MAC\)/, found![0]);
+});
+
+test('🛑 THE STATIC aria-label NAMES NO COMBO EITHER', () => {
+  // Same reason as the placeholder: served to every platform, never re-read.
+  const found = HTML.match(/id="pane-search"[\s\S]{0,300}?aria-label="([^"]*)"/);
+
+  assert.notEqual(found, null, 'the filter box has no aria-label attribute');
+  assert.doesNotMatch(found![1], /Cmd|Ctrl|⌘|-F\b/, `the static fallback hardcodes a combo: ${found![1]}`);
+});

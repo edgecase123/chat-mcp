@@ -23,6 +23,7 @@ import {
   historyKeyApplies,
   focusSearchKeyApplies,
   searchPlaceholder,
+  searchAriaLabel,
   messageMarkdown,
   cheatSheet,
   commandBlock,
@@ -1868,6 +1869,10 @@ const IS_MAC = /mac|iphone|ipad/i.test(navigator.userAgentData?.platform || navi
 // The box names the key that reaches it. The HTML ships a bare "Search" as the
 // no-JS fallback, because the combo differs per platform and the markup does not.
 el.paneSearch.placeholder = searchPlaceholder(IS_MAC);
+// 🛑 AND THE ACCESSIBLE NAME, which is the only one a screen reader reads.
+// `aria-label` wins over `placeholder`, so the placeholder alone leaves an
+// assistive-tech user never told the key exists. Found by claude1 on PR 124.
+el.paneSearch.ariaLabel = searchAriaLabel(IS_MAC);
 
 // Cmd-F on macOS, Ctrl-F everywhere else, focuses the conversation filter.
 //
