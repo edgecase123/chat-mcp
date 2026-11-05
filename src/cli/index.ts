@@ -2,6 +2,7 @@ import readline from 'node:readline';
 import { randomUUID } from 'node:crypto';
 import { openDb } from '../storage/db.js';
 import { NotifyBus, notifyPeer } from '../notify/bus.js';
+import { sendToRoom } from '../messaging/room-send.js';
 import * as dao from '../storage/dao.js';
 import type { Message } from '../storage/dao.js';
 import { assertRoomName } from '../util/naming.js';
@@ -394,14 +395,11 @@ export async function runCli(opts: CliOptions): Promise<void> {
         console.log(dim(`  no longer a member of ${roomName} — /back and /join again`));
         return;
       }
-      const sent = dao.insertMessage(db, { from: opts.handle, to: roomName, body: text });
-      // Advance own watermark so we don't see our own message on next flush.
-      dao.advanceRoomRead(db, roomName, opts.handle, sent.id);
-      const members = dao.roomMembers(db, roomName);
-      for (const member of members) {
-        if (member === opts.handle) continue;
-        notifyPeer(member, { id: sent.id, to: roomName, from: opts.handle, ts: sent.sent_at, body: text });
-      }
+      // advanceOwnRead: true — the TUI reprints its own line immediately, so
+      // the next flush must not repeat it.
+      const sent = sendToRoom(db, {
+        from: opts.handle, room: roomName, body: text, advanceOwnRead: true,
+      });
       process.stdout.write(`${dim(`          → sent ${timeOf(sent.sent_at)}`)}\n`);
       return;
     }

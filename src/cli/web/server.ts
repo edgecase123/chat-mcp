@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { openDb, type Db } from '../../storage/db.js';
 import { NotifyBus, notifyPeer } from '../../notify/bus.js';
+import { sendToRoom } from '../../messaging/room-send.js';
 import { answerAndNotify } from '../../supervise/answer.js';
 import * as dao from '../../storage/dao.js';
 import { parseSearch, snippet } from '../../search/query.js';
@@ -467,13 +468,9 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
     if (!dao.isRoomMember(ctx.db, room, ctx.handle)) {
       return respondJson(res, { error: 'not a member of room' }, 403);
     }
-    const sent = dao.insertMessage(ctx.db, { from: ctx.handle, to: room, body: bodyText, kind });
-    dao.advanceRoomRead(ctx.db, room, ctx.handle, sent.id);
-    for (const member of dao.roomMembers(ctx.db, room)) {
-      if (member === ctx.handle) continue;
-      const unread = dao.totalUnreadFor(ctx.db, member);
-      notifyPeer(member, { id: sent.id, to: room, from: ctx.handle, ts: sent.sent_at, body: bodyText, kind, unread });
-    }
+    const sent = sendToRoom(ctx.db, {
+      from: ctx.handle, room, body: bodyText, kind, advanceOwnRead: true,
+    });
     respondJson(res, { id: sent.id, sent_at: sent.sent_at });
   } else {
     const peer = body.target;
