@@ -126,6 +126,60 @@ export function jumpLabel(unread) {
 }
 
 /**
+ * How loud the jump affordance should be, from how long the OLDEST unread
+ * message has been waiting (#121).
+ *
+ * 🛑 TIME, NOT COUNT. lee's words were "brighten louder UNTIL it is clicked",
+ * and a count-driven level stops climbing the moment arrivals stop — so ONE
+ * message ignored for ten minutes would stay as dim as one ignored for one
+ * second. Rejected for that reason, not for cost.
+ *
+ * ⚠️ PURE, AND IT DOES NOT READ A CLOCK. The caller passes elapsed time, so a
+ * test can reach every level without waiting and without faking `Date.now`.
+ *
+ * Levels are STEPS, never a pulse: nothing animates, so
+ * `prefers-reduced-motion` needs no second code path and a glance at any
+ * moment shows the current level. Chosen by lee, 2026-11-04.
+ *
+ * @param {number} waitingForMs  how long the oldest unread has been waiting
+ * @returns {0|1|2|3} 0 means "no louder than the resting border"
+ */
+export function jumpUrgency(waitingForMs) {
+  if (!Number.isFinite(waitingForMs) || waitingForMs <= 0) return 0;
+
+  let level = 0;
+  for (const threshold of JUMP_URGENCY_MS) {
+    if (waitingForMs >= threshold) level += 1;
+  }
+
+  return /** @type {0|1|2|3} */ (level);
+}
+
+/**
+ * The thresholds, ascending. The last one is the CAP — past it the border
+ * holds, so an ignored message never escalates forever.
+ */
+export const JUMP_URGENCY_MS = [3000, 8000, 15000];
+
+/**
+ * When the current run of unread messages STARTED, or null if none is waiting.
+ *
+ * 🛑 THE OLDEST UNREAD SETS THE CLOCK, NOT THE NEWEST. A later arrival must
+ * not restart it: in a busy room a steady trickle would then hold the border
+ * at level 0 forever, which is the exact case the feature exists for.
+ *
+ * @param {number|null} previousSince
+ * @param {number} unread
+ * @param {number} nowMs
+ * @returns {number|null}
+ */
+export function nextUnreadSince(previousSince, unread, nowMs) {
+  if (unread <= 0) return null;
+
+  return previousSince ?? nowMs;
+}
+
+/**
  * The unread tally after a render. Pinned means you were already looking at
  * the newest line, so nothing was missed.
  *

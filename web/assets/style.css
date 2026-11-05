@@ -494,14 +494,20 @@ html, body {
 }
 /* #102 — the filter box. Sits in the pane header beside the title, so it is
    visible without being the first thing read. */
+/* 🛑 `float`, NOT `margin-left: auto`. The header is `display: block`, so the
+   auto margin computed to 0px and the box sat at the LEFT edge of its own
+   line. Measured in the browser: right edge 430 of a 1280 pane.
+   Floating puts it at the header's right edge, on the line BELOW the absolute
+   `.pane__style` selector — 20px from the edge at both 1280 and 420 wide, with
+   no collision and no horizontal page scroll. */
 .pane__search {
   background: var(--bg-input, var(--bg-card));
   border: 1px solid var(--color-border, var(--border));
   border-radius: 4px;
   color: inherit;
+  float: right;
   font: inherit;
   font-size: 12px;
-  margin-left: auto;
   max-width: 14rem;
   padding: 3px 8px;
 }
@@ -653,6 +659,29 @@ html, body {
 .jump-newest:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+/* #121 — the pill used to appear and then never change, so one message waiting
+   looked like twenty and ten seconds looked like ten minutes.
+   🛑 STEPS, NOT A PULSE. app.js sets `data-urgency` from `jumpUrgency()`, which
+   is driven by HOW LONG the oldest unread has waited. Nothing animates, so
+   `prefers-reduced-motion` needs no second code path and a glance at any
+   moment shows the level. Chosen by lee, 2026-11-04. */
+.jump-newest[data-urgency='1'] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--fg);
+}
+.jump-newest[data-urgency='2'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* The cap. A ring rather than a brighter colour, because level 2 is already
+   the full accent and there is nowhere louder for the border alone to go. */
+.jump-newest[data-urgency='3'] {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow:
+    0 2px 10px rgb(0 0 0 / 18%),
+    0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .messages__empty {
   color: var(--fg-faint);
