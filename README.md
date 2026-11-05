@@ -306,8 +306,6 @@ The Header line shows your own gauge as `· ctx <n>%` once you've reported. `/wh
 **Getting started** — from an empty view:
 
 - `Ctrl-K` — command palette. Fuzzy-search every command.
-
-The browser UI has its own shortcut: `Cmd-F` / `Ctrl-F` focuses the conversation filter. It deliberately overrides the browser's find-in-page, which can only see the messages already in the DOM and cannot hide the rest.
 - Type `/` — inline autocomplete shows matching commands.
 - `Tab` — complete peer names after `/dm`, room names after `/join`, etc.
 - `1`–`9` — jump to the Nth sidebar entry (agent or joined room) when the input is empty.
