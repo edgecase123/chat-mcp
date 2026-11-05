@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { openDb, type Db } from '../../storage/db.js';
 import { NotifyBus, notifyPeer } from '../../notify/bus.js';
-import { sendToRoom } from '../../messaging/room-send.js';
+import { NotARoomMemberError, sendToRoom } from '../../messaging/room-send.js';
 import { answerAndNotify } from '../../supervise/answer.js';
 import * as dao from '../../storage/dao.js';
 import { parseSearch, snippet } from '../../search/query.js';
@@ -468,9 +468,21 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
     if (!dao.isRoomMember(ctx.db, room, ctx.handle)) {
       return respondJson(res, { error: 'not a member of room' }, 403);
     }
-    const sent = sendToRoom(ctx.db, {
-      from: ctx.handle, room, body: bodyText, kind, advanceOwnRead: true,
-    });
+    // \u{1F6D1} MAPPED, NOT THROWN. `sendToRoom` enforces the 64 KB cap, and an
+    // unwrapped throw reaches the `createServer` catch-all as a 500 \u2014 a
+    // client error reported as a server one. `handleRoomJoin` below does the
+    // same mapping for an invalid room name.
+    let sent;
+    try {
+      sent = sendToRoom(ctx.db, {
+        from: ctx.handle, room, body: bodyText, kind, advanceOwnRead: true,
+      });
+    } catch (e) {
+      if (e instanceof NotARoomMemberError) {
+        return respondJson(res, { error: 'not a member of room' }, 403);
+      }
+      return respondJson(res, { error: (e as Error).message }, 400);
+    }
     respondJson(res, { id: sent.id, sent_at: sent.sent_at });
   } else {
     const peer = body.target;

@@ -653,3 +653,50 @@ test('a rebound GET to /api/search is refused — it reads every room', async ()
   assert.equal((await raw(h, { path: '/api/search?q=gate', host: 'evil.example.com' })).status, 403);
   close(h);
 });
+
+// ── POST /api/messages body cap (claude1's review of PR 128) ─────────────
+
+/**
+ * 🛑 A CLIENT ERROR MUST NOT BE REPORTED AS A SERVER ERROR.
+ *
+ * `sendToRoom` enforces the 64 KB cap for every caller. The web handler did
+ * not wrap it, so the throw reached the `createServer` catch-all and the
+ * client got a 500 for its own oversized request.
+ */
+test('🚨 an over-cap room post is a 400, not a 500', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#ops', 'operator');
+
+    const res = await post(
+      h,
+      '/api/messages',
+      { target: '#ops', body: 'a'.repeat(64 * 1024 + 1) },
+      h.origin,
+    );
+
+    assert.equal(res.status, 400);
+    assert.match(await errorOf(res), /exceeds 65536-byte cap/);
+  } finally {
+    close(h);
+  }
+});
+
+/** ⚠️ The control. A body at the cap must still post, or the guard is just off. */
+test('🚨 control — a room post AT the cap still succeeds', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#ops', 'operator');
+
+    const res = await post(
+      h,
+      '/api/messages',
+      { target: '#ops', body: 'a'.repeat(64 * 1024) },
+      h.origin,
+    );
+
+    assert.equal(res.status, 200);
+  } finally {
+    close(h);
+  }
+});
