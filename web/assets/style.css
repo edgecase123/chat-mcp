@@ -30,6 +30,13 @@
   --accent: #0891b2;
   --accent-fg: #ffffff;
   --accent-soft: #cffafe;
+  /* 🛑 THE SEARCH HIT IS AMBER, NOT THE ACCENT, AND NOT `yellow`. Full-strength
+     --accent gives white-on-cyan at 3.68:1, BELOW the 4.5 AA floor — a found
+     word would read worse than the text around it. Amber is loud against both
+     grounds and keeps the mark's own text above 11:1. Measured, and pinned by
+     mark-contrast.test.ts. Set by lee, 2026-11-04. */
+  --mark-bg: #fde047;
+  --mark-fg: #1f2430;
   --self: #7c3aed;
   --self-soft: #ede9fe;
   --danger: #dc2626;
@@ -58,6 +65,8 @@
   --accent: #22d3ee;
   --accent-fg: #04121a;
   --accent-soft: #164e5c;
+  --mark-bg: #facc15;
+  --mark-fg: #0f141b;
   --self: #a78bfa;
   --self-soft: #3b2a5c;
   --danger: #f87171;
@@ -496,13 +505,16 @@ html, body {
   max-width: 14rem;
   padding: 3px 8px;
 }
-/* 🛑 NOT `background: yellow`. A hit has to read in BOTH themes, and a fixed
-   colour is invisible in one of them. */
+/* 🛑 THE MARK CARRIES ITS OWN TEXT COLOUR. `color: inherit` was survivable on
+   the old pale background and is not on this one — the body `--fg` flips per
+   theme while an amber ground does not, so one theme would get light text on
+   amber. Both halves are tokens for that reason. */
 .message__body mark {
-  background: var(--accent-soft, rgba(255, 213, 79, 0.35));
+  background: var(--mark-bg);
   border-radius: 2px;
-  color: inherit;
-  padding: 0 1px;
+  color: var(--mark-fg);
+  font-weight: 600;
+  padding: 0 2px;
 }
 
 /* #104 — quieter than the time, because it is reference data rather than
