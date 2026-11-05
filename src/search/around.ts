@@ -79,3 +79,33 @@ export function aroundWindow(limit: number): { before: number; after: number } {
 
   return { before: span - after, after };
 }
+
+/** The hard ceiling the route has always applied. */
+export const MAX_MESSAGE_LIMIT = 500;
+
+/**
+ * A `limit` query parameter, or why it was refused.
+ *
+ * 🛑 `parseInt` + `Math.min/max` CANNOT REJECT. `parseInt('abc')` is NaN,
+ * `Math.max(1, NaN)` is NaN, and `NaN <= 0` is FALSE — so every downstream
+ * guard written as `<= 0` waves it through and NaN reaches `LIMIT`, where
+ * node:sqlite throws "datatype mismatch". That surfaced as a 500 carrying the
+ * raw SQL message. Traced by claude1 on PR 123; it was pre-existing on
+ * `?target=` and this route had copied the pattern.
+ *
+ * ⚠️ AN ABSENT LIMIT IS THE DEFAULT, NOT AN ERROR. Only a present-and-bad one
+ * is refused, so existing callers that omit it are unaffected.
+ */
+export function parseMessageLimit(
+  raw: string | null | undefined,
+  fallback = 100,
+): { ok: true; limit: number } | { ok: false; reason: string } {
+  if (raw === null || raw === undefined || raw === '') return { ok: true, limit: fallback };
+  if (!/^[0-9]+$/.test(raw)) return { ok: false, reason: 'limit must be a positive integer' };
+
+  const n = Number(raw);
+
+  if (!Number.isSafeInteger(n) || n < 1) return { ok: false, reason: 'limit must be a positive integer' };
+
+  return { ok: true, limit: Math.min(MAX_MESSAGE_LIMIT, n) };
+}

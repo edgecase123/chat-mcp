@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  MAX_MESSAGE_LIMIT,
   aroundWindow,
   parseAroundId,
+  parseMessageLimit,
   readerIsPartyToDm,
   targetForMessage,
 } from '../../src/search/around.js';
@@ -102,5 +104,56 @@ test('🛑 before + after + the anchor never exceeds the limit', () => {
     const { before, after } = aroundWindow(limit);
 
     assert.equal(before + after + 1, Math.max(1, limit), `limit ${limit}`);
+  }
+});
+
+/**
+ * 🛑 `parseInt` + `Math.min/max` CANNOT REJECT, AND EVERY `<= 0` GUARD
+ * DOWNSTREAM WAVES NaN THROUGH.
+ *
+ * `parseInt('abc')` is NaN, `Math.max(1, NaN)` is NaN, and `NaN <= 0` is
+ * FALSE — so NaN reached `LIMIT` and node:sqlite threw "datatype mismatch",
+ * surfacing as a 500 carrying the raw SQL message. Traced by claude1 on
+ * PR 123. It was pre-existing on `?target=`; this route had copied it.
+ */
+
+test('🛑 a non-numeric limit is REFUSED, not coerced to NaN', () => {
+  assert.equal(parseMessageLimit('abc').ok, false);
+  assert.equal(parseMessageLimit('10x').ok, false);
+  assert.equal(parseMessageLimit('-5').ok, false);
+  assert.equal(parseMessageLimit('0').ok, false);
+  assert.equal(parseMessageLimit('1.5').ok, false);
+  assert.equal(parseMessageLimit(' 10').ok, false);
+});
+
+test('⚠️ control — the OLD expression accepts every one of those', () => {
+  // The pattern this replaced. If a future edit reintroduces it, this is the
+  // shape to look for: a clamp that cannot say no.
+  const old = (raw: string) => Math.min(500, Math.max(1, parseInt(raw, 10)));
+
+  assert.ok(Number.isNaN(old('abc')), 'the old clamp yields NaN');
+  assert.equal(Number.isNaN(old('abc')) && (old('abc') <= 0), false, 'and NaN <= 0 is FALSE, so guards pass it');
+});
+
+test('an absent limit is the default, because omitting it is not an error', () => {
+  assert.deepEqual(parseMessageLimit(null), { ok: true, limit: 100 });
+  assert.deepEqual(parseMessageLimit(undefined), { ok: true, limit: 100 });
+  assert.deepEqual(parseMessageLimit(''), { ok: true, limit: 100 });
+  assert.deepEqual(parseMessageLimit(null, 200), { ok: true, limit: 200 });
+});
+
+test('a valid limit passes through, and the ceiling still clamps', () => {
+  assert.deepEqual(parseMessageLimit('1'), { ok: true, limit: 1 });
+  assert.deepEqual(parseMessageLimit('250'), { ok: true, limit: 250 });
+  assert.deepEqual(parseMessageLimit('5000'), { ok: true, limit: MAX_MESSAGE_LIMIT });
+});
+
+test('🛑 nothing parseMessageLimit returns can reach aroundWindow as NaN', () => {
+  // The two halves have to agree, or the fix only moves the failure.
+  for (const raw of ['1', '2', '99', '500', '5000', null]) {
+    const r = parseMessageLimit(raw);
+    assert.equal(r.ok, true, `limit ${raw}`);
+    const { before, after } = aroundWindow((r as { limit: number }).limit);
+    assert.ok(Number.isInteger(before) && Number.isInteger(after), `limit ${raw} gave ${before}/${after}`);
   }
 });

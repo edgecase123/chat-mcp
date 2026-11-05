@@ -26,6 +26,7 @@ import { packageVersion } from '../../util/version.js';
 import {
   aroundWindow,
   parseAroundId,
+  parseMessageLimit,
   readerIsPartyToDm,
   targetForMessage,
 } from '../../search/around.js';
@@ -388,7 +389,11 @@ function handleMessagesAround(url: URL, res: ServerResponse, ctx: RouteContext):
 
   if (!parsed.ok) return respondJson(res, { error: parsed.reason }, 400);
 
-  const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit') ?? '100', 10)));
+  const lim = parseMessageLimit(url.searchParams.get('limit'));
+
+  if (!lim.ok) return respondJson(res, { error: lim.reason }, 400);
+
+  const limit = lim.limit;
   const row = ctx.db
     .prepare('SELECT from_handle, to_handle FROM messages WHERE id = ?')
     .get(parsed.id) as { from_handle: string; to_handle: string } | undefined;
@@ -422,7 +427,13 @@ function handleMessagesAround(url: URL, res: ServerResponse, ctx: RouteContext):
 
 function handleGetMessages(url: URL, res: ServerResponse, ctx: RouteContext): void {
   const target = url.searchParams.get('target');
-  const limit = Math.min(500, Math.max(1, parseInt(url.searchParams.get('limit') ?? '100', 10)));
+  // 🛑 VALIDATED, NOT CLAMPED. `?limit=abc` used to reach `LIMIT NaN` and 500
+  // with the raw SQL message in the body. See `parseMessageLimit`.
+  const lim = parseMessageLimit(url.searchParams.get('limit'));
+
+  if (!lim.ok) return respondJson(res, { error: lim.reason }, 400);
+
+  const limit = lim.limit;
   const beforeIdRaw = url.searchParams.get('before_id');
   const beforeId = beforeIdRaw ? parseInt(beforeIdRaw, 10) : undefined;
   if (!target) return respondJson(res, { error: 'target required' }, 400);
