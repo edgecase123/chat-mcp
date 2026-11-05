@@ -5,7 +5,7 @@ import { createServer, request as httpRequest, type Server } from 'node:http';
 import { AddressInfo } from 'node:net';
 import { migrate } from '../../../src/storage/db.js';
 import * as dao from '../../../src/storage/dao.js';
-import { route, type RouteContext } from '../../../src/cli/web/server.js';
+import { route, roomDeleteVerdict, type RouteContext } from '../../../src/cli/web/server.js';
 
 /**
  * 🛑 THESE ENDPOINTS DESTROY DATA. /api/kick deletes an agent and every room
@@ -262,6 +262,125 @@ test('a member can delete the room, and its messages go with it', async () => {
   assert.equal(dao.isRoomMember(h.db, '#ops', 'operator'), false);
   assert.equal(count(), 0);
   close(h);
+});
+
+// ── room ownership gates delete (#89) ────────────────────────────────────
+
+/**
+ * 🛑 EVERY REFUSAL HERE ASSERTS THE ROOM SURVIVED, per the note at the top of
+ * this file. A guard that answers 403 after deleting is still a 403.
+ *
+ * ⚠️ `joinRoom`'s FIRST joiner becomes `created_by`, so the fixtures below
+ * control ownership purely by join order. There is no setter.
+ *
+ * 🛑 `try/finally` ROUND EVERY ONE, UNLIKE THE TESTS ABOVE. `close(h)` as a
+ * trailing statement is skipped when an assertion throws, and the leaked
+ * listening server hangs `node --test` with no output at all rather than
+ * reporting the failure. Hit while writing this block.
+ */
+
+/** The error string a refusal carries. Read ONCE; a Response body is single-use. */
+async function errorOf(res: Response): Promise<string> {
+  return (await res.json() as { error?: string }).error ?? '<no error field>';
+}
+
+test('🛑 a member who does NOT own the room cannot delete it, and it survives', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#ops', 'peer-a');      // peer-a owns it
+    dao.joinRoom(h.db, '#ops', 'operator');    // the caller is a member, not the owner
+
+    const res = await post(h, '/api/rooms/delete', { room: '#ops' }, h.origin);
+
+    assert.equal(res.status, 403);
+    assert.match(await errorOf(res), /only peer-a can delete #ops/);
+    assert.equal(dao.roomOwner(h.db, '#ops'), 'peer-a', 'a non-owner member deleted the room');
+  } finally {
+    close(h);
+  }
+});
+
+test('the owner can delete their own room', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#ops', 'operator');    // operator owns it
+    dao.joinRoom(h.db, '#ops', 'peer-a');
+    assert.equal(dao.roomOwner(h.db, '#ops'), 'operator', 'fixture did not make the caller the owner');
+
+    const res = await post(h, '/api/rooms/delete', { room: '#ops' }, h.origin);
+
+    assert.equal(res.status, 200);
+    assert.equal(dao.roomOwner(h.db, '#ops'), undefined);
+  } finally {
+    close(h);
+  }
+});
+
+test('🛑 ONCE THE OWNER HAS LEFT, ANY MEMBER CAN DELETE — no room is ever locked', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#ops', 'peer-a');      // peer-a owns it
+    dao.joinRoom(h.db, '#ops', 'operator');
+    dao.leaveRoom(h.db, '#ops', 'peer-a');     // and walks out, leaving created_by behind
+    // Both are denominators: if either were false this test would pass for a
+    // reason that is not the one under test.
+    assert.equal(dao.roomOwner(h.db, '#ops'), 'peer-a', 'leaveRoom cleared created_by, so this case cannot arise');
+    assert.equal(dao.isRoomMember(h.db, '#ops', 'peer-a'), false, 'the owner is still a member, so nothing is being tested');
+
+    const res = await post(h, '/api/rooms/delete', { room: '#ops' }, h.origin);
+
+    assert.equal(res.status, 200, await errorOf(res));
+    assert.equal(dao.roomOwner(h.db, '#ops'), undefined);
+  } finally {
+    close(h);
+  }
+});
+
+test('a non-member is still refused BEFORE ownership is considered', async () => {
+  const h = await harness();
+  try {
+    dao.joinRoom(h.db, '#theirs', 'peer-a');
+
+    const res = await post(h, '/api/rooms/delete', { room: '#theirs' }, h.origin);
+
+    assert.equal(res.status, 403);
+    // The old message, not the ownership one: a stranger must not learn who
+    // owns a room they cannot see.
+    const err = await errorOf(res);
+    assert.match(err, /not a member/);
+    assert.doesNotMatch(err, /peer-a/, `the refusal leaked the owner: ${err}`);
+    assert.equal(dao.roomOwner(h.db, '#theirs'), 'peer-a');
+  } finally {
+    close(h);
+  }
+});
+
+// ── the verdict rule on its own ──────────────────────────────────────────
+
+const V = (caller: string, owner: string | undefined, callerIsMember: boolean, ownerIsMember: boolean) =>
+  roomDeleteVerdict({ caller, owner, callerIsMember, ownerIsMember });
+
+test('membership is checked before ownership, so a stranger never learns the owner', () => {
+  assert.equal(V('me', 'them', false, true), 'not-a-member');
+  assert.equal(V('me', 'them', false, false), 'not-a-member');
+  // Even owning it does not help once you have left.
+  assert.equal(V('me', 'me', false, false), 'not-a-member');
+});
+
+test('the owner is allowed, and a present non-owner is not', () => {
+  assert.equal(V('me', 'me', true, true), 'allow');
+  assert.equal(V('me', 'them', true, true), 'owner-only');
+});
+
+test('🛑 A DEPARTED OWNER FALLS BACK TO MEMBER-ONLY', () => {
+  // The lockout case. Without this branch the room is undeletable forever.
+  assert.equal(V('me', 'them', true, false), 'allow');
+});
+
+test('a room with no owner row cannot lock either', () => {
+  // `created_by` is NOT NULL, so undefined means the room does not exist and
+  // the 404 past this check is the right answer, not a 403.
+  assert.equal(V('me', undefined, true, false), 'allow');
 });
 
 // ── POST /api/messages/clear (#88) ───────────────────────────────────────

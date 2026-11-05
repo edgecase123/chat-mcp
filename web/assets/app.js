@@ -24,6 +24,7 @@ import {
   focusSearchKeyApplies,
   searchPlaceholder,
   searchAriaLabel,
+  roomMetaLabel,
   messageMarkdown,
   cheatSheet,
   commandBlock,
@@ -962,7 +963,7 @@ function renderPaneHeader() {
   if (state.currentTarget.startsWith('#')) {
     el.paneTitle.textContent = state.currentTarget;
     const room = state.rooms.find((r) => r.name === state.currentTarget);
-    el.paneMeta.textContent = room ? `${room.member_count ?? '?'} members` : '';
+    el.paneMeta.textContent = roomMetaLabel(room);
     // #92 — the style selector belongs to rooms only. A DM has no shared room
     // to carry one, and the empty state has no target at all.
     if (el.paneStyleWrap && el.paneStyle) {

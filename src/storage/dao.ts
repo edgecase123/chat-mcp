@@ -540,6 +540,22 @@ export function isRoomMember(db: Db, room: string, handle: string): boolean {
   return row !== undefined;
 }
 
+/**
+ * Who created the room, or `undefined` if it does not exist (#89).
+ *
+ * 🛑 THE OWNER MAY NOT BE A MEMBER. `leaveRoom` drops the `room_members` row
+ * and never touches this column, so a creator can walk out of their own room.
+ * Callers that gate on ownership must check membership separately — see
+ * `roomDeleteVerdict`, which is why an unconditional owner-only rule would
+ * lock such a room for everyone.
+ */
+export function roomOwner(db: Db, room: string): string | undefined {
+  const row = db.prepare(
+    `SELECT created_by FROM rooms WHERE name = ?`,
+  ).get(room) as unknown as { created_by: string } | undefined;
+  return row?.created_by;
+}
+
 /** Members of a room, in join order. Includes offline members. */
 export function roomMembers(db: Db, room: string): string[] {
   const rows = db.prepare(
