@@ -1074,6 +1074,50 @@ export function messageIdLabel(id) {
 }
 
 /**
+ * The next match to focus when the reader presses Enter in the filter.
+ *
+ * 🛑 WRAPS, AND THE FIRST PRESS GOES TO THE FIRST MATCH. Starting at -1 means
+ * `current + 1` is 0, so no special case is needed for "nothing focused yet".
+ *
+ * ⚠️ RETURNS -1 WHEN THERE IS NOTHING TO FOCUS, rather than 0. A caller that
+ * got 0 for an empty list would reveal a row that does not exist.
+ *
+ * @param {number} current  the focused index, or -1 for none
+ * @param {number} total    how many matches there are
+ * @param {1|-1} delta      forward on Enter, back on Shift-Enter
+ */
+export function nextMatchIndex(current, total, delta = 1) {
+  if (!Number.isFinite(total) || total <= 0) return -1;
+
+  const from = Number.isFinite(current) ? current : -1;
+
+  // 🛑 "NOTHING FOCUSED" IS NOT INDEX -1 FOR BOTH DIRECTIONS. Forward from
+  // nothing is the first match; BACK from nothing is the LAST, the way
+  // find-in-page behaves. Modular arithmetic alone gave index 1 of 3 here,
+  // which a test caught.
+  if (from < 0) return delta > 0 ? 0 : total - 1;
+
+  // `+ total` because -1 % n is -1 in JS, which would index off the front.
+  return (((from + delta) % total) + total) % total;
+}
+
+/**
+ * What the filter box reports about the focused match.
+ *
+ * 🛑 BOTH NUMBERS, ALWAYS. "3" alone does not say whether more follow, which
+ * is the whole question a reader pressing Enter is asking.
+ *
+ * @param {number} index  the focused index, or -1
+ * @param {number} total
+ */
+export function matchPositionLabel(index, total) {
+  if (total <= 0) return '';
+  if (index < 0) return `${total} match${total === 1 ? '' : 'es'}`;
+
+  return `${index + 1} of ${total}`;
+}
+
+/**
  * The fragment that links to one message (#104).
  *
  * 🛑 THE ID ALONE, NOT THE CONVERSATION TOO. Ids are globally unique and the

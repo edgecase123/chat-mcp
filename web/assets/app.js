@@ -34,12 +34,14 @@ import {
   gaugeDisplay,
   claimRow,
   claimsPanelEmpty,
+  matchPositionLabel,
   messageHash,
   messageIdFromHash,
   messageIdLabel,
   highlightSegments,
   jumpUrgency,
   messageMatchesSearch,
+  nextMatchIndex,
   nextUnreadSince,
   searchableText,
   searchFilterEmpty,
@@ -72,6 +74,7 @@ const state = {
   unreadBelow: 0,   // messages that arrived while the reader was scrolled up
   unreadSince: null, // when the OLDEST of them arrived (#121), ms, or null
   linkedId: null,    // the message a link sent us to (#104), marked until it expires
+  matchIndex: -1,    // which filter match Enter has walked to, -1 for none
   suggest: null,     // { items, index, kind, token } while the composer popover is open
   history: { entries: [], index: null, draft: null },
   // 🛑 NOT in `messages`. refresh() reassigns that wholesale on every wake,
@@ -698,8 +701,15 @@ function revealMessage(id) {
   // ⚠️ The earlier version of this comment cited a measurement that was
   // invalid: the "cold load" it described was a hash-only navigation, which
   // does not reload the document. The reason above holds by construction.
+  // 🛑 EXACTLY ONE ROW IS EVER MARKED. Walking the filter with Enter re-arms
+  // the timer each press, so without this the PREVIOUS row keeps its class and
+  // the reader sees three "current" matches instead of one. Measured: three
+  // presses left markedCount at 3.
+  for (const other of el.messages.querySelectorAll('li.is-linked')) {
+    other.classList.remove('is-linked');
+  }
+
   state.linkedId = id;
-  row.classList.remove('is-linked');
   void row.offsetWidth;
   row.classList.add('is-linked');
 
@@ -1445,6 +1455,10 @@ async function tryDispatchSlashCommand(input) {
 // #102 — filter and highlight the open conversation as the term is typed.
 el.paneSearch.addEventListener('input', () => {
   state.searchTerm = el.paneSearch.value;
+  // 🛑 A NEW TERM INVALIDATES THE WALK. "3 of 12" against a different term is
+  // a position in a list that no longer exists, and the next Enter would jump
+  // somewhere the reader never chose.
+  state.matchIndex = -1;
   // 🛑 NOT forceBottom. Filtering while scrolled up must not yank the reader
   // to the newest hit; the jump affordance already offers that.
   renderMessages();
@@ -1457,7 +1471,34 @@ el.paneSearch.addEventListener('keydown', (e) => {
   e.preventDefault();
   el.paneSearch.value = '';
   state.searchTerm = '';
+  state.matchIndex = -1;
   renderMessages();
+});
+
+/**
+ * Enter walks the filter's matches, Shift-Enter walks back.
+ *
+ * 🛑 FOCUS STAYS IN THE INPUT. Moving DOM focus to the row would take it off
+ * the box, and the reader's NEXT Enter would go nowhere — the same trap as a
+ * find-in-page field. The mark is the position indicator instead.
+ *
+ * ⚠️ WALKS `state.renderedIds`, which is what the filter actually produced,
+ * not a recount of the term. A second matcher here could disagree with the one
+ * that built the list, and then the count and the rows would differ.
+ */
+el.paneSearch.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+
+  const ids = state.renderedIds;
+
+  if (state.searchTerm.trim() === '' || ids.length === 0) return;
+
+  state.matchIndex = nextMatchIndex(state.matchIndex, ids.length, e.shiftKey ? -1 : 1);
+  const id = ids[state.matchIndex];
+
+  if (id !== undefined) revealMessage(id);
+  el.paneSearch.title = matchPositionLabel(state.matchIndex, ids.length);
 });
 
 el.composerInput.addEventListener('input', () => {

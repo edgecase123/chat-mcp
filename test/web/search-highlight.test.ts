@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 // @ts-expect-error — plain JS module, no types, same as the other logic tests.
-import { matchRanges, messageMatchesSearch, searchableText, searchFilterEmpty } from '../../web/assets/logic.js';
+import {
+  matchPositionLabel,
+  matchRanges,
+  messageMatchesSearch,
+  nextMatchIndex,
+  searchableText,
+  searchFilterEmpty,
+} from '../../web/assets/logic.js';
 
 /**
  * 🛑 HIGHLIGHTING IS WHERE A SEARCH FEATURE GETS DANGEROUS.
@@ -173,4 +180,70 @@ test('a real fragment or relative href is still appended', () => {
   // destinations and only the bare `#` is the dead one.
   assert.equal(searchableText('see the gate', ['#gate-section']), 'see the gate\n#gate-section');
   assert.equal(searchableText('see the gate', ['/rooms/gate']), 'see the gate\n/rooms/gate');
+});
+
+/**
+ * 🛑 ENTER CYCLES THROUGH THE MATCHES. The filter showed which rows matched
+ * and gave the reader no way to walk them, so a hit near the top of a long
+ * conversation still meant scrolling to find it.
+ */
+
+test('🛑 the FIRST press goes to the first match, with no special case', () => {
+  // Starting at -1 makes `current + 1` land on 0 for free.
+  assert.equal(nextMatchIndex(-1, 5), 0);
+});
+
+test('it walks forward and WRAPS at the end', () => {
+  assert.equal(nextMatchIndex(0, 3), 1);
+  assert.equal(nextMatchIndex(1, 3), 2);
+  assert.equal(nextMatchIndex(2, 3), 0, 'wraps to the top');
+});
+
+test('🛑 Shift-Enter walks BACK and wraps off the front', () => {
+  // -1 % n is -1 in JS, so the naive modulo indexes off the front of the list.
+  assert.equal(nextMatchIndex(2, 3, -1), 1);
+  assert.equal(nextMatchIndex(0, 3, -1), 2, 'wraps to the bottom');
+  assert.equal(nextMatchIndex(-1, 3, -1), 2, 'back from nothing is the last');
+});
+
+test('🛑 an empty match list yields -1, NEVER 0', () => {
+  // A caller handed 0 would try to reveal a row that does not exist.
+  assert.equal(nextMatchIndex(-1, 0), -1);
+  assert.equal(nextMatchIndex(0, 0), -1);
+  assert.equal(nextMatchIndex(5, 0, -1), -1);
+});
+
+test('⚠️ a non-finite count or index does not produce NaN', () => {
+  assert.equal(nextMatchIndex(-1, Number.NaN), -1);
+  assert.equal(nextMatchIndex(Number.NaN, 4), 0, 'an unknown position starts at the first');
+});
+
+test('a single match cycles to itself rather than to -1', () => {
+  assert.equal(nextMatchIndex(-1, 1), 0);
+  assert.equal(nextMatchIndex(0, 1), 0);
+  assert.equal(nextMatchIndex(0, 1, -1), 0);
+});
+
+test('🛑 the label carries BOTH numbers, because "3" does not say if more follow', () => {
+  assert.equal(matchPositionLabel(0, 12), '1 of 12');
+  assert.equal(matchPositionLabel(11, 12), '12 of 12');
+});
+
+test('before any Enter, the label is the total alone, pluralised', () => {
+  assert.equal(matchPositionLabel(-1, 12), '12 matches');
+  assert.equal(matchPositionLabel(-1, 1), '1 match');
+});
+
+test('no matches means no label at all, not "0 of 0"', () => {
+  assert.equal(matchPositionLabel(-1, 0), '');
+  assert.equal(matchPositionLabel(0, 0), '');
+});
+
+test('🛑 cycling N times through N matches returns to the start', () => {
+  // A control on the wraparound: an off-by-one in either direction breaks it.
+  const total = 7;
+  let i = -1;
+  for (let n = 0; n < total; n++) i = nextMatchIndex(i, total);
+  assert.equal(i, total - 1, 'N presses from -1 land on the last');
+  assert.equal(nextMatchIndex(i, total), 0, 'and the next wraps');
 });
