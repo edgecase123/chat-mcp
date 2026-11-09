@@ -83,9 +83,8 @@ they only read stdout and drive stdin of whatever process `spawn()` started.
    a restart is for. Graceful vs. immediate reuses #40's existing
    semantics: graceful lets the current turn finish, which is the same
    window an agent already uses to externalize state before a `/clear`
-   today. Whether this ships as `chat-mcp agents restart <handle>` or
-   folds into `--container`'s own crash/restart path is still open — see
-   below.
+   today. Ships as a new verb, `chat-mcp agents restart <handle>`, composed
+   from #40's stop plus a respawn — decided by lee, 2026-11-09.
 
 9. **Errors** — container exit reuses today's `onExit` path, no new state
    machine. A missing token fails fast at spawn with an error naming
@@ -113,9 +112,7 @@ they only read stdout and drive stdin of whatever process `spawn()` started.
 
 ## Open questions for lee
 
-1. `chat-mcp agents restart <handle>` as a new verb composed from #40's
-   stop, or fold restart-on-demand into `--container` itself with no
-   separate operator-facing command?
+None open.
 
 ## Checks
 
