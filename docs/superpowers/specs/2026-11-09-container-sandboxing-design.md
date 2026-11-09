@@ -32,18 +32,28 @@ they only read stdout and drive stdin of whatever process `spawn()` started.
 1. **Mount (code)** — reuse `dirsFor(handle)` from `src/supervise/projects.ts`.
    No new registration for the clone path.
 
-2. **Mount (extra state)** — generalize to a per-handle list of extra
-   read-write mounts, registered explicitly:
+2. **Mount (extra state)** — a per-handle list of extra read-write mounts,
+   keyed and registered explicitly:
 
    ```
-   chat-mcp mount add <handle> <host-dir>
+   chat-mcp mount add <handle> <key> <host-dir>
    ```
 
-   Two entries get registered per handle in practice: the `local-context`
-   base dir, and this handle's Claude Code memory dir
-   (`~/.claude/projects/<project-slug>/memory/`). Unregistered means not
-   mounted — externalized state silently does not survive a restart until
-   it is set. Fails explicit, same as `dirsFor`.
+   `<key>` is a free-form slug, not a fixed enum chat-mcp interprets —
+   chat-mcp only mounts the directory at a matching path in the container;
+   the key is a label the agent itself recognizes by convention (e.g.
+   `local-context`, `memory`). This keeps the mechanism generic: not every
+   user runs the `local-context` skill, so chat-mcp never hardcodes which
+   keys exist or what they mean.
+
+   Example: `chat-mcp mount add claude1 local-context ~/context`.
+
+   Two keys get registered per handle in practice today: `local-context`
+   (this session's base dir), and `memory` (this handle's Claude Code
+   memory dir, `~/.claude/projects/<project-slug>/memory/`). An
+   unregistered key is simply not mounted — externalized state under that
+   key silently does not survive a restart until it is set. Fails
+   explicit, same as `dirsFor`.
 
 3. **Auth** — one token, shared across all handles for now (expand to
    per-handle later if concurrent-session limits require it — unproven
