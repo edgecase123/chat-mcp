@@ -55,6 +55,18 @@ they only read stdout and drive stdin of whatever process `spawn()` started.
    key silently does not survive a restart until it is set. Fails
    explicit, same as `dirsFor`.
 
+   **Advertising mounts to the agent** — no SessionStart hook. On a fresh
+   (non-resumed) spawn, the supervisor prepends the registered keys and
+   their in-container paths to the first dispatch prompt, e.g. `"Mounted
+   directories: local-context -> /mnt/local-context, memory ->
+   /mnt/memory."` chat-mcp does not say what to do with a key — that is
+   the agent's own convention (its CLAUDE.md, its skills) to decide, the
+   same way the mount itself stays key-agnostic. Reuses the existing
+   per-driver dispatch-prompt mechanism (`claude-redispatch.ts`'s
+   pattern), not a new one. A hook would need to be baked correctly into
+   the container image and would fail silently if it weren't; a chat
+   message is the same channel every other turn already uses.
+
 3. **Auth** — one token, shared across all handles for now (expand to
    per-handle later if concurrent-session limits require it — unproven
    either way). Setup flow:
@@ -90,11 +102,18 @@ they only read stdout and drive stdin of whatever process `spawn()` started.
    it, via `--rm`), then `spawn()` a fresh one. No `docker exec`, ever.
    Code on the clone mount survives (bind mount); anything written only to
    the container's own ephemeral layer does not — that is the clean slate
-   a restart is for. Graceful vs. immediate reuses #40's existing
-   semantics: graceful lets the current turn finish, which is the same
-   window an agent already uses to externalize state before a `/clear`
-   today. Ships as a new verb, `chat-mcp agents restart <handle>`, composed
-   from #40's stop plus a respawn — decided by lee, 2026-11-09.
+   a restart is for. Ships as a new verb, `chat-mcp agents restart
+   <handle>`, composed from #40's stop plus a respawn — decided by lee,
+   2026-11-09.
+
+   **The agent must be told, not just given a turn.** "Let the current
+   turn finish" by itself gives no reason to externalize anything — the
+   agent does not know a restart is coming. Graceful mode sends a chat
+   message to the handle first: *"This container is restarting.
+   Externalize anything you need now — this is the last turn before
+   shutdown."* Then waits for that specific turn's `onTurnEnd`, then
+   kills, then respawns. `--now` skips the notice and kills immediately,
+   same as #40's existing immediate mode.
 
 9. **Errors** — container exit reuses today's `onExit` path, no new state
    machine. A missing token fails fast at spawn with an error naming
@@ -114,6 +133,9 @@ they only read stdout and drive stdin of whatever process `spawn()` started.
   Code's own convention, lands at the same relative path under the
   container's home — otherwise Claude Code inside the container computes a
   different project slug and writes memory nobody on the host can find.
+- A graceful restart's externalize-notice turn must not wait forever on a
+  hung agent — bound the wait, and fall back to an immediate kill on
+  timeout, same escape hatch `--now` already provides.
 
 ## What is NOT proven
 
