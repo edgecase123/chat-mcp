@@ -121,6 +121,13 @@ export interface SpawnOptions {
    * end.
    */
   readonly grant?: ChildGrant;
+
+  /**
+   * The SUPERVISOR's own handle, so a driver that needs per-handle state
+   * (registered mounts) can look it up. `grant.handle` is the CHILD's bus
+   * handle (`<handle>-agent`) and is the wrong key for that lookup.
+   */
+  readonly supervisorHandle?: string;
 }
 
 /** Split a byte stream into whole JSON lines. Partial lines are held back. */

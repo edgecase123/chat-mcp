@@ -1,5 +1,6 @@
 import type { AgentChild, SpawnOptions } from '../child.js';
 import { spawnClaude } from './claude.js';
+import { spawnDockerClaude } from './docker-claude.js';
 import { redispatchPrompt as claudeRedispatch, type RedispatchInput } from './claude-redispatch.js';
 
 /**
@@ -18,7 +19,7 @@ import { redispatchPrompt as claudeRedispatch, type RedispatchInput } from './cl
  * entry here. The queue, the gate, the socket, the allowlist and the
  * re-dispatch template are all untouched by it.
  */
-export type DriverName = 'claude';
+export type DriverName = 'claude' | 'docker-claude';
 
 export type SpawnFn = (opts: SpawnOptions) => AgentChild;
 
@@ -37,6 +38,7 @@ export interface Driver {
 
 const DRIVERS: Record<DriverName, Driver> = {
   claude: { spawn: spawnClaude, redispatchPrompt: claudeRedispatch },
+  'docker-claude': { spawn: spawnDockerClaude, redispatchPrompt: claudeRedispatch },
 };
 
 /** Every driver this build knows. */
