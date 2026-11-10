@@ -346,7 +346,44 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .option('--permission-prompts <target>', 'who answers prompts: host | none', 'none')
     .option('--no-reply', 'do NOT let the child answer on the bus — makes this supervisor a doorbell')
     .option('--allowed-tools <tools>', "comma-separated tool allowlist for the child (default: lee's narrow list)")
+    .option('--container', 'run the child inside a Docker container (#129)', false)
     .action(async (handle: string, o: Record<string, string>) => {
+      if (o.container) {
+        const { imageNeedsBuild, buildImage, isConfirmed, markConfirmed, describePlan } =
+          await import('./supervise/container.js');
+        const { readMounts } = await import('./supervise/mounts.js');
+        const { execSync } = await import('node:child_process');
+
+        if (imageNeedsBuild()) {
+          console.log('building the chat-mcp-agent image (Dockerfile changed or image missing)...');
+          execSync('npm run build', { stdio: 'inherit' });
+          buildImage();
+        }
+
+        if (!isConfirmed(handle)) {
+          const extra = Object.keys(readMounts().agents[handle] ?? {}).map(
+            (k) => `/mnt/${k}`,
+          );
+          console.log(
+            describePlan({
+              mountPaths: ['/work', '/root/.chat-mcp', ...extra],
+              envVarNames: ['CLAUDE_CODE_OAUTH_TOKEN'],
+              binary: 'claude',
+              networkMode: 'bridge (default, full outbound — narrowing is #134)',
+            }),
+          );
+          const { createInterface } = await import('node:readline/promises');
+          const rl = createInterface({ input: process.stdin, output: process.stdout });
+          const answer = await rl.question('Proceed? [y/N] ');
+          rl.close();
+          if (!/^y(es)?$/i.test(answer.trim())) {
+            console.log('aborted');
+            return;
+          }
+          markConfirmed(handle);
+        }
+      }
+
       const { startSupervisor } = await import('./supervise/index.js');
       const sup = await startSupervisor({
         handle,
@@ -364,6 +401,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         // commander turns --no-reply into reply:false and omits it otherwise.
         reply: (o as unknown as { reply?: boolean }).reply,
         allowedTools: typeof o.allowedTools === 'string' ? o.allowedTools.split(',') : undefined,
+        container: (o as unknown as { container?: boolean }).container,
       });
       const shutdown = (): void => {
         void sup.stop().then(() => process.exit(0));

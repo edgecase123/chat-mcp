@@ -65,6 +65,13 @@ export interface SupervisorOptions extends SpawnOptions {
    */
   readonly driver?: string;
 
+  /**
+   * Run this handle's child inside a container. Requires a token on file
+   * (`chat-mcp auth set-token`) and a confirmed plan
+   * (`chat-mcp supervise <handle> --container` prompts for this once).
+   */
+  readonly container?: boolean;
+
   /** Injected so the supervisor is testable without touching the real bus. */
   readonly db?: Parameters<typeof dao.insertApproval>[0];
 
@@ -147,6 +154,29 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const driver = driverFor(opts.driver ?? 'claude');
 
+  // 🛑 GATED ON THE DRIVER TOO, NOT JUST `opts.container`. Selecting
+  // `docker-claude` already means "run this in a container" — a caller who
+  // passes the driver without the flag still gets a container child, so
+  // checking `opts.container` alone would let that path skip the token and
+  // confirm checks the container driver requires.
+  if (opts.container || opts.driver === 'docker-claude') {
+    const { readToken } = await import('./auth.js');
+    const { isConfirmed } = await import('./container.js');
+
+    if (!readToken()) {
+      throw new Error(
+        'no Claude OAuth token on file; run `claude setup-token` on the host, then ' +
+          '`chat-mcp auth set-token <token>`',
+      );
+    }
+    if (!isConfirmed(opts.handle)) {
+      throw new Error(
+        `container plan for "${opts.handle}" is not confirmed; run ` +
+          `\`chat-mcp supervise ${opts.handle} --container\` interactively once first`,
+      );
+    }
+  }
+
   // 🛑 THROWS BEFORE ANYTHING SPAWNS. A child's cwd is reachable by
   // definition, so an unvalidated one is a containment hole that no
   // allowlist or directory list can close.
@@ -184,7 +214,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * changed the child's `--allowedTools`. The next attempt was denied again.
    * `grantedCommands` was written and never read.
    */
-  let child = spawnFn({ ...opts, cwd: childCwd, grant: initialGrant });
+  let child = spawnFn({ ...opts, cwd: childCwd, grant: initialGrant, supervisorHandle: opts.handle });
   let currentGrant = initialGrant;
   let currentModel = opts.model;
 
@@ -459,6 +489,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       // resuming works 3 of 3 with an explicit prompt, 0 of 2 with a vague
       // one, so the prompt below is as load-bearing as the flag.
       resumeSessionId: childSession ?? opts.resumeSessionId,
+      supervisorHandle: opts.handle,
     });
 
     wireChild();
