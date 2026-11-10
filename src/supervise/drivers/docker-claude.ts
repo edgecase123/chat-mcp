@@ -172,8 +172,8 @@ export function spawnDockerClaude(opts: SpawnOptions = {}): AgentChild {
     },
     kill(): void {
       // Terminates the `docker run` process itself. No `docker exec`, ever
-      // — decision 8. Container removal is `--rm`'s job, proved manually
-      // (Task 9 smoke test), not by this call.
+      // — decision 8. Container removal is `--rm`'s job, shown only by a
+      // manual run against real Docker, not by this call.
       child.kill();
     },
   };
