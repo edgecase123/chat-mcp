@@ -34,7 +34,7 @@ export { containerPathFor };
  * container — so the content just needs to point at paths that exist
  * INSIDE the container, not at this host process's own node binary.
  */
-function writeContainerMcpConfig(childHandle: string): string {
+export function writeContainerMcpConfig(childHandle: string): string {
   ensureMcpConfigDir();
   const hostPath = mcpConfigPathFor(childHandle);
   const config = {
