@@ -72,7 +72,8 @@ export interface VendorSpawn {
   readonly authEnvVar: string;    // 'CLAUDE_CODE_OAUTH_TOKEN'
 
   readonly argsFor: (opts: SpawnOptions, mode: SandboxMode) => string[];
-  readonly mcpConfigFor: (childHandle: string, mode: SandboxMode) => McpConfig;
+  /** The config path to point the CLI at, written first if the mode needs it. */
+  readonly mcpConfigFor: (grant: ChildGrant, mode: SandboxMode) => string;
   readonly routeEvent: EventRouter;
   readonly encodeInput: (text: string) => string;
   readonly redispatchPrompt: (input: RedispatchInput) => string;

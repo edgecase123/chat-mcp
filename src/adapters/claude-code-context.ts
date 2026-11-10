@@ -288,6 +288,7 @@ async function uninstall(opts: AdapterInstallOptions): Promise<AdapterResult> {
 
 export const claudeCodeContextAdapter: Adapter = {
   name: ADAPTER_NAME,
+  vendor: 'claude',
   description: 'Claude Code — PreToolUse hook that reports context-window usage',
   scopes: SCOPES,
   defaultScope: 'local',

@@ -289,6 +289,7 @@ async function uninstall(opts: AdapterInstallOptions): Promise<AdapterResult> {
 
 export const claudeCodeAdapter: Adapter = {
   name: ADAPTER_NAME,
+  vendor: 'claude',
   description: 'Claude Code — SessionStart hook that primes the wake watch',
   scopes: SCOPES,
   defaultScope: 'local',

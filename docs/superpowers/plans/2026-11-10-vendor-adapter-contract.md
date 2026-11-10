@@ -200,11 +200,15 @@ export interface Adapter {
 Add these imports at the top of the same file:
 
 ```ts
-import type { ChildGrant, SpawnOptions } from '../supervise/child.js';
+import type { SpawnOptions } from '../supervise/child.js';
+import type { ChildGrant } from '../supervise/grant.js';
 import type { Denial } from '../supervise/denial.js';
 import type { RateLimitSnapshot } from '../supervise/rate-limit.js';
 import type { RedispatchInput } from '../supervise/drivers/claude-redispatch.js';
 ```
+
+⚠️ `ChildGrant` is exported from `supervise/grant.ts`, NOT from
+`supervise/child.ts`. `child.ts` only re-imports it.
 
 Then add `vendor: 'claude',` to the adapter object at the bottom of
 `src/adapters/claude-code.ts` and of `src/adapters/claude-code-context.ts`.
