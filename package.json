@@ -10,6 +10,7 @@
   "files": [
     "dist",
     "web",
+    "Dockerfile",
     "README.md",
     "DESIGN.md",
     "LICENSE"
