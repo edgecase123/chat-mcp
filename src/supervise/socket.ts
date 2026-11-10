@@ -58,6 +58,18 @@ export interface ApprovalAnswer {
   readonly sessionId: string | null;
 }
 
+/**
+ * An out-of-band restart command for a running child.
+ *
+ * `graceful` tells the child to externalize state in its current turn, then
+ * waits for that turn to end before killing and respawning. `now` kills and
+ * respawns immediately, no notice.
+ */
+export interface RestartControl {
+  readonly kind: 'restart';
+  readonly mode: 'graceful' | 'now';
+}
+
 export interface WakeEnvelope {
   readonly id: number;
   readonly to: string;
@@ -75,6 +87,9 @@ export interface WakeEnvelope {
    * agent as a sentence and the re-dispatch template never runs.
    */
   readonly approval?: ApprovalAnswer;
+
+  /** An out-of-band control command, e.g. a CLI-initiated restart. Absent for a chat wake or an approval. */
+  readonly control?: RestartControl;
 }
 
 export interface WakeAck {

@@ -65,6 +65,13 @@ export interface SupervisorOptions extends SpawnOptions {
    */
   readonly driver?: string;
 
+  /**
+   * Run this handle's child inside a container. Requires a token on file
+   * (`chat-mcp auth set-token`) and a confirmed plan
+   * (`chat-mcp supervise <handle> --container` prompts for this once).
+   */
+  readonly container?: boolean;
+
   /** Injected so the supervisor is testable without touching the real bus. */
   readonly db?: Parameters<typeof dao.insertApproval>[0];
 
@@ -147,6 +154,33 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const driver = driverFor(opts.driver ?? 'claude');
 
+  // 🛑 GATED ON THE DRIVER TOO, NOT JUST `opts.container`. Selecting
+  // `docker-claude` already means "run this in a container" — a caller who
+  // passes the driver without the flag still gets a container child, so
+  // checking `opts.container` alone would let that path skip the token and
+  // confirm checks the container driver requires. Every other container-only
+  // decision in this function (mount banner included) must share this same
+  // predicate rather than re-deriving it.
+  const isContainerSpawn = Boolean(opts.container) || opts.driver === 'docker-claude';
+
+  if (isContainerSpawn) {
+    const { readToken } = await import('./auth.js');
+    const { isConfirmed } = await import('./container.js');
+
+    if (!readToken()) {
+      throw new Error(
+        'no Claude OAuth token on file; run `claude setup-token` on the host, then ' +
+          '`chat-mcp auth set-token <token>`',
+      );
+    }
+    if (!isConfirmed(opts.handle)) {
+      throw new Error(
+        `container plan for "${opts.handle}" is not confirmed; run ` +
+          `\`chat-mcp supervise ${opts.handle} --container\` interactively once first`,
+      );
+    }
+  }
+
   // 🛑 THROWS BEFORE ANYTHING SPAWNS. A child's cwd is reachable by
   // definition, so an unvalidated one is a containment hole that no
   // allowlist or directory list can close.
@@ -157,6 +191,22 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   // one clone per agent — claude1 in ~/dev/leagues, claude2 in ~/dev/leagues2
   // — so the mapping is explicit. lee, 2026-10-31.
   const dirs = opts.extraDirs ?? dirsFor(opts.handle);
+
+  const { mountsFor, containerPathFor } = await import('./mounts.js');
+
+  let needsMountBanner = isContainerSpawn && !opts.resumeSessionId;
+
+  const mountBannerPrefix = (): string => {
+    if (!needsMountBanner) return '';
+    needsMountBanner = false;
+
+    const entries = Object.entries(mountsFor(opts.handle)).map(
+      ([key]) => `${key} -> ${containerPathFor(key)}`,
+    );
+
+    return entries.length === 0 ? '' : `Mounted directories: ${entries.join(', ')}.\n\n`;
+  };
+
   const childCwd = resolveCwd(opts.cwd, dirs);
   // Injected in tests; the real one is the shared bus database the web UI
   // already reads.
@@ -184,7 +234,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * changed the child's `--allowedTools`. The next attempt was denied again.
    * `grantedCommands` was written and never read.
    */
-  let child = spawnFn({ ...opts, cwd: childCwd, grant: initialGrant });
+  let child = spawnFn({ ...opts, cwd: childCwd, grant: initialGrant, supervisorHandle: opts.handle });
   let currentGrant = initialGrant;
   let currentModel = opts.model;
 
@@ -211,10 +261,31 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   /** Observers of the child finishing a turn. See `Supervisor.onTurnEnd`. */
   const turnEndListeners: (() => void)[] = [];
 
+  /**
+   * Observers of a prompt actually being WRITTEN to the child — distinct
+   * from `queue.offer()` being CALLED, which merely queues it when a turn is
+   * already in flight. A graceful restart must know when its notice was
+   * truly dispatched, not when it was merely offered: offering it just
+   * marks it pending, and the turn-end that later flushes it into dispatch
+   * is itself an observer-notified event, so "offered" and "sent" can be
+   * ticks apart.
+   */
+  const sendListeners: ((prompt: { text: string; messageIds: readonly number[] }) => void)[] = [];
+
+  /**
+   * Counts each onTurnEnd invocation, incremented BEFORE `queue.turnEnded()`
+   * runs. A prompt dispatched from inside one turn-end call (because it was
+   * queued behind an in-flight turn) and the turn-end that completes that
+   * SAME prompt's own turn are two different calls one count apart — this
+   * is how a graceful restart tells them apart. See `restartChild`.
+   */
+  let turnEndCount = 0;
+
   const queue = new TurnQueue({
     send: (prompt) => {
       log(`→ child: ${prompt.text.slice(0, 80).replace(/\n/g, ' ')}`);
       child.send(prompt.text);
+      for (const cb of sendListeners) cb(prompt);
     },
   });
 
@@ -308,6 +379,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
     child.onTurnEnd(
       ifCurrent('onTurnEnd', () => {
+        turnEndCount++;
         queue.turnEnded();
         log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
 
@@ -459,6 +531,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       // resuming works 3 of 3 with an explicit prompt, 0 of 2 with a vague
       // one, so the prompt below is as load-bearing as the flag.
       resumeSessionId: childSession ?? opts.resumeSessionId,
+      supervisorHandle: opts.handle,
     });
 
     wireChild();
@@ -517,7 +590,93 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     );
   };
 
+  /**
+   * A deliberate clean slate, not a resume: `resumeSessionId` is dropped so
+   * the respawned child starts a brand-new session.
+   */
+  const RESTART_NOTICE =
+    'This container is restarting. Externalize anything you need now — ' +
+    'this is the last turn before shutdown.';
+  const GRACEFUL_RESTART_TIMEOUT_MS = 30_000;
+
+  const doRestart = (): void => {
+    const unsent = queue.drain();
+    log(`restarting child (${unsent.length} prompt(s) carried over)`);
+    child.kill();
+    childSession = null;
+    needsMountBanner = isContainerSpawn;
+
+    child = spawnFn({
+      ...opts,
+      cwd: childCwd,
+      grant: currentGrant,
+      model: currentModel,
+      supervisorHandle: opts.handle,
+      resumeSessionId: undefined,
+    });
+
+    wireChild();
+    for (const p of unsent) queue.offer(p);
+  };
+
+  const restartChild = (mode: 'graceful' | 'now'): void => {
+    if (mode === 'now') {
+      doRestart();
+      return;
+    }
+
+    let noticeDispatchedAtCount: number | null = null;
+    let settled = false;
+
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      const turnIdx = turnEndListeners.indexOf(onAnyTurnEnd);
+      if (turnIdx >= 0) turnEndListeners.splice(turnIdx, 1);
+      const sendIdx = sendListeners.indexOf(onSend);
+      if (sendIdx >= 0) sendListeners.splice(sendIdx, 1);
+    };
+
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      doRestart();
+    };
+
+    const timer = setTimeout(finish, GRACEFUL_RESTART_TIMEOUT_MS);
+
+    // 🛑 "DISPATCHED" ≠ "ITS OWN TURN ENDED". If the notice was queued behind
+    // an in-flight turn, the turn-end that flushes it into dispatch and the
+    // turn-end that completes its own turn are the SAME callback, called
+    // once per turn — but two SEPARATE invocations, one count apart. Firing
+    // on the first (dispatch) one kills the child the instant it receives
+    // the notice, before it can act on it (chat-mcp review, Task 8).
+    const onAnyTurnEnd = (): void => {
+      if (noticeDispatchedAtCount === null) return;
+      if (turnEndCount <= noticeDispatchedAtCount) return;
+      finish();
+    };
+
+    const onSend = (prompt: { text: string; messageIds: readonly number[] }): void => {
+      if (prompt.text !== RESTART_NOTICE || noticeDispatchedAtCount !== null) return;
+      noticeDispatchedAtCount = turnEndCount;
+    };
+
+    turnEndListeners.push(onAnyTurnEnd);
+    sendListeners.push(onSend);
+
+    queue.offer({ text: RESTART_NOTICE, messageIds: [] });
+  };
+
   const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
+    // A restart command is out-of-band, not a chat message or an approval,
+    // and must run before either of those checks.
+    if (envelope.control?.kind === 'restart') {
+      restartChild(envelope.control.mode);
+
+      return { ok: true, queued: 'sent' };
+    }
+
     // An answer is not a chat message and must not be rendered as one.
     // 🛑 AN ANSWER REPLACES THE CHILD AND QUEUES ITS OWN PROMPT, so there is
     // nothing left for this path to send. Routing it on would deliver the
@@ -529,7 +688,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     }
 
     const prompt = {
-      text: formatPrompt(envelope),
+      text: `${mountBannerPrefix()}${formatPrompt(envelope)}`,
       messageIds: envelope.id > 0 ? [envelope.id] : [],
     };
 

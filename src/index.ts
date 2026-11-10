@@ -254,11 +254,116 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     });
 
   program
+    .command('mount <action> [handle] [key] [dir]')
+    .description('Register an extra mount for a containerized agent: add | list')
+    .action(async (action: string, handle?: string, key?: string, dir?: string) => {
+      const { registerMount, readMounts } = await import('./supervise/mounts.js');
+
+      if (action === 'list') {
+        const { agents } = readMounts();
+        const names = handle ? [handle] : Object.keys(agents);
+
+        if (names.length === 0) {
+          console.log('no mounts registered');
+          return;
+        }
+
+        for (const name of names) {
+          const entries = Object.entries(agents[name] ?? {});
+          console.log(
+            entries.length === 0
+              ? `${name}  (no mounts)`
+              : `${name}  ${entries.map(([k, v]) => `${k}=${v}`).join('  ')}`,
+          );
+        }
+        return;
+      }
+
+      if (action === 'add') {
+        if (!handle || !key || !dir) {
+          console.error('Error: chat-mcp mount add <handle> <key> <dir>');
+          process.exit(1);
+        }
+        try {
+          const mounts = registerMount(handle, key, dir);
+          console.log(
+            `${handle}  ${Object.entries(mounts).map(([k, v]) => `${k}=${v}`).join('  ')}`,
+          );
+        } catch (err) {
+          console.error(`chat-mcp: ${err instanceof Error ? err.message : String(err)}`);
+          process.exit(1);
+        }
+        return;
+      }
+
+      console.error(`Error: unknown action "${action}". Use add | list.`);
+      process.exit(1);
+    });
+
+  program
+    .command('auth <action> [token]')
+    .description('Manage the shared Claude OAuth token for containerized agents: set-token')
+    .action(async (action: string, token?: string) => {
+      const { setToken } = await import('./supervise/auth.js');
+
+      if (action === 'set-token') {
+        if (!token) {
+          console.error('Error: chat-mcp auth set-token <token>');
+          process.exit(1);
+        }
+        try {
+          setToken(token);
+          console.log('token stored (chmod 600)');
+        } catch (err) {
+          console.error(`chat-mcp: ${err instanceof Error ? err.message : String(err)}`);
+          process.exit(1);
+        }
+        return;
+      }
+
+      console.error(`Error: unknown action "${action}". Use set-token.`);
+      process.exit(1);
+    });
+
+  program
+    .command('agents <action> <handle>')
+    .description('Control a running supervisor: restart')
+    .option('--now', 'skip the graceful notice and kill immediately', false)
+    .action(async (action: string, handle: string, o: { now?: boolean }) => {
+      if (action !== 'restart') {
+        console.error(`Error: unknown action "${action}". Use restart.`);
+        process.exit(1);
+      }
+
+      const { deliverToSupervisor } = await import('./supervise/socket.js');
+      const ack = await deliverToSupervisor(handle, {
+        id: 0,
+        to: handle,
+        from: 'cli',
+        ts: Date.now(),
+        control: { kind: 'restart', mode: o.now ? 'now' : 'graceful' },
+      });
+
+      if (!ack) {
+        console.error(`no supervisor is listening for "${handle}"`);
+        process.exit(1);
+      }
+
+      console.log(`restart accepted for ${handle}`);
+    });
+
+  program
     .command('supervise <handle>')
     .description('Run a supervisor that owns the agent CLI and feeds it arriving messages (chat-mcp#33)')
     .option('--model <model>', 'model for the supervised child')
     .option('--binary <path>', 'path to the agent CLI', 'claude')
-    .option('--driver <name>', 'which agent CLI to drive', 'claude')
+    // 🛑 NO DEFAULT HERE. `--container` must be able to tell "the caller
+    // never named a driver" from "the caller explicitly asked for the host
+    // driver" — a static default of 'claude' erases that distinction, so
+    // `--container` alone would silently spawn on the HOST while showing
+    // the container confirm banner. Found running the #129 Task 9 smoke
+    // test: `--container` with no `--driver` produced an empty `docker ps`.
+    .option('--driver <name>', 'which agent CLI to drive (default: docker-claude with --container, else claude)')
     .option('--cwd <dir>', 'working directory for the child')
     .option('--resume <sessionId>', 'resume an existing session')
     .option(
@@ -274,13 +379,50 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .option('--permission-prompts <target>', 'who answers prompts: host | none', 'none')
     .option('--no-reply', 'do NOT let the child answer on the bus — makes this supervisor a doorbell')
     .option('--allowed-tools <tools>', "comma-separated tool allowlist for the child (default: lee's narrow list)")
+    .option('--container', 'run the child inside a Docker container (#129)', false)
     .action(async (handle: string, o: Record<string, string>) => {
+      if (o.container) {
+        const { imageNeedsBuild, buildImage, isConfirmed, markConfirmed, describePlan } =
+          await import('./supervise/container.js');
+        const { readMounts } = await import('./supervise/mounts.js');
+        const { execSync } = await import('node:child_process');
+
+        if (imageNeedsBuild()) {
+          console.log('building the chat-mcp-agent image (Dockerfile changed or image missing)...');
+          execSync('npm run build', { stdio: 'inherit' });
+          buildImage();
+        }
+
+        if (!isConfirmed(handle)) {
+          const extra = Object.keys(readMounts().agents[handle] ?? {}).map(
+            (k) => `/mnt/${k}`,
+          );
+          console.log(
+            describePlan({
+              mountPaths: ['/work', '/root/.chat-mcp', ...extra],
+              envVarNames: ['CLAUDE_CODE_OAUTH_TOKEN'],
+              binary: 'claude',
+              networkMode: 'bridge (default, full outbound — narrowing is #134)',
+            }),
+          );
+          const { createInterface } = await import('node:readline/promises');
+          const rl = createInterface({ input: process.stdin, output: process.stdout });
+          const answer = await rl.question('Proceed? [y/N] ');
+          rl.close();
+          if (!/^y(es)?$/i.test(answer.trim())) {
+            console.log('aborted');
+            return;
+          }
+          markConfirmed(handle);
+        }
+      }
+
       const { startSupervisor } = await import('./supervise/index.js');
       const sup = await startSupervisor({
         handle,
         model: o.model,
         binary: o.binary,
-        driver: o.driver,
+        driver: o.driver ?? (o.container ? 'docker-claude' : 'claude'),
         cwd: o.cwd,
         resumeSessionId: o.resume,
         // 🛑 EXPLICIT --permission-mode STILL WINS. `--auto` is a shorthand,
@@ -292,6 +434,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         // commander turns --no-reply into reply:false and omits it otherwise.
         reply: (o as unknown as { reply?: boolean }).reply,
         allowedTools: typeof o.allowedTools === 'string' ? o.allowedTools.split(',') : undefined,
+        container: (o as unknown as { container?: boolean }).container,
       });
       const shutdown = (): void => {
         void sup.stop().then(() => process.exit(0));
