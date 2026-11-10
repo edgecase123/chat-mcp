@@ -14,16 +14,17 @@ const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
 const DIRS = [process.cwd()];
 
 interface FakeChild {
+  readonly opts: { resumeSessionId?: string };
   sent: string[];
   killed: boolean;
   finishTurn: () => void;
 }
 
 function recordingChild(children: FakeChild[]) {
-  return () => {
+  return (opts: { resumeSessionId?: string }) => {
     const sent: string[] = [];
     let endTurn: (() => void) | undefined;
-    const rec: FakeChild = { sent, killed: false, finishTurn: () => endTurn?.() };
+    const rec: FakeChild = { opts, sent, killed: false, finishTurn: () => endTurn?.() };
     children.push(rec);
 
     return {
@@ -110,6 +111,52 @@ test('graceful restart sends the externalize notice and waits for its reply befo
   }
 });
 
+test('graceful restart requested mid-turn is NOT killed on the in-flight turn\'s own end', async () => {
+  // 🛑 THE REGRESSION THIS GUARDS. A notice queued behind an in-flight turn
+  // is dispatched BY the turn-end that flushes the queue — that same
+  // turn-end event must not be mistaken for the notice's OWN reply, or the
+  // child is killed the instant it receives the notice, with no turn to act
+  // on it. Found by code review on the first implementation of this file.
+  const children: FakeChild[] = [];
+  const handle = `restart-${process.pid}-midturn`;
+  const sup = await supervisorFor(handle, children);
+
+  try {
+    await deliverToSupervisor(handle, { id: 1, to: handle, from: 'lee', ts: Date.now(), body: 'already-in-flight' });
+    assert.equal(children[0]?.sent.length, 1, 'the in-flight turn must have started');
+
+    const ackPromise = deliverToSupervisor(handle, {
+      id: 2,
+      to: handle,
+      from: 'cli',
+      ts: Date.now(),
+      control: { kind: 'restart', mode: 'graceful' },
+    });
+    await ackPromise;
+
+    // The notice is only QUEUED while the prior turn is still open — not
+    // dispatched yet, so no second `send` has happened.
+    assert.equal(children[0]?.sent.length, 1, 'the notice must not jump the queue');
+
+    // Ending the IN-FLIGHT turn flushes the notice into dispatch. This is
+    // the turn-end the bug fired on incorrectly.
+    children[0]?.finishTurn();
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.equal(children[0]?.sent.length, 2, 'the notice should now have been dispatched');
+    assert.equal(children[0]?.killed, false, 'must not be killed on the SAME turn-end that dispatched the notice');
+
+    // Ending the notice's OWN turn is the actual reply.
+    children[0]?.finishTurn();
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.equal(children[0]?.killed, true, 'must be killed once the notice turn itself ends');
+    assert.equal(children.length, 2, 'no replacement child was spawned');
+  } finally {
+    await sup.stop();
+  }
+});
+
 test('a restarted child does NOT resume the old session — that is the clean slate', async () => {
   const children: FakeChild[] = [];
   const handle = `restart-${process.pid}-clean`;
@@ -124,9 +171,8 @@ test('a restarted child does NOT resume the old session — that is the clean sl
       control: { kind: 'restart', mode: 'now' },
     });
 
-    await deliverToSupervisor(handle, { id: 4, to: handle, from: 'lee', ts: Date.now(), body: 'hi' });
-
     assert.equal(children.length, 2);
+    assert.equal(children[1]?.opts.resumeSessionId, undefined, 'the replacement must not resume the old session');
   } finally {
     await sup.stop();
   }

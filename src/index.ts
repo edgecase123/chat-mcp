@@ -349,7 +349,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         process.exit(1);
       }
 
-      console.log(`restart ${ack.ok ? 'accepted' : 'refused'} for ${handle}`);
+      console.log(`restart accepted for ${handle}`);
     });
 
   program

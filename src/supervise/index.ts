@@ -261,10 +261,31 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   /** Observers of the child finishing a turn. See `Supervisor.onTurnEnd`. */
   const turnEndListeners: (() => void)[] = [];
 
+  /**
+   * Observers of a prompt actually being WRITTEN to the child — distinct
+   * from `queue.offer()` being CALLED, which merely queues it when a turn is
+   * already in flight. A graceful restart must know when its notice was
+   * truly dispatched, not when it was merely offered: offering it just
+   * marks it pending, and the turn-end that later flushes it into dispatch
+   * is itself an observer-notified event, so "offered" and "sent" can be
+   * ticks apart.
+   */
+  const sendListeners: ((prompt: { text: string; messageIds: readonly number[] }) => void)[] = [];
+
+  /**
+   * Counts each onTurnEnd invocation, incremented BEFORE `queue.turnEnded()`
+   * runs. A prompt dispatched from inside one turn-end call (because it was
+   * queued behind an in-flight turn) and the turn-end that completes that
+   * SAME prompt's own turn are two different calls one count apart — this
+   * is how a graceful restart tells them apart. See `restartChild`.
+   */
+  let turnEndCount = 0;
+
   const queue = new TurnQueue({
     send: (prompt) => {
       log(`→ child: ${prompt.text.slice(0, 80).replace(/\n/g, ' ')}`);
       child.send(prompt.text);
+      for (const cb of sendListeners) cb(prompt);
     },
   });
 
@@ -358,6 +379,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
     child.onTurnEnd(
       ifCurrent('onTurnEnd', () => {
+        turnEndCount++;
         queue.turnEnded();
         log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
 
@@ -603,32 +625,45 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       return;
     }
 
-    let awaitingNoticeReply = false;
+    let noticeDispatchedAtCount: number | null = null;
     let settled = false;
+
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      const turnIdx = turnEndListeners.indexOf(onAnyTurnEnd);
+      if (turnIdx >= 0) turnEndListeners.splice(turnIdx, 1);
+      const sendIdx = sendListeners.indexOf(onSend);
+      if (sendIdx >= 0) sendListeners.splice(sendIdx, 1);
+    };
 
     const finish = (): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      const idx = turnEndListeners.indexOf(onAnyTurnEnd);
-      if (idx >= 0) turnEndListeners.splice(idx, 1);
+      cleanup();
       doRestart();
     };
 
     const timer = setTimeout(finish, GRACEFUL_RESTART_TIMEOUT_MS);
 
+    // 🛑 "DISPATCHED" ≠ "ITS OWN TURN ENDED". If the notice was queued behind
+    // an in-flight turn, the turn-end that flushes it into dispatch and the
+    // turn-end that completes its own turn are the SAME callback, called
+    // once per turn — but two SEPARATE invocations, one count apart. Firing
+    // on the first (dispatch) one kills the child the instant it receives
+    // the notice, before it can act on it (chat-mcp review, Task 8).
     const onAnyTurnEnd = (): void => {
-      if (!awaitingNoticeReply) return;
+      if (noticeDispatchedAtCount === null) return;
+      if (turnEndCount <= noticeDispatchedAtCount) return;
       finish();
     };
 
-    turnEndListeners.push(onAnyTurnEnd);
+    const onSend = (prompt: { text: string; messageIds: readonly number[] }): void => {
+      if (prompt.text !== RESTART_NOTICE || noticeDispatchedAtCount !== null) return;
+      noticeDispatchedAtCount = turnEndCount;
+    };
 
-    const originalSend = queue.offer.bind(queue);
-    queue.offer = ((prompt: { text: string; messageIds: number[] }) => {
-      if (prompt.text === RESTART_NOTICE) awaitingNoticeReply = true;
-      return originalSend(prompt);
-    }) as typeof queue.offer;
+    turnEndListeners.push(onAnyTurnEnd);
+    sendListeners.push(onSend);
 
     queue.offer({ text: RESTART_NOTICE, messageIds: [] });
   };
