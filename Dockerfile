@@ -8,6 +8,15 @@ RUN apt-get update \
 
 RUN npm install -g @anthropic-ai/claude-code
 
+# 🛑 NON-ROOT, NOT OPTIONAL. `claude --allow-dangerously-skip-permissions`
+# refuses to run as root/sudo — confirmed by actually running the image
+# (#129 Task 9 smoke test; exit 1, "cannot be used with root/sudo
+# privileges"). HOME stays /root (not /home/agent) so CONTAINER_STATE_DIR
+# in docker-claude.ts keeps resolving to /root/.chat-mcp with no code
+# change — chown it to the new user instead of relocating it.
+RUN useradd --create-home --uid 10001 agent \
+  && chown -R agent:agent /root
+
 WORKDIR /opt/chat-mcp
 COPY package.json package-lock.json ./
 # 🛑 --ignore-scripts, NOT JUST --omit=dev. `npm ci` always fires the
@@ -19,3 +28,7 @@ RUN npm ci --omit=dev --ignore-scripts
 # Prebuilt on the HOST before `docker build` runs — see container.ts's
 # buildImage(), which runs `npm run build` first. This image never runs tsc.
 COPY dist ./dist
+RUN chown -R agent:agent /opt/chat-mcp
+
+ENV HOME=/root
+USER agent

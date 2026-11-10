@@ -357,7 +357,13 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .description('Run a supervisor that owns the agent CLI and feeds it arriving messages (chat-mcp#33)')
     .option('--model <model>', 'model for the supervised child')
     .option('--binary <path>', 'path to the agent CLI', 'claude')
-    .option('--driver <name>', 'which agent CLI to drive', 'claude')
+    // 🛑 NO DEFAULT HERE. `--container` must be able to tell "the caller
+    // never named a driver" from "the caller explicitly asked for the host
+    // driver" — a static default of 'claude' erases that distinction, so
+    // `--container` alone would silently spawn on the HOST while showing
+    // the container confirm banner. Found running the #129 Task 9 smoke
+    // test: `--container` with no `--driver` produced an empty `docker ps`.
+    .option('--driver <name>', 'which agent CLI to drive (default: docker-claude with --container, else claude)')
     .option('--cwd <dir>', 'working directory for the child')
     .option('--resume <sessionId>', 'resume an existing session')
     .option(
@@ -416,7 +422,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         handle,
         model: o.model,
         binary: o.binary,
-        driver: o.driver,
+        driver: o.driver ?? (o.container ? 'docker-claude' : 'claude'),
         cwd: o.cwd,
         resumeSessionId: o.resume,
         // 🛑 EXPLICIT --permission-mode STILL WINS. `--auto` is a shorthand,
