@@ -60,7 +60,8 @@ the spec in the same commit so the two documents cannot drift.
 
 | File | Responsibility |
 |---|---|
-| `src/adapters/types.ts` | `Adapter`, `VendorSpawn`, `SandboxMode`, `EventRouter`. Types only. |
+| `src/supervise/vendor.ts` | NEW. `VendorSpawn`, `SandboxMode`, `EventRouter`. **In the supervise layer, not beside `Adapter`** — see the layering rule below. |
+| `src/adapters/types.ts` | `Adapter` only, importing `VendorSpawn` from `supervise/vendor.ts`. |
 | `src/adapters/claude-spawn.ts` | NEW. The `VendorSpawn` for Claude Code. The only place Claude's flags live. |
 | `src/adapters/index.ts` | registry plus `spawnFor(vendor)` and `vendorsWithSpawn()` |
 | `src/supervise/drivers/wiring.ts` | NEW. The child wiring both drivers duplicate today. |
@@ -69,6 +70,22 @@ the spec in the same commit so the two documents cannot drift.
 | `src/supervise/drivers/index.ts` | alias resolution: driver name to (vendor, mode) |
 | `src/supervise/drivers/claude.ts` | keeps `claudeArgs`, `writeClaudeMcpConfig`, `routeClaudeEvent`. Loses `spawnClaude`. |
 | `src/supervise/drivers/docker-claude.ts` | DELETED in PR 3. Its container-path constants move to `containerized.ts`. |
+
+### 🛑 The layering rule, and why it is not obvious
+
+**`adapters/` imports from `supervise/`. Never the reverse.**
+
+`VendorSpawn` reads as if it belongs beside `Adapter`, and an earlier draft of
+this plan put it there. That is wrong, and the cost is invisible until PR 2:
+`wiring.ts` needs `EventRouter`, so it would import `adapters/types.js`, which
+reverses one edge and closes a cycle.
+
+A grep of the tree before PR 2 cannot find that cycle, because the file that
+closes it does not exist yet. `test/adapters/spawn-contract.test.ts` holds the
+guard — it walks `src/supervise/**` and fails on any `from '…adapters/…'`.
+Proved by injecting one such import and watching it fail.
+
+So every spawner below imports from `../vendor.js`, not from `adapters/`.
 
 ---
 
@@ -675,7 +692,7 @@ import type { AgentChild } from '../child.js';
 import { createLineParser } from '../child.js';
 import type { RateLimitSnapshot } from '../rate-limit.js';
 import type { Denial } from '../denial.js';
-import type { EventRouter } from '../../adapters/types.js';
+import type { EventRouter } from '../vendor.js';
 
 /**
  * Turn a spawned process into an `AgentChild`.
@@ -948,7 +965,7 @@ Refs #131"
 ```ts
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentChild, SpawnOptions } from '../child.js';
-import type { VendorSpawn } from '../../adapters/types.js';
+import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
 
 /** Spawn a vendor's CLI as a bare host process. */
@@ -972,7 +989,7 @@ directory are unchanged.
 ```ts
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentChild, SpawnOptions } from '../child.js';
-import type { VendorSpawn } from '../../adapters/types.js';
+import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
 import { mountsFor, containerPathFor } from '../mounts.js';
 import { readToken } from '../auth.js';
@@ -1135,7 +1152,7 @@ Expected: FAIL, `resolveDriver is not a function`.
 
 ```ts
 import type { AgentChild, SpawnOptions } from '../child.js';
-import type { SandboxMode } from '../../adapters/types.js';
+import type { SandboxMode } from '../vendor.js';
 import { spawnFor } from '../../adapters/index.js';
 import { spawnOnHost } from './host.js';
 import { spawnContainerized } from './containerized.js';
@@ -1261,7 +1278,7 @@ Expected: 0 failures.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add -A
+git add src test docs
 git commit -m "feat(#131): adding a CLI meant two registry entries and a pairing nobody could see
 
 Collapses the two drivers into a generic host spawner and a generic
@@ -1371,7 +1388,7 @@ manually verified.
 
 ```bash
 npx tsc --noEmit && npm test
-git add -A
+git add src test docs
 git commit -m "test(#131): nothing automated proved --rm actually removes the container
 
 Refs #131"

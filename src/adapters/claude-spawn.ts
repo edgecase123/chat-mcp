@@ -1,6 +1,6 @@
 import type { SpawnOptions } from '../supervise/child.js';
 import type { ChildGrant } from '../supervise/grant.js';
-import type { SandboxMode, VendorSpawn } from './types.js';
+import type { SandboxMode, VendorSpawn } from '../supervise/vendor.js';
 import { claudeArgs, routeClaudeEvent } from '../supervise/drivers/claude.js';
 import { redispatchPrompt } from '../supervise/drivers/claude-redispatch.js';
 import { writeContainerMcpConfig } from '../supervise/drivers/docker-claude.js';
