@@ -254,6 +254,73 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     });
 
   program
+    .command('mount <action> [handle] [key] [dir]')
+    .description('Register an extra mount for a containerized agent: add | list')
+    .action(async (action: string, handle?: string, key?: string, dir?: string) => {
+      const { registerMount, readMounts } = await import('./supervise/mounts.js');
+
+      if (action === 'list') {
+        const { agents } = readMounts();
+        const names = handle ? [handle] : Object.keys(agents);
+
+        if (names.length === 0) {
+          console.log('no mounts registered');
+          return;
+        }
+
+        for (const name of names) {
+          const entries = Object.entries(agents[name] ?? {});
+          console.log(
+            entries.length === 0
+              ? `${name}  (no mounts)`
+              : `${name}  ${entries.map(([k, v]) => `${k}=${v}`).join('  ')}`,
+          );
+        }
+        return;
+      }
+
+      if (action === 'add') {
+        if (!handle || !key || !dir) {
+          console.error('Error: chat-mcp mount add <handle> <key> <dir>');
+          process.exit(1);
+        }
+        try {
+          const mounts = registerMount(handle, key, dir);
+          console.log(
+            `${handle}  ${Object.entries(mounts).map(([k, v]) => `${k}=${v}`).join('  ')}`,
+          );
+        } catch (err) {
+          console.error(`chat-mcp: ${err instanceof Error ? err.message : String(err)}`);
+          process.exit(1);
+        }
+        return;
+      }
+
+      console.error(`Error: unknown action "${action}". Use add | list.`);
+      process.exit(1);
+    });
+
+  program
+    .command('auth <action> [token]')
+    .description('Manage the shared Claude OAuth token for containerized agents: set-token')
+    .action(async (action: string, token?: string) => {
+      const { setToken } = await import('./supervise/auth.js');
+
+      if (action === 'set-token') {
+        if (!token) {
+          console.error('Error: chat-mcp auth set-token <token>');
+          process.exit(1);
+        }
+        setToken(token);
+        console.log('token stored (chmod 600)');
+        return;
+      }
+
+      console.error(`Error: unknown action "${action}". Use set-token.`);
+      process.exit(1);
+    });
+
+  program
     .command('supervise <handle>')
     .description('Run a supervisor that owns the agent CLI and feeds it arriving messages (chat-mcp#33)')
     .option('--model <model>', 'model for the supervised child')

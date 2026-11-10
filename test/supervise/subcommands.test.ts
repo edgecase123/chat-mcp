@@ -28,3 +28,9 @@ test('supervise is registered and reachable', () => {
   assert.ok(source.includes(".command('supervise"), 'the verb is not registered');
   assert.ok(KNOWN_SUBCOMMANDS.has('supervise'), 'the verb would fall through to shim mode');
 });
+
+test('mount, auth and agents are registered, or they silently fall through to shim mode', () => {
+  assert.ok(KNOWN_SUBCOMMANDS.has('mount'));
+  assert.ok(KNOWN_SUBCOMMANDS.has('auth'));
+  assert.ok(KNOWN_SUBCOMMANDS.has('agents'));
+});
