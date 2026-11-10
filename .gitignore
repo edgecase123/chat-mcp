@@ -5,6 +5,7 @@ measurements/
 .DS_Store
 .env
 .idea/
+.worktrees/
 
 # Obsidian. NO leading slash: a vault opened on a SUBFOLDER writes its config
 # there, so `/.obsidian/` would match the repo root only.
