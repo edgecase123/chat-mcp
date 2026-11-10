@@ -311,8 +311,13 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
           console.error('Error: chat-mcp auth set-token <token>');
           process.exit(1);
         }
-        setToken(token);
-        console.log('token stored (chmod 600)');
+        try {
+          setToken(token);
+          console.log('token stored (chmod 600)');
+        } catch (err) {
+          console.error(`chat-mcp: ${err instanceof Error ? err.message : String(err)}`);
+          process.exit(1);
+        }
         return;
       }
 
