@@ -9,6 +9,7 @@ import {
 } from '../util/paths.js';
 import { detectChatHandleInCwd } from '../util/mcp-config.js';
 import type { Adapter, AdapterInstallOptions, AdapterResult } from './types.js';
+import { claudeSpawn } from './claude-spawn.js';
 
 const ADAPTER_NAME = 'claude-code';
 const SCOPES = ['user', 'project', 'local'] as const;
@@ -289,9 +290,11 @@ async function uninstall(opts: AdapterInstallOptions): Promise<AdapterResult> {
 
 export const claudeCodeAdapter: Adapter = {
   name: ADAPTER_NAME,
+  vendor: 'claude',
   description: 'Claude Code — SessionStart hook that primes the wake watch',
   scopes: SCOPES,
   defaultScope: 'local',
   install,
   uninstall,
+  spawn: claudeSpawn,
 };

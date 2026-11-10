@@ -1,6 +1,7 @@
 import { claudeCodeAdapter } from './claude-code.js';
 import { claudeCodeContextAdapter } from './claude-code-context.js';
 import type { Adapter, AdapterInstallOptions, AdapterResult } from './types.js';
+import type { VendorSpawn } from '../supervise/vendor.js';
 
 const REGISTRY: readonly Adapter[] = [claudeCodeAdapter, claudeCodeContextAdapter];
 
@@ -23,4 +24,27 @@ export async function runInstall(name: string, opts: AdapterInstallOptions): Pro
 
 export async function runUninstall(name: string, opts: AdapterInstallOptions): Promise<AdapterResult> {
   return getAdapter(name).uninstall(opts);
+}
+
+/** Every vendor this build can spawn. */
+export function vendorsWithSpawn(): readonly string[] {
+  return [...new Set(REGISTRY.filter((a) => a.spawn).map((a) => a.vendor))];
+}
+
+/**
+ * The spawn contract for `vendor`.
+ *
+ * 🛑 THROWS, AND NAMES WHAT IS AVAILABLE, for the same reason `driverFor`
+ * does: a silent fallback would make a missing vendor look like a working one.
+ */
+export function spawnFor(vendor: string): VendorSpawn {
+  const found = REGISTRY.find((a) => a.vendor === vendor && a.spawn)?.spawn;
+
+  if (!found) {
+    throw new Error(
+      `vendor "${vendor}" cannot be spawned by this build; it has: ${vendorsWithSpawn().join(', ')}`,
+    );
+  }
+
+  return found;
 }

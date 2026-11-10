@@ -1,3 +1,5 @@
+import type { VendorSpawn } from '../supervise/vendor.js';
+
 export interface AdapterInstallOptions {
   handle: string;
   scope?: string;
@@ -20,9 +22,20 @@ export interface AdapterResult {
 
 export interface Adapter {
   name: string;
+  /** Which CLI this adapter is for. Several adapters may share one vendor. */
+  vendor: string;
   description: string;
   scopes: readonly string[];
   defaultScope: string;
   install(opts: AdapterInstallOptions): Promise<AdapterResult>;
   uninstall(opts: AdapterInstallOptions): Promise<AdapterResult>;
+  /**
+   * How to spawn this vendor's CLI. Present on at most ONE adapter per
+   * vendor, asserted by `test/adapters/spawn-contract.test.ts`. A wake-only
+   * adapter omits it.
+   *
+   * 🛑 DEFINED IN `supervise/vendor.ts`, NOT HERE, so that the generic
+   * spawners can read it without `supervise/` importing `adapters/`.
+   */
+  spawn?: VendorSpawn;
 }
