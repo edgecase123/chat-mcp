@@ -187,6 +187,22 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   // one clone per agent — claude1 in ~/dev/leagues, claude2 in ~/dev/leagues2
   // — so the mapping is explicit. lee, 2026-10-31.
   const dirs = opts.extraDirs ?? dirsFor(opts.handle);
+
+  const { mountsFor, containerPathFor } = await import('./mounts.js');
+
+  let needsMountBanner = Boolean(opts.container) && !opts.resumeSessionId;
+
+  const mountBannerPrefix = (): string => {
+    if (!needsMountBanner) return '';
+    needsMountBanner = false;
+
+    const entries = Object.entries(mountsFor(opts.handle)).map(
+      ([key]) => `${key} -> ${containerPathFor(key)}`,
+    );
+
+    return entries.length === 0 ? '' : `Mounted directories: ${entries.join(', ')}.\n\n`;
+  };
+
   const childCwd = resolveCwd(opts.cwd, dirs);
   // Injected in tests; the real one is the shared bus database the web UI
   // already reads.
@@ -560,7 +576,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     }
 
     const prompt = {
-      text: formatPrompt(envelope),
+      text: `${mountBannerPrefix()}${formatPrompt(envelope)}`,
       messageIds: envelope.id > 0 ? [envelope.id] : [],
     };
 
