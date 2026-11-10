@@ -9,6 +9,7 @@ import {
 } from '../util/paths.js';
 import { detectChatHandleInCwd } from '../util/mcp-config.js';
 import type { Adapter, AdapterInstallOptions, AdapterResult } from './types.js';
+import { claudeSpawn } from './claude-spawn.js';
 
 const ADAPTER_NAME = 'claude-code';
 const SCOPES = ['user', 'project', 'local'] as const;
@@ -295,4 +296,5 @@ export const claudeCodeAdapter: Adapter = {
   defaultScope: 'local',
   install,
   uninstall,
+  spawn: claudeSpawn,
 };

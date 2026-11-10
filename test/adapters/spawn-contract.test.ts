@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { listAdapters } from '../../src/adapters/index.js';
+import { listAdapters, spawnFor, vendorsWithSpawn } from '../../src/adapters/index.js';
 
 test('every adapter declares which vendor CLI it is for', () => {
   for (const adapter of listAdapters()) {
@@ -24,4 +24,19 @@ test('🛑 no vendor has two adapters carrying spawn config', () => {
       `vendor "${vendor}" has ${names.length} adapters carrying spawn: ${names.join(', ')}`,
     );
   }
+});
+
+test('spawnFor resolves the claude vendor to a spawn block', () => {
+  assert.equal(spawnFor('claude').binary, 'claude');
+});
+
+test('🛑 spawnFor throws and names what exists, rather than falling back', () => {
+  // A silent fallback to claude would mean asking for cursor and getting
+  // claude, which looks exactly like cursor working.
+  assert.throws(() => spawnFor('cursor'), /cursor/);
+  assert.throws(() => spawnFor('cursor'), /claude/);
+});
+
+test('vendorsWithSpawn lists every vendor that can be spawned', () => {
+  assert.deepEqual([...vendorsWithSpawn()].sort(), ['claude']);
 });
