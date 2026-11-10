@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-mounts-'));
 
-const { registerMount, readMounts, mountsFor, mountsPath } = await import(
+const { registerMount, readMounts, mountsFor, mountsPath, containerPathFor } = await import(
   '../../src/supervise/mounts.js'
 );
 
@@ -54,4 +54,12 @@ test('a malformed mounts.json reads as empty rather than throwing', async () => 
   const { writeFileSync } = await import('node:fs');
   writeFileSync(mountsPath(), 'not json');
   assert.deepEqual(readMounts(), { agents: {} });
+});
+
+test('containerPathFor returns /mnt/{key}', () => {
+  assert.equal(containerPathFor('local-context'), '/mnt/local-context');
+});
+
+test('containerPathFor works for different keys', () => {
+  assert.equal(containerPathFor('memory'), '/mnt/memory');
 });
