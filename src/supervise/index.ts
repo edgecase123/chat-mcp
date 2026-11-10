@@ -568,7 +568,80 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     );
   };
 
+  /**
+   * A deliberate clean slate, not a resume: `resumeSessionId` is dropped so
+   * the respawned child starts a brand-new session.
+   */
+  const RESTART_NOTICE =
+    'This container is restarting. Externalize anything you need now — ' +
+    'this is the last turn before shutdown.';
+  const GRACEFUL_RESTART_TIMEOUT_MS = 30_000;
+
+  const doRestart = (): void => {
+    const unsent = queue.drain();
+    log(`restarting child (${unsent.length} prompt(s) carried over)`);
+    child.kill();
+    childSession = null;
+    needsMountBanner = isContainerSpawn;
+
+    child = spawnFn({
+      ...opts,
+      cwd: childCwd,
+      grant: currentGrant,
+      model: currentModel,
+      supervisorHandle: opts.handle,
+      resumeSessionId: undefined,
+    });
+
+    wireChild();
+    for (const p of unsent) queue.offer(p);
+  };
+
+  const restartChild = (mode: 'graceful' | 'now'): void => {
+    if (mode === 'now') {
+      doRestart();
+      return;
+    }
+
+    let awaitingNoticeReply = false;
+    let settled = false;
+
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const idx = turnEndListeners.indexOf(onAnyTurnEnd);
+      if (idx >= 0) turnEndListeners.splice(idx, 1);
+      doRestart();
+    };
+
+    const timer = setTimeout(finish, GRACEFUL_RESTART_TIMEOUT_MS);
+
+    const onAnyTurnEnd = (): void => {
+      if (!awaitingNoticeReply) return;
+      finish();
+    };
+
+    turnEndListeners.push(onAnyTurnEnd);
+
+    const originalSend = queue.offer.bind(queue);
+    queue.offer = ((prompt: { text: string; messageIds: number[] }) => {
+      if (prompt.text === RESTART_NOTICE) awaitingNoticeReply = true;
+      return originalSend(prompt);
+    }) as typeof queue.offer;
+
+    queue.offer({ text: RESTART_NOTICE, messageIds: [] });
+  };
+
   const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
+    // A restart command is out-of-band, not a chat message or an approval,
+    // and must run before either of those checks.
+    if (envelope.control?.kind === 'restart') {
+      restartChild(envelope.control.mode);
+
+      return { ok: true, queued: 'sent' };
+    }
+
     // An answer is not a chat message and must not be rendered as one.
     // 🛑 AN ANSWER REPLACES THE CHILD AND QUEUES ITS OWN PROMPT, so there is
     // nothing left for this path to send. Routing it on would deliver the

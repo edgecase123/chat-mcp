@@ -326,6 +326,33 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     });
 
   program
+    .command('agents <action> <handle>')
+    .description('Control a running supervisor: restart')
+    .option('--now', 'skip the graceful notice and kill immediately', false)
+    .action(async (action: string, handle: string, o: { now?: boolean }) => {
+      if (action !== 'restart') {
+        console.error(`Error: unknown action "${action}". Use restart.`);
+        process.exit(1);
+      }
+
+      const { deliverToSupervisor } = await import('./supervise/socket.js');
+      const ack = await deliverToSupervisor(handle, {
+        id: 0,
+        to: handle,
+        from: 'cli',
+        ts: Date.now(),
+        control: { kind: 'restart', mode: o.now ? 'now' : 'graceful' },
+      });
+
+      if (!ack) {
+        console.error(`no supervisor is listening for "${handle}"`);
+        process.exit(1);
+      }
+
+      console.log(`restart ${ack.ok ? 'accepted' : 'refused'} for ${handle}`);
+    });
+
+  program
     .command('supervise <handle>')
     .description('Run a supervisor that owns the agent CLI and feeds it arriving messages (chat-mcp#33)')
     .option('--model <model>', 'model for the supervised child')
