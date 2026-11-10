@@ -158,8 +158,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   // `docker-claude` already means "run this in a container" — a caller who
   // passes the driver without the flag still gets a container child, so
   // checking `opts.container` alone would let that path skip the token and
-  // confirm checks the container driver requires.
-  if (opts.container || opts.driver === 'docker-claude') {
+  // confirm checks the container driver requires. Every other container-only
+  // decision in this function (mount banner included) must share this same
+  // predicate rather than re-deriving it.
+  const isContainerSpawn = Boolean(opts.container) || opts.driver === 'docker-claude';
+
+  if (isContainerSpawn) {
     const { readToken } = await import('./auth.js');
     const { isConfirmed } = await import('./container.js');
 
@@ -190,7 +194,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
   const { mountsFor, containerPathFor } = await import('./mounts.js');
 
-  let needsMountBanner = Boolean(opts.container) && !opts.resumeSessionId;
+  let needsMountBanner = isContainerSpawn && !opts.resumeSessionId;
 
   const mountBannerPrefix = (): string => {
     if (!needsMountBanner) return '';

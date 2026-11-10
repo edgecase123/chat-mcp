@@ -67,7 +67,38 @@ test('a fresh container spawn prepends the mount banner to the FIRST prompt only
 
     children[0]?.finishTurn();
     await deliverToSupervisor(handle, { id: 2, to: handle, from: 'lee', ts: Date.now(), body: 'again' });
+    assert.equal(sent.length, 2, 'the second prompt must actually have been sent');
+    assert.match(sent[1] ?? '', /again/);
     assert.doesNotMatch(sent[1] ?? '', /Mounted directories:/, 'the banner must not repeat');
+  } finally {
+    await sup.stop();
+  }
+});
+
+test('the docker-claude driver gets the mount banner even without an explicit container flag', async () => {
+  const db = new DatabaseSync(':memory:');
+  migrate(db);
+  const handle = `mb-driver-only-${process.pid}`;
+  setToken('sk-ant-oat-x');
+  markConfirmed(handle);
+
+  const extra = mkdtempSync(join(tmpdir(), 'chat-mcp-mb-extra-'));
+  registerMount(handle, 'local-context', extra);
+
+  const sent: string[] = [];
+  const sup = await startSupervisor({
+    handle,
+    db,
+    extraDirs: DIRS,
+    driver: 'docker-claude',
+    log: () => undefined,
+    spawnChild: () => fakeChild(sent),
+  });
+
+  try {
+    await deliverToSupervisor(handle, { id: 1, to: handle, from: 'lee', ts: Date.now(), body: 'hi' });
+    assert.equal(sent.length, 1, 'the prompt must actually have been sent');
+    assert.match(sent[0] ?? '', /Mounted directories:.*local-context -> \/mnt\/local-context/s);
   } finally {
     await sup.stop();
   }
@@ -89,6 +120,8 @@ test('a non-container (bare host) spawn never gets a mount banner', async () => 
 
   try {
     await deliverToSupervisor(handle, { id: 1, to: handle, from: 'lee', ts: Date.now(), body: 'hi' });
+    assert.equal(sent.length, 1, 'the prompt must actually have been sent');
+    assert.match(sent[0] ?? '', /hi/);
     assert.doesNotMatch(sent[0] ?? '', /Mounted directories:/);
   } finally {
     await sup.stop();
