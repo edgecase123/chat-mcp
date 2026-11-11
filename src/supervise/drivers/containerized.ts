@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentChild, SpawnOptions } from '../child.js';
 import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
@@ -46,6 +46,24 @@ export function writeContainerMcpConfig(childHandle: string, vendor: VendorSpawn
   return `${containerStateDir(vendor)}/mcp/${childHandle}.json`;
 }
 
+/**
+ * The name `docker run --name` is given, so `kill()` has something to
+ * address a `docker stop` to. One supervisor handle runs one container at a
+ * time, so the handle alone is a stable, collision-free name.
+ */
+export function containerNameFor(supervisorHandle: string): string {
+  return `chat-mcp-${supervisorHandle}`;
+}
+
+/** The one place that validates the field both `dockerArgsForVendor` and `spawnContainerized` need. */
+function requireSupervisorHandle(opts: SpawnOptions): string {
+  if (!opts.supervisorHandle) {
+    throw new Error('a containerized spawn needs opts.supervisorHandle to find its mounts');
+  }
+
+  return opts.supervisorHandle;
+}
+
 export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): string[] {
   const token = readToken();
   if (!token) {
@@ -55,10 +73,7 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
     );
   }
 
-  if (!opts.supervisorHandle) {
-    throw new Error('a containerized spawn needs opts.supervisorHandle to find its mounts');
-  }
-
+  const supervisorHandle = requireSupervisorHandle(opts);
   const projectDir = opts.cwd;
   if (!projectDir) {
     throw new Error('a containerized spawn needs a resolved cwd');
@@ -68,6 +83,8 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
     'run',
     '-i',
     '--rm',
+    '--name',
+    containerNameFor(supervisorHandle),
     '-e',
     `${vendor.authEnvVar}=${token}`,
     '-v',
@@ -76,12 +93,12 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
     `${stateDir()}:${containerStateDir(vendor)}`,
   ];
 
-  for (const [key, hostDir] of Object.entries(mountsFor(opts.supervisorHandle))) {
+  for (const [key, hostDir] of Object.entries(mountsFor(supervisorHandle))) {
     args.push('-v', `${hostDir}:${containerPathFor(key)}`);
   }
 
   args.push('-w', CONTAINER_PROJECT_DIR, vendor.image);
-  args.push(vendor.binary, ...vendor.argsFor(opts, 'docker'));
+  args.push(opts.binary ?? vendor.binary, ...vendor.argsFor(opts, 'docker'));
 
   if (opts.grant) {
     args.push('--mcp-config', vendor.mcpConfigFor(opts.grant, 'docker'), '--strict-mcp-config');
@@ -104,5 +121,15 @@ export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {})
     { stdio: ['pipe', 'pipe', 'pipe'] },
   ) as ChildProcessWithoutNullStreams;
 
-  return wireAgentChild(child, vendor);
+  const name = containerNameFor(requireSupervisorHandle(opts));
+
+  return wireAgentChild(child, vendor, {
+    stop: () => {
+      try {
+        execFileSync('docker', ['stop', name], { stdio: 'ignore' });
+      } catch {
+        // Already stopped or removed — the expected case on a repeat kill().
+      }
+    },
+  });
 }
