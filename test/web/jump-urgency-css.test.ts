@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CSS, block } from '../support/theme-tokens.js';
-// @ts-expect-error — plain JS module, no types, same as the other logic tests.
 import { JUMP_URGENCY_MS } from '../../web/assets/logic.js';
 
 /**
