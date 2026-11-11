@@ -204,7 +204,7 @@ test('run-command refuses a script that symlinks out of the project', async (t) 
   );
 
   assert.equal(reply?.ok, false);
-  assert.match(reply?.error as string, /outside the project directory/);
+  assert.match(reply?.error as string, /not inside the project directory/);
 });
 
 test('an unknown command name is refused', async (t) => {
@@ -314,7 +314,7 @@ test('a handle with manifests in two registered directories is refused', async (
   ]);
 
   assert.equal(reply?.ok, false);
-  assert.match(reply?.error as string, /two registered directories|refuses to guess/);
+  assert.match(reply?.error as string, /refuses to guess/);
 });
 
 test('a handle with no registered directory is refused, not defaulted to cwd', async (t) => {
@@ -328,7 +328,7 @@ test('a handle with no registered directory is refused, not defaulted to cwd', a
   ]);
 
   assert.equal(reply?.ok, false);
-  assert.match(reply?.error as string, /no project directory registered/);
+  assert.match(reply?.error as string, /no project directory is configured/);
 });
 
 /**
@@ -368,18 +368,6 @@ test('a non-zero exit is reported as an exit code, not as a refusal', async (t) 
   assert.equal((reply?.stderr as string).trim(), 'err');
 });
 
-/**
- * A peer that never sends a newline would grow the read buffer without limit,
- * which is a memory exhaustion from inside a container.
- */
-test('an envelope with no newline is dropped rather than buffered without limit', async (t) => {
-  const broker = await brokerFor(`h15-${process.pid}`, project(ECHO));
-  t.after(() => broker.close());
-
-  const raw = await exchange(broker.port, [`${'x'.repeat(70 * 1024)}`], 400);
-
-  assert.equal(raw, '');
-});
 
 /**
  * 🛑 THE TRUST BOUNDARY, STATED AS A TEST SO IT CANNOT BE FORGOTTEN.
@@ -408,4 +396,192 @@ test('the broker runs the script content present at run time, not at check time'
   );
 
   assert.equal((reply?.stdout as string).trim(), 'second');
+});
+
+/** Like `exchange`, but says whether the BROKER closed the connection. */
+function probe(port: number, payload: Buffer | readonly Buffer[], waitMs = 400) {
+  return new Promise<{ raw: string; closed: boolean }>((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1');
+    let raw = '';
+    let closed = false;
+    let timer: NodeJS.Timeout;
+
+    socket.on('error', reject);
+    socket.on('data', (c) => {
+      raw += c.toString();
+    });
+    socket.on('close', () => {
+      closed = true;
+      clearTimeout(timer);
+      resolve({ raw, closed });
+    });
+    socket.once('connect', () => {
+      for (const part of Array.isArray(payload) ? payload : [payload]) socket.write(part);
+      timer = setTimeout(() => {
+        socket.destroy();
+        resolve({ raw, closed });
+      }, waitMs);
+    });
+  });
+}
+
+/**
+ * 🛑 THE ASSERTION IS THAT THE BROKER CLOSED, NOT THAT IT STAYED SILENT.
+ *
+ * The first version of this test sent the oversized payload WITH a newline, so
+ * it reached `JSON.parse`, threw, and the socket was destroyed — identical
+ * bytes on the wire with the cap deleted. Proven vacuous by deleting the cap
+ * and watching 18/18 still pass. Without a newline there is nothing to parse,
+ * so only the cap can end the connection.
+ */
+test('a line longer than the cap closes the connection', async (t) => {
+  const broker = await brokerFor(`h17-${process.pid}`, project(ECHO));
+  t.after(() => broker.close());
+
+  const { raw, closed } = await probe(broker.port, Buffer.from('x'.repeat(70 * 1024)));
+
+  assert.equal(raw, '');
+  assert.equal(closed, true, 'the oversized line was buffered instead of refused');
+});
+
+/**
+ * 🛑 A MULTI-BYTE CHARACTER SPLIT ACROSS TCP SEGMENTS. `chunk.toString()` per
+ * chunk turns the halves into U+FFFD and loses the rest; a `StringDecoder`
+ * holds the partial sequence until the next chunk completes it.
+ */
+test('an envelope split mid-character is reassembled intact', async (t) => {
+  const broker = await brokerFor(`h18-${process.pid}`, project(ECHO));
+  t.after(() => broker.close());
+
+  const line = Buffer.from(
+    `${JSON.stringify({ id: 1, token: 'tok-secret', op: 'run-command', name: 'gate-✅', params: {} })}\n`,
+    'utf8',
+  );
+  const cut = line.indexOf(Buffer.from('✅', 'utf8')) + 1;
+  const { raw } = await probe(broker.port, [line.subarray(0, cut), line.subarray(cut)]);
+  const reply = JSON.parse(raw.split('\n')[0] as string) as Record<string, unknown>;
+
+  assert.equal(reply.ok, false);
+  assert.match(reply.error as string, /no command "gate-✅"/);
+});
+
+/**
+ * 🛑 "NOT NULL" IS NOT "AUTHENTICATED". `undefined` is what a `Map.get` miss or
+ * a missing `return` hands back, and a `handle === null` gate lets it through.
+ */
+test('an authenticate that returns undefined does not authenticate', async (t) => {
+  registerProject(`h19-${process.pid}`, project(ECHO));
+  const broker = await CommandBroker.bind({
+    authenticate: () => undefined as unknown as string | null,
+  });
+  t.after(() => broker.close());
+
+  const { raw } = await probe(
+    broker.port,
+    Buffer.from(`${JSON.stringify({ id: 1, token: 'anything', op: 'list-commands' })}\n`),
+  );
+
+  assert.equal(raw, '');
+});
+
+test('an authenticate that returns an empty string does not authenticate', async (t) => {
+  const broker = await CommandBroker.bind({ authenticate: () => '' });
+  t.after(() => broker.close());
+
+  const { raw } = await probe(
+    broker.port,
+    Buffer.from(`${JSON.stringify({ id: 1, token: 'anything', op: 'list-commands' })}\n`),
+  );
+
+  assert.equal(raw, '');
+});
+
+/**
+ * 🛑 A THROW FROM `authenticate` MUST NOT TAKE THE SUPERVISOR DOWN. It is
+ * supplied by the caller of `bind` and reached with a caller-controlled token,
+ * so an unhandled rejection here would be a remote kill switch.
+ */
+test('a throwing authenticate refuses the caller and leaves the broker alive', async (t) => {
+  const handle = `h20-${process.pid}`;
+  registerProject(handle, project(ECHO));
+
+  let explode = true;
+  const broker = await CommandBroker.bind({
+    authenticate: (tkn) => {
+      if (explode) throw new Error('config blew up');
+
+      return tkn === 'tok-secret' ? handle : null;
+    },
+  });
+  t.after(() => broker.close());
+
+  const first = await probe(
+    broker.port,
+    Buffer.from(`${JSON.stringify({ id: 1, token: 'tok-secret', op: 'list-commands' })}\n`),
+  );
+
+  assert.equal(first.raw, '');
+
+  explode = false;
+  const [after] = await replies(broker.port, [
+    { id: 2, token: 'tok-secret', op: 'list-commands' },
+  ]);
+
+  assert.equal(after?.ok, true, 'the broker died with the throwing authenticate');
+});
+
+/**
+ * 🛑 ONE WRITE CAN CARRY MANY ENVELOPES, AND EACH ONE SPAWNS A HOST PROCESS.
+ * Without the cap, a single chunk of N run-commands starts N processes at once,
+ * each with the full timeout and output budget.
+ */
+test('more requests than the in-flight cap are refused rather than all run', async (t) => {
+  const manifest = { commands: [{ name: 'slow', script: 'scripts/slow.sh' }] };
+  const dir = project(manifest, { 'slow.sh': '#!/bin/sh\nsleep 1\necho done\n' });
+  const handle = `h21-${process.pid}`;
+
+  registerProject(handle, dir);
+  const broker = await CommandBroker.bind({
+    authenticate: (tkn) => (tkn === 'tok-secret' ? handle : null),
+    maxInFlight: 1,
+  });
+  t.after(() => broker.close());
+
+  const got = await replies(
+    broker.port,
+    [
+      { id: 1, token: 'tok-secret', op: 'run-command', name: 'slow', params: {} },
+      { id: 2, token: 'tok-secret', op: 'run-command', name: 'slow', params: {} },
+    ],
+    2500,
+  );
+  const busy = got.filter((r) => r.error === 'the broker is busy; retry');
+
+  assert.equal(busy.length, 1, JSON.stringify(got));
+});
+
+/**
+ * 🛑 NO HOST PATH CROSSES THE BOUNDARY. The caller writes the manifest, so a
+ * refusal that names what a path resolved to is an arbitrary-path existence and
+ * realpath oracle for the whole host.
+ */
+test('a refusal never carries a host path', async (t) => {
+  const dir = project(ECHO);
+  symlinkSync('/bin/sh', join(dir, 'scripts', 'gate.sh'));
+
+  const broker = await brokerFor(`h22-${process.pid}`, dir);
+  t.after(() => broker.close());
+
+  const [reply] = await replies(
+    broker.port,
+    [{ id: 1, token: 'tok-secret', op: 'run-command', name: 'gate', params: { lane: 'php' } }],
+    1500,
+  );
+
+  assert.equal(reply?.ok, false);
+  assert.equal(
+    (reply?.error as string).includes('/'),
+    false,
+    `the refusal leaked a path: ${String(reply?.error)}`,
+  );
 });

@@ -1,29 +1,40 @@
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
-import { execFile } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { dirsFor } from './projects.js';
-import { listCommands, readManifest, resolveArgv, type ListedCommand } from './commands.js';
+import {
+  isRecord,
+  listCommands,
+  readManifest,
+  resolveArgv,
+  type CommandManifest,
+  type ListedCommand,
+} from './commands.js';
 import { checkedScriptPath } from './containment.js';
+import { runScript, type ScriptResult, type ScriptRunner } from './run-script.js';
 
 /** Where a project declares the commands it offers, relative to its directory. */
 export const MANIFEST_RELATIVE = join('.chat-mcp', 'commands.json');
 
 /**
- * 🛑 LOOPBACK, NOT THE BOUNDARY. A container reaches a host `127.0.0.1` bind
+ * 🛑 LOOPBACK IS NOT THE BOUNDARY. A container reaches a host `127.0.0.1` bind
  * through `host.docker.internal` on Docker Desktop, measured. The token is what
- * separates callers; this keeps the broker off the operator's LAN.
+ * separates callers; this only keeps the broker off the operator's LAN.
  */
 const BIND_ADDRESS = '127.0.0.1';
 
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 const DEFAULT_MAX_BUFFER = 8 * 1024 * 1024;
+const DEFAULT_MAX_IN_FLIGHT = 4;
+const DEFAULT_MAX_CONNECTIONS = 8;
+const DEFAULT_IDLE_TIMEOUT_MS = 60 * 1000;
 
 /**
  * The longest envelope accepted before the connection is dropped.
  *
- * A peer that never sends a newline would otherwise grow this buffer without
- * limit, which is a memory exhaustion from inside a container.
+ * A peer that never sends a newline would otherwise grow the read buffer
+ * without limit, which is memory exhaustion from inside a container.
  */
 const MAX_LINE = 64 * 1024;
 
@@ -31,20 +42,42 @@ export interface BrokerOptions {
   /**
    * 🛑 THE CALLER'S IDENTITY COMES FROM ITS SECRET, NEVER FROM A FIELD IT
    * FILLS IN. Return the handle a token belongs to, or null to refuse.
+   *
+   * 🛑 COMPARE IN CONSTANT TIME. The obvious `token === stored` leaks the
+   * shared prefix through timing, and this is the only boundary there is. Use
+   * `crypto.timingSafeEqual` on equal-length buffers. Throttling repeated
+   * failures is the caller's job too — the broker drops the connection and
+   * nothing stops an immediate reconnect.
    */
   readonly authenticate: (token: string) => string | null;
   readonly timeoutMs?: number;
   readonly maxBuffer?: number;
+  /** Dispatches allowed to be in flight at once, across all connections. */
+  readonly maxInFlight?: number;
+  readonly maxConnections?: number;
+  /** How long a connection may sit with NOTHING in flight before it is closed. */
+  readonly idleTimeoutMs?: number;
+  /** Test seam; see `run-script.ts`. */
+  readonly run?: ScriptRunner;
 }
 
-interface RunResult {
-  readonly exitCode: number;
-  readonly stdout: string;
-  readonly stderr: string;
-}
+/**
+ * A refusal with two faces: what the caller is told, and what the operator can
+ * read in the host's log.
+ *
+ * 🛑 THE CALLER NEVER SEES A HOST PATH. A collaborator's message names absolute
+ * directories and says whether a path exists and what it resolved to — and the
+ * caller writes the manifest, so forwarding that turns the broker into an
+ * arbitrary-path existence and realpath oracle for the whole host.
+ */
+class Refusal extends Error {
+  readonly detail: string;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  constructor(publicMessage: string, cause?: unknown) {
+    super(publicMessage);
+    this.name = 'Refusal';
+    this.detail = cause instanceof Error ? cause.message : String(cause ?? publicMessage);
+  }
 }
 
 /**
@@ -55,19 +88,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * the failure `dirsFor`'s own docblock exists to prevent.
  */
 function projectDirFor(handle: string): string {
-  const dirs = dirsFor(handle);
+  let dirs: string[];
+
+  try {
+    dirs = dirsFor(handle);
+  } catch (err) {
+    throw new Refusal('no project directory is configured for this agent', err);
+  }
+
   const withManifest = dirs.filter((dir) => existsSync(join(dir, MANIFEST_RELATIVE)));
 
   if (withManifest.length === 0) {
-    throw new Error(
-      `no command manifest for "${handle}": expected ${MANIFEST_RELATIVE} in ${dirs.join(', ')}`,
+    throw new Refusal(
+      'this project offers no commands',
+      new Error(`no ${MANIFEST_RELATIVE} in ${dirs.join(', ')}`),
     );
   }
 
   if (withManifest.length > 1) {
-    throw new Error(
-      `"${handle}" has a command manifest in two registered directories, so the broker ` +
-        `refuses to guess: ${withManifest.join(', ')}`,
+    throw new Refusal(
+      'this agent has commands in more than one project, so the broker refuses to guess',
+      new Error(`manifests in ${withManifest.join(', ')}`),
     );
   }
 
@@ -93,9 +134,10 @@ export class CommandBroker {
 
   private readonly server: Server;
   private readonly options: BrokerOptions;
-  /** Tracked so `close()` can end them; see the test that names `cancelled 1`. */
+  /** Tracked so `close()` can end them; see the test naming `cancelled 1`. */
   private readonly open = new Set<Socket>();
   private boundPort = 0;
+  private inFlight = 0;
 
   private constructor(server: Server, options: BrokerOptions) {
     this.server = server;
@@ -106,6 +148,7 @@ export class CommandBroker {
     const server = createServer();
     const broker = new CommandBroker(server, options);
 
+    server.maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
     server.on('connection', (socket) => broker.accept(socket));
 
     await new Promise<void>((resolve, reject) => {
@@ -144,18 +187,47 @@ export class CommandBroker {
     this.open.add(socket);
     socket.once('close', () => this.open.delete(socket));
 
+    // 🛑 THE IDLE TIMEOUT IS ARMED ONLY WHILE NOTHING IS IN FLIGHT. A gate runs
+    // for minutes with no bytes on the wire, so a plain idle timeout would kill
+    // the connection while it waits for the answer it asked for.
+    const idle = this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+    const decoder = new StringDecoder('utf8');
     let buffer = '';
+    let pending = 0;
 
+    const armIdle = () => {
+      if (socket.destroyed) return;
+      socket.setTimeout(pending === 0 ? idle : 0);
+    };
+
+    socket.on('timeout', () => socket.destroy());
     socket.on('error', () => socket.destroy());
+    armIdle();
+
     socket.on('data', (chunk: Buffer) => {
-      buffer += chunk.toString();
+      buffer += decoder.write(chunk);
 
       for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
+        if (socket.destroyed) return;
+
         const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
-        void this.handleLine(socket, line);
+        pending += 1;
+        armIdle();
+
+        void this.handleLine(socket, line)
+          .catch(() => socket.destroy())
+          .finally(() => {
+            pending -= 1;
+            armIdle();
+          });
       }
 
+      // 🛑 AN OVERSIZED LINE IS NEVER PARSED. The check has to sit after the
+      // drain so a complete line is handled first, and it must clear the
+      // buffer: a cap that only bounds the RESIDUE still lets the oversized
+      // line reach `JSON.parse`, which is what made this guard's first test
+      // vacuous.
       if (buffer.length > MAX_LINE) {
         buffer = '';
         socket.destroy();
@@ -189,9 +261,23 @@ export class CommandBroker {
       return;
     }
 
-    const handle = this.options.authenticate(envelope.token);
+    let handle: unknown;
 
-    if (handle === null) {
+    // 🛑 INSIDE A TRY. `authenticate` is supplied by the caller of `bind`, and a
+    // throw from it out here becomes an unhandled rejection that takes the
+    // supervisor down — with a caller-controlled token as the trigger.
+    try {
+      handle = this.options.authenticate(envelope.token);
+    } catch {
+      socket.destroy();
+
+      return;
+    }
+
+    // 🛑 A NON-EMPTY STRING, NOT "not null". `undefined` from a `Map.get` miss
+    // or from a missing `return` would otherwise AUTHENTICATE, and the declared
+    // `string | null` is not enforced on a value that arrives from config.
+    if (typeof handle !== 'string' || handle.length === 0) {
       socket.destroy();
 
       return;
@@ -199,21 +285,36 @@ export class CommandBroker {
 
     const id = typeof envelope.id === 'number' ? envelope.id : null;
 
+    // 🛑 ONE WRITE CAN CARRY MANY ENVELOPES, AND EACH ONE SPAWNS A HOST
+    // PROCESS. Without this, a single chunk of N run-commands starts N
+    // processes, each allowed the full timeout and output budget.
+    if (this.inFlight >= (this.options.maxInFlight ?? DEFAULT_MAX_IN_FLIGHT)) {
+      this.reply(socket, { id, ok: false, error: 'the broker is busy; retry' });
+
+      return;
+    }
+
+    this.inFlight += 1;
+
     try {
       this.reply(socket, { id, ok: true, ...(await this.dispatch(handle, envelope)) });
     } catch (err) {
-      this.reply(socket, {
-        id,
-        ok: false,
-        error: err instanceof Error ? err.message : 'the broker refused the request',
-      });
+      if (err instanceof Refusal) {
+        console.error(`broker refused a request from "${handle}": ${err.detail}`);
+        this.reply(socket, { id, ok: false, error: err.message });
+      } else {
+        console.error(`broker failed a request from "${handle}": ${String(err)}`);
+        this.reply(socket, { id, ok: false, error: 'the broker could not run that command' });
+      }
+    } finally {
+      this.inFlight -= 1;
     }
   }
 
   private async dispatch(
     handle: string,
     envelope: Record<string, unknown>,
-  ): Promise<{ commands: ListedCommand[] } | RunResult> {
+  ): Promise<{ commands: ListedCommand[] } | ScriptResult> {
     if (envelope.op === 'list-commands') {
       return { commands: listCommands(this.manifestFor(handle).manifest) };
     }
@@ -222,82 +323,66 @@ export class CommandBroker {
       return this.runCommand(handle, envelope);
     }
 
-    throw new Error(`unknown op "${String(envelope.op)}"`);
+    throw new Refusal('unknown op');
   }
 
-  private manifestFor(handle: string) {
+  private manifestFor(handle: string): { dir: string; manifest: CommandManifest } {
     const dir = projectDirFor(handle);
 
-    return { dir, manifest: readManifest(join(dir, MANIFEST_RELATIVE)) };
+    try {
+      return { dir, manifest: readManifest(join(dir, MANIFEST_RELATIVE)) };
+    } catch (err) {
+      throw new Refusal('this project has no usable command manifest', err);
+    }
   }
 
   private async runCommand(
     handle: string,
     envelope: Record<string, unknown>,
-  ): Promise<RunResult> {
+  ): Promise<ScriptResult> {
     if (typeof envelope.name !== 'string') {
-      throw new Error('run-command needs a string "name"');
+      throw new Refusal('run-command needs a string "name"');
     }
 
     const params = envelope.params ?? {};
 
     if (!isRecord(params)) {
-      throw new Error('run-command "params" must be an object');
+      throw new Refusal('run-command "params" must be an object');
     }
 
     const { dir, manifest } = this.manifestFor(handle);
-    const resolved = resolveArgv(manifest, envelope.name, params as Record<string, string>);
 
-    // 🛑 THE ONLY WAY TO A PATH. `resolved.script` is an object, so handing it
-    // to `execFile` without this call is a compile error rather than a missing
-    // symlink check.
-    const script = checkedScriptPath(dir, resolved.script);
+    // The caller named this command and supplied these values, so this message
+    // discloses only what it already knows.
+    let resolved;
 
-    return this.run(script, resolved.argv, dir);
-  }
+    try {
+      resolved = resolveArgv(manifest, envelope.name, params as Record<string, string>);
+    } catch (err) {
+      throw new Refusal(err instanceof Error ? err.message : 'the command was refused', err);
+    }
 
-  /**
-   * 🛑 A NON-ZERO EXIT IS AN ANSWER, NOT AN ERROR. A gate that fails is the
-   * result the caller asked for, and reporting it as a refusal would make a
-   * failing gate indistinguishable from a rejected request.
-   */
-  private run(script: string, argv: readonly string[], cwd: string): Promise<RunResult> {
-    return new Promise((resolve, reject) => {
-      execFile(
+    // 🛑 THE ONLY WAY TO A PATH. `resolved.script` is an object, so reaching the
+    // runner without this call is a compile error rather than a missing symlink
+    // check.
+    let script: string;
+
+    try {
+      script = checkedScriptPath(dir, resolved.script);
+    } catch (err) {
+      throw new Refusal('the command script is not inside the project directory', err);
+    }
+
+    try {
+      return await runScript(
         script,
-        [...argv],
-        { cwd, timeout: this.timeoutMs, maxBuffer: this.maxBuffer },
-        (err, stdout, stderr) => {
-          if (err === null) {
-            resolve({ exitCode: 0, stdout, stderr });
-
-            return;
-          }
-
-          const failure = err as Error & { code?: number | string; killed?: boolean };
-
-          if (failure.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
-            reject(new Error(`command output exceeded ${this.maxBuffer} bytes`));
-
-            return;
-          }
-
-          if (failure.killed === true) {
-            reject(new Error(`command timed out after ${this.timeoutMs}ms`));
-
-            return;
-          }
-
-          if (typeof failure.code === 'number') {
-            resolve({ exitCode: failure.code, stdout, stderr });
-
-            return;
-          }
-
-          reject(new Error(failure.message));
-        },
+        resolved.argv,
+        { cwd: dir, timeout: this.timeoutMs, maxBuffer: this.maxBuffer },
+        this.options.run,
       );
-    });
+    } catch (err) {
+      throw new Refusal(err instanceof Error ? err.message : 'the command failed to run', err);
+    }
   }
 
   private reply(socket: Socket, payload: Record<string, unknown>): void {
