@@ -118,8 +118,41 @@ test('kill() stops the container by name via the daemon, not a raw signal to the
 
   agent.kill();
 
-  assert.deepEqual(stopInvocations, [['stop', 'chat-mcp-claude1']]);
+  assert.deepEqual(stopInvocations, [['stop', '-t', '60', 'chat-mcp-claude1']]);
   assert.ok(fakeDockerRun, 'spawn mock was not invoked');
+
+  fakeDockerRun?.kill();
+});
+
+test('a per-handle shutdownGraceSeconds overrides the -t default', async (t) => {
+  setToken('sk-ant-oat-x');
+  let fakeDockerRun: ReturnType<typeof realSpawn> | undefined;
+  const stopInvocations: string[][] = [];
+  t.mock.module('node:child_process', {
+    namedExports: {
+      spawn: () => {
+        fakeDockerRun = realSpawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
+        return fakeDockerRun;
+      },
+      execFileSync: (_cmd: string, args: string[]) => {
+        stopInvocations.push(args);
+        return Buffer.from('');
+      },
+    },
+  });
+
+  const { spawnContainerized } = await import(
+    `../../../src/supervise/drivers/containerized.js?grace-test=${Date.now()}`
+  );
+  const agent = spawnContainerized(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: 'claude1',
+    shutdownGraceSeconds: 5,
+  });
+
+  agent.kill();
+
+  assert.deepEqual(stopInvocations, [['stop', '-t', '5', 'chat-mcp-claude1']]);
 
   fakeDockerRun?.kill();
 });

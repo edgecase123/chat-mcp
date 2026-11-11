@@ -14,6 +14,14 @@ import {
 export const CONTAINER_PROJECT_DIR = '/work';
 const CONTAINER_CHAT_MCP_ENTRY = '/opt/chat-mcp/dist/index.js';
 
+/**
+ * Seconds between `docker stop`'s SIGTERM and SIGKILL. Not a measured figure
+ * — lee's chosen default (#149), raised from docker's own 10s default so a
+ * session has time to externalize before being cut off. Per-handle
+ * overridable via `SpawnOptions.shutdownGraceSeconds`.
+ */
+export const DEFAULT_SHUTDOWN_GRACE_SECONDS = 60;
+
 export { containerPathFor };
 
 /** Where the bus's state dir lands inside the container, for this vendor. */
@@ -114,10 +122,13 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
  * instead of a hand-written copy — a copy proves `docker stop` works, not
  * that `spawnContainerized` is wired to call it (claude2, PR #147 review).
  */
-export function dockerStopFor(name: string): () => void {
+export function dockerStopFor(
+  name: string,
+  graceSeconds: number = DEFAULT_SHUTDOWN_GRACE_SECONDS,
+): () => void {
   return () => {
     try {
-      execFileSync('docker', ['stop', name], { stdio: 'ignore' });
+      execFileSync('docker', ['stop', '-t', String(graceSeconds), name], { stdio: 'ignore' });
     } catch {
       // Already stopped or removed — the expected case on a repeat kill().
     }
@@ -139,6 +150,7 @@ export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {})
   ) as ChildProcessWithoutNullStreams;
 
   const name = containerNameFor(requireSupervisorHandle(opts));
+  const graceSeconds = opts.shutdownGraceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
 
-  return wireAgentChild(child, vendor, { stop: dockerStopFor(name) });
+  return wireAgentChild(child, vendor, { stop: dockerStopFor(name, graceSeconds) });
 }

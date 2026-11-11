@@ -2,7 +2,7 @@ import type { AgentChild, SpawnOptions } from './child.js';
 import type { VendorSpawn } from './vendor.js';
 import { resolveDriver } from './drivers/index.js';
 import { spawnOnHost } from './drivers/host.js';
-import { spawnContainerized } from './drivers/containerized.js';
+import { spawnContainerized, DEFAULT_SHUTDOWN_GRACE_SECONDS } from './drivers/containerized.js';
 import { TurnQueue } from './turn-queue.js';
 import { WakeListener, type WakeAck, type WakeEnvelope } from './socket.js';
 import { RateLimitGate } from './rate-limit.js';
@@ -107,7 +107,13 @@ export interface Supervisor {
    * routine model pause. Raised by claude1 on PR 43.
    */
   onTurnEnd(cb: () => void): void;
-  stop(): Promise<void>;
+  /**
+   * `'now'` (default) kills immediately, matching every existing caller.
+   * `'graceful'` sends `SHUTDOWN_NOTICE` first and waits out the configured
+   * grace period for the current turn to end (#149) — the CLI's SIGINT/
+   * SIGTERM handler is the one caller that wants this.
+   */
+  stop(mode?: 'graceful' | 'now'): Promise<void>;
 }
 
 /** How an arriving message is presented to the agent. */
@@ -612,6 +618,62 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     'this is the last turn before shutdown.';
   const GRACEFUL_RESTART_TIMEOUT_MS = 30_000;
 
+  const SHUTDOWN_NOTICE =
+    'This agent is shutting down. Externalize anything you need now — ' +
+    'this is the last turn before SIGTERM.';
+  const shutdownGraceMs = (opts.shutdownGraceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS) * 1000;
+
+  /**
+   * Send `notice`, then wait up to `timeoutMs` for the current turn to end
+   * before calling `onFinish` — shared by `restartChild('graceful')` and
+   * `stop('graceful')` (#149), the two places this process gives a running
+   * child a head start before something irreversible follows.
+   *
+   * 🛑 "DISPATCHED" ≠ "ITS OWN TURN ENDED". If the notice was queued behind
+   * an in-flight turn, the turn-end that flushes it into dispatch and the
+   * turn-end that completes its own turn are the SAME callback, called
+   * once per turn — but two SEPARATE invocations, one count apart. Firing
+   * on the first (dispatch) one acts the instant the child receives the
+   * notice, before it can act on it (chat-mcp review, Task 8).
+   */
+  const sendNoticeThenFinish = (notice: string, timeoutMs: number, onFinish: () => void): void => {
+    let noticeDispatchedAtCount: number | null = null;
+    let settled = false;
+
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      const turnIdx = turnEndListeners.indexOf(onAnyTurnEnd);
+      if (turnIdx >= 0) turnEndListeners.splice(turnIdx, 1);
+      const sendIdx = sendListeners.indexOf(onSend);
+      if (sendIdx >= 0) sendListeners.splice(sendIdx, 1);
+    };
+
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      onFinish();
+    };
+
+    const timer = setTimeout(finish, timeoutMs);
+
+    const onAnyTurnEnd = (): void => {
+      if (noticeDispatchedAtCount === null) return;
+      if (turnEndCount <= noticeDispatchedAtCount) return;
+      finish();
+    };
+
+    const onSend = (prompt: { text: string; messageIds: readonly number[] }): void => {
+      if (prompt.text !== notice || noticeDispatchedAtCount !== null) return;
+      noticeDispatchedAtCount = turnEndCount;
+    };
+
+    turnEndListeners.push(onAnyTurnEnd);
+    sendListeners.push(onSend);
+
+    queue.offer({ text: notice, messageIds: [] });
+  };
+
   const doRestart = (): void => {
     const unsent = queue.drain();
     log(`restarting child (${unsent.length} prompt(s) carried over)`);
@@ -638,47 +700,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       return;
     }
 
-    let noticeDispatchedAtCount: number | null = null;
-    let settled = false;
-
-    const cleanup = (): void => {
-      clearTimeout(timer);
-      const turnIdx = turnEndListeners.indexOf(onAnyTurnEnd);
-      if (turnIdx >= 0) turnEndListeners.splice(turnIdx, 1);
-      const sendIdx = sendListeners.indexOf(onSend);
-      if (sendIdx >= 0) sendListeners.splice(sendIdx, 1);
-    };
-
-    const finish = (): void => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      doRestart();
-    };
-
-    const timer = setTimeout(finish, GRACEFUL_RESTART_TIMEOUT_MS);
-
-    // 🛑 "DISPATCHED" ≠ "ITS OWN TURN ENDED". If the notice was queued behind
-    // an in-flight turn, the turn-end that flushes it into dispatch and the
-    // turn-end that completes its own turn are the SAME callback, called
-    // once per turn — but two SEPARATE invocations, one count apart. Firing
-    // on the first (dispatch) one kills the child the instant it receives
-    // the notice, before it can act on it (chat-mcp review, Task 8).
-    const onAnyTurnEnd = (): void => {
-      if (noticeDispatchedAtCount === null) return;
-      if (turnEndCount <= noticeDispatchedAtCount) return;
-      finish();
-    };
-
-    const onSend = (prompt: { text: string; messageIds: readonly number[] }): void => {
-      if (prompt.text !== RESTART_NOTICE || noticeDispatchedAtCount !== null) return;
-      noticeDispatchedAtCount = turnEndCount;
-    };
-
-    turnEndListeners.push(onAnyTurnEnd);
-    sendListeners.push(onSend);
-
-    queue.offer({ text: RESTART_NOTICE, messageIds: [] });
+    sendNoticeThenFinish(RESTART_NOTICE, GRACEFUL_RESTART_TIMEOUT_MS, doRestart);
   };
 
   const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
@@ -742,7 +764,13 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     onTurnEnd(cb: () => void): void {
       turnEndListeners.push(cb);
     },
-    async stop(): Promise<void> {
+    async stop(mode: 'graceful' | 'now' = 'now'): Promise<void> {
+      if (mode === 'graceful') {
+        await new Promise<void>((resolve) => {
+          sendNoticeThenFinish(SHUTDOWN_NOTICE, shutdownGraceMs, resolve);
+        });
+      }
+
       await listener.close();
       child.kill();
       // Registration happens in the CHILD, via the shim. So this deletes a row

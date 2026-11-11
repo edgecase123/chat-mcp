@@ -450,7 +450,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         container: (o as unknown as { container?: boolean }).container,
       });
       const shutdown = (): void => {
-        void sup.stop().then(() => process.exit(0));
+        void sup.stop('graceful').then(() => process.exit(0));
       };
       process.on('SIGINT', shutdown);
       process.on('SIGTERM', shutdown);

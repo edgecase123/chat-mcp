@@ -128,6 +128,13 @@ export interface SpawnOptions {
    * handle (`<handle>-agent`) and is the wrong key for that lookup.
    */
   readonly supervisorHandle?: string;
+
+  /**
+   * Seconds between a shutdown notice and `kill()` (#149). For a
+   * containerized child this is also `docker stop`'s `-t`. Default
+   * `DEFAULT_SHUTDOWN_GRACE_SECONDS` (60), per-handle overridable.
+   */
+  readonly shutdownGraceSeconds?: number;
 }
 
 /** Split a byte stream into whole JSON lines. Partial lines are held back. */
