@@ -25,14 +25,24 @@ function showConfig(project: string): { files: string[]; compilerOptions: Record
   return JSON.parse(out) as { files: string[]; compilerOptions: Record<string, unknown> };
 }
 
-/** Every `.ts` file actually on disk under `test/`, so the count has a denominator. */
+/**
+ * Every TypeScript file actually on disk under `test/`, so the count has a
+ * denominator.
+ *
+ * 🛑 EVERY TS EXTENSION, NOT `.ts`. A denominator of `.ts` alone cannot see an
+ * `include` narrowed by EXTENSION — `test/**\/*.ts` drops a `.tsx` file and
+ * every guard below still passes. The repo already has 18 `.tsx` files under
+ * `src/cli/ink/`, so an Ink component test is the next one and it lands here.
+ */
+const TS_FILE = /\.(ts|tsx|mts|cts)$/;
+
 function testFilesOnDisk(dir = join(ROOT, 'test')): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = join(dir, entry.name);
 
     if (entry.isDirectory()) return testFilesOnDisk(full);
 
-    return entry.name.endsWith('.ts') ? [full] : [];
+    return TS_FILE.test(entry.name) ? [full] : [];
   });
 }
 
