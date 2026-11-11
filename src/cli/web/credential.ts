@@ -87,6 +87,19 @@ const WRITE_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Every path any tier names, so a test can prove the dispatch table is fully
+ * classified rather than restating one of the three sets.
+ *
+ * 🛑 THE FALLBACK AND `ADMIN_ROUTES` BOTH RETURN `admin`, so a return value
+ * cannot tell a classified route from a forgotten one. Membership can.
+ */
+export const CLASSIFIED_PATHS: ReadonlySet<string> = new Set([
+  ...ADMIN_ROUTES,
+  ...READ_ROUTES,
+  ...WRITE_ROUTES,
+]);
+
+/**
  * Constant-time compare of two equal-length tokens.
  *
  * ⚠️ THE LENGTH IS COMPARED FIRST AND THAT IS NOT CONSTANT TIME. It has to be,

@@ -12,6 +12,7 @@ import {
   COOKIE_NAME,
   cookieValue,
   mintToken,
+  CLASSIFIED_PATHS,
   requiredCapability,
   tokenMatches,
   type Capability,
@@ -214,12 +215,64 @@ test('🛑 a GET on a path that only accepts writes is admin, not read', () => {
   assert.equal(requiredCapability('GET', '/api/rooms/join'), 'admin');
 });
 
-test('every read surface in the dispatch table is reachable with `read`', () => {
+test('every path in READ_ROUTES resolves to read', () => {
   for (const p of [
     '/api/whoami', '/api/messages', '/api/approvals',
     '/api/claims', '/api/search', '/api/files', '/api/events',
   ]) {
     assert.equal(requiredCapability('GET', p), 'read', p);
+  }
+});
+
+/**
+ * 🛑 THIS READS THE DISPATCH TABLE. The test above restates a constant, which
+ * is why it is now named for the constant: claude2 added one unclassified GET
+ * route to `server.ts` on `c2c0249` and the whole suite stayed green.
+ *
+ * ⚠️ A RETURN VALUE CANNOT ANSWER THIS. The fallback and `ADMIN_ROUTES` both
+ * say `admin`, so a forgotten route is indistinguishable from a deliberate
+ * one. Membership in `CLASSIFIED_PATHS` is the test.
+ *
+ * The denominator is asserted, not implied — a regex that stops matching would
+ * otherwise pass this with an empty list.
+ */
+test('🛑 EVERY api path in the dispatch table is classified, and the count is stated', () => {
+  const src = readFileSync(
+    new URL('../../../src/cli/web/server.ts', import.meta.url),
+    'utf8',
+  );
+
+  const dispatched = new Map<string, Set<string>>();
+
+  for (const m of src.matchAll(
+    /path === '(\/api\/[^']*)'(?:\s*&&\s*req\.method === '([A-Z]+)')?/g,
+  )) {
+    const path = m[1]!;
+    // No method clause means the route answers ANY verb, so GET reaches it.
+    const method = m[2] ?? 'GET';
+    (dispatched.get(path) ?? dispatched.set(path, new Set()).get(path)!).add(method);
+  }
+
+  assert.ok(
+    dispatched.size >= 15,
+    `only ${dispatched.size} api paths matched; the regex has stopped reading the table`,
+  );
+
+  const unclassified = [...dispatched.keys()].filter((p) => !CLASSIFIED_PATHS.has(p));
+  assert.deepEqual(
+    unclassified,
+    [],
+    'these api routes exist but no tier names them, so they fell to the admin fallback',
+  );
+
+  for (const [path, methods] of dispatched) {
+    for (const method of methods) {
+      const tier = requiredCapability(method, path);
+      assert.notEqual(tier, null, `${method} ${path} must need a capability`);
+      if (method === 'GET' || method === 'HEAD') {
+        assert.equal(tier, 'read', `${method} ${path} is a read surface`);
+      }
+    }
   }
 });
 
