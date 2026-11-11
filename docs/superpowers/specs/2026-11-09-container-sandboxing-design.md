@@ -15,9 +15,12 @@
 > `sendNoticeThenFinish` and `shutdownGraceSeconds` in
 > `src/supervise/index.ts`, not unbuilt work.
 >
-> 🛑 **One thing this spec assumes is still open as #148**: whether a
-> containerized agent notices SIGTERM at all. The graceful path depends on a
-> handler that may not exist.
+> 🛑 **One half of the graceful path is proven and one half is not.** #148
+> fixed the outer half: `kill()` runs `docker stop`, which the daemon acts on,
+> because `docker run -i`'s client process ignores SIGTERM. What is still
+> unproven is the INNER half — whether the agent process inside the container
+> handles the signal `docker stop` delivers. Until it does, a longer grace
+> window changes nothing.
 
 ## Problem
 
