@@ -311,6 +311,20 @@ export function migrate(db: Db): void {
   }
 }
 
+/**
+ * The second connection a write is read back on, per primary handle.
+ *
+ * 🛑 THE WRITING CONNECTION IS NOT A WITNESS. #138's shim held a view of this
+ * file nobody else had, so re-reading through it would have confirmed its own
+ * wrong answer for the whole outage. lee ruled for a separate connection.
+ */
+const verifiers = new WeakMap<Db, Db>();
+
+/** Undefined only for a database that did not come from `openDb` — see `insertMessage`. */
+export function verifierFor(db: Db): Db | undefined {
+  return verifiers.get(db);
+}
+
 export function openDb(): Db {
   ensureStateDir();
   const db = new DatabaseSync(dbPath());
@@ -318,6 +332,28 @@ export function openDb(): Db {
   db.exec('PRAGMA synchronous = NORMAL');
   db.exec('PRAGMA foreign_keys = ON');
   migrate(db);
+
+  // Opened eagerly, so an unusable database fails here rather than on the first
+  // send. One file handle per process; a send pays nothing for it.
+  const verifier = new DatabaseSync(dbPath());
+  verifier.exec('PRAGMA journal_mode = WAL');
+  verifiers.set(db, verifier);
+
+  // 🛑 `close()` HAS TO CLOSE BOTH. A second live connection keeps the WAL on
+  // disk past a clean close, and the WAL is the file holding the newest
+  // traffic — which is what `tightenDbFiles` below exists to protect.
+  const closePrimary = db.close.bind(db);
+  db.close = () => {
+    try {
+      verifier.close();
+    } catch {
+      // Already closed. A teardown that throws leaves the PRIMARY open, which
+      // is the handle that matters; `closePrimary` still reports its own errors.
+    } finally {
+      closePrimary();
+    }
+  };
+
   tightenDbFiles();
 
   return db;
