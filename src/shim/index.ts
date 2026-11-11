@@ -24,6 +24,7 @@ import { installReportContext } from './tools/report_context.js';
 import { installSetStyle } from './tools/set_style.js';
 import { installClaims } from './tools/claims.js';
 import { installSearch } from './tools/search.js';
+import { installHealth } from './tools/health.js';
 import { installInboxResource } from './resources/inbox.js';
 import { checkWakeAdapter, prependAdapterWarning, type AdapterStatus } from './adapter-check.js';
 import { dbPath, notifyPathFor } from '../util/paths.js';
@@ -73,6 +74,7 @@ function buildInstructions(handle: string): string {
     `- \`inbox\` — non-blocking; returns unread DMs and marks them read. Call on each wake, and at natural pause points if wake isn't wired up.`,
     `- \`wait_for_message\` — blocks up to ~25s (max 120s). Use right after \`send\` when you expect a fast reply.`,
     `- \`send\` — send a 1:1 message. \`list_agents\` shows who is online. \`whoami\` returns your own registration + peers.`,
+    `- \`health\` — the resolved database plus the two id marks that say whether a reported message id is real. A send has reported success while nothing persisted, and lost work looks identical to "the peer never replied", so call this before concluding a peer is silent.`,
     ``,
     `## Rooms — multi-peer channels`,
     ``,
@@ -160,6 +162,7 @@ export async function runShim(opts: ShimOptions): Promise<void> {
   installSetStyle(server, ctx);
   installClaims(server, ctx);
   installSearch(server, ctx);
+  installHealth(server, ctx);
   installInboxResource(server, ctx);
 
   const transport = new StdioServerTransport();

@@ -1,4 +1,7 @@
 import type { Db } from './db.js';
+// A value import: `db.ts` owns the schema_version table, and it imports only
+// `util/paths.js`, so this cannot cycle back.
+import { currentSchemaVersion } from './db.js';
 import type { ClaimRow } from '../claims/lifecycle.js';
 // A value import, not a type: `searchMessages` has to tell a room target from
 // a peer target at runtime. `naming.ts` imports nothing, so this cannot cycle.
@@ -308,6 +311,34 @@ export function insertMessage(db: Db, input: SendInput): SendResult {
     `INSERT INTO messages (from_handle, to_handle, body, sent_at, kind) VALUES (?, ?, ?, ?, ?)`,
   ).run(input.from, input.to, input.body, sent_at, kind);
   return { id: Number(info.lastInsertRowid), sent_at };
+}
+
+export interface BusHealth {
+  max_id: number | null;
+  autoincrement_seq: number | null;
+  schema_version: number | null;
+}
+
+/**
+ * The two marks that say whether a reported message id is real.
+ *
+ * 🛑 NEITHER NUMBER MEANS ANYTHING ALONE. `sqlite_sequence.seq` is the
+ * AUTOINCREMENT high-water mark, so `max_id` below it means a row was written
+ * and is now gone, while the two level and short of a reported id means no
+ * INSERT was ever attempted. #138 could only be diagnosed by the pair.
+ */
+export function busHealth(db: Db): BusHealth {
+  const max = db.prepare('SELECT MAX(id) AS v FROM messages').get() as unknown as { v: number | null };
+  // sqlite_sequence holds no row for a table until its first insert, so `.get()`
+  // is undefined on a database nobody has sent on yet.
+  const seq = db.prepare("SELECT seq AS v FROM sqlite_sequence WHERE name = 'messages'").get() as unknown as
+    | { v: number | null }
+    | undefined;
+  return {
+    max_id: max.v ?? null,
+    autoincrement_seq: seq?.v ?? null,
+    schema_version: currentSchemaVersion(db),
+  };
 }
 
 export interface InboxQuery {

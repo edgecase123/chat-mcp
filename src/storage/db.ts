@@ -287,10 +287,19 @@ function tx(db: Db, fn: () => void): void {
   }
 }
 
+/**
+ * The schema version this database reports, or null before any migration ran.
+ *
+ * Lives here because `db.ts` owns the table — it creates it in `migrate()`.
+ */
+export function currentSchemaVersion(db: Db): number | null {
+  const row = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as unknown as { v: number | null };
+  return row.v ?? null;
+}
+
 export function migrate(db: Db): void {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)`);
-  const row = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as unknown as { v: number | null };
-  const current = row.v ?? 0;
+  const current = currentSchemaVersion(db) ?? 0;
   for (let i = current; i < MIGRATIONS.length; i++) {
     const version = i + 1;
     const migration = MIGRATIONS[i];
