@@ -328,7 +328,12 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   program
     .command('agents <action> <handle>')
     .description('Control a running supervisor: restart, stop')
-    .option('--now', 'skip the graceful notice and kill immediately', false)
+    // 🛑 NOT "kill immediately", WHICH IS WHAT THIS SAID. `--now` skips the
+    // notice wait only. `docker stop -t` still waits out its full grace, so a
+    // containerized handle can take its whole grace to go down either way.
+    // Promising "immediately" is the same misleading-operator class as #136.
+    // claude2 raised it reviewing PR #158.
+    .option('--now', 'skip the graceful notice (a container teardown still waits out its grace)', false)
     .action(async (action: string, handle: string, o: { now?: boolean }) => {
       if (action !== 'restart' && action !== 'stop') {
         console.error(`Error: unknown action "${action}". Use restart or stop.`);
