@@ -32,3 +32,12 @@ test('🛑 the adapter docker argv equals the CLI tail of dockerArgsFor today', 
 
   assert.deepEqual(claudeSpawn.argsFor(opts, 'docker'), cliTail);
 });
+
+const { dockerArgsForVendor } = await import('../../../src/supervise/drivers/containerized.js');
+
+test('🛑 the generic container argv is byte-identical to dockerArgsFor today', () => {
+  setToken('sk-ant-oat-x');
+  const opts = { cwd: PROJECT_DIR, model: 'opus', supervisorHandle: 'claude1' };
+
+  assert.deepEqual(dockerArgsForVendor(claudeSpawn, opts), dockerArgsFor(opts));
+});
