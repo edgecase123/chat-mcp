@@ -176,3 +176,37 @@ test('a spawn failure does not strand the socket on the handle', async () => {
   // The handle has to be startable again, which is the consequence that matters.
   await assert.doesNotReject(() => refuseIfSupervisorLive('spawn-throws'));
 });
+
+/**
+ * 🛑 THE POSITION IS THE PROPERTY, AND A COMMENT CANNOT HOLD IT.
+ *
+ * The wrapper's refusal has to be its FIRST statement. Below the stop branch
+ * it is already too late: a stop wake reaches `doStop` inside a
+ * `setImmediate`, where a dead-zone throw lands outside this call stack and
+ * takes the supervisor down instead of refusing.
+ *
+ * The source comment above that line says exactly this, and nothing enforced
+ * it until here. A later edit inserting a branch above the refusal would read
+ * as harmless.
+ */
+test('🛑 the refusal is the wrapper FIRST statement, above the stop branch', () => {
+  const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
+  const lines = src.split('\n');
+
+  const bindAt = lines.findIndex((l) => l.includes('WakeListener.bind('));
+  assert.ok(bindAt >= 0, 'bind call not found');
+
+  const wrapperEnd = lines.findIndex((l, i) => i > bindAt && l === '  });');
+  const body = lines.slice(bindAt + 1, wrapperEnd);
+
+  const statements = body
+    .map((l) => l.trim())
+    .filter((l) => l !== '' && !l.startsWith('//') && !l.startsWith('*') && !l.startsWith('/*'));
+
+  assert.ok(statements.length > 0, 'the wrapper body must hold statements');
+  assert.match(
+    statements[0],
+    /^if \(onWake === null\) return \{ ok: false,/,
+    'the refusal must come before anything else in the wrapper, including the stop branch',
+  );
+});
