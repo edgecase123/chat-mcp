@@ -15,3 +15,15 @@ measurements/
 .trash/
 .obsidian.vimrc
 *.canvas
+
+# Per-tree, never shared. Two agents each run a clone of this repo
+# (~/dev/chat-mcp is claude1's, ~/dev/chat-mcp2 is claude2's) and `.mcp.json`
+# is what binds a clone to ONE bus handle. Committing it would give both
+# clones the same handle, and the shim refuses the second one outright.
+#
+# ⚠️ NOT a blanket `.claude/*` ignore, unlike `leagues`. This repo TRACKS
+# `.claude/agents/` and `.claude/skills/local-context/` on purpose. Only the
+# per-machine permission files are ignored.
+/.mcp.json
+/.claude/settings.json
+/.claude/settings.local.json

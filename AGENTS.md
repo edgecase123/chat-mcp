@@ -25,6 +25,106 @@ Set `process.env.CHAT_MCP_HOME` to a temp dir *before* importing anything
 that resolves a state path — see `src/util/paths.ts`'s `stateDir()` for why,
 and any `test/supervise/*.test.ts` for the pattern.
 
+## Three clones: one runs the bus, two are edited
+
+Two agents work this repo at the same time. A third clone runs the bus they
+talk over, so neither agent's work-in-progress can take the comms down.
+
+| clone | role | handle |
+|---|---|---|
+| `~/dev/chat-mcp-main` | runs the bus for both agents. Stays on `main`. | — |
+| `~/dev/chat-mcp` | claude1 edits and tests here | `claude1` |
+| `~/dev/chat-mcp2` | claude2 edits and tests here | `claude2` |
+
+Each agent clone carries a `.mcp.json` at its root, **gitignored and
+per-tree**. It names that clone's handle and points at `chat-mcp-main`:
+
+```json
+{
+  "mcpServers": {
+    "chat": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/Users/leejenkins/dev/chat-mcp-main/dist/index.js", "--handle", "claude2"],
+      "env": {}
+    }
+  }
+}
+```
+
+- **Not that clone's own build.** Comms is infrastructure, and you do not run
+  infrastructure off a working copy. Break your `src/`, rebuild, and you lose
+  your own bus mid-task — which happened on 2026-11-11.
+- **Not `npx github:…` either.** npx resolves one cache directory per spec
+  string, shared by both clones, and rewrites it in place when `main` moves. A
+  session starting during that rewrite reads a launcher with no execute bit
+  and dies with `Permission denied`.
+- **`cd ~/dev/chat-mcp-main && git pull && npm ci && npm run build`** after
+  anything lands on `main`. A stale `dist/` is worse than a missing one: it can
+  be silently corrupt, and only the paths importing the broken module die. One
+  was found beginning `ximport;` while `--handle` kept answering correctly, so
+  a healthy handshake proves nothing about the rest of the build.
+- **Never symlink `node_modules` between clones.** It faked five failures and
+  shrank the test denominator by 60 on PR #147. Run `npm ci` in each clone.
+
+A new agent clone needs its own `.mcp.json` written by hand. Nothing in the
+repo can supply it, because the whole point is that each one differs.
+
+### Testing a clone in isolation uses `CHAT_MCP_HOME`, not ports
+
+Ports are already not a collision: `chat-mcp web --port` defaults to a random
+free port. The state is the shared thing. `stateDir()` in `src/util/paths.ts`
+resolves all five of `chat.db`, `notify/`, `sock/`, `mcp/` and `adapters/`
+under one root, and `CHAT_MCP_HOME` is that root.
+
+```bash
+CHAT_MCP_HOME=/tmp/chat-mcp-test-$$ node ./dist/index.js --handle probe
+```
+
+The suite enforces this: `stateDir()` throws under the node test runner when
+`CHAT_MCP_HOME` is unset, because binding a socket in the live directory
+unlinks whatever looks stale and silently stops a running agent.
+
+### `.mcp.json` alone leaves the agent DEAF
+
+Registering on the bus is not the same as noticing a message. `.mcp.json`
+gives the session its handle and its tools. Nothing in it wakes the model when
+a message lands, so an agent with only `.mcp.json` answers nothing and looks
+identical to one that is ignoring you.
+
+The wake trigger is a hook, in `.claude/settings.local.json` at the clone root
+— also gitignored and per-tree:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command",
+        "command": "/Users/leejenkins/.chat-mcp/adapters/claude-code-claude2.sh" } ] }
+    ],
+    "PreToolUse": [
+      { "hooks": [ { "type": "command",
+        "command": "/Users/leejenkins/.chat-mcp/adapters/claude-code-context-claude2.sh" } ] }
+    ]
+  }
+}
+```
+
+Those two scripts are per-handle and are installed, not written by hand:
+
+```bash
+chat-mcp install claude-code --handle <handle>
+chat-mcp install claude-code-context --handle <handle>
+```
+
+Two things that cost time here:
+
+- **An agent cannot write this file for itself.** Claude Code's
+  `[Self-Modification]` classifier denies it, so a human creates it or grants
+  the write. Both agents hit that on 2026-11-11.
+- **Check for an adapter before installing one.** `ls ~/.chat-mcp/adapters/`
+  already holds several handles' scripts. A missing one is the exception.
+
 ## Layout
 
 - `src/adapters/` — per-vendor CLI integration (flags, event shapes). May import from `src/supervise/`.
