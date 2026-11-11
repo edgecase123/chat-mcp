@@ -98,6 +98,23 @@ export interface AgentChild {
 
   onExit(cb: (code: number | null, signal: string | null) => void): void;
   kill(): void;
+
+  /**
+   * Resolve once `kill()`'s teardown has actually finished.
+   *
+   * 🛑 SEPARATE FROM `kill()` ON PURPOSE, BECAUSE A RESTART MUST NOT WAIT.
+   * `kill()` is best-effort and returns immediately: a containerized child
+   * spawns `docker stop` detached, because PID 1 ignores SIGTERM and
+   * `docker stop` then waits out its full `-t`. Blocking there froze the whole
+   * supervisor for that minute.
+   *
+   * A stop is the one caller that wants the wait, since the process is leaving
+   * anyway and the operator needs telling that the container is down.
+   *
+   * Optional. A driver with nothing to wait for omits it, and the old
+   * non-blocking behaviour is what omitting it gives you.
+   */
+  awaitTeardown?(): Promise<void>;
 }
 
 export interface SpawnOptions {

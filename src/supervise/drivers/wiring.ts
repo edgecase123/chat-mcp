@@ -28,6 +28,12 @@ export function wireAgentChild(
      * actually fire. Proved by `container-removal.test.ts`.
      */
     stop?: () => void;
+    /**
+     * Backs `AgentChild.awaitTeardown`. Omitted leaves that hook absent rather
+     * than present-and-instant, because the caller distinguishes the two: a
+     * driver with nothing to wait for must not claim it confirmed anything.
+     */
+    teardown?: () => Promise<void>;
   } = {},
 ): AgentChild {
   const eventCbs: ((e: Record<string, unknown>) => void)[] = [];
@@ -95,5 +101,9 @@ export function wireAgentChild(
 
       child.kill();
     },
+    // Spread so the key is ABSENT when no teardown was passed, rather than
+    // present and undefined. `awaitTeardown?.()` cannot tell those apart, but
+    // a driver test asserting the contract can.
+    ...(opts.teardown ? { awaitTeardown: opts.teardown } : {}),
   };
 }

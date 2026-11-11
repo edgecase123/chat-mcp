@@ -327,11 +327,16 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
 
   program
     .command('agents <action> <handle>')
-    .description('Control a running supervisor: restart')
-    .option('--now', 'skip the graceful notice and kill immediately', false)
+    .description('Control a running supervisor: restart, stop')
+    // 🛑 NOT "kill immediately", WHICH IS WHAT THIS SAID. `--now` skips the
+    // notice wait only. `docker stop -t` still waits out its full grace, so a
+    // containerized handle can take its whole grace to go down either way.
+    // Promising "immediately" is the same misleading-operator class as #136.
+    // claude2 raised it reviewing PR #158.
+    .option('--now', 'skip the graceful notice (a container teardown still waits out its grace)', false)
     .action(async (action: string, handle: string, o: { now?: boolean }) => {
-      if (action !== 'restart') {
-        console.error(`Error: unknown action "${action}". Use restart.`);
+      if (action !== 'restart' && action !== 'stop') {
+        console.error(`Error: unknown action "${action}". Use restart or stop.`);
         process.exit(1);
       }
 
@@ -341,7 +346,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         to: handle,
         from: 'cli',
         ts: Date.now(),
-        control: { kind: 'restart', mode: o.now ? 'now' : 'graceful' },
+        control: { kind: action, mode: o.now ? 'now' : 'graceful' },
       });
 
       if (!ack) {
@@ -349,7 +354,54 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         process.exit(1);
       }
 
-      console.log(`restart accepted for ${handle}`);
+      // 🛑 `{ ok: false }` IS A TRUTHY OBJECT, so `if (!ack)` alone reports a
+      // REFUSED control as accepted. That turned a refused `--now` into a
+      // silent no-op the operator waited out. Found by claude2 on PR #158.
+      if (!ack.ok) {
+        console.error(`${action} refused for ${handle}: ${ack.error ?? 'no reason given'}`);
+        process.exit(1);
+      }
+
+      if (action === 'restart') {
+        console.log(`restart accepted for ${handle}`);
+        return;
+      }
+
+      console.log(`stop accepted for ${handle} — waiting for teardown`);
+
+      // 🛑 THE SOCKET FILE IS THE SIGNAL, and the supervisor unlinks it only
+      // AFTER the container is gone. Polling the container here instead would
+      // report nothing for a non-containerized child, which has no container.
+      const { socketPathFor } = await import('./util/paths.js');
+      const { existsSync } = await import('node:fs');
+      const { DEFAULT_SHUTDOWN_GRACE_SECONDS } = await import(
+        './supervise/drivers/containerized.js'
+      );
+      // 🛑 THE SUPERVISOR'S OWN GRACE, FROM THE ACK — not this process's copy
+      // of the default. `shutdownGraceSeconds` is overridable per handle, and a
+      // ceiling computed from the default gives up first and calls a healthy
+      // stop a failure. The fallback only covers an older supervisor whose ack
+      // predates the field.
+      const grace = ack.graceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
+      // One grace period, doubled to cover the notice wait AND `docker stop -t`
+      // back to back, plus a margin for the daemon's own removal step.
+      const STOP_WAIT_MS = grace * 2 * 1000 + 15_000;
+      const path = socketPathFor(handle);
+      const deadline = Date.now() + STOP_WAIT_MS;
+
+      while (existsSync(path) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      if (existsSync(path)) {
+        console.error(
+          `${handle} did not confirm teardown within ${Math.round(STOP_WAIT_MS / 1000)}s. ` +
+            `It may still be shutting down — check \`docker ps\`.`,
+        );
+        process.exit(1);
+      }
+
+      console.log(`${handle} stopped`);
     });
 
   program
@@ -449,8 +501,16 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         allowedTools: typeof o.allowedTools === 'string' ? o.allowedTools.split(',') : undefined,
         container: (o as unknown as { container?: boolean }).container,
       });
+      // A bus-delivered `agents stop` reaches the supervisor, not this signal
+      // handler, so the exit has to be wired to the stop itself. Without it the
+      // process survives its own stop — the #136 symptom all over again.
+      sup.onStopped(() => {
+        console.log(`${handle} stopped`);
+        process.exit(0);
+      });
+
       const shutdown = (): void => {
-        void sup.stop('graceful').then(() => process.exit(0));
+        void sup.stop('graceful');
       };
       process.on('SIGINT', shutdown);
       process.on('SIGTERM', shutdown);

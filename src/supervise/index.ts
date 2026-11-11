@@ -114,6 +114,15 @@ export interface Supervisor {
    * SIGTERM handler is the one caller that wants this.
    */
   stop(mode?: 'graceful' | 'now'): Promise<void>;
+  /**
+   * Called once this supervisor has stopped, however the stop was triggered.
+   *
+   * 🛑 THE CLI'S ONLY EXIT SIGNAL FOR A BUS-DELIVERED STOP. `stop()` closes the
+   * socket and kills the child but cannot exit the host process, so without
+   * this the `supervise` process outlives its own stop and the operator sees
+   * nothing happen — the #136 symptom, reproduced by the fix for it.
+   */
+  onStopped(cb: () => void): void;
 }
 
 /** How an arriving message is presented to the agent. */
@@ -287,6 +296,9 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
   /** Observers of the child finishing a turn. See `Supervisor.onTurnEnd`. */
   const turnEndListeners: (() => void)[] = [];
+
+  /** Observers of this supervisor having stopped. See `Supervisor.onStopped`. */
+  const stoppedListeners: (() => void)[] = [];
 
   /**
    * Observers of a prompt actually being WRITTEN to the child — distinct
@@ -644,7 +656,14 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * on the first (dispatch) one acts the instant the child receives the
    * notice, before it can act on it (chat-mcp review, Task 8).
    */
-  const sendNoticeThenFinish = (notice: string, timeoutMs: number, onFinish: () => void): void => {
+  const sendNoticeThenFinish = (
+    notice: string,
+    timeoutMs: number,
+    onFinish: () => void,
+    // Returns a short-circuit. Calling it runs `onFinish` now and cancels the
+    // wait, which is how `agents stop --now` escalates a graceful stop still
+    // inside its grace period.
+  ): (() => void) => {
     let noticeDispatchedAtCount: number | null = null;
     let settled = false;
 
@@ -680,6 +699,8 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     sendListeners.push(onSend);
 
     queue.offer({ text: notice, messageIds: [] });
+
+    return finish;
   };
 
   const doRestart = (): void => {
@@ -711,7 +732,81 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     sendNoticeThenFinish(RESTART_NOTICE, GRACEFUL_RESTART_TIMEOUT_MS, doRestart);
   };
 
+  let hasStopped = false;
+  /**
+   * Set while a graceful stop is waiting out its grace period. Calling it ends
+   * that wait immediately.
+   *
+   * 🛑 THIS IS WHAT MAKES `--now` ESCALATE A GRACEFUL STOP. Without it the
+   * second command is refused and the operator waits out the original grace
+   * believing they cut it short — which is #136's own symptom, reintroduced
+   * one layer up. Found by claude2 reviewing PR #158.
+   */
+  let cancelGracefulWait: (() => void) | null = null;
+
+  const doStop = async (mode: 'graceful' | 'now'): Promise<void> => {
+    // A bus-delivered stop and the CLI's SIGINT handler can both land, and the
+    // second one must not re-close the socket or fire `onStopped` twice.
+    if (hasStopped) {
+      if (mode === 'now') cancelGracefulWait?.();
+
+      return;
+    }
+    hasStopped = true;
+
+    if (mode === 'graceful') {
+      await new Promise<void>((resolve) => {
+        cancelGracefulWait = sendNoticeThenFinish(SHUTDOWN_NOTICE, shutdownGraceMs, resolve);
+      });
+      cancelGracefulWait = null;
+    }
+
+    // 🛑 `kill()` RETURNS BEFORE THE CONTAINER IS DOWN. It spawns `docker stop`
+    // detached on purpose, so firing `onStopped` here reports "stopped" while
+    // the container is still shutting down. The wait is what makes the printed
+    // confirmation true.
+    const current = child;
+    current.kill();
+    await current.awaitTeardown?.();
+
+    // 🛑 CLOSED AFTER THE TEARDOWN, NOT BEFORE, SO THE SOCKET'S DISAPPEARANCE
+    // MEANS "FULLY STOPPED". That is the one signal `agents stop` can wait on
+    // for every driver — a host child has no container to poll. Envelopes
+    // arriving in this window are refused above, not delivered to a dead child.
+    await listener.close();
+
+    // Registration happens in the CHILD, via the shim. So this deletes a row
+    // this process did not write, which is why it is opt-in and not default.
+    if (opts.ephemeral === true) dao.deleteAgent(approvalsDb, opts.handle);
+
+    for (const cb of stoppedListeners) cb();
+  };
+
   const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
+    // 🛑 A STOP IS CHECKED BEFORE THE STOPPING GUARD, so `--now` can escalate a
+    // graceful stop mid-grace. Refusing it would tell the operator their
+    // escalation landed while they wait out the original period — #136's own
+    // symptom. `doStop` is idempotent and handles the upgrade itself.
+    if (envelope.control?.kind === 'stop') {
+      const mode = envelope.control.mode;
+      // A stop closes the very socket this ack travels back on, so it CANNOT
+      // run inline. Deferring lets the ack reach the CLI before the listener
+      // dies — otherwise `agents stop` reports no supervisor was listening.
+      setImmediate(() => void doStop(mode));
+
+      // The CLI's wait ceiling comes from HERE rather than its own copy of the
+      // default, so a per-handle `shutdownGraceSeconds` cannot make a healthy
+      // stop report failure. Found by claude2 reviewing PR #158.
+      return { ok: true, queued: 'sent', graceSeconds: Math.ceil(shutdownGraceMs / 1000) };
+    }
+
+    // 🛑 THE SOCKET OUTLIVES THE CHILD DURING A TEARDOWN, by up to the full
+    // grace period. Without this a wake in that window is "delivered" to a
+    // child that is already being killed, and the sender is told `sent`.
+    if (hasStopped) {
+      return { ok: false, error: 'supervisor is stopping' };
+    }
+
     // A restart command is out-of-band, not a chat message or an approval,
     // and must run before either of those checks.
     if (envelope.control?.kind === 'restart') {
@@ -772,18 +867,11 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     onTurnEnd(cb: () => void): void {
       turnEndListeners.push(cb);
     },
+    onStopped(cb: () => void): void {
+      stoppedListeners.push(cb);
+    },
     async stop(mode: 'graceful' | 'now' = 'now'): Promise<void> {
-      if (mode === 'graceful') {
-        await new Promise<void>((resolve) => {
-          sendNoticeThenFinish(SHUTDOWN_NOTICE, shutdownGraceMs, resolve);
-        });
-      }
-
-      await listener.close();
-      child.kill();
-      // Registration happens in the CHILD, via the shim. So this deletes a row
-      // this process did not write, which is why it is opt-in and not default.
-      if (opts.ephemeral === true) dao.deleteAgent(approvalsDb, opts.handle);
+      await doStop(mode);
     },
   };
 }
