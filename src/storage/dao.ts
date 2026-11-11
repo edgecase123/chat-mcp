@@ -1017,6 +1017,18 @@ export interface Approval {
   readonly sessionId: string | null;
   readonly createdAt: number;
   readonly answeredAt: number | null;
+  /**
+   * The handle that answered, or null when it is not known.
+   *
+   * 🛑 NULL IS "UNKNOWN", NEVER A HANDLE. Rows answered before #163 have no
+   * approver, and reading one as a name attributes a decision to whoever the
+   * caller happened to substitute.
+   *
+   * 🛑 THE HANDLE ALONE. lee ruled on 2026-11-11 that the request context is
+   * not stored again — `requested`, `reason`, `sessionId` and `answeredAt` are
+   * already on this row, and a second copy drifts from the first.
+   */
+  readonly answeredBy: string | null;
   readonly decision: 'approve' | 'deny' | null;
 }
 
@@ -1043,6 +1055,7 @@ interface ApprovalRow {
   session_id: string | null;
   created_at: number;
   answered_at: number | null;
+  answered_by: string | null;
   decision: string | null;
 }
 
@@ -1079,6 +1092,7 @@ function toApproval(row: ApprovalRow): Approval {
     sessionId: row.session_id,
     createdAt: row.created_at,
     answeredAt: row.answered_at,
+    answeredBy: row.answered_by,
     decision: row.decision === 'approve' || row.decision === 'deny' ? row.decision : null,
   };
 }
@@ -1161,7 +1175,12 @@ export class UnnameableApprovalError extends Error {
   }
 }
 
-export function answerApproval(db: Db, id: number, decision: 'approve' | 'deny'): boolean {
+export function answerApproval(
+  db: Db,
+  id: number,
+  decision: 'approve' | 'deny',
+  answeredBy: string,
+): boolean {
   // ⚠️ ONLY WHEN THE ROW EXISTS. `?.requested == null` is also true for an
   // approval that is not there, so the first version threw
   // UnnameableApprovalError for a missing id instead of returning false —
@@ -1176,8 +1195,10 @@ export function answerApproval(db: Db, id: number, decision: 'approve' | 'deny')
   }
 
   const result = db
-    .prepare(`UPDATE approvals SET answered_at = ?, decision = ? WHERE id = ? AND answered_at IS NULL`)
-    .run(Date.now(), decision, id);
+    .prepare(
+      `UPDATE approvals SET answered_at = ?, decision = ?, answered_by = ? WHERE id = ? AND answered_at IS NULL`,
+    )
+    .run(Date.now(), decision, answeredBy, id);
 
   return Number(result.changes) > 0;
 }

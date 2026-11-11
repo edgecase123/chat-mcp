@@ -63,8 +63,8 @@ test('the rebuilt table still refuses two answers', () => {
   const db = existingDb();
   const id = dao.pendingApprovals(db)[0]!.id;
 
-  assert.equal(dao.answerApproval(db, id, 'deny'), true);
-  assert.equal(dao.answerApproval(db, id, 'approve'), false, 'the index or guard was lost');
+  assert.equal(dao.answerApproval(db, id, 'deny', 'operator'), true);
+  assert.equal(dao.answerApproval(db, id, 'approve', 'operator'), false, 'the index or guard was lost');
 });
 
 /**

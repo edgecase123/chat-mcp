@@ -111,3 +111,32 @@ test('an unknown id is reported as missing, not as ungrantable', () => {
 
   assert.equal(answerAndNotify(db, 9999, 'approve', 'a-human').kind, 'no-such-approval');
 });
+
+/**
+ * #163 — the handle this function already receives is now RECORDED, not only
+ * used to address the wake.
+ *
+ * 🛑 THE ONLY PRODUCTION CALLER IS `src/cli/web/server.ts`, so a unit test on
+ * `dao.answerApproval` alone proves the column and not the wiring. This is the
+ * leg that would survive `fromHandle` being dropped on the way through.
+ */
+test('the handle that answers is recorded on the row, not only on the envelope', () => {
+  const db = new DatabaseSync(':memory:');
+  migrate(db);
+
+  const supervisor = `ans5-${process.pid}`;
+  const id = seed(db, supervisor);
+
+  try {
+    answerAndNotify(db, id, 'approve', 'leejenkins');
+
+    const payload = JSON.parse(readFileSync(notifyPath(supervisor), 'utf8'));
+
+    // The envelope carried it before #163 and is transient — one file per
+    // handle, overwritten. The row is the record.
+    assert.equal(payload.from, 'leejenkins');
+    assert.equal(dao.getApproval(db, id)?.answeredBy, 'leejenkins');
+  } finally {
+    rmSync(notifyPath(supervisor), { force: true });
+  }
+});
