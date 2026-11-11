@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { wireAgentChild } from '../../../src/supervise/drivers/wiring.js';
-import { containerNameFor } from '../../../src/supervise/drivers/containerized.js';
+import { containerNameFor, dockerStopFor } from '../../../src/supervise/drivers/containerized.js';
 
 function dockerAvailable(): boolean {
   try {
@@ -27,6 +27,10 @@ function dockerAvailable(): boolean {
  * — it was passing #148's old `todo` exactly because of that. `kill()`'s
  * `stop` override is what actually reaches the daemon (`docker stop`), so
  * this exercises that override the same way `spawnContainerized` wires it.
+ *
+ * 🛑 USES `dockerStopFor` FROM PRODUCTION, NOT A COPY. A hand-written `stop`
+ * closure here would prove `docker stop` removes a container; it would not
+ * prove `spawnContainerized` is wired to call it (claude2, PR #147 review).
  */
 test(
   '🛑 AgentChild.kill() on a containerized child removes the --rm container',
@@ -47,15 +51,7 @@ test(
     const agentChild = wireAgentChild(
       rawChild,
       { routeEvent: () => undefined, encodeInput: (text) => text },
-      {
-        stop: () => {
-          try {
-            execFileSync('docker', ['stop', name], { stdio: 'ignore' });
-          } catch {
-            // Already stopped — fine, kill() must still be idempotent.
-          }
-        },
-      },
+      { stop: dockerStopFor(name) },
     );
 
     try {

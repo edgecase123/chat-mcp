@@ -108,6 +108,23 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
 }
 
 /**
+ * `kill()`'s `stop` override for a container by name.
+ *
+ * Exported so `container-removal.test.ts` can exercise this exact closure
+ * instead of a hand-written copy — a copy proves `docker stop` works, not
+ * that `spawnContainerized` is wired to call it (claude2, PR #147 review).
+ */
+export function dockerStopFor(name: string): () => void {
+  return () => {
+    try {
+      execFileSync('docker', ['stop', name], { stdio: 'ignore' });
+    } catch {
+      // Already stopped or removed — the expected case on a repeat kill().
+    }
+  };
+}
+
+/**
  * Spawn a vendor's CLI inside `docker run`.
  *
  * 🛑 ONE `docker run` PROCESS, DRIVEN OVER STDIN AND STDOUT. No `docker exec`,
@@ -123,13 +140,5 @@ export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {})
 
   const name = containerNameFor(requireSupervisorHandle(opts));
 
-  return wireAgentChild(child, vendor, {
-    stop: () => {
-      try {
-        execFileSync('docker', ['stop', name], { stdio: 'ignore' });
-      } catch {
-        // Already stopped or removed — the expected case on a repeat kill().
-      }
-    },
-  });
+  return wireAgentChild(child, vendor, { stop: dockerStopFor(name) });
 }
