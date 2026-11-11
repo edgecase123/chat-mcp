@@ -25,6 +25,88 @@ Set `process.env.CHAT_MCP_HOME` to a temp dir *before* importing anything
 that resolves a state path — see `src/util/paths.ts`'s `stateDir()` for why,
 and any `test/supervise/*.test.ts` for the pattern.
 
+## One clone per agent, one handle each
+
+Two agents work this repo at the same time, each in its own clone. The clone
+is what decides which bus handle that session answers to.
+
+| clone | handle |
+|---|---|
+| `~/dev/chat-mcp` | `claude1` |
+| `~/dev/chat-mcp2` | `claude2` |
+
+The binding lives in `.mcp.json` at the clone root, which is **gitignored and
+per-tree**. It points at that clone's own build:
+
+```json
+{
+  "mcpServers": {
+    "chat": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/absolute/path/to/this/clone/dist/index.js", "--handle", "claude2"],
+      "env": {}
+    }
+  }
+}
+```
+
+Two things to know before you touch it:
+
+- **`npm run build` first, and again after every pull.** `.mcp.json` runs
+  `dist/`, so a clone with no `dist/` has no bus at all. A stale `dist/` is
+  worse than a missing one: it can be silently corrupt, and only the paths
+  importing the broken module die. One was found beginning `ximport;` while
+  `--handle` kept answering correctly throughout, so a healthy handshake
+  proves nothing about the rest of the build.
+- **It points at the local build on purpose, not `npx github:…`.** In this
+  repo npx would run a different version than the one you are editing. It
+  also writes a shared npx cache directory that both clones resolve to, which
+  is its own failure mode.
+
+A new clone needs its own `.mcp.json` written by hand. Nothing in the repo can
+supply it, because the whole point is that each one differs.
+
+### `.mcp.json` alone leaves the agent DEAF
+
+Registering on the bus is not the same as noticing a message. `.mcp.json`
+gives the session its handle and its tools. Nothing in it wakes the model when
+a message lands, so an agent with only `.mcp.json` answers nothing and looks
+identical to one that is ignoring you.
+
+The wake trigger is a hook, in `.claude/settings.local.json` at the clone root
+— also gitignored and per-tree:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command",
+        "command": "/Users/leejenkins/.chat-mcp/adapters/claude-code-claude2.sh" } ] }
+    ],
+    "PreToolUse": [
+      { "hooks": [ { "type": "command",
+        "command": "/Users/leejenkins/.chat-mcp/adapters/claude-code-context-claude2.sh" } ] }
+    ]
+  }
+}
+```
+
+Those two scripts are per-handle and are installed, not written by hand:
+
+```bash
+chat-mcp install claude-code --handle <handle>
+chat-mcp install claude-code-context --handle <handle>
+```
+
+Two things that cost time here:
+
+- **An agent cannot write this file for itself.** Claude Code's
+  `[Self-Modification]` classifier denies it, so a human creates it or grants
+  the write. Both agents hit that on 2026-11-11.
+- **Check for an adapter before installing one.** `ls ~/.chat-mcp/adapters/`
+  already holds several handles' scripts. A missing one is the exception.
+
 ## Layout
 
 - `src/adapters/` — per-vendor CLI integration (flags, event shapes). May import from `src/supervise/`.
