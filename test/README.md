@@ -9,6 +9,27 @@ node --test --import tsx test/cli/ink/fuzzy.test.ts   # one file
 
 Pure-logic modules only. UI components smoked via `npm run smoke` and manual `npm run dev -- cli --experimental --handle testuser`.
 
+## 🛑 One test is skipped in CI, on purpose
+
+`test/supervise/drivers/container-removal.test.ts` starts a real Docker
+container. It is the only test in the suite that needs a live daemon.
+
+**It runs locally and is skipped in CI, by lee's ruling of 2026-11-11.**
+`docker run` pulls the image inside the test's own startup budget, so a runner
+slow enough to miss that budget reds `main` with no defect behind it (#150).
+
+```bash
+npm run test:docker                     # the lane, on purpose
+DOCKER_TESTS=1 npm test                 # the whole suite including the lane
+```
+
+The decision lives in `test/support/docker-lane.ts` and is unit-tested in
+`test/support/docker-lane.test.ts`, including a control proving
+`DOCKER_TESTS=0` does not force it on.
+
+⚠️ **`npm test` reports `skipped 1` in CI and `skipped 0` locally.** A local
+`skipped 1` means docker is not running, not that the lane was retired.
+
 ## 🛑 One test goes red with no code change, on purpose
 
 `test/supervise/corpus-staleness.test.ts` fails when

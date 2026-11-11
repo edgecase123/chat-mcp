@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { wireAgentChild } from '../../../src/supervise/drivers/wiring.js';
 import { containerNameFor, dockerStopFor } from '../../../src/supervise/drivers/containerized.js';
+import { dockerLaneSkip } from '../../support/docker-lane.js';
 
 function dockerAvailable(): boolean {
   try {
@@ -44,7 +45,7 @@ const STARTUP_BOUND_MS = 20000;
  */
 test(
   '🛑 AgentChild.kill() on a containerized child removes the --rm container',
-  { skip: dockerAvailable() ? false : 'docker is not available here' },
+  { skip: dockerLaneSkip(process.env, dockerAvailable) },
   async () => {
     const name = containerNameFor(`removal-test-${process.pid}`);
     const rawChild = spawn('docker', [
