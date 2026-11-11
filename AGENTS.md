@@ -53,3 +53,10 @@ and any `test/supervise/*.test.ts` for the pattern.
 - `.claude/agents/dry-solid-reviewer.md` — DRY/SOLID review against this codebase's own patterns.
 - `.claude/agents/security-scanner.md` — scans for this repo's actual attack surface (command injection, secret handling, path traversal, SQL interpolation).
 - `.claude/skills/local-context/` — per-task working-memory skill (`/local-context`).
+
+## Review order: self, then sibling
+
+Run the matching `.claude/agents/*.md` reviewer(s) on your own diff **before**
+handing it to the other agent for peer review. Same rule as `leagues`'
+CLAUDE.md. A finding a sub-agent catches pre-review costs nothing; the same
+finding caught by the sibling costs a round trip back to you.
