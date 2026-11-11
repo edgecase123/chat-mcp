@@ -24,7 +24,7 @@
     "clean": "rm -rf dist",
     "smoke": "npm run build && node scripts/smoke.mjs",
     "test": "node --test --experimental-test-module-mocks --import tsx 'test/**/*.test.ts'",
-    "test:docker": "DOCKER_TESTS=1 node --test --experimental-test-module-mocks --import tsx 'test/supervise/drivers/container-removal.test.ts'",
+    "test:docker": "DOCKER_TESTS=1 npm test",
     "prepare": "npm run build"
   },
   "dependencies": {

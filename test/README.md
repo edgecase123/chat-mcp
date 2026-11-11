@@ -19,9 +19,13 @@ container. It is the only test in the suite that needs a live daemon.
 slow enough to miss that budget reds `main` with no defect behind it (#150).
 
 ```bash
-npm run test:docker                     # the lane, on purpose
-DOCKER_TESTS=1 npm test                 # the whole suite including the lane
+npm run test:docker                     # the whole suite, lane included
 ```
+
+🛑 **That script runs the WHOLE suite with `DOCKER_TESTS=1`, and must keep
+doing so.** Naming individual files there means a second test adopting
+`dockerLaneSkip` runs NOWHERE — skipped by `npm test` in CI, unmatched by
+`test:docker` — and both lanes still report green (claude1, PR #156 review).
 
 The decision lives in `test/support/docker-lane.ts` and is unit-tested in
 `test/support/docker-lane.test.ts`, including a control proving

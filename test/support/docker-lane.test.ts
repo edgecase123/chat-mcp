@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { dockerLaneSkip } from './docker-lane.js';
 
 const present = () => true;
@@ -47,4 +48,16 @@ test('⚠️ control — DOCKER_TESTS cannot conjure a docker daemon', () => {
   // saying docker is missing.
   const reason = dockerLaneSkip({ CI: 'true', DOCKER_TESTS: '1' }, absent);
   assert.match(reason as string, /not available/i);
+});
+
+test('🛑 `npm run test:docker` runs the WHOLE suite, so the lane can grow', () => {
+  // A script naming individual files means a second test adopting
+  // `dockerLaneSkip` runs NOWHERE — `npm test` skips it in CI and
+  // `test:docker` does not match it — and both lanes report green.
+  // Found by claude1 reviewing PR #156.
+  const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+  const script: string = pkg.scripts['test:docker'];
+
+  assert.match(script, /DOCKER_TESTS=1/);
+  assert.doesNotMatch(script, /\.test\.ts/, 'naming a file here cannot see a lane that grows');
 });
