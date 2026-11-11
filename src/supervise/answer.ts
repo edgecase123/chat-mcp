@@ -32,7 +32,7 @@ export function answerAndNotify(
   let answered: boolean;
 
   try {
-    answered = dao.answerApproval(db, id, decision);
+    answered = dao.answerApproval(db, id, decision, fromHandle);
   } catch (err) {
     // An unnamed request is a valid row that cannot be APPROVED, because
     // there is nothing to allowlist. Denying it always works.

@@ -260,6 +260,18 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
       CREATE INDEX claims_by_resource ON claims (resource, id DESC);
     `);
   },
+  (db) => {
+    // #163 — an answered approval recorded WHAT was decided and WHEN, and
+    // nothing about WHO decided it.
+    //
+    // 🛑 NULLABLE, AND A NULL MEANS UNKNOWN. Every row answered before this
+    // column existed has one, so a default would attribute those decisions to
+    // a handle nobody chose.
+    //
+    // ⚠️ A SEPARATE MIGRATION, per migration 8's docblock. Editing an earlier
+    // one never reaches a database that already ran it.
+    db.exec(`ALTER TABLE approvals ADD COLUMN answered_by TEXT`);
+  },
 ];
 
 /**

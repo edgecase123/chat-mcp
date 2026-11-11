@@ -76,14 +76,14 @@ test('an answered approval leaves the pending list', () => {
   const db = freshDb();
   const id = dao.insertApproval(db, REQUEST);
 
-  assert.equal(dao.answerApproval(db, id, 'approve'), true);
+  assert.equal(dao.answerApproval(db, id, 'approve', 'operator'), true);
   assert.deepEqual(dao.pendingApprovals(db), []);
 });
 
 test('the decision is readable after answering', () => {
   const db = freshDb();
   const id = dao.insertApproval(db, REQUEST);
-  dao.answerApproval(db, id, 'deny');
+  dao.answerApproval(db, id, 'deny', 'operator');
 
   assert.equal(dao.getApproval(db, id)?.decision, 'deny');
 });
@@ -98,16 +98,16 @@ test('an approval cannot be answered twice', () => {
   const db = freshDb();
   const id = dao.insertApproval(db, REQUEST);
 
-  assert.equal(dao.answerApproval(db, id, 'deny'), true);
-  assert.equal(dao.answerApproval(db, id, 'approve'), false, 'the second answer was accepted');
+  assert.equal(dao.answerApproval(db, id, 'deny', 'operator'), true);
+  assert.equal(dao.answerApproval(db, id, 'approve', 'operator'), false, 'the second answer was accepted');
 });
 
 test('a second answer does not overwrite the first decision', () => {
   const db = freshDb();
   const id = dao.insertApproval(db, REQUEST);
 
-  dao.answerApproval(db, id, 'deny');
-  dao.answerApproval(db, id, 'approve');
+  dao.answerApproval(db, id, 'deny', 'operator');
+  dao.answerApproval(db, id, 'approve', 'operator');
 
   assert.equal(dao.getApproval(db, id)?.decision, 'deny', 'a deny was upgraded to an approve');
 });
@@ -115,7 +115,7 @@ test('a second answer does not overwrite the first decision', () => {
 test('answering an id that does not exist returns false rather than throwing', () => {
   const db = freshDb();
 
-  assert.equal(dao.answerApproval(db, 999, 'approve'), false);
+  assert.equal(dao.answerApproval(db, 999, 'approve', 'operator'), false);
 });
 
 /**
@@ -199,8 +199,8 @@ test('a row with prose but NO grant cannot be approved', () => {
   const id = dao.insertApproval(db, { ...REQUEST, grant: null });
 
   assert.ok(dao.getApproval(db, id)?.requested, 'the prose is present, so the card looks fine');
-  assert.throws(() => dao.answerApproval(db, id, 'approve'), dao.UnnameableApprovalError);
-  assert.equal(dao.answerApproval(db, id, 'deny'), true, 'deny must still work');
+  assert.throws(() => dao.answerApproval(db, id, 'approve', 'operator'), dao.UnnameableApprovalError);
+  assert.equal(dao.answerApproval(db, id, 'deny', 'operator'), true, 'deny must still work');
 });
 
 test('the grant survives the round trip exactly', () => {
@@ -222,7 +222,7 @@ test('approving an unnamed request THROWS rather than granting a blank', () => {
   const db = freshDb();
   const id = dao.insertApproval(db, { ...REQUEST, requested: null, grant: null });
 
-  assert.throws(() => dao.answerApproval(db, id, 'approve'), dao.UnnameableApprovalError);
+  assert.throws(() => dao.answerApproval(db, id, 'approve', 'operator'), dao.UnnameableApprovalError);
 });
 
 /** Stopping something you cannot name is always a safe answer. */
@@ -230,7 +230,7 @@ test('an unnamed request CAN be denied', () => {
   const db = freshDb();
   const id = dao.insertApproval(db, { ...REQUEST, requested: null, grant: null });
 
-  assert.equal(dao.answerApproval(db, id, 'deny'), true);
+  assert.equal(dao.answerApproval(db, id, 'deny', 'operator'), true);
   assert.equal(dao.getApproval(db, id)?.decision, 'deny');
 });
 
@@ -238,7 +238,7 @@ test('a refused approve leaves the request still pending, not half-answered', ()
   const db = freshDb();
   const id = dao.insertApproval(db, { ...REQUEST, requested: null, grant: null });
 
-  assert.throws(() => dao.answerApproval(db, id, 'approve'));
+  assert.throws(() => dao.answerApproval(db, id, 'approve', 'operator'));
   assert.equal(dao.pendingApprovals(db).length, 1, 'the refusal consumed the request');
 });
 
@@ -250,5 +250,5 @@ test('a refused approve leaves the request still pending, not half-answered', ()
 test('approving an id that does not exist still returns false, not a throw', () => {
   const db = freshDb();
 
-  assert.equal(dao.answerApproval(db, 4242, 'approve'), false);
+  assert.equal(dao.answerApproval(db, 4242, 'approve', 'operator'), false);
 });
