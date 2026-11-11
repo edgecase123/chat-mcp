@@ -110,6 +110,16 @@ export interface WakeAck {
   readonly ok: boolean;
   readonly queued?: 'sent' | 'queued' | 'duplicate' | 'held';
   readonly error?: string;
+
+  /**
+   * The supervisor's own shutdown grace, in seconds, on a stop ack.
+   *
+   * 🛑 THE CLI MUST NOT KEEP ITS OWN COPY OF THE DEFAULT. `shutdownGraceSeconds`
+   * is overridable per handle, so a CLI computing its wait ceiling from the
+   * default gives up first and reports failure on a stop that is working.
+   * Found by claude2 reviewing PR #158.
+   */
+  readonly graceSeconds?: number;
 }
 
 const ACK_TIMEOUT_MS = 2_000;

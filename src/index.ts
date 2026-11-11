@@ -349,6 +349,14 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         process.exit(1);
       }
 
+      // 🛑 `{ ok: false }` IS A TRUTHY OBJECT, so `if (!ack)` alone reports a
+      // REFUSED control as accepted. That turned a refused `--now` into a
+      // silent no-op the operator waited out. Found by claude2 on PR #158.
+      if (!ack.ok) {
+        console.error(`${action} refused for ${handle}: ${ack.error ?? 'no reason given'}`);
+        process.exit(1);
+      }
+
       if (action === 'restart') {
         console.log(`restart accepted for ${handle}`);
         return;
@@ -364,10 +372,15 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       const { DEFAULT_SHUTDOWN_GRACE_SECONDS } = await import(
         './supervise/drivers/containerized.js'
       );
-      // One grace period plus the daemon's own removal step, plus a margin.
-      // `--now` skips the notice but `docker stop -t` still waits out its full
-      // grace, so this ceiling is the same either way.
-      const STOP_WAIT_MS = DEFAULT_SHUTDOWN_GRACE_SECONDS * 1000 + 15_000;
+      // 🛑 THE SUPERVISOR'S OWN GRACE, FROM THE ACK — not this process's copy
+      // of the default. `shutdownGraceSeconds` is overridable per handle, and a
+      // ceiling computed from the default gives up first and calls a healthy
+      // stop a failure. The fallback only covers an older supervisor whose ack
+      // predates the field.
+      const grace = ack.graceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
+      // One grace period, doubled to cover the notice wait AND `docker stop -t`
+      // back to back, plus a margin for the daemon's own removal step.
+      const STOP_WAIT_MS = grace * 2 * 1000 + 15_000;
       const path = socketPathFor(handle);
       const deadline = Date.now() + STOP_WAIT_MS;
 

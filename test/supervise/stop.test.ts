@@ -27,11 +27,15 @@ function recordingChild(children: FakeChild[]) {
     const sent: string[] = [];
     let endTurn: (() => void) | undefined;
     let releaseTeardown: (() => void) | undefined;
+    let teardownReleased = false;
     const rec: FakeChild = {
       sent,
       killed: false,
       finishTurn: () => endTurn?.(),
-      finishTeardown: () => releaseTeardown?.(),
+      finishTeardown: () => {
+        teardownReleased = true;
+        releaseTeardown?.();
+      },
       teardownAwaited: false,
     };
     children.push(rec);
@@ -52,6 +56,12 @@ function recordingChild(children: FakeChild[]) {
       },
       awaitTeardown: () => {
         rec.teardownAwaited = true;
+
+        // 🛑 RESOLVE IMMEDIATELY IF THE RELEASE ALREADY HAPPENED. A `finally`
+        // that releases before the supervisor reaches `awaitTeardown` would
+        // otherwise leave a promise nothing ever settles, and `npm test` runs
+        // without `--test-force-exit` — so the suite hangs instead of failing.
+        if (teardownReleased) return Promise.resolve();
 
         return new Promise<void>((resolve) => {
           releaseTeardown = resolve;
@@ -212,6 +222,130 @@ test('a wake arriving during the teardown is refused, not delivered', async () =
     assert.equal(children[0].sent.length, 0);
   } finally {
     children[0]?.finishTeardown();
+    await sup.stop('now');
+  }
+});
+
+test('--now escalates a graceful stop still inside its grace period', async () => {
+  const children: FakeChild[] = [];
+  const handle = `stop-${process.pid}-escalate`;
+  const sup = await supervisorFor(handle, children);
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 7,
+      to: handle,
+      from: 'cli',
+      ts: Date.now(),
+      control: { kind: 'stop', mode: 'graceful' },
+    });
+
+    await settle();
+
+    // Mid-grace: the notice went out and the child is deliberately NOT killed.
+    assert.equal(children[0].sent.length, 1);
+    assert.equal(children[0].killed, false);
+
+    // 🛑 THE ack.ok IS HALF THE ASSERTION. A refused escalation told the
+    // operator it landed while they waited out the original grace, which is
+    // #136's own symptom one layer up.
+    const escalation = await deliverToSupervisor(handle, {
+      id: 8,
+      to: handle,
+      from: 'cli',
+      ts: Date.now(),
+      control: { kind: 'stop', mode: 'now' },
+    });
+
+    assert.equal(escalation?.ok, true);
+    await settle();
+
+    // Killed WITHOUT the turn ever ending, which is what the escalation buys.
+    assert.equal(children[0].killed, true);
+    assert.equal(children.length, 1);
+  } finally {
+    children[0]?.finishTeardown();
+    await sup.stop('now');
+  }
+});
+
+test('a stop ack carries the supervisor own grace, not the CLI default', async () => {
+  const children: FakeChild[] = [];
+  const handle = `stop-${process.pid}-grace`;
+  const db = new DatabaseSync(':memory:');
+  migrate(db);
+
+  // A per-handle override is real and tested elsewhere. The CLI sizes its wait
+  // from this number, so an ack that omitted it would make a healthy stop on a
+  // long-grace handle report failure.
+  const sup = await startSupervisor({
+    handle,
+    db,
+    extraDirs: DIRS,
+    spawnChild: recordingChild(children),
+    shutdownGraceSeconds: 90,
+    log: () => undefined,
+  });
+
+  try {
+    const ack = await deliverToSupervisor(handle, {
+      id: 9,
+      to: handle,
+      from: 'cli',
+      ts: Date.now(),
+      control: { kind: 'stop', mode: 'now' },
+    });
+
+    assert.equal(ack?.ok, true);
+    assert.equal(ack?.graceSeconds, 90);
+  } finally {
+    await settle();
+    children[0]?.finishTeardown();
+    await sup.stop('now');
+  }
+});
+
+test('a non-stop envelope IS refused once a stop has begun', async () => {
+  const children: FakeChild[] = [];
+  const handle = `stop-${process.pid}-refuse`;
+  const sup = await supervisorFor(handle, children);
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 10,
+      to: handle,
+      from: 'cli',
+      ts: Date.now(),
+      control: { kind: 'restart', mode: 'now' },
+    });
+
+    // 🛑 `now`, NOT `graceful`. A graceful stop here would sit on the real
+    // 60s grace timer, and `npm test` runs without `--test-force-exit` — so
+    // the whole suite hangs on a timer this test never needed.
+    await deliverToSupervisor(handle, {
+      id: 11,
+      to: handle,
+      from: 'cli',
+      ts: Date.now(),
+      control: { kind: 'stop', mode: 'now' },
+    });
+
+    await settle();
+
+    // Moving the stop branch ABOVE the stopping guard must not let anything
+    // else through it.
+    const late = await deliverToSupervisor(handle, {
+      id: 12,
+      to: handle,
+      from: 'cli',
+      ts: Date.now(),
+      control: { kind: 'restart', mode: 'now' },
+    });
+
+    assert.equal(late?.ok, false);
+    assert.equal(late?.error, 'supervisor is stopping');
+  } finally {
+    children.at(-1)?.finishTeardown();
     await sup.stop('now');
   }
 });

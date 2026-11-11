@@ -656,7 +656,14 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * on the first (dispatch) one acts the instant the child receives the
    * notice, before it can act on it (chat-mcp review, Task 8).
    */
-  const sendNoticeThenFinish = (notice: string, timeoutMs: number, onFinish: () => void): void => {
+  const sendNoticeThenFinish = (
+    notice: string,
+    timeoutMs: number,
+    onFinish: () => void,
+    // Returns a short-circuit. Calling it runs `onFinish` now and cancels the
+    // wait, which is how `agents stop --now` escalates a graceful stop still
+    // inside its grace period.
+  ): (() => void) => {
     let noticeDispatchedAtCount: number | null = null;
     let settled = false;
 
@@ -692,6 +699,8 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     sendListeners.push(onSend);
 
     queue.offer({ text: notice, messageIds: [] });
+
+    return finish;
   };
 
   const doRestart = (): void => {
@@ -724,17 +733,32 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   };
 
   let hasStopped = false;
+  /**
+   * Set while a graceful stop is waiting out its grace period. Calling it ends
+   * that wait immediately.
+   *
+   * 🛑 THIS IS WHAT MAKES `--now` ESCALATE A GRACEFUL STOP. Without it the
+   * second command is refused and the operator waits out the original grace
+   * believing they cut it short — which is #136's own symptom, reintroduced
+   * one layer up. Found by claude2 reviewing PR #158.
+   */
+  let cancelGracefulWait: (() => void) | null = null;
 
   const doStop = async (mode: 'graceful' | 'now'): Promise<void> => {
     // A bus-delivered stop and the CLI's SIGINT handler can both land, and the
     // second one must not re-close the socket or fire `onStopped` twice.
-    if (hasStopped) return;
+    if (hasStopped) {
+      if (mode === 'now') cancelGracefulWait?.();
+
+      return;
+    }
     hasStopped = true;
 
     if (mode === 'graceful') {
       await new Promise<void>((resolve) => {
-        sendNoticeThenFinish(SHUTDOWN_NOTICE, shutdownGraceMs, resolve);
+        cancelGracefulWait = sendNoticeThenFinish(SHUTDOWN_NOTICE, shutdownGraceMs, resolve);
       });
+      cancelGracefulWait = null;
     }
 
     // 🛑 `kill()` RETURNS BEFORE THE CONTAINER IS DOWN. It spawns `docker stop`
@@ -759,6 +783,23 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   };
 
   const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
+    // 🛑 A STOP IS CHECKED BEFORE THE STOPPING GUARD, so `--now` can escalate a
+    // graceful stop mid-grace. Refusing it would tell the operator their
+    // escalation landed while they wait out the original period — #136's own
+    // symptom. `doStop` is idempotent and handles the upgrade itself.
+    if (envelope.control?.kind === 'stop') {
+      const mode = envelope.control.mode;
+      // A stop closes the very socket this ack travels back on, so it CANNOT
+      // run inline. Deferring lets the ack reach the CLI before the listener
+      // dies — otherwise `agents stop` reports no supervisor was listening.
+      setImmediate(() => void doStop(mode));
+
+      // The CLI's wait ceiling comes from HERE rather than its own copy of the
+      // default, so a per-handle `shutdownGraceSeconds` cannot make a healthy
+      // stop report failure. Found by claude2 reviewing PR #158.
+      return { ok: true, queued: 'sent', graceSeconds: Math.ceil(shutdownGraceMs / 1000) };
+    }
+
     // 🛑 THE SOCKET OUTLIVES THE CHILD DURING A TEARDOWN, by up to the full
     // grace period. Without this a wake in that window is "delivered" to a
     // child that is already being killed, and the sender is told `sent`.
@@ -770,16 +811,6 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // and must run before either of those checks.
     if (envelope.control?.kind === 'restart') {
       restartChild(envelope.control.mode);
-
-      return { ok: true, queued: 'sent' };
-    }
-
-    // A stop closes the very socket this ack travels back on, so it CANNOT run
-    // inline. Deferring lets the ack reach the CLI before the listener dies —
-    // otherwise `agents stop` reports no supervisor was listening.
-    if (envelope.control?.kind === 'stop') {
-      const mode = envelope.control.mode;
-      setImmediate(() => void doStop(mode));
 
       return { ok: true, queued: 'sent' };
     }
