@@ -155,13 +155,44 @@ test('🛑 closing the handle closes its verifier, so the WAL does not outlive t
  * connection as its own witness, silently, and nothing else would notice.
  */
 test('🛑 src/ opens a database in exactly one place, so every handle gets a verifier', () => {
-  const files = execFileSync('git', ['ls-files', 'src'], { encoding: 'utf8' })
-    .split('\n')
-    .filter((f) => f.endsWith('.ts'));
+  // 🛑 `.tsx` TOO. The first cut filtered `.ts` and so scanned 90 of 108 files,
+  // blind to all 18 Ink components. Raised by claude2 reviewing this PR.
+  const files = sourceFiles();
   // Denominator: a listing that matched nothing would otherwise pass.
-  assert.ok(files.length >= 40, `found only ${files.length} source files`);
+  assert.ok(files.length >= 100, `found only ${files.length} source files`);
+  assert.ok(
+    files.some((f) => f.endsWith('.tsx')),
+    'no .tsx file in the scan, so the extension filter has regressed',
+  );
 
-  const openers = files.filter((f) => readFileSync(f, 'utf8').includes('new DatabaseSync('));
+  // Whitespace-tolerant: `new DatabaseSync (` would slip a literal match.
+  const openers = files.filter((f) => /new\s+DatabaseSync\s*\(/.test(readFileSync(f, 'utf8')));
 
   assert.deepEqual(openers, ['src/storage/db.ts']);
 });
+
+/**
+ * 🛑 THESE TWO SURFACES MUST STAY UP AND REPORT IN-BAND. Everything else —
+ * a oneshot verb, an MCP tool, the web API — lets the throw out, which is the
+ * loud path lee asked for.
+ *
+ * Counted rather than parsed: a bare call added later makes the two totals
+ * disagree, and the message names the file.
+ */
+test('🛑 the TUI and the REPL route every send through sendOrReason', () => {
+  for (const file of ['src/cli/ink/App.tsx', 'src/cli/index.ts']) {
+    const src = readFileSync(file, 'utf8');
+    const sends = [...src.matchAll(/(?:dao\.insertMessage|sendToRoom)\s*\(/g)].length;
+    const wrapped = [...src.matchAll(/sendOrReason\s*\(/g)].length;
+
+    // Denominator: a file with no sends would otherwise pass this vacuously.
+    assert.ok(sends > 0, `${file} has no send call, so this guard reads nothing`);
+    assert.equal(wrapped, sends, `${file} has ${sends} send calls but ${wrapped} go through sendOrReason`);
+  }
+});
+
+function sourceFiles(): string[] {
+  return execFileSync('git', ['ls-files', 'src'], { encoding: 'utf8' })
+    .split('\n')
+    .filter((f) => /\.tsx?$/.test(f));
+}

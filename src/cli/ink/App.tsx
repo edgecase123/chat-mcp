@@ -8,6 +8,7 @@ import { NotifyBus, notifyPeer } from '../../notify/bus.js';
 import type { Db } from '../../storage/db.js';
 import * as dao from '../../storage/dao.js';
 import type { Message, MessageKind, AgentStatus, Agent } from '../../storage/dao.js';
+import { sendOrReason } from '../../messaging/send-or-reason.js';
 import { assertRoomName } from '../../util/naming.js';
 import { stampOf as timeOf } from '../../util/time.js';
 import { wrappedRowCount, rehydrateEscapedNewlines } from '../../util/wrap.js';
@@ -249,14 +250,26 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           setStatus(`peer ${target.peer} not registered`);
           return;
         }
-        const sent = dao.insertMessage(db, { from: handle, to: target.peer, body, kind });
+        // A send that did not persist is the one failure here that used to
+        // escape the callback instead of reaching the status line.
+        const out = sendOrReason(() => dao.insertMessage(db, { from: handle, to: target.peer, body, kind }));
+        if ('reason' in out) {
+          setStatus(out.reason);
+          return;
+        }
+        const sent = out.sent;
         notifyPeer(target.peer, { id: sent.id, to: target.peer, from: handle, ts: sent.sent_at, body, kind });
       } else {
         if (!dao.isRoomMember(db, target.room, handle)) {
           setStatus(`not a member of ${target.room}`);
           return;
         }
-        const sent = dao.insertMessage(db, { from: handle, to: target.room, body, kind });
+        const out = sendOrReason(() => dao.insertMessage(db, { from: handle, to: target.room, body, kind }));
+        if ('reason' in out) {
+          setStatus(out.reason);
+          return;
+        }
+        const sent = out.sent;
         dao.advanceRoomRead(db, target.room, handle, sent.id);
         for (const member of dao.roomMembers(db, target.room)) {
           if (member === handle) continue;
@@ -572,9 +585,28 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           );
           if (targets.length === 0) return setStatus('no other peers online to ping');
           const body = `📢 All hands — please /join ${roomArg} (from ${handle})`;
+          // 🛑 COUNT, DO NOT ASSUME. A throw partway through used to leave the
+          // earlier peers notified, the rest not, and no status line at all —
+          // the same "partial send, no receipt" shape #138 is about.
+          let notified = 0;
+          let stoppedAt: string | null = null;
           for (const t of targets) {
-            const sent = dao.insertMessage(db, { from: handle, to: t.handle, body, kind: 'alert' });
+            const out = sendOrReason(() =>
+              dao.insertMessage(db, { from: handle, to: t.handle, body, kind: 'alert' }),
+            );
+            if ('reason' in out) {
+              stoppedAt = t.handle;
+              break;
+            }
+            const sent = out.sent;
             notifyPeer(t.handle, { id: sent.id, to: t.handle, from: handle, ts: sent.sent_at, body, kind: 'alert' });
+            notified += 1;
+          }
+          if (stoppedAt !== null) {
+            const progress = `${notified} of ${targets.length}`;
+            setStatus(`📢 all-hands STOPPED at ${stoppedAt} — ${progress} notified → ${roomArg}`);
+            setTick((t) => t + 1);
+            return;
           }
           setStatus(`📢 all-hands sent to ${targets.length} peer${targets.length === 1 ? '' : 's'} → ${roomArg}`);
           setTick((t) => t + 1);
