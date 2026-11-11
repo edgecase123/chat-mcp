@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { openDb } from '../storage/db.js';
 import { NotifyBus, notifyPeer } from '../notify/bus.js';
 import { sendToRoom } from '../messaging/room-send.js';
+import { sendOrReason } from '../messaging/send-or-reason.js';
 import * as dao from '../storage/dao.js';
 import type { Message } from '../storage/dao.js';
 import { assertRoomName } from '../util/naming.js';
@@ -384,7 +385,17 @@ export async function runCli(opts: CliOptions): Promise<void> {
         console.log(dim(`  peer ${mode.dmTarget} no longer registered — /back and try again`));
         return;
       }
-      const sent = dao.insertMessage(db, { from: opts.handle, to: mode.dmTarget, body: text });
+      // The REPL has to stay up and say so, rather than exit on a send that
+      // did not persist. The oneshot `send` verb still throws.
+      const peerHandle = mode.dmTarget;
+      const out = sendOrReason(() =>
+        dao.insertMessage(db, { from: opts.handle, to: peerHandle, body: text }),
+      );
+      if ('reason' in out) {
+        console.log(dim(`  ${out.reason}`));
+        return;
+      }
+      const sent = out.sent;
       notifyPeer(mode.dmTarget, { id: sent.id, to: mode.dmTarget, from: opts.handle, ts: sent.sent_at, body: text });
       process.stdout.write(`${dim(`          → sent ${timeOf(sent.sent_at)}`)}\n`);
       return;
@@ -397,10 +408,16 @@ export async function runCli(opts: CliOptions): Promise<void> {
       }
       // advanceOwnRead: true — the TUI reprints its own line immediately, so
       // the next flush must not repeat it.
-      const sent = sendToRoom(db, {
-        from: opts.handle, room: roomName, body: text, advanceOwnRead: true,
-      });
-      process.stdout.write(`${dim(`          → sent ${timeOf(sent.sent_at)}`)}\n`);
+      const out = sendOrReason(() =>
+        sendToRoom(db, {
+          from: opts.handle, room: roomName, body: text, advanceOwnRead: true,
+        }),
+      );
+      if ('reason' in out) {
+        console.log(dim(`  ${out.reason}`));
+        return;
+      }
+      process.stdout.write(`${dim(`          → sent ${timeOf(out.sent.sent_at)}`)}\n`);
       return;
     }
     console.log(dim('  Not in a DM or room. Use /dm <handle> or /join #<room>.'));

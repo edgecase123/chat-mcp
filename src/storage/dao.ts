@@ -1,7 +1,7 @@
 import type { Db } from './db.js';
 // A value import: `db.ts` owns the schema_version table, and it imports only
 // `util/paths.js`, so this cannot cycle back.
-import { currentSchemaVersion } from './db.js';
+import { currentSchemaVersion, verifierFor } from './db.js';
 import type { ClaimRow } from '../claims/lifecycle.js';
 // A value import, not a type: `searchMessages` has to tell a room target from
 // a peer target at runtime. `naming.ts` imports nothing, so this cannot cycle.
@@ -304,13 +304,58 @@ export interface SendResult {
   sent_at: number;
 }
 
+/** Which check rejected the send. Each one is a different claim about what happened. */
+export type NotPersistedReason = 'no-rows-changed' | 'row-absent-on-reread';
+
+/**
+ * #138 — a send reported an id for a row that was never written.
+ *
+ * 🛑 `lastInsertRowid` IS PER-CONNECTION, NOT PER-TABLE, so a statement that
+ * inserts nothing still returns whatever that connection inserted last. The id
+ * is a sender's only receipt, so handing back a foreign rowid is the defect.
+ *
+ * Not a `RoomSendInputError`: the caller did nothing wrong, so the web server
+ * must answer 500 rather than 400.
+ */
+export class MessageNotPersistedError extends Error {
+  constructor(
+    readonly reason: NotPersistedReason,
+    readonly claimedId: number,
+    readonly from: string,
+    readonly to: string,
+  ) {
+    super(
+      `Nothing was sent from ${from} to ${to}. ` +
+        (reason === 'no-rows-changed'
+          ? `The INSERT into messages changed no rows, so id ${claimedId} belongs to another table.`
+          : `A second connection cannot read id ${claimedId} back, so the row did not survive.`),
+    );
+    this.name = 'MessageNotPersistedError';
+  }
+}
+
 export function insertMessage(db: Db, input: SendInput): SendResult {
   const sent_at = Date.now();
   const kind: MessageKind = input.kind ?? 'chat';
   const info = db.prepare(
     `INSERT INTO messages (from_handle, to_handle, body, sent_at, kind) VALUES (?, ?, ?, ?, ?)`,
   ).run(input.from, input.to, input.body, sent_at, kind);
-  return { id: Number(info.lastInsertRowid), sent_at };
+  const id = Number(info.lastInsertRowid);
+  if (Number(info.changes) !== 1) {
+    throw new MessageNotPersistedError('no-rows-changed', id, input.from, input.to);
+  }
+
+  // 🛑 THE WITNESS, NOT THE WRITER. `verifierFor` is undefined only for a
+  // `:memory:` database, which no second connection can reach — a guard test
+  // keeps `openDb` the single place production opens one.
+  const witness = verifierFor(db) ?? db;
+  if (!witness.prepare('SELECT id FROM messages WHERE id = ?').get(id)) {
+    // Rejected alternative: returning the id anyway when only the witness is
+    // unhappy. A retry that double-posts is recoverable; a false receipt is not.
+    throw new MessageNotPersistedError('row-absent-on-reread', id, input.from, input.to);
+  }
+
+  return { id, sent_at };
 }
 
 export interface BusHealth {
