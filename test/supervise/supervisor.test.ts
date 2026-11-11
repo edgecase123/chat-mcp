@@ -10,7 +10,7 @@ const { startSupervisor, formatPrompt } = await import('../../src/supervise/inde
 const { claudeArgs, routeClaudeEvent } = await import('../../src/supervise/drivers/claude.js');
 const { createLineParser } = await import('../../src/supervise/child.js');
 const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
-import type { AgentChild, SpawnOptions } from '../../src/supervise/drivers/claude.js';
+import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
 import type { RateLimitSnapshot } from '../../src/supervise/rate-limit.js';
 const { parseClaudeRateLimit: parseRateLimitEvent } = await import('../../src/supervise/drivers/claude-events.js');
 import { supervisorOptions } from '../support/supervisor-options.js';
