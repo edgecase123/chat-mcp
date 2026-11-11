@@ -55,6 +55,20 @@ test('confirming one handle does not confirm another', () => {
   assert.equal(isConfirmed('claude2'), false);
 });
 
+test('a malformed container.json logs the path before falling back, instead of wiping state with no trace', (t) => {
+  const path = join(process.env.CHAT_MCP_HOME!, 'container.json');
+  writeFileSync(path, '{ this is not json');
+
+  const errorMock = t.mock.method(console, 'error', () => {});
+
+  assert.equal(isConfirmed('claude1'), false);
+  assert.equal(errorMock.mock.calls.length, 1);
+  assert.ok(
+    String(errorMock.mock.calls[0].arguments[0]).includes(path),
+    'the logged message must name the corrupt file path',
+  );
+});
+
 test('the printed plan names mounts, env var NAMES only, binary and network', () => {
   const plan = describePlan({
     mountPaths: ['/work', '/root/.chat-mcp'],
