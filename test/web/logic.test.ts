@@ -37,7 +37,6 @@ import {
   messageIdLabel,
   highlightSegments,
   suggestionsFor,
-// @ts-expect-error — plain JS with JSDoc types, deliberately not compiled.
   pathsFromUriList,
   droppedPathValue,
   dropInsertText,

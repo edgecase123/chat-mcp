@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-// @ts-expect-error — plain JS with JSDoc types, deliberately not compiled.
 import { gaugeDisplay, ageLabel } from '../../web/assets/logic.js';
 
 /**

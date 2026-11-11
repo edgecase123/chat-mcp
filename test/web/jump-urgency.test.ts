@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-// @ts-expect-error — plain JS module, no types, same as the other logic tests.
 import { JUMP_URGENCY_MS, jumpUrgency, nextUnreadSince } from '../../web/assets/logic.js';
 
 /**

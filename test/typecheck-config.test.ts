@@ -82,3 +82,41 @@ test('🛑 rootDir is the repo root — ./src gives 100 x TS6059 and checks noth
     'rootDir ./src makes every test file "not under rootDir" and typechecks none of them',
   );
 });
+
+/**
+ * 🛑 THE BROWSER MODULE MUST BE IN THE PROGRAM, OR ITS CONSUMERS SEE `any`.
+ *
+ * Every test under `test/web/` imports `web/assets/logic.js`. Absent from the
+ * program it resolves as `any`, so a wrong argument and a null deref both
+ * typecheck — seventeen of them did, and its JSDoc types ten more.
+ *
+ * It needs `allowJs` AND the `include`; either one alone resolves no file.
+ */
+test('🛑 it reaches web/assets, or every test/web import is `any`', () => {
+  const { files } = showConfig('tsconfig.test.json');
+  const resolved = files.map((f) => relative(ROOT, join(ROOT, f)));
+
+  assert.ok(
+    resolved.includes('web/assets/logic.js'),
+    'web/assets/logic.js is not in the program, so test/web imports it as any',
+  );
+});
+
+/**
+ * ⚠️ THE GUARD ABOVE PROVES THE CONSUMERS ARE CHECKED, NEVER THE MODULE BODY.
+ *
+ * `allowJs` without `checkJs` puts the file in the program and type-checks
+ * nothing inside it, so "no errors in web/assets" is the only answer that
+ * config can give. Turning `checkJs` on is 408 errors in there, measured.
+ *
+ * This fails the day someone flips it without budgeting for them.
+ */
+test('⚠️ checkJs stays off — web/assets is UNCHECKED, not clean', () => {
+  const { compilerOptions } = showConfig('tsconfig.test.json');
+
+  assert.notEqual(
+    compilerOptions.checkJs,
+    true,
+    'checkJs is on; web/assets carries 408 errors and no slice has budgeted them',
+  );
+});
