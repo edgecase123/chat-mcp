@@ -8,7 +8,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-bind-first-'));
 
 const { startSupervisor } = await import('../../src/supervise/index.js');
 const { socketPathFor } = await import('../../src/util/paths.js');
-import type { AgentChild } from '../../src/supervise/drivers/claude.js';
+import type { AgentChild } from '../../src/supervise/child.js';
 
 const DIRS = [process.cwd()];
 
