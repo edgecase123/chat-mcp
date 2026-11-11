@@ -1,61 +1,42 @@
-import type { AgentChild, SpawnOptions } from '../child.js';
-import { spawnClaude } from './claude.js';
-import { spawnDockerClaude } from './docker-claude.js';
-import { redispatchPrompt as claudeRedispatch, type RedispatchInput } from './claude-redispatch.js';
+import type { SandboxMode } from '../vendor.js';
 
 /**
- * The driver registry: how a CLI name becomes a spawner.
+ * How a CLI name and a `--container` flag become a (vendor, mode) pair.
  *
- * 🛑 THIS EXISTS SO ADDING A CLI IS ONE FILE AND ONE LINE. lee, 2026-10-31:
- * *"this should also work with cursor and that abstraction is probably
- * necessary in this logic"*.
+ * 🛑 SANDBOX MODE IS AN AXIS, NOT A VENDOR. `docker-claude` used to be a
+ * sibling of `claude` in a driver registry, so a second CLI meant two entries
+ * and a pairing nobody could see. It is now an alias over (vendor, mode),
+ * which is also why the confirm gate can read `mode === 'docker'` instead of
+ * matching a driver-name string a new vendor would spell differently.
  *
- * ⚠️ BEFORE THIS, `startSupervisor` IMPORTED `spawnClaude` BY NAME. Everything
- * else was already behind the seam, so that one line was the whole remaining
- * coupling — and it is the kind that reads as harmless right up to the point
- * somebody has to add a second CLI.
- *
- * A Cursor driver is `drivers/cursor.ts` implementing `AgentChild`, plus its
- * entry here. The queue, the gate, the socket, the allowlist and the
- * re-dispatch template are all untouched by it.
+ * 🛑 THIS FILE RESOLVES A NAME TO A (vendor, mode) PAIR AND NOTHING ELSE. It
+ * does NOT resolve `vendor` to a `VendorSpawn` — that needs `adapters/`'s
+ * `spawnFor`, and `supervise/` never imports `adapters/` (the layering rule
+ * `test/adapters/spawn-contract.test.ts` guards). The caller that already
+ * imports both (`src/index.ts`, or `supervise/index.ts` via an injected
+ * `opts.vendor`) does that resolution.
  */
-export type DriverName = 'claude' | 'docker-claude';
-
-export type SpawnFn = (opts: SpawnOptions) => AgentChild;
-
-/**
- * Everything a CLI needs to supply.
- *
- * 🛑 `redispatchPrompt` IS PART OF THE DRIVER, not a shared template. A seam
- * test caught it living above the driver: the wording names `--allowedTools`,
- * which is Claude Code's flag, and the 3-of-3 live result that justifies the
- * wording is evidence about that CLI only.
- */
-export interface Driver {
-  readonly spawn: SpawnFn;
-  readonly redispatchPrompt: (input: RedispatchInput) => string;
-}
-
-const DRIVERS: Record<DriverName, Driver> = {
-  claude: { spawn: spawnClaude, redispatchPrompt: claudeRedispatch },
-  'docker-claude': { spawn: spawnDockerClaude, redispatchPrompt: claudeRedispatch },
+const ALIASES: Record<string, { vendor: string; mode: SandboxMode }> = {
+  claude: { vendor: 'claude', mode: 'host' },
+  'docker-claude': { vendor: 'claude', mode: 'docker' },
 };
 
-/** Every driver this build knows. */
-export const DRIVER_NAMES = Object.keys(DRIVERS) as DriverName[];
+const DEFAULT_VENDOR = 'claude';
 
-/**
- * The spawner for `name`.
- *
- * 🛑 THROWS, AND NAMES WHAT IS AVAILABLE. A silent fallback to Claude would
- * mean asking for Cursor and getting Claude, which looks like Cursor working.
- */
-export function driverFor(name: string): Driver {
-  const driver = DRIVERS[name as DriverName];
+export interface DriverSelection {
+  readonly vendor: string;
+  readonly mode: SandboxMode;
+}
 
-  if (!driver) {
-    throw new Error(`unknown agent driver "${name}"; this build has: ${DRIVER_NAMES.join(', ')}`);
-  }
+export function resolveDriver(o: { driver?: string; container?: boolean }): DriverSelection {
+  const mode: SandboxMode = o.container ? 'docker' : 'host';
 
-  return driver;
+  if (!o.driver) return { vendor: DEFAULT_VENDOR, mode };
+
+  const alias = ALIASES[o.driver];
+  // An alias names its own mode. `--container` can only tighten it, never
+  // loosen it, so an explicit `--driver docker-claude` stays containerized.
+  if (alias) return { vendor: alias.vendor, mode: alias.mode === 'docker' ? 'docker' : mode };
+
+  return { vendor: o.driver, mode };
 }

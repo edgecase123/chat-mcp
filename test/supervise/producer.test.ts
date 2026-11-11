@@ -144,7 +144,7 @@ test('the supervisor actually CALLS redispatchPrompt — not just registers it',
   const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
 
   assert.ok(
-    src.includes('driver.redispatchPrompt('),
+    src.includes('opts.vendor.redispatchPrompt('),
     'the re-dispatch template is registered and never run',
   );
 });

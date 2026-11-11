@@ -9,10 +9,19 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-driver-'
 
 const { setToken } = await import('../../../src/supervise/auth.js');
 const { registerMount } = await import('../../../src/supervise/mounts.js');
-const { dockerArgsFor, CONTAINER_PROJECT_DIR, CONTAINER_STATE_DIR, containerPathFor } =
-  await import('../../../src/supervise/drivers/docker-claude.js');
+const { claudeSpawn } = await import('../../../src/adapters/claude-spawn.js');
+const {
+  dockerArgsForVendor,
+  CONTAINER_PROJECT_DIR,
+  containerStateDir,
+  containerPathFor,
+} = await import('../../../src/supervise/drivers/containerized.js');
 
 const PROJECT_DIR = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-project-'));
+
+function dockerArgsFor(opts: Parameters<typeof dockerArgsForVendor>[1]) {
+  return dockerArgsForVendor(claudeSpawn, opts);
+}
 
 test('with no token on file, building argv throws naming the fix', () => {
   assert.throws(
@@ -31,7 +40,7 @@ test('the chat-mcp state dir is bind-mounted so the bus is reachable in-containe
   const { stateDir } = await import('../../../src/util/paths.js');
   setToken('sk-ant-oat-x');
   const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
-  assert.ok(args.includes(`${stateDir()}:${CONTAINER_STATE_DIR}`));
+  assert.ok(args.includes(`${stateDir()}:${containerStateDir(claudeSpawn)}`));
 });
 
 test('a registered extra mount appears at /mnt/<key>', () => {
@@ -74,35 +83,43 @@ test('the invocation runs the image with --rm, never leaving a stopped container
   assert.ok(args.includes('--rm'));
 });
 
-test('kill() terminates the docker-run process mid-turn, not just at turn end', async (t) => {
+test('kill() stops the container by name via the daemon, not a raw signal to the docker-run client', async (t) => {
   setToken('sk-ant-oat-x');
   // A real, controllable stand-in for the `docker run` CLI process: a long-lived
-  // process with piped stdio (spawnDockerClaude reads child.stdout directly), so
-  // a pass here proves kill() propagates a real terminating signal, not just that
-  // the Node wrapper object changes state. Node's own `node:test` module mocking
-  // only intercepts an ESM named import at a fresh module instance, so the mock
-  // must be installed before `docker-claude.js` is (re-)imported below.
+  // process with piped stdio (spawnContainerized reads child.stdout directly).
+  // Node's own `node:test` module mocking only intercepts an ESM named import at
+  // a fresh module instance, so the mock must be installed before
+  // `containerized.js` is (re-)imported below.
+  //
+  // 🛑 A RAW SIGTERM TO THIS CLIENT PROCESS IS NOT THE CONTRACT ANY MORE. The
+  // daemon ignores it (container-removal.test.ts, #148's real finding), so
+  // `kill()` must shell out to `docker stop <name>` instead — this test
+  // captures that `execFileSync` call rather than asserting the client died,
+  // which is a signal propagation detail a real daemon supplies, not this mock.
   let fakeDockerRun: ReturnType<typeof realSpawn> | undefined;
+  const stopInvocations: string[][] = [];
   t.mock.module('node:child_process', {
     namedExports: {
       spawn: () => {
         fakeDockerRun = realSpawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
         return fakeDockerRun;
       },
+      execFileSync: (_cmd: string, args: string[]) => {
+        stopInvocations.push(args);
+        return Buffer.from('');
+      },
     },
   });
 
-  const { spawnDockerClaude } = await import(
-    `../../../src/supervise/drivers/docker-claude.js?kill-test=${Date.now()}`
+  const { spawnContainerized } = await import(
+    `../../../src/supervise/drivers/containerized.js?kill-test=${Date.now()}`
   );
-  const agent = spawnDockerClaude({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  const agent = spawnContainerized(claudeSpawn, { cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
 
-  const exitSignal = new Promise((resolve) => agent.onExit((_code, signal) => resolve(signal)));
-  // Kill before any stdout line has been parsed, i.e. before any turn has ended —
-  // the live smoke test only ever exercised a turn-end `kill -INT`.
   agent.kill();
 
-  assert.equal(await exitSignal, 'SIGTERM');
+  assert.deepEqual(stopInvocations, [['stop', 'chat-mcp-claude1']]);
   assert.ok(fakeDockerRun, 'spawn mock was not invoked');
-  assert.throws(() => process.kill(fakeDockerRun!.pid!, 0), /ESRCH/);
+
+  fakeDockerRun?.kill();
 });

@@ -17,6 +17,18 @@ import type { EventRouter } from '../vendor.js';
 export function wireAgentChild(
   child: ChildProcessWithoutNullStreams,
   vendor: { routeEvent: EventRouter; encodeInput: (text: string) => string },
+  opts: {
+    /**
+     * Overrides how `kill()` ends the process.
+     *
+     * 🛑 A CONTAINERIZED CHILD'S `docker run` CLIENT IGNORES SIGTERM. The
+     * daemon only reacts to `docker stop`, which is itself SIGTERM-to-PID1
+     * then SIGKILL after a grace period — so passing a `stop` here, instead
+     * of leaving this to the default `child.kill()`, is what lets `--rm`
+     * actually fire. Proved by `container-removal.test.ts`.
+     */
+    stop?: () => void;
+  } = {},
 ): AgentChild {
   const eventCbs: ((e: Record<string, unknown>) => void)[] = [];
   const turnEndCbs: (() => void)[] = [];
@@ -76,6 +88,11 @@ export function wireAgentChild(
       child.on('exit', (code, signal) => cb(code, signal));
     },
     kill(): void {
+      if (opts.stop) {
+        opts.stop();
+        return;
+      }
+
       child.kill();
     },
   };

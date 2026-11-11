@@ -3,7 +3,7 @@ import type { ChildGrant } from '../supervise/grant.js';
 import type { SandboxMode, VendorSpawn } from '../supervise/vendor.js';
 import { claudeArgs, claudeEncodeInput, routeClaudeEvent } from '../supervise/drivers/claude.js';
 import { redispatchPrompt } from '../supervise/drivers/claude-redispatch.js';
-import { writeContainerMcpConfig } from '../supervise/drivers/docker-claude.js';
+import { writeContainerMcpConfig } from '../supervise/drivers/containerized.js';
 import { IMAGE_TAG } from '../supervise/container.js';
 
 /**
@@ -44,7 +44,7 @@ export const claudeSpawn: VendorSpawn = {
   // Docker: the file is rewritten with container-side command and args, and
   // the path handed to the CLI is the one that exists INSIDE the container.
   mcpConfigFor: (grant: ChildGrant, mode: SandboxMode): string =>
-    mode === 'docker' ? writeContainerMcpConfig(grant.handle) : grant.configPath,
+    mode === 'docker' ? writeContainerMcpConfig(grant.handle, claudeSpawn) : grant.configPath,
 
   routeEvent: routeClaudeEvent,
 

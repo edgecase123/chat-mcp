@@ -34,8 +34,8 @@ export function vendorsWithSpawn(): readonly string[] {
 /**
  * The spawn contract for `vendor`.
  *
- * 🛑 THROWS, AND NAMES WHAT IS AVAILABLE, for the same reason `driverFor`
- * does: a silent fallback would make a missing vendor look like a working one.
+ * 🛑 THROWS, AND NAMES WHAT IS AVAILABLE: a silent fallback would make a
+ * missing vendor look like a working one.
  */
 export function spawnFor(vendor: string): VendorSpawn {
   const found = REGISTRY.find((a) => a.vendor === vendor && a.spawn)?.spawn;

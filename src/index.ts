@@ -397,11 +397,15 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
           const extra = Object.keys(readMounts().agents[handle] ?? {}).map(
             (k) => `/mnt/${k}`,
           );
+          const { spawnFor } = await import('./adapters/index.js');
+          const { containerStateDir } = await import('./supervise/drivers/containerized.js');
+          const { resolveDriver } = await import('./supervise/drivers/index.js');
+          const vendor = spawnFor(resolveDriver({ driver: o.driver, container: true }).vendor);
           console.log(
             describePlan({
-              mountPaths: ['/work', '/root/.chat-mcp', ...extra],
-              envVarNames: ['CLAUDE_CODE_OAUTH_TOKEN'],
-              binary: 'claude',
+              mountPaths: ['/work', containerStateDir(vendor), ...extra],
+              envVarNames: [vendor.authEnvVar],
+              binary: vendor.binary,
               networkMode: 'bridge (default, full outbound — narrowing is #134)',
             }),
           );
@@ -418,11 +422,20 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       }
 
       const { startSupervisor } = await import('./supervise/index.js');
+      const { spawnFor } = await import('./adapters/index.js');
+      const { resolveDriver } = await import('./supervise/drivers/index.js');
+      const vendor = spawnFor(
+        resolveDriver({
+          driver: o.driver,
+          container: (o as unknown as { container?: boolean }).container,
+        }).vendor,
+      );
       const sup = await startSupervisor({
         handle,
+        vendor,
         model: o.model,
         binary: o.binary,
-        driver: o.driver ?? (o.container ? 'docker-claude' : 'claude'),
+        driver: o.driver,
         cwd: o.cwd,
         resumeSessionId: o.resume,
         // 🛑 EXPLICIT --permission-mode STILL WINS. `--auto` is a shorthand,

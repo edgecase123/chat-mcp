@@ -13,6 +13,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-replace-'));
 const { migrate } = await import('../../src/storage/db.js');
 const { startSupervisor } = await import('../../src/supervise/index.js');
 const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
+const { claudeSpawn } = await import('../../src/adapters/claude-spawn.js');
 import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
 
 /**
@@ -95,6 +96,7 @@ async function supervisorFor(handle: string, children: FakeChild[]) {
 
   return startSupervisor({
     handle,
+    vendor: claudeSpawn,
     db,
     extraDirs: DIRS,
     spawnChild: recordingChild(children),
@@ -115,6 +117,7 @@ async function supervisorWithDb(handle: string, children: FakeChild[]) {
 
   const sup = await startSupervisor({
     handle,
+    vendor: claudeSpawn,
     db,
     extraDirs: DIRS,
     spawnChild: recordingChild(children),
@@ -696,6 +699,7 @@ test('a filed approval carries the allowlist the refused child actually had', as
 
   const sup = await startSupervisor({
     handle,
+    vendor: claudeSpawn,
     db,
     extraDirs: DIRS,
     spawnChild: recordingChild(children),
