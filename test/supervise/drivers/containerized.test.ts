@@ -343,3 +343,90 @@ test('🛑 a declared path that LEXICALLY escapes the project refuses', () => {
     /inside the project/,
   );
 });
+
+test('🛑 a declared path containing a COLON refuses, rather than emitting a malformed mount spec', () => {
+  setToken('sk-ant-oat-x');
+  const dir = projectWithScripts();
+  mkdirSync(join(dir, 'odd:name'));
+
+  // docker's own parser rejects the four-field spec this would build, so the
+  // whole spawn dies at `docker run` with `too many colons` instead of here.
+  assert.throws(
+    () => dockerArgsFor({ cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: ['odd:name'] }),
+    /colon/,
+  );
+});
+
+test('🛑 a declared path that is a SYMLINK INSIDE the project REFUSES, or the real directory stays writable', () => {
+  setToken('sk-ant-oat-x');
+  const dir = projectWithScripts();
+  mkdirSync(join(dir, 'real-scripts'));
+  symlinkSync('real-scripts', join(dir, 'linked'));
+
+  // Mounting `<dir>/real-scripts` at `/work/linked:ro` would leave
+  // `/work/real-scripts` writable — the same host directory, under its real
+  // name — and the broker resolves `linked/gate.sh` through the symlink too.
+  assert.throws(
+    () => dockerArgsFor({ cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: ['linked'] }),
+    /symlink or sits under one/,
+  );
+});
+
+test('🛑 a declared path UNDER a symlinked directory refuses for the same reason', () => {
+  setToken('sk-ant-oat-x');
+  const dir = projectWithScripts();
+  mkdirSync(join(dir, 'real-scripts', 'lib'), { recursive: true });
+  symlinkSync('real-scripts', join(dir, 'linked'));
+
+  assert.throws(
+    () => dockerArgsFor({ cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: ['linked/lib'] }),
+    /symlink or sits under one/,
+  );
+});
+
+test('🛑 EVERY spelling of the project ROOT refuses, not just the bare one', () => {
+  setToken('sk-ant-oat-x');
+  const dir = projectWithScripts();
+
+  // All three normalise to the root. Mounting it would stop the agent editing
+  // the repo it is working in, which is the cost lee explicitly did not accept.
+  for (const spelling of ['.', './', 'scripts/..']) {
+    assert.throws(
+      () => dockerArgsFor({ cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: [spelling] }),
+      /project root/,
+      `"${spelling}" was accepted`,
+    );
+  }
+});
+
+test('the container side is the NORMALISED path, never the raw declared spelling', () => {
+  setToken('sk-ant-oat-x');
+  const dir = projectWithScripts();
+
+  for (const spelling of ['scripts/./lib', 'scripts//lib', 'scripts/lib/']) {
+    const args = dockerArgsFor({
+      cwd: dir,
+      supervisorHandle: 'claude1',
+      readOnlyPaths: [spelling],
+    });
+
+    assert.ok(
+      args.includes(`${dir}/scripts/lib:${CONTAINER_PROJECT_DIR}/scripts/lib:ro`),
+      `"${spelling}" emitted ${args.filter((a) => a.endsWith(':ro')).join(', ')}`,
+    );
+  }
+});
+
+test('a project directory reached through a SYMLINK still mounts its real paths', () => {
+  setToken('sk-ant-oat-x');
+  const real = projectWithScripts();
+  const link = join(mkdtempSync(join(tmpdir(), 'chat-mcp-ro-link-')), 'proj');
+  symlinkSync(real, link);
+
+  // `opts.cwd` is whatever the operator registered, and on macOS `mkdtemp`
+  // alone hands back a path under the `/var` symlink. The project dir is
+  // resolved before the comparison, so this is a mount and not a refusal.
+  const args = dockerArgsFor({ cwd: link, supervisorHandle: 'claude1', readOnlyPaths: ['scripts'] });
+
+  assert.ok(args.includes(`${real}/scripts:${CONTAINER_PROJECT_DIR}/scripts:ro`));
+});

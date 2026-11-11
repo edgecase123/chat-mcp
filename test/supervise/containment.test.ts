@@ -126,3 +126,11 @@ test('the NOUN names what was missing, so the message is not script-specific', a
     /read-only path does not exist/,
   );
 });
+
+test('🛑 a path containing a COLON is refused, because it is a field delimiter in a mount spec', async () => {
+  const { containedRelative } = await import('../../src/supervise/containment.js');
+
+  // `-v <host>:<dest>:ro` splits on `:`, so `evil:dir` makes a four-field spec.
+  // Docker refuses it outright — one bad declared path denies the whole spawn.
+  assert.throws(() => containedRelative('scripts/evil:dir', 'read-only path'), /colon/);
+});

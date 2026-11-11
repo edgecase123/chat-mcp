@@ -90,6 +90,13 @@ export function containedRelative(raw: unknown, noun: string): string {
     throw new Error(`${noun} must not have a path segment starting with "-", got "${raw}"`);
   }
 
+  // 🛑 A COLON IS A FIELD DELIMITER IN A DOCKER `-v` SPEC, and a legal POSIX
+  // filename character. `odd:name` builds a four-field spec that the daemon
+  // refuses, so one bad entry denies the whole spawn.
+  if (normalised.includes(':')) {
+    throw new Error(`${noun} must not contain a colon, got "${raw}"`);
+  }
+
   return normalised;
 }
 
@@ -123,6 +130,65 @@ export function checkedProjectPath(projectDir: string, relative: string, noun: s
   }
 
   return real;
+}
+
+/** A declared path resolved to the one host directory it may be mounted from. */
+export interface MountPath {
+  /** The host side of the bind mount, after symlinks. */
+  readonly host: string;
+  /** Where it goes under the project mount. Normalised, no trailing slash. */
+  readonly inner: string;
+}
+
+/**
+ * Resolve a project-declared path into a bind mount, or throw.
+ *
+ * 🛑 THE DECLARED PATH MUST BE ITS OWN REAL PATH. A symlink gives the same host
+ * directory TWO names under the project mount, and a read-only mount covers
+ * only the name it is mounted at:
+ *
+ *   proj/scripts -> real-scripts        contained, so a realpath check passes
+ *   -v <proj>/real-scripts:/work/scripts:ro
+ *   /work/real-scripts                  STILL WRITABLE, same host directory
+ *
+ * The broker resolves `scripts/gate.sh` through the symlink too, so the agent
+ * writes the file the broker runs. Refusing is what makes the mount hold
+ * ACROSS spawns: once the path is a real directory and mounted, the kernel
+ * refuses to unlink, rename or re-point the mountpoint — measured, so the agent
+ * cannot turn it into a symlink later either.
+ *
+ * ⚠️ REFUSING, NOT REMAPPING. Mounting at the resolved name instead would
+ * protect the right directory this spawn, and leave the symlink itself
+ * writable — so the next spawn resolves through whatever the agent re-pointed
+ * it at.
+ */
+export function checkedMountPath(projectDir: string, declared: string, noun: string): MountPath {
+  const inner = containedRelative(declared, noun).replace(/\/+$/, '');
+
+  // `.`, `./` and `scripts/..` all normalise to the root, which would mount the
+  // whole project read-only and stop the agent editing the repo it works in.
+  if (inner === '' || inner === '.') {
+    throw new Error(`${noun} may not be the project root, got "${declared}"`);
+  }
+
+  let realProject: string;
+
+  try {
+    realProject = realpathSync(projectDir);
+  } catch {
+    throw new Error(`the project directory does not exist: ${projectDir}`);
+  }
+
+  const host = checkedProjectPath(realProject, inner, noun);
+
+  if (host !== join(realProject, inner)) {
+    throw new Error(
+      `refusing "${declared}": it is a symlink or sits under one, resolving to "${host}". ` +
+        'A read-only mount would leave that directory writable under its real name.',
+    );
+  }
+
+  return { host, inner };
 }
 
 /** The absolute path a manifest's script actually runs, or throw. */
