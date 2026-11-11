@@ -161,9 +161,10 @@ export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {})
   // grace period, so this is short even against a container mid-stop, and it
   // also clears the stale container a crashed supervisor leaves behind.
   //
-  // Only ever this handle's own container: the live-handle guard refuses a
-  // second supervisor before reaching here, so there is no running agent to
-  // take down.
+  // Only ever this handle's own container. `startSupervisor` refuses a second
+  // supervisor for a live handle as its first statement, before anything
+  // spawns, proved by `second-supervisor-refused.test.ts` asserting the spawn
+  // count stays at 1. So there is no rival agent for this to take down.
   try {
     execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' });
   } catch {

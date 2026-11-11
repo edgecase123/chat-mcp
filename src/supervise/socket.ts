@@ -101,6 +101,30 @@ export interface WakeAck {
 const ACK_TIMEOUT_MS = 2_000;
 
 /**
+ * Refuse when another supervisor is already listening for `handle`.
+ *
+ * 🛑 SEPARATE FROM `bind` SO A CALLER CAN REFUSE BEFORE IT SPAWNS. `bind`
+ * runs late in `startSupervisor`, and a containerized spawn clears its
+ * container name with `docker rm -f` — a name derived from the handle alone.
+ * So a second supervisor used to SIGKILL the first one's agent and only then
+ * find out it was not allowed to start (#154).
+ *
+ * A stale socket file is not a rival. Nothing answering means the file is
+ * debris, and this returns without touching it — removing it is `bind`'s job,
+ * so a caller that only wants to ask cannot destroy anything.
+ */
+export async function refuseIfSupervisorLive(handle: string): Promise<void> {
+  const path = socketPathFor(handle);
+  if (!existsSync(path)) return;
+
+  if (await isLive(path)) {
+    throw new Error(
+      `another supervisor is already listening for [${handle}] at ${path}; refusing to steal its deliveries`,
+    );
+  }
+}
+
+/**
  * A supervisor's listening end.
  *
  * One JSON envelope per line in, one JSON ack per line out. Newline-delimited
@@ -144,14 +168,9 @@ export class WakeListener {
     ensureSocketDir();
     const path = socketPathFor(handle);
 
-    if (existsSync(path)) {
-      if (await isLive(path)) {
-        throw new Error(
-          `another supervisor is already listening for [${handle}] at ${path}; refusing to steal its deliveries`,
-        );
-      }
-      unlinkSync(path);
-    }
+    await refuseIfSupervisorLive(handle);
+    // Whatever is left is debris a crashed supervisor abandoned.
+    if (existsSync(path)) unlinkSync(path);
 
     const open = new Set<Socket>();
     const server = createServer((socket: Socket) => {

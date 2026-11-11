@@ -4,7 +4,7 @@ import { resolveDriver } from './drivers/index.js';
 import { spawnOnHost } from './drivers/host.js';
 import { spawnContainerized, DEFAULT_SHUTDOWN_GRACE_SECONDS } from './drivers/containerized.js';
 import { TurnQueue } from './turn-queue.js';
-import { WakeListener, type WakeAck, type WakeEnvelope } from './socket.js';
+import { WakeListener, refuseIfSupervisorLive, type WakeAck, type WakeEnvelope } from './socket.js';
 import { RateLimitGate } from './rate-limit.js';
 import { openDb } from '../storage/db.js';
 import * as dao from '../storage/dao.js';
@@ -167,6 +167,14 @@ function buildGrant(opts: SupervisorOptions, dirs: readonly string[]): ChildGran
 }
 
 export async function startSupervisor(opts: SupervisorOptions): Promise<Supervisor> {
+  // 🛑 FIRST STATEMENT, BEFORE ANYTHING WRITES OR SPAWNS. lee ruled on
+  // 2026-11-11 that a second supervisor refuses rather than taking over.
+  // Refusing here rather than at the `bind` below keeps two destructive steps
+  // out of the rejected path: the child's MCP config, which is written per
+  // handle and would clobber the live supervisor's, and the containerized
+  // spawn's `docker rm -f` (#154).
+  await refuseIfSupervisorLive(opts.handle);
+
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const selection = resolveDriver({ driver: opts.driver, container: opts.container });
 
