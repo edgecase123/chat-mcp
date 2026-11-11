@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { realpathSync } from 'node:fs';
+import { realContains } from './containment.js';
 
 /**
  * What a supervised agent may do without asking.
@@ -91,17 +92,9 @@ export function resolveCwd(
     throw err;
   }
 
-  const ok = dirs.some((dir) => {
-    let base: string;
-    try {
-      base = realpathSync(resolve(dir));
-    } catch {
-      // An allowed directory that is not on disk cannot contain anything.
-      return false;
-    }
-
-    return real === base || real.startsWith(`${base}/`);
-  });
+  // One implementation of "is this inside that", shared with the command
+  // broker's script check. Two copies of a containment rule drift.
+  const ok = dirs.some((dir) => realContains(dir, real));
 
   if (!ok) {
     throw new Error(
