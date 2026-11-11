@@ -9,6 +9,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-graceful-stop-'
 
 const { migrate } = await import('../../src/storage/db.js');
 const { startSupervisor } = await import('../../src/supervise/index.js');
+import { supervisorOptions } from '../support/supervisor-options.js';
 
 const DIRS = [process.cwd()];
 
@@ -50,14 +51,14 @@ async function supervisorFor(
 ) {
   const db = new DatabaseSync(':memory:');
   migrate(db);
-  return startSupervisor({
+  return startSupervisor(supervisorOptions({
     handle,
     db,
     extraDirs: DIRS,
     spawnChild: recordingChild(children),
     log: () => undefined,
     shutdownGraceSeconds,
-  });
+  }));
 }
 
 test('stop() with no mode kills immediately and sends no notice', async () => {
