@@ -35,6 +35,7 @@ function readContainerState(): ContainerState {
 
     return { builtHash: parsed.builtHash ?? null, confirmed: parsed.confirmed ?? {} };
   } catch {
+    console.error(`container state at ${path} is not valid JSON — falling back to empty state`);
     return EMPTY_STATE;
   }
 }
