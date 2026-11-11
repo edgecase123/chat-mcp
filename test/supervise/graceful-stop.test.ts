@@ -43,7 +43,11 @@ function recordingChild(children: FakeChild[]) {
   };
 }
 
-async function supervisorFor(handle: string, children: FakeChild[]) {
+async function supervisorFor(
+  handle: string,
+  children: FakeChild[],
+  shutdownGraceSeconds?: number,
+) {
   const db = new DatabaseSync(':memory:');
   migrate(db);
   return startSupervisor({
@@ -52,6 +56,7 @@ async function supervisorFor(handle: string, children: FakeChild[]) {
     extraDirs: DIRS,
     spawnChild: recordingChild(children),
     log: () => undefined,
+    shutdownGraceSeconds,
   });
 }
 
@@ -92,4 +97,20 @@ test("stop('graceful') sends a shutdown notice and waits for its turn to end bef
   await stopPromise;
 
   assert.equal(children[0]?.killed, true, 'never killed after the notice turn ended');
+});
+
+test("🛑 stop('graceful') kills on the grace TIMEOUT when the turn never ends", async () => {
+  const children: FakeChild[] = [];
+  // 🛑 THIS IS THE BRANCH THE 60s DEFAULT EXISTS FOR — a child that is hung,
+  // crashed, or simply never ends its turn. The test above always calls
+  // `finishTurn()`, so it resolves on the turn-end path and never reaches
+  // `setTimeout(finish, timeoutMs)`. This one never finishes a turn, so only
+  // the timeout can resolve `stop()`. Were that timer missing, this would
+  // hang rather than assert — which is still a loud failure, not a pass.
+  const sup = await supervisorFor(`stop-${process.pid}-timeout`, children, 0.05);
+
+  await sup.stop('graceful');
+
+  assert.equal(children[0]?.sent.length, 1, 'the notice must still be sent before the wait');
+  assert.equal(children[0]?.killed, true, 'the grace timeout never fired, so a hung child survives');
 });

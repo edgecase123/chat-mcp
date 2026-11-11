@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentChild, SpawnOptions } from '../child.js';
 import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
@@ -127,11 +127,20 @@ export function dockerStopFor(
   graceSeconds: number = DEFAULT_SHUTDOWN_GRACE_SECONDS,
 ): () => void {
   return () => {
-    try {
-      execFileSync('docker', ['stop', '-t', String(graceSeconds), name], { stdio: 'ignore' });
-    } catch {
-      // Already stopped or removed — the expected case on a repeat kill().
-    }
+    // 🛑 DETACHED, NOT `execFileSync`. PID 1 in a container ignores SIGTERM,
+    // so `docker stop` always waits out its full `-t` — 60s by default. Doing
+    // that synchronously froze the whole supervisor for that minute: no
+    // logging, no socket handling, and a second Ctrl-C did nothing. The
+    // daemon owns the teardown, so this process does not need to watch it.
+    const stopper = spawn('docker', ['stop', '-t', String(graceSeconds), name], {
+      stdio: 'ignore',
+      detached: true,
+    });
+    // An unhandled 'error' event on a child process is an uncaught exception,
+    // so this handler is load-bearing rather than defensive. `kill()` is
+    // best-effort by contract, and there is no logger at this layer.
+    stopper.on('error', () => undefined);
+    stopper.unref();
   };
 }
 
