@@ -52,9 +52,22 @@ function topLevelYields(window: string[]): string[] {
 
     if (!scopes.includes(true) && /\bawait\b/.test(code)) hits.push(trimmed);
 
-    for (const ch of code) {
-      if (ch === '{') scopes.push(/=>|\bfunction\b/.test(code));
-      else if (ch === '}') scopes.pop();
+    // 🛑 THE VERDICT IS PER BRACE, NOT PER LINE. One verdict for the whole
+    // line made `if (items.some((i) => i.ok)) {` look like a function body,
+    // because the line contains `=>` somewhere. Found by claude1 on PR #164,
+    // after it survived three heads of this branch.
+    for (let i = 0; i < code.length; i += 1) {
+      if (code[i] === '{') {
+        const before = code.slice(0, i);
+
+        // `=>` must END the text before the brace, which is what separates an
+        // arrow BODY from an arrow inside a block header. A `function` needs
+        // its signature matched instead, because its name and parameters sit
+        // between the keyword and the brace.
+        scopes.push(/=>\s*$/.test(before) || /\bfunction\b[^)]*\)\s*$/.test(before));
+      } else if (code[i] === '}') {
+        scopes.pop();
+      }
     }
   }
 
@@ -205,8 +218,35 @@ test('🛑 the refusal is the wrapper FIRST statement, above the stop branch', (
 
   assert.ok(statements.length > 0, 'the wrapper body must hold statements');
   assert.match(
-    statements[0],
+    statements[0]!,
     /^if \(onWake === null\) return \{ ok: false,/,
     'the refusal must come before anything else in the wrapper, including the stop branch',
   );
+});
+
+/**
+ * 🛑 THE DETECTOR HAD NO TEST, WHICH IS WHY IT WAS WRONG THREE TIMES.
+ *
+ * Round 1 read indentation and scored 1 of 3. Round 2 read the whole line and
+ * missed an arrow in a block HEADER. The fix claude1 suggested anchored to the
+ * brace but dropped `function` declarations, which `startSupervisor` contains
+ * one of.
+ *
+ * A guard that guards nothing is worse than no guard, so the truth table is
+ * pinned here rather than asserted in prose.
+ */
+test('🛑 topLevelYields: the pinned truth table', () => {
+  const CASES: [string, string[], number][] = [
+    ['a plain block counts', ['  if (cond) {', '    await realYield();', '  }'], 1],
+    ['an arrow in a block HEADER does not hide it', ['  if (items.some((i) => i.ok)) {', '    await realYield();', '  }'], 1],
+    ['an arrow in a for HEADER does not hide it', ['  for (const x of list.filter((i) => i.on)) {', '    await realYield();', '  }'], 1],
+    ['an arrow BODY is excluded', ['  const f = async () => {', '    await teardown();', '  };'], 0],
+    ['a function DECLARATION body is excluded', ['  function helper() {', '    await teardown();', '  }'], 0],
+    ['a continuation line counts', ['  const a = String(', '    await Promise.resolve(1),', '  );'], 1],
+    ['a comment mentioning await does not count', ['  // we used to await here', '  const x = 1;'], 0],
+  ];
+
+  for (const [name, window, want] of CASES) {
+    assert.equal(topLevelYields(window).length, want, name);
+  }
 });
