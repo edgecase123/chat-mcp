@@ -25,18 +25,19 @@ Set `process.env.CHAT_MCP_HOME` to a temp dir *before* importing anything
 that resolves a state path — see `src/util/paths.ts`'s `stateDir()` for why,
 and any `test/supervise/*.test.ts` for the pattern.
 
-## One clone per agent, one handle each
+## Three clones: one runs the bus, two are edited
 
-Two agents work this repo at the same time, each in its own clone. The clone
-is what decides which bus handle that session answers to.
+Two agents work this repo at the same time. A third clone runs the bus they
+talk over, so neither agent's work-in-progress can take the comms down.
 
-| clone | handle |
-|---|---|
-| `~/dev/chat-mcp` | `claude1` |
-| `~/dev/chat-mcp2` | `claude2` |
+| clone | role | handle |
+|---|---|---|
+| `~/dev/chat-mcp-main` | runs the bus for both agents. Stays on `main`. | — |
+| `~/dev/chat-mcp` | claude1 edits and tests here | `claude1` |
+| `~/dev/chat-mcp2` | claude2 edits and tests here | `claude2` |
 
-The binding lives in `.mcp.json` at the clone root, which is **gitignored and
-per-tree**. It points at that clone's own build:
+Each agent clone carries a `.mcp.json` at its root, **gitignored and
+per-tree**. It names that clone's handle and points at `chat-mcp-main`:
 
 ```json
 {
@@ -44,28 +45,45 @@ per-tree**. It points at that clone's own build:
     "chat": {
       "type": "stdio",
       "command": "node",
-      "args": ["/absolute/path/to/this/clone/dist/index.js", "--handle", "claude2"],
+      "args": ["/Users/leejenkins/dev/chat-mcp-main/dist/index.js", "--handle", "claude2"],
       "env": {}
     }
   }
 }
 ```
 
-Two things to know before you touch it:
+- **Not that clone's own build.** Comms is infrastructure, and you do not run
+  infrastructure off a working copy. Break your `src/`, rebuild, and you lose
+  your own bus mid-task — which happened on 2026-11-11.
+- **Not `npx github:…` either.** npx resolves one cache directory per spec
+  string, shared by both clones, and rewrites it in place when `main` moves. A
+  session starting during that rewrite reads a launcher with no execute bit
+  and dies with `Permission denied`.
+- **`cd ~/dev/chat-mcp-main && git pull && npm ci && npm run build`** after
+  anything lands on `main`. A stale `dist/` is worse than a missing one: it can
+  be silently corrupt, and only the paths importing the broken module die. One
+  was found beginning `ximport;` while `--handle` kept answering correctly, so
+  a healthy handshake proves nothing about the rest of the build.
+- **Never symlink `node_modules` between clones.** It faked five failures and
+  shrank the test denominator by 60 on PR #147. Run `npm ci` in each clone.
 
-- **`npm run build` first, and again after every pull.** `.mcp.json` runs
-  `dist/`, so a clone with no `dist/` has no bus at all. A stale `dist/` is
-  worse than a missing one: it can be silently corrupt, and only the paths
-  importing the broken module die. One was found beginning `ximport;` while
-  `--handle` kept answering correctly throughout, so a healthy handshake
-  proves nothing about the rest of the build.
-- **It points at the local build on purpose, not `npx github:…`.** In this
-  repo npx would run a different version than the one you are editing. It
-  also writes a shared npx cache directory that both clones resolve to, which
-  is its own failure mode.
+A new agent clone needs its own `.mcp.json` written by hand. Nothing in the
+repo can supply it, because the whole point is that each one differs.
 
-A new clone needs its own `.mcp.json` written by hand. Nothing in the repo can
-supply it, because the whole point is that each one differs.
+### Testing a clone in isolation uses `CHAT_MCP_HOME`, not ports
+
+Ports are already not a collision: `chat-mcp web --port` defaults to a random
+free port. The state is the shared thing. `stateDir()` in `src/util/paths.ts`
+resolves all five of `chat.db`, `notify/`, `sock/`, `mcp/` and `adapters/`
+under one root, and `CHAT_MCP_HOME` is that root.
+
+```bash
+CHAT_MCP_HOME=/tmp/chat-mcp-test-$$ node ./dist/index.js --handle probe
+```
+
+The suite enforces this: `stateDir()` throws under the node test runner when
+`CHAT_MCP_HOME` is unset, because binding a socket in the live directory
+unlinks whatever looks stale and silently stops a running agent.
 
 ### `.mcp.json` alone leaves the agent DEAF
 
