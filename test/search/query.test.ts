@@ -65,23 +65,37 @@ test('a normal query is not broad', () => {
 });
 
 test('the target scopes the search, and is optional', () => {
-  assert.equal(parseSearch({ q: 'gate', target: '#leagues' }).ok && parseSearch({ q: 'gate', target: '#leagues' }).target, '#leagues');
-  assert.equal(parseSearch({ q: 'gate' }).ok && parseSearch({ q: 'gate' }).target, undefined);
+  const scoped = parseSearch({ q: 'gate', target: '#leagues' });
+  assert.equal(scoped.ok && scoped.target, '#leagues');
+
+  const unscoped = parseSearch({ q: 'gate' });
+  assert.equal(unscoped.ok && unscoped.target, undefined);
 
   // A blank target is the same as none, not a search for the empty room.
-  assert.equal(parseSearch({ q: 'gate', target: '  ' }).ok && parseSearch({ q: 'gate', target: '  ' }).target, undefined);
+  const blank = parseSearch({ q: 'gate', target: '  ' });
+  assert.equal(blank.ok && blank.target, undefined);
 });
 
 test('🛑 the limit is CAPPED, so one search cannot return the whole transcript', () => {
-  assert.equal(parseSearch({ q: 'a' }).ok && parseSearch({ q: 'a' }).limit, 50);
-  assert.equal(parseSearch({ q: 'a', limit: 10 }).ok && parseSearch({ q: 'a', limit: 10 }).limit, 10);
-  assert.equal(parseSearch({ q: 'a', limit: 9999 }).ok && parseSearch({ q: 'a', limit: 9999 }).limit, MAX_LIMIT);
+  const byDefault = parseSearch({ q: 'a' });
+  assert.equal(byDefault.ok && byDefault.limit, 50);
+
+  const asked = parseSearch({ q: 'a', limit: 10 });
+  assert.equal(asked.ok && asked.limit, 10);
+
+  const over = parseSearch({ q: 'a', limit: 9999 });
+  assert.equal(over.ok && over.limit, MAX_LIMIT);
 
   // Junk falls back rather than becoming zero, which would return nothing and
   // read as "no matches".
-  assert.equal(parseSearch({ q: 'a', limit: 0 }).ok && parseSearch({ q: 'a', limit: 0 }).limit, 50);
-  assert.equal(parseSearch({ q: 'a', limit: -5 }).ok && parseSearch({ q: 'a', limit: -5 }).limit, 50);
-  assert.equal(parseSearch({ q: 'a', limit: Number.NaN }).ok && parseSearch({ q: 'a', limit: Number.NaN }).limit, 50);
+  const zero = parseSearch({ q: 'a', limit: 0 });
+  assert.equal(zero.ok && zero.limit, 50);
+
+  const negative = parseSearch({ q: 'a', limit: -5 });
+  assert.equal(negative.ok && negative.limit, 50);
+
+  const notANumber = parseSearch({ q: 'a', limit: Number.NaN });
+  assert.equal(notANumber.ok && notANumber.limit, 50);
 });
 
 test('a snippet centres on the match rather than always taking the head', () => {
