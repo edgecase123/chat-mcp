@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, normalize } from 'node:path';
+import type { UncheckedScript } from './containment.js';
 
 /**
  * The commands a supervised agent may ask the host to run.
@@ -13,12 +14,20 @@ import { isAbsolute, normalize } from 'node:path';
  * Adding a project is a manifest file. Nothing here names a repo.
  */
 
-export type ParamType = 'enum' | 'string';
+/**
+ * 🛑 `string` WAS HERE AND IS DELIBERATELY GONE. A free-form positional is
+ * unconstrained argv, and `execFile` without a shell does NOT neutralise that:
+ * the callee parses its own flags, so `-e/bin/sh`, `--upload-pack=…` and
+ * `--checkpoint-action=exec=…` all reach it intact. Every real command so far
+ * is an enumerated mode. A free-form type needs a mandatory anchored pattern
+ * before it comes back.
+ */
+export type ParamType = 'enum';
 
 export interface CommandParam {
   readonly name: string;
   readonly type: ParamType;
-  /** Required for `enum`, refused for `string`. */
+  /** The permitted values. Every type today is enumerated. */
   readonly values?: readonly string[];
   /** Omitted makes the param required. */
   readonly default?: string;
@@ -26,7 +35,7 @@ export interface CommandParam {
 
 export interface CommandSpec {
   readonly name: string;
-  /** Relative to the project directory, normalised, contained. */
+  /** Relative, normalised, and LEXICALLY contained. See `containedScript`. */
   readonly script: string;
   readonly params?: readonly CommandParam[];
 }
@@ -42,22 +51,89 @@ export interface ListedCommand {
 }
 
 export interface ResolvedCommand {
-  readonly script: string;
+  /**
+   * 🛑 NOT A PATH TO RUN. `checkedScriptPath(projectDir, script)` turns it
+   * into one, and its object type is what makes skipping that a compile error.
+   */
+  readonly script: UncheckedScript;
   readonly argv: readonly string[];
 }
 
-const PARAM_TYPES: readonly ParamType[] = ['enum', 'string'];
+/**
+ * Per-type rules, parse-time and resolve-time in one place.
+ *
+ * 🛑 A `Record<ParamType, …>` SO A NEW TYPE CANNOT HALF-LAND. The two halves
+ * used to sit in `parseParam` and in `resolveArgv`, and forgetting the second
+ * would let a new type's value reach argv unchecked — a fail-open on the
+ * authorization surface. The compiler now refuses a missing arm.
+ */
+interface ParamKind {
+  /** Validate and return the declared `values`, or undefined when the type takes none. */
+  readonly parseValues: (
+    raw: Record<string, unknown>,
+    context: string,
+  ) => readonly string[] | undefined;
+  /** Refuse a supplied value the type does not permit. */
+  readonly assertValue: (value: string, param: CommandParam, context: string) => void;
+}
+
+const PARAM_KINDS: Record<ParamType, ParamKind> = {
+  enum: {
+    parseValues: (raw, context) => {
+      if (!Array.isArray(raw.values) || raw.values.length === 0) {
+        throw new Error(`${context} is an enum and needs a non-empty "values" array`);
+      }
+
+      if (!raw.values.every((v): v is string => typeof v === 'string')) {
+        throw new Error(`${context}: every value must be a string`);
+      }
+
+      for (const value of raw.values as string[]) {
+        // 🛑 A VALUE STARTING WITH `-` IS A FLAG TO THE CALLEE. The manifest
+        // author controls this list, so this catches their mistake rather than
+        // an agent's attack — but it is the same consequence either way.
+        if (value.startsWith('-')) {
+          throw new Error(`${context}: value "${value}" must not start with "-"`);
+        }
+      }
+
+      return [...(raw.values as string[])];
+    },
+    assertValue: (value, param, context) => {
+      if (!param.values?.includes(value)) {
+        throw new Error(`${context}: "${value}" is not one of ${param.values?.join(', ')}`);
+      }
+    },
+  },
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Refuse a repeated `name`, for whichever noun the caller is checking. */
+function assertUniqueNames(
+  named: readonly { readonly name: string }[],
+  complain: (name: string) => string,
+): void {
+  const seen = new Set<string>();
+
+  for (const item of named) {
+    if (seen.has(item.name)) throw new Error(complain(item.name));
+    seen.add(item.name);
+  }
+}
+
 /**
- * Refuse a script path that is absolute or that leaves the project.
+ * Refuse a script path that is absolute or that LEXICALLY leaves the project.
  *
- * 🛑 NORMALISE FIRST. `scripts/../../bin/sh` does not begin with `..` but
- * resolves outside, so a prefix check on the raw string reads it as
- * contained. The normalised form is what gets stored and run.
+ * 🛑 LEXICAL ONLY, AND THAT IS NOT CONTAINMENT. A symlink inside the project
+ * still escapes it, and this runs at parse time with no project directory and
+ * no file on disk, so it cannot resolve one. `checkedScriptPath` is the real
+ * check and `UncheckedScript` is what forces a caller through it.
+ *
+ * Normalise first: `scripts/../../bin/sh` does not begin with `..` but
+ * resolves outside, so a prefix check on the raw string reads it as contained.
  */
 function containedScript(commandName: string, raw: unknown): string {
   if (typeof raw !== 'string' || raw.length === 0) {
@@ -68,11 +144,30 @@ function containedScript(commandName: string, raw: unknown): string {
     throw new Error(`command "${commandName}" script must be a relative path, got "${raw}"`);
   }
 
-  const normalised = normalize(raw);
+  // 🛑 BEFORE normalize(). A NUL makes `scripts/gate.sh\0../../bin/sh`
+  // normalise to the innocent-looking `scripts/bin/sh`, and a newline or a
+  // control character only surfaces as an ERR_INVALID_ARG_VALUE at spawn time.
+  if (/[\u0000-\u001f\u007f]/.test(raw)) {
+    throw new Error(`command "${commandName}" script has a control character in it`);
+  }
 
-  if (normalised === '..' || normalised.startsWith(`..${'/'}`)) {
+  const normalised = normalize(raw);
+  // 🛑 SEGMENTS, NOT `startsWith('../')`. On win32 `normalize` returns
+  // `..\bin\sh`, which a forward-slash prefix check reads as contained. A
+  // filename that merely BEGINS with dots, like `..foo`, is legitimate.
+  const segments = normalised.split(/[\\/]/);
+
+  if (segments[0] === '..') {
     throw new Error(
       `command "${commandName}" script must stay inside the project, got "${raw}"`,
+    );
+  }
+
+  // `execFile`'s own first argument is the program, so a leading `-` is an
+  // option injection into the spawn itself.
+  if (segments.some((segment) => segment.startsWith('-'))) {
+    throw new Error(
+      `command "${commandName}" script must not have a path segment starting with "-", got "${raw}"`,
     );
   }
 
@@ -85,45 +180,31 @@ function parseParam(commandName: string, raw: unknown): CommandParam {
   }
 
   const name = raw.name;
+  const context = `command "${commandName}" param "${name}"`;
 
-  if (typeof raw.type !== 'string' || !PARAM_TYPES.includes(raw.type as ParamType)) {
-    throw new Error(
-      `command "${commandName}" param "${name}": unknown param type ${JSON.stringify(raw.type)}`,
-    );
+  // Keeps a param out of Object.prototype's key space, and keeps a name out of
+  // the shapes a callee might read as a flag.
+  if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name)) {
+    throw new Error(`${context}: a param name must match /^[a-z0-9][a-z0-9_-]*$/i`);
+  }
+
+  if (typeof raw.type !== 'string' || !Object.hasOwn(PARAM_KINDS, raw.type)) {
+    throw new Error(`${context}: unknown param type ${JSON.stringify(raw.type)}`);
   }
 
   const type = raw.type as ParamType;
-  let values: readonly string[] | undefined;
-
-  if (type === 'enum') {
-    if (!Array.isArray(raw.values) || raw.values.length === 0) {
-      throw new Error(
-        `command "${commandName}" param "${name}" is an enum and needs a non-empty "values" array`,
-      );
-    }
-
-    if (!raw.values.every((v): v is string => typeof v === 'string')) {
-      throw new Error(`command "${commandName}" param "${name}": every value must be a string`);
-    }
-
-    values = [...(raw.values as string[])];
-  } else if (raw.values !== undefined) {
-    throw new Error(`command "${commandName}" param "${name}" is a string and takes no "values"`);
-  }
-
+  const values = PARAM_KINDS[type].parseValues(raw, context);
   let fallback: string | undefined;
 
   if (raw.default !== undefined) {
     if (typeof raw.default !== 'string') {
-      throw new Error(`command "${commandName}" param "${name}": default must be a string`);
+      throw new Error(`${context}: default must be a string`);
     }
 
     fallback = raw.default;
 
     if (values && !values.includes(fallback)) {
-      throw new Error(
-        `command "${commandName}" param "${name}": default "${fallback}" is not one of ${values.join(', ')}`,
-      );
+      throw new Error(`${context}: default "${fallback}" is not one of ${values.join(', ')}`);
     }
   }
 
@@ -150,14 +231,7 @@ function parseCommand(raw: unknown): CommandSpec {
   }
 
   const params = raw.params.map((p) => parseParam(name, p));
-  const seen = new Set<string>();
-
-  for (const param of params) {
-    if (seen.has(param.name)) {
-      throw new Error(`command "${name}" has a duplicate param "${param.name}"`);
-    }
-    seen.add(param.name);
-  }
+  assertUniqueNames(params, (dup) => `command "${name}" has a duplicate param "${dup}"`);
 
   return { name, script, params };
 }
@@ -173,14 +247,7 @@ export function parseManifest(raw: unknown): CommandManifest {
   }
 
   const commands = raw.commands.map(parseCommand);
-  const seen = new Set<string>();
-
-  for (const command of commands) {
-    if (seen.has(command.name)) {
-      throw new Error(`duplicate command "${command.name}" in the manifest`);
-    }
-    seen.add(command.name);
-  }
+  assertUniqueNames(commands, (dup) => `duplicate command "${dup}" in the manifest`);
 
   return { commands };
 }
@@ -189,10 +256,10 @@ export function parseManifest(raw: unknown): CommandManifest {
  * Read and validate a manifest from disk.
  *
  * 🛑 THROWS ON A MALFORMED FILE, unlike `projects.json` and `mounts.json`
- * which read as empty. Those two degrade to "nothing registered", which is
- * safe. A manifest that silently reads as empty would present itself as
- * "this project offers no commands" and send the operator looking at the
- * broker instead of at their stray comma.
+ * which read as empty. Those two degrade to "nothing registered", and
+ * `dirsFor` turns that back into a loud error. Nothing does that for a
+ * manifest, so an empty reading would present itself as "this project offers
+ * no commands" and send the operator to the broker instead of their comma.
  */
 export function readManifest(path: string): CommandManifest {
   if (!existsSync(path)) {
@@ -219,9 +286,15 @@ export function readManifest(path: string): CommandManifest {
  * broker owns the mapping, so a path never crosses the boundary.
  */
 export function listCommands(manifest: CommandManifest): ListedCommand[] {
+  // 🛑 COPIES, NOT THE LIVE ARRAYS. `readonly` is compile-time only, so a
+  // caller pushing onto the returned `params` used to add a param to the
+  // manifest itself — after which `resolveArgv` accepted it.
   return manifest.commands.map((command) => ({
     name: command.name,
-    params: command.params ?? [],
+    params: (command.params ?? []).map((param) => ({
+      ...param,
+      ...(param.values ? { values: [...param.values] } : {}),
+    })),
   }));
 }
 
@@ -252,7 +325,8 @@ export function resolveArgv(
   }
 
   const argv = declared.map((param) => {
-    const supplied = params[param.name];
+    const context = `command "${name}" param "${param.name}"`;
+    const supplied = Object.hasOwn(params, param.name) ? params[param.name] : undefined;
 
     if (supplied === undefined) {
       if (param.default !== undefined) return param.default;
@@ -260,17 +334,13 @@ export function resolveArgv(
     }
 
     if (typeof supplied !== 'string') {
-      throw new Error(`command "${name}" param "${param.name}" must be a string`);
+      throw new Error(`${context} must be a string`);
     }
 
-    if (param.values && !param.values.includes(supplied)) {
-      throw new Error(
-        `command "${name}" param "${param.name}": "${supplied}" is not one of ${param.values.join(', ')}`,
-      );
-    }
+    PARAM_KINDS[param.type].assertValue(supplied, param, context);
 
     return supplied;
   });
 
-  return { script: command.script, argv };
+  return { script: { relative: command.script }, argv };
 }

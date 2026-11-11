@@ -9,6 +9,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-commands-'));
 const { parseManifest, readManifest, listCommands, resolveArgv } = await import(
   '../../src/supervise/commands.js'
 );
+type CommandParam = import('../../src/supervise/commands.js').CommandParam;
 
 /**
  * The sample the ticket names: one enumerated positional with a default,
@@ -34,7 +35,7 @@ test('the ticket’s sample command parses', () => {
 test('a single enumerated positional with a default resolves to one argv entry', () => {
   const resolved = resolveArgv(parseManifest(GATE), 'run-gate', {});
   assert.deepEqual(resolved.argv, ['all']);
-  assert.equal(resolved.script, 'scripts/reset-and-test.sh');
+  assert.equal(resolved.script.relative, 'scripts/reset-and-test.sh');
 });
 
 test('an explicit enum value overrides the default', () => {
@@ -156,7 +157,7 @@ test('an unknown param type is refused', () => {
   assert.throws(
     () =>
       parseManifest({
-        commands: [{ name: 'g', script: 'a.sh', params: [{ name: 'n', type: 'number' }] }],
+        commands: [{ name: 'g', script: 'a.sh', params: [{ name: 'n', type: 'string' }] }],
       }),
     /unknown param type/,
   );
@@ -171,8 +172,8 @@ test('duplicate param names within one command are refused', () => {
             name: 'g',
             script: 'a.sh',
             params: [
-              { name: 'mode', type: 'string' },
-              { name: 'mode', type: 'string' },
+              { name: 'mode', type: 'enum', values: ['a'] },
+              { name: 'mode', type: 'enum', values: ['a'] },
             ],
           },
         ],
@@ -203,7 +204,7 @@ test('🛑 an enum value outside the declared set is refused', () => {
 
 test('a required param with no default cannot be omitted', () => {
   const m = parseManifest({
-    commands: [{ name: 'g', script: 'a.sh', params: [{ name: 'target', type: 'string' }] }],
+    commands: [{ name: 'g', script: 'a.sh', params: [{ name: 'target', type: 'enum', values: ['x'] }] }],
   });
   assert.throws(() => resolveArgv(m, 'g', {}), /needs a value for "target"/);
 });
@@ -222,8 +223,8 @@ test('argv order follows the declared param order, not the caller’s key order'
         name: 'g',
         script: 'a.sh',
         params: [
-          { name: 'first', type: 'string' },
-          { name: 'second', type: 'string' },
+          { name: 'first', type: 'enum', values: ['A'] },
+          { name: 'second', type: 'enum', values: ['B'] },
         ],
       },
     ],
@@ -251,4 +252,133 @@ test('🛑 readManifest THROWS on a malformed file rather than reading as empty'
 
 test('readManifest throws a path-naming error when the file is absent', () => {
   assert.throws(() => readManifest(join(tmpdir(), 'definitely-not-here-1337', 'commands.json')), /no command manifest at/);
+});
+
+// ── the resolved script is not a runnable path ───────────────────────────────
+
+test('🛑 resolveArgv hands back an UncheckedScript, not a path', () => {
+  const resolved = resolveArgv(parseManifest(GATE), 'run-gate', {});
+
+  // A bare string here would be assignable to execFile's first argument, which
+  // is exactly the lexical-containment mistake `checkedScriptPath` exists to
+  // stop. The object shape is the compile-time guard.
+  assert.equal(typeof resolved.script, 'object');
+  assert.equal(resolved.script.relative, 'scripts/reset-and-test.sh');
+});
+
+// ── the fixes from the security review ───────────────────────────────────────
+
+test('🛑 a free-form "string" param type no longer exists', () => {
+  assert.throws(
+    () =>
+      parseManifest({
+        commands: [{ name: 'g', script: 'a.sh', params: [{ name: 'n', type: 'string' }] }],
+      }),
+    /unknown param type/,
+  );
+});
+
+test('🛑 an enum value that starts with "-" is refused', () => {
+  // `-e/bin/sh` and `--upload-pack=…` are flags to whatever the script execs.
+  // execFile without a shell does not neutralise that.
+  assert.throws(
+    () =>
+      parseManifest({
+        commands: [
+          { name: 'g', script: 'a.sh', params: [{ name: 'm', type: 'enum', values: ['-rf'] }] },
+        ],
+      }),
+    /must not start with "-"/,
+  );
+});
+
+test('🛑 a NUL in a script path is refused BEFORE normalize hides it', () => {
+  // normalize('scripts/gate.sh\0../../bin/sh') returns the innocent-looking
+  // 'scripts/bin/sh'.
+  assert.throws(
+    () => parseManifest({ commands: [{ name: 'g', script: 'scripts/gate.sh\u0000../../bin/sh' }] }),
+    /control character/,
+  );
+});
+
+test('a newline in a script path is refused', () => {
+  assert.throws(
+    () => parseManifest({ commands: [{ name: 'g', script: 'scripts/a.sh\nrm -rf /' }] }),
+    /control character/,
+  );
+});
+
+test('🛑 a script path segment starting with "-" is refused', () => {
+  assert.throws(
+    () => parseManifest({ commands: [{ name: 'g', script: '-rf' }] }),
+    /must not have a path segment starting with "-"/,
+  );
+  assert.throws(
+    () => parseManifest({ commands: [{ name: 'g', script: 'scripts/-rf' }] }),
+    /must not have a path segment starting with "-"/,
+  );
+});
+
+test('a filename that merely begins with dots is still allowed', () => {
+  const m = parseManifest({ commands: [{ name: 'g', script: '..foo/bar.sh' }] });
+  assert.equal(m.commands[0]?.script, '..foo/bar.sh');
+});
+
+test('🛑 mutating listCommands output cannot widen the manifest', () => {
+  const m = parseManifest(GATE);
+  const listed = listCommands(m);
+
+  assert.notEqual(listed[0]?.params, m.commands[0]?.params);
+  (listed[0]?.params as CommandParam[]).push({ name: 'injected', type: 'enum', values: ['x'] });
+
+  assert.throws(() => resolveArgv(m, 'run-gate', { injected: 'x' }), /unknown param "injected"/);
+});
+
+test('🛑 the enum values array is copied too, not shared', () => {
+  const m = parseManifest(GATE);
+  const listed = listCommands(m);
+
+  assert.notEqual(listed[0]?.params[0]?.values, m.commands[0]?.params?.[0]?.values);
+  (listed[0]?.params[0]?.values as string[]).push('injected');
+
+  assert.throws(() => resolveArgv(m, 'run-gate', { mode: 'injected' }), /not one of/);
+});
+
+test('a param name outside the allowed charset is refused', () => {
+  for (const bad of ['__proto__', '-flag', 'has space', '', 'a.b', 'a/b']) {
+    assert.throws(
+      () =>
+        parseManifest({
+          commands: [
+            { name: 'g', script: 'a.sh', params: [{ name: bad, type: 'enum', values: ['x'] }] },
+          ],
+        }),
+      undefined,
+      `accepted param name ${JSON.stringify(bad)}`,
+    );
+  }
+});
+
+test('a param NAMED constructor is allowed, and hasOwn is what makes it safe', () => {
+  // `constructor` matches the name charset. It is harmless because the lookup
+  // is `Object.hasOwn`, not `params[name]` — so the inherited function is
+  // never mistaken for a supplied value.
+  const m = parseManifest({
+    commands: [
+      { name: 'g', script: 'a.sh', params: [{ name: 'constructor', type: 'enum', values: ['x'] }] },
+    ],
+  });
+
+  assert.throws(() => resolveArgv(m, 'g', {}), /needs a value for "constructor"/);
+  assert.deepEqual(resolveArgv(m, 'g', { constructor: 'x' }).argv, ['x']);
+});
+
+test('🛑 a prototype key cannot stand in for a supplied value', () => {
+  const m = parseManifest({
+    commands: [{ name: 'g', script: 'a.sh', params: [{ name: 'mode', type: 'enum', values: ['x'] }] }],
+  });
+
+  // `{}.toString` is truthy, so a plain `params[name]` lookup would have found
+  // a function here rather than reporting the param as missing.
+  assert.throws(() => resolveArgv(m, 'g', Object.create({ mode: 'x' })), /needs a value for "mode"/);
 });
