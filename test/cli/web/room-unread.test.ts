@@ -6,6 +6,12 @@ import { AddressInfo } from 'node:net';
 import { migrate } from '../../../src/storage/db.js';
 import * as dao from '../../../src/storage/dao.js';
 import { route, type RouteContext } from '../../../src/cli/web/server.js';
+import { ALL_CAPABILITIES } from '../../../src/cli/web/credential.js';
+
+/** The api credential every request below presents. Minted per process in production. */
+const TEST_TOKEN = 'test-token-for-route-tests';
+const COOKIE = `chat_mcp_api=${TEST_TOKEN}`;
+
 
 /**
  * 🛑 A BADGE THAT NEVER CLEARS IS WORSE THAN NO BADGE. Reading a room is the
@@ -20,7 +26,7 @@ async function harness(handle = 'me'): Promise<{ db: DatabaseSync; server: Serve
     dao.upsertAgent(db, { handle: h, pid: 1, session_id: h, display_name: h, metadata: {} });
   }
   // Assigned after listen; every request is served after that.
-  const ctx: RouteContext = { handle, db, sseClients: new Set(), port: 0 };
+  const ctx: RouteContext = { handle, db, sseClients: new Set(), port: 0, token: TEST_TOKEN, capabilities: ALL_CAPABILITIES };
   const server = createServer((req, res) => { void route(req, res, ctx); });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const { port } = server.address() as AddressInfo;
@@ -52,13 +58,14 @@ function newestIdIn(db: DatabaseSync, room: string): number {
 async function markRead(origin: string, room: string, upToId: number): Promise<Response> {
   return fetch(`${origin}/api/rooms/read`, {
     method: 'POST',
-    headers: { Origin: origin },
+    headers: { Origin: origin, Cookie: COOKIE },
     body: JSON.stringify({ room, up_to_id: upToId }),
   });
 }
 
 async function roomsOf(origin: string): Promise<{ name: string; unread: number }[]> {
-  const w = await (await fetch(`${origin}/api/whoami`)).json() as { rooms: { name: string; unread: number }[] };
+  const w = await (await fetch(`${origin}/api/whoami`, { headers: { Cookie: COOKIE } }))
+    .json() as { rooms: { name: string; unread: number }[] };
   return w.rooms;
 }
 
@@ -109,7 +116,7 @@ test('🛑 a GET does NOT mark a room read, so an <img> tag cannot do it', async
   const before = (await roomsOf(h.origin))[0]!.unread;
 
   // Exactly what an <img src> load looks like: a GET with NO Origin header.
-  await fetch(`${h.origin}/api/messages?target=%23ops`);
+  await fetch(`${h.origin}/api/messages?target=%23ops`, { headers: { Cookie: COOKIE } });
 
   assert.equal((await roomsOf(h.origin))[0]!.unread, before, 'a GET mutated the watermark');
   close(h);

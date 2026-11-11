@@ -17,6 +17,17 @@ import { assertRoomName, isRoomName } from '../../util/naming.js';
 import { ensureStateDir, stateDir } from '../../util/paths.js';
 import { renderBodyToHtml } from './render.js';
 import {
+  ALL_CAPABILITIES,
+  COOKIE_NAME,
+  HANDSHAKE_PARAM,
+  cookieValue,
+  mintToken,
+  requiredCapability,
+  sessionCookie,
+  tokenMatches,
+  type Capability,
+} from './credential.js';
+import {
   buildHints,
   defaultRoots,
   matchesHintPrefix,
@@ -80,6 +91,7 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   const db = openDb();
   const notify = new NotifyBus(handle);
   const session_id = randomUUID();
+  const token = mintToken();
 
   dao.upsertAgent(db, {
     handle,
@@ -109,7 +121,14 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   let boundPort = 0;
   const server = createServer(async (req, res) => {
     try {
-      await route(req, res, { handle, db, sseClients, port: boundPort });
+      await route(req, res, {
+        handle,
+        db,
+        sseClients,
+        port: boundPort,
+        token,
+        capabilities: ALL_CAPABILITIES,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (!res.headersSent) {
@@ -129,6 +148,11 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   const actualPort = await listenWithFallback(server, opts.port, PREFERRED_PORT);
   boundPort = actualPort;
   const url = `http://127.0.0.1:${actualPort}/`;
+  // 🛑 THE ONLY PLACE THE TOKEN IS PUBLISHED. The banner is the terminal,
+  // which a container cannot read; `webUrlFile()` is under `stateDir()`,
+  // which it can. So the handshake url goes to the operator and the plain
+  // url goes to the file.
+  const handshakeUrl = `${url}?${HANDSHAKE_PARAM}=${token}`;
 
   const banner = [
     '',
@@ -138,7 +162,9 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
     `  ║  ${url.padEnd(40)}  ║`,
     '  ╚════════════════════════════════════════════╝',
     '',
-    `  bound:  127.0.0.1 (localhost only)`,
+    `  bound:  127.0.0.1 — NOT a containment boundary; a container reaches it`,
+    `  open:   ${handshakeUrl}`,
+    `  note:   that url carries this session's api credential. reopen it after a restart.`,
     `  stop:   Ctrl-C`,
     actualPort !== PREFERRED_PORT && !opts.port
       ? `  note:   preferred port ${PREFERRED_PORT} was taken — using ${actualPort} instead`
@@ -154,7 +180,7 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   } catch { /* best-effort */ }
 
   if (opts.open !== false) {
-    openBrowser(url);
+    openBrowser(handshakeUrl);
   }
 
   // Idle-shutdown: if the last SSE client disconnected and no new one joined
@@ -254,6 +280,16 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
 export interface RouteContext {
   handle: string;
   db: Db;
+  /**
+   * The secret every `/api/*` request must present.
+   *
+   * 🛑 MINTED PER PROCESS AND NEVER PERSISTED. Writing it under
+   * `stateDir()` would hand it to every containerized agent, because that
+   * directory is bind-mounted into each one and a container runs as root.
+   */
+  token: string;
+  /** What a request holding `token` is allowed to reach. */
+  capabilities: readonly Capability[];
   sseClients: Set<ServerResponse>;
   /**
    * The loopback port this server bound to. 🛑 EVERY ORIGIN CHECK IS DERIVED
@@ -297,6 +333,40 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   const origin = req.headers.origin;
   if (origin !== undefined && !allowedOrigins(ctx.port).includes(origin)) {
     return respondJson(res, { error: 'cross-origin request refused' }, 403);
+  }
+
+
+  // The browser's first load carries the token in the query. Trade it for an
+  // HttpOnly cookie and redirect, so the secret leaves the address bar and the
+  // history and every later `/api/*` fetch carries it without page script.
+  if ((req.method === 'GET' || req.method === 'HEAD') && url.searchParams.has(HANDSHAKE_PARAM)) {
+    if (!tokenMatches(ctx.token, url.searchParams.get(HANDSHAKE_PARAM))) {
+      return respondJson(res, { error: 'bad credential' }, 401);
+    }
+
+    url.searchParams.delete(HANDSHAKE_PARAM);
+    res.statusCode = 302;
+    res.setHeader('Set-Cookie', sessionCookie(ctx.token));
+    res.setHeader('Location', `${url.pathname}${url.search}`);
+    res.end();
+
+    return;
+  }
+
+  // 🛑 EVERY `/api/*` ROUTE, READS INCLUDED, AND THE BIND ADDRESS IS NOT PART
+  // OF THE DECISION. A container reaches the host's 127.0.0.1 through
+  // `host.docker.internal`, which Docker Desktop proxies from the host side,
+  // so the Host allowlist above is a second check and never the only one.
+  const needed = requiredCapability(req.method ?? 'GET', path);
+
+  if (needed !== null) {
+    if (!tokenMatches(ctx.token, cookieValue(req.headers.cookie, COOKIE_NAME))) {
+      return respondJson(res, { error: 'api credential required; reopen the url from the terminal' }, 401);
+    }
+
+    if (!ctx.capabilities.includes(needed)) {
+      return respondJson(res, { error: `this credential cannot ${needed}` }, 403);
+    }
   }
 
   if (path === '/api/whoami') return handleWhoami(res, ctx);
@@ -712,9 +782,10 @@ function handleSearch(url: URL, res: ServerResponse, ctx: RouteContext): void {
 
   if (!parsed.ok) return respondJson(res, { error: parsed.reason }, 400);
 
-  // 🛑 NO `caller`, DELIBERATELY. This is lee's own UI on 127.0.0.1 behind the
-  // rebinding guard, so it is meant to read every room and DM. The MCP tool
-  // passes one; see `dao.searchMessages`.
+  // 🛑 NO `caller`, DELIBERATELY — this surface reads every room and DM.
+  // ⚠️ THE BIND ADDRESS IS NOT WHAT MAKES THAT SAFE, WHICH IS WHAT THIS
+  // COMMENT USED TO SAY. The api credential in `route` is. The MCP tool
+  // passes a caller; see `dao.searchMessages`.
   const { hits, truncated } = dao.searchMessages(ctx.db, {
     pattern: parsed.pattern,
     target: parsed.target,

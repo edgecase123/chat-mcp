@@ -68,7 +68,11 @@ Launches a foreground localhost HTTP server on **port 3737** (or a random free p
   agent is something a human can actually follow.
 - The pane header names who owns a room, next to the member count.
 
-Design principles: **no persistent daemon** (exits when the last browser tab closes + 60s idle timeout, or on Ctrl-C), **no shared ports** (binds `127.0.0.1` on an OS-assigned free port), **no cloud, no auth** (localhost-only). State lives in `~/.chat-mcp/` exactly like the terminal CLI. MCP shims are unaffected.
+Design principles: **no persistent daemon** (exits when the last browser tab closes + 60s idle timeout, or on Ctrl-C), **no shared ports** (binds `127.0.0.1` on an OS-assigned free port), **no cloud**. State lives in `~/.chat-mcp/` exactly like the terminal CLI. MCP shims are unaffected.
+
+🛑 **Every `/api/*` route needs a credential, and the bind address is not one.** A containerized agent reaches the host's `127.0.0.1` through `host.docker.internal`, which Docker Desktop proxies from the host side — so `127.0.0.1` is not a containment boundary. `chat-mcp web` mints a per-process token, prints it in the banner's `open:` url, and trades it for an `HttpOnly; SameSite=Strict` session cookie on the browser's first load. Reads need `read`, ordinary writes need `write`, and answering an approval, kicking an agent or deleting a room need `admin`.
+
+⚠️ **The token is never written under `~/.chat-mcp/`**, because that whole directory is bind-mounted read-write into every containerized agent and a container runs as root. It lives in the terminal banner only, so **after a restart, reopen the url from the terminal** — the old cookie will not work.
 
 Flags: `--port <n>` to pin a specific port; `--no-open` to skip auto-launching the browser.
 
