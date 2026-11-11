@@ -337,8 +337,13 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
 
 
   // The browser's first load carries the token in the query. Trade it for an
-  // HttpOnly cookie and redirect, so the secret leaves the address bar and the
-  // history and every later `/api/*` fetch carries it without page script.
+  // HttpOnly cookie and redirect, so the secret leaves the ADDRESS BAR and
+  // every later `/api/*` fetch carries it without page script.
+  //
+  // ⚠️ THIS DOES NOT PROMISE THE HISTORY IS CLEAN. A 302 leaves no
+  // back-button entry, but the originally-typed url can still reach the
+  // history store and the omnibox. Untested in a real browser. The token is
+  // per-process and session-scoped, so a leaked old one is already dead.
   if ((req.method === 'GET' || req.method === 'HEAD') && url.searchParams.has(HANDSHAKE_PARAM)) {
     if (!tokenMatches(ctx.token, url.searchParams.get(HANDSHAKE_PARAM))) {
       return respondJson(res, { error: 'bad credential' }, 401);

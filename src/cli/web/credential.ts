@@ -14,7 +14,14 @@ export const HANDSHAKE_PARAM = 't';
 
 export type Capability = 'read' | 'write' | 'admin';
 
-/** Every capability, for the operator's own browser. */
+/**
+ * Every capability, for the operator's own browser.
+ *
+ * ⚠️ THE ONLY PRODUCTION PRODUCER OF `capabilities`. So the per-route tiers and
+ * the 403 they raise are exercised by the tests alone today — no narrower
+ * credential is minted yet. This is the groundwork for lee's 2026-11-11
+ * ruling that the credential can be scoped per route, not a live restriction.
+ */
 export const ALL_CAPABILITIES: readonly Capability[] = ['read', 'write', 'admin'];
 
 export function mintToken(): string {
@@ -25,16 +32,20 @@ export function mintToken(): string {
  * The capability an API route demands, or null when the path is not an API
  * route at all.
  *
- * 🛑 THE DEFAULT FOR AN UNLISTED `/api/` PATH IS `admin`, NOT `read`. A new
- * endpoint that nobody remembered to classify must start at the most
- * restrictive level rather than the least.
+ * 🛑 AN UNLISTED `/api/` PATH IS `admin` FOR EVERY METHOD, READS INCLUDED.
+ * Reads are enumerated rather than inferred from the verb: the first cut
+ * returned `read` for any GET, so an unclassified endpoint got the LEAST
+ * restrictive level while the comment promised the most. Found by claude2
+ * reviewing PR #165. The tests pin all four quadrants.
  */
 export function requiredCapability(method: string, path: string): Capability | null {
   if (!path.startsWith('/api/')) return null;
 
+  const reading = method === 'GET' || method === 'HEAD';
+
   if (ADMIN_ROUTES.has(path)) return 'admin';
-  if (method === 'GET' || method === 'HEAD') return 'read';
-  if (WRITE_ROUTES.has(path)) return 'write';
+  if (WRITE_ROUTES.has(path) && !reading) return 'write';
+  if (READ_ROUTES.has(path) && reading) return 'read';
 
   return 'admin';
 }
@@ -50,6 +61,22 @@ const ADMIN_ROUTES: ReadonlySet<string> = new Set([
   '/api/rooms/delete',
 ]);
 
+/**
+ * Every GET surface, enumerated from the dispatch table in `server.ts`.
+ *
+ * ⚠️ `/api/messages` IS IN HERE AND IN THE WRITES. It is a GET and a POST, so
+ * the method decides which tier applies, not the path.
+ */
+const READ_ROUTES: ReadonlySet<string> = new Set([
+  '/api/whoami',
+  '/api/messages',
+  '/api/approvals',
+  '/api/claims',
+  '/api/search',
+  '/api/files',
+  '/api/events',
+]);
+
 const WRITE_ROUTES: ReadonlySet<string> = new Set([
   '/api/messages',
   '/api/messages/clear',
@@ -59,7 +86,15 @@ const WRITE_ROUTES: ReadonlySet<string> = new Set([
   '/api/rooms/style',
 ]);
 
-/** Constant-time compare that does not leak the expected length. */
+/**
+ * Constant-time compare of two equal-length tokens.
+ *
+ * ⚠️ THE LENGTH IS COMPARED FIRST AND THAT IS NOT CONSTANT TIME. It has to be,
+ * because `timingSafeEqual` throws on a length mismatch. Safe here only
+ * because the token is always 43 base64url characters, so the length is fixed
+ * and public. This comment said "does not leak the expected length", which was
+ * a security property the function never had. Found by claude2 on PR #165.
+ */
 export function tokenMatches(expected: string, presented: string | null): boolean {
   if (presented === null) return false;
 

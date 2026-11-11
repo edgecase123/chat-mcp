@@ -167,6 +167,21 @@ test('🛑 a read-only credential cannot answer an approval, and the approval su
   assert.equal(dao.getApproval(h.db, id)?.decision, null);
 });
 
+test('🛑 a read-only credential cannot post a message either', async (t) => {
+  const h = await harness(['read']);
+  t.after(() => close(h));
+  const before = dao.totalUnreadFor(h.db, 'peer-a');
+
+  const res = await fetch(`${h.origin}/api/messages`, {
+    method: 'POST',
+    headers: { Origin: h.origin, Cookie: COOKIE },
+    body: JSON.stringify({ target: 'peer-a', body: 'should not land' }),
+  });
+
+  assert.equal(res.status, 403);
+  assert.equal(dao.totalUnreadFor(h.db, 'peer-a'), before, 'a refused post still delivered');
+});
+
 test('a read-only credential still reads', async (t) => {
   const h = await harness(['read']);
   t.after(() => close(h));
@@ -177,9 +192,35 @@ test('a read-only credential still reads', async (t) => {
 
 // ── The capability table ─────────────────────────────────────────────────
 
-test('🛑 an UNLISTED api route defaults to admin, never to read', () => {
-  assert.equal(requiredCapability('POST', '/api/something-nobody-classified'), 'admin');
-  assert.equal(requiredCapability('DELETE', '/api/also-new'), 'admin');
+/**
+ * 🛑 ALL FOUR QUADRANTS. The first cut of this test asserted only POST and
+ * DELETE, and the code returned `read` for an unlisted GET — the exact
+ * inversion of the docblock beside it. An absence-test that only probes the
+ * verbs you already handled cannot fail. Found by claude2 on PR #165.
+ */
+test('🛑 an UNLISTED api route is admin for EVERY method, reads included', () => {
+  for (const m of ['GET', 'HEAD', 'POST', 'DELETE', 'PUT', 'PATCH']) {
+    assert.equal(
+      requiredCapability(m, '/api/something-nobody-classified'),
+      'admin',
+      `${m} on an unclassified path must not be cheaper than admin`,
+    );
+  }
+});
+
+test('🛑 a GET on a path that only accepts writes is admin, not read', () => {
+  assert.equal(requiredCapability('GET', '/api/rooms/read'), 'admin');
+  assert.equal(requiredCapability('GET', '/api/messages/clear'), 'admin');
+  assert.equal(requiredCapability('GET', '/api/rooms/join'), 'admin');
+});
+
+test('every read surface in the dispatch table is reachable with `read`', () => {
+  for (const p of [
+    '/api/whoami', '/api/messages', '/api/approvals',
+    '/api/claims', '/api/search', '/api/files', '/api/events',
+  ]) {
+    assert.equal(requiredCapability('GET', p), 'read', p);
+  }
 });
 
 test('the three destructive routes are admin, and the ordinary writes are not', () => {
@@ -191,10 +232,10 @@ test('the three destructive routes are admin, and the ordinary writes are not', 
   }
 });
 
-test('a GET is read, and a non-api path needs nothing', () => {
-  assert.equal(requiredCapability('GET', '/api/search'), 'read');
+test('a non-api path needs nothing', () => {
   assert.equal(requiredCapability('GET', '/'), null);
   assert.equal(requiredCapability('GET', '/assets/app.js'), null);
+  assert.equal(requiredCapability('POST', '/'), null);
 });
 
 // ── The primitives ───────────────────────────────────────────────────────
