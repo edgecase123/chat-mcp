@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,6 +21,69 @@ const PROJECT_DIR = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-project-'));
 
 function dockerArgsFor(opts: Parameters<typeof dockerArgsForVendor>[1]) {
   return dockerArgsForVendor(claudeSpawn, opts);
+}
+
+/**
+ * Mock `node:child_process` so both docker calls land on one `spawn` mock,
+ * and record every `docker stop` argv.
+ *
+ * 🛑 `docker stop` MOVED OFF `execFileSync` ONTO A DETACHED `spawn`, because
+ * PID 1 ignores SIGTERM so a synchronous stop froze the supervisor for the
+ * whole `-t` window. One mock now sees the `docker run` client AND the
+ * stopper, so it discriminates on argv: `stop` is the stopper, anything else
+ * is the run.
+ *
+ * Node's module mocking only intercepts an ESM named import at a fresh module
+ * instance, so callers must import `containerized.js` with a cache-busting
+ * query AFTER calling this.
+ */
+function mockDocker(t: TestContext): {
+  /** Every docker argv, in call order, across both spawn and execFileSync. */
+  calls: string[][];
+  stopInvocations: string[][];
+  runningClient: () => ReturnType<typeof realSpawn> | undefined;
+} {
+  const calls: string[][] = [];
+  const stopInvocations: string[][] = [];
+  let fakeDockerRun: ReturnType<typeof realSpawn> | undefined;
+
+  t.mock.module('node:child_process', {
+    namedExports: {
+      spawn: (_cmd: string, args: string[]) => {
+        calls.push(args);
+        if (args[0] === 'stop') {
+          stopInvocations.push(args);
+          // `dockerStopFor` attaches an 'error' listener and calls `unref()`,
+          // so the stub has to answer both or the code under test throws.
+          return { on: () => undefined, unref: () => undefined };
+        }
+        // A real, controllable stand-in for the `docker run` CLI process:
+        // long-lived with piped stdio, since spawnContainerized reads
+        // child.stdout directly.
+        fakeDockerRun = realSpawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
+        return fakeDockerRun;
+      },
+      // The pre-run `docker rm -f` is the one call that must still be
+      // synchronous — the name has to be free before `docker run`.
+      execFileSync: (_cmd: string, args: string[]) => {
+        calls.push(args);
+        return Buffer.from('');
+      },
+    },
+  });
+
+  // 🛑 KILL THE STAND-IN FROM `t.after`, NOT FROM THE TEST BODY. A kill after
+  // the assertions never runs when an assertion throws, and the stand-in is a
+  // real `setInterval` process — so a FAILING test leaks an open handle and
+  // the whole runner hangs instead of reporting the failure. Observed: one
+  // leaked pid wedged `node --test` indefinitely. Same lesson as
+  // `container-removal.test.ts`'s `finally`, different resource.
+  t.after(() => fakeDockerRun?.kill());
+
+  // 🛑 BOTH ARRAYS ARE THE SAME OBJECTS THE MOCK PUSHES INTO, never a
+  // filtered copy. A getter returning `calls.filter(...)` would be evaluated
+  // once at destructuring — before the call under test — and assert empty.
+  return { calls, stopInvocations, runningClient: () => fakeDockerRun };
 }
 
 test('with no token on file, building argv throws naming the fix', () => {
@@ -85,31 +148,12 @@ test('the invocation runs the image with --rm, never leaving a stopped container
 
 test('kill() stops the container by name via the daemon, not a raw signal to the docker-run client', async (t) => {
   setToken('sk-ant-oat-x');
-  // A real, controllable stand-in for the `docker run` CLI process: a long-lived
-  // process with piped stdio (spawnContainerized reads child.stdout directly).
-  // Node's own `node:test` module mocking only intercepts an ESM named import at
-  // a fresh module instance, so the mock must be installed before
-  // `containerized.js` is (re-)imported below.
-  //
-  // 🛑 A RAW SIGTERM TO THIS CLIENT PROCESS IS NOT THE CONTRACT ANY MORE. The
+  // 🛑 A RAW SIGTERM TO THE `docker run` CLIENT IS NOT THE CONTRACT. The
   // daemon ignores it (container-removal.test.ts, #148's real finding), so
-  // `kill()` must shell out to `docker stop <name>` instead — this test
-  // captures that `execFileSync` call rather than asserting the client died,
-  // which is a signal propagation detail a real daemon supplies, not this mock.
-  let fakeDockerRun: ReturnType<typeof realSpawn> | undefined;
-  const stopInvocations: string[][] = [];
-  t.mock.module('node:child_process', {
-    namedExports: {
-      spawn: () => {
-        fakeDockerRun = realSpawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
-        return fakeDockerRun;
-      },
-      execFileSync: (_cmd: string, args: string[]) => {
-        stopInvocations.push(args);
-        return Buffer.from('');
-      },
-    },
-  });
+  // `kill()` must shell out to `docker stop <name>` instead. This test
+  // captures that argv rather than asserting the client died, which is a
+  // signal-propagation detail a real daemon supplies and this mock does not.
+  const { stopInvocations, runningClient } = mockDocker(t);
 
   const { spawnContainerized } = await import(
     `../../../src/supervise/drivers/containerized.js?kill-test=${Date.now()}`
@@ -118,8 +162,41 @@ test('kill() stops the container by name via the daemon, not a raw signal to the
 
   agent.kill();
 
-  assert.deepEqual(stopInvocations, [['stop', 'chat-mcp-claude1']]);
-  assert.ok(fakeDockerRun, 'spawn mock was not invoked');
+  assert.deepEqual(stopInvocations, [['stop', '-t', '60', 'chat-mcp-claude1']]);
+  assert.ok(runningClient(), 'spawn mock was not invoked');
+});
 
-  fakeDockerRun?.kill();
+test('a per-handle shutdownGraceSeconds overrides the -t default', async (t) => {
+  setToken('sk-ant-oat-x');
+  const { stopInvocations } = mockDocker(t);
+
+  const { spawnContainerized } = await import(
+    `../../../src/supervise/drivers/containerized.js?grace-test=${Date.now()}`
+  );
+  const agent = spawnContainerized(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: 'claude1',
+    shutdownGraceSeconds: 5,
+  });
+
+  agent.kill();
+
+  assert.deepEqual(stopInvocations, [['stop', '-t', '5', 'chat-mcp-claude1']]);
+});
+
+test('🛑 the container name is force-cleared BEFORE docker run, or a restart hits a name conflict', async (t) => {
+  setToken('sk-ant-oat-x');
+  // The name is fixed per handle, and `kill()` no longer waits for the
+  // teardown — so without this, restarting a handle inside the grace window
+  // gets `Conflict. The container name is already in use` from the daemon.
+  // Ordering is the whole assertion: an `rm -f` after `run` clears nothing.
+  const { calls } = mockDocker(t);
+
+  const { spawnContainerized } = await import(
+    `../../../src/supervise/drivers/containerized.js?rm-test=${Date.now()}`
+  );
+  spawnContainerized(claudeSpawn, { cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+
+  assert.deepEqual(calls[0], ['rm', '-f', 'chat-mcp-claude1'], 'the first docker call must be rm -f');
+  assert.equal(calls[1]?.[0], 'run', 'docker run must follow the rm -f, not precede it');
 });

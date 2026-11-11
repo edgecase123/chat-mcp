@@ -14,6 +14,14 @@ import {
 export const CONTAINER_PROJECT_DIR = '/work';
 const CONTAINER_CHAT_MCP_ENTRY = '/opt/chat-mcp/dist/index.js';
 
+/**
+ * Seconds between `docker stop`'s SIGTERM and SIGKILL. Not a measured figure
+ * — lee's chosen default (#149), raised from docker's own 10s default so a
+ * session has time to externalize before being cut off. Per-handle
+ * overridable via `SpawnOptions.shutdownGraceSeconds`.
+ */
+export const DEFAULT_SHUTDOWN_GRACE_SECONDS = 60;
+
 export { containerPathFor };
 
 /** Where the bus's state dir lands inside the container, for this vendor. */
@@ -114,13 +122,25 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
  * instead of a hand-written copy — a copy proves `docker stop` works, not
  * that `spawnContainerized` is wired to call it (claude2, PR #147 review).
  */
-export function dockerStopFor(name: string): () => void {
+export function dockerStopFor(
+  name: string,
+  graceSeconds: number = DEFAULT_SHUTDOWN_GRACE_SECONDS,
+): () => void {
   return () => {
-    try {
-      execFileSync('docker', ['stop', name], { stdio: 'ignore' });
-    } catch {
-      // Already stopped or removed — the expected case on a repeat kill().
-    }
+    // 🛑 DETACHED, NOT `execFileSync`. PID 1 in a container ignores SIGTERM,
+    // so `docker stop` always waits out its full `-t` — 60s by default. Doing
+    // that synchronously froze the whole supervisor for that minute: no
+    // logging, no socket handling, and a second Ctrl-C did nothing. The
+    // daemon owns the teardown, so this process does not need to watch it.
+    const stopper = spawn('docker', ['stop', '-t', String(graceSeconds), name], {
+      stdio: 'ignore',
+      detached: true,
+    });
+    // An unhandled 'error' event on a child process is an uncaught exception,
+    // so this handler is load-bearing rather than defensive. `kill()` is
+    // best-effort by contract, and there is no logger at this layer.
+    stopper.on('error', () => undefined);
+    stopper.unref();
   };
 }
 
@@ -132,13 +152,32 @@ export function dockerStopFor(name: string): () => void {
  * `container-removal.test.ts`, not just asserted here.
  */
 export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {}): AgentChild {
+  const name = containerNameFor(requireSupervisorHandle(opts));
+
+  // 🛑 CLEAR THE NAME FIRST, SYNCHRONOUSLY. The name is fixed per handle, and
+  // `kill()` no longer waits for the teardown — so restarting a handle inside
+  // the grace window meets `Conflict. The container name is already in use`
+  // (claude2, PR #153 re-review). `-f` SIGKILLs rather than waiting out a
+  // grace period, so this is short even against a container mid-stop, and it
+  // also clears the stale container a crashed supervisor leaves behind.
+  //
+  // Only ever this handle's own container: the live-handle guard refuses a
+  // second supervisor before reaching here, so there is no running agent to
+  // take down.
+  try {
+    execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' });
+  } catch {
+    // Nothing by that name — the normal case, and not distinguishable from a
+    // missing docker without a logger at this layer.
+  }
+
   const child: ChildProcessWithoutNullStreams = spawn(
     'docker',
     dockerArgsForVendor(vendor, opts),
     { stdio: ['pipe', 'pipe', 'pipe'] },
   ) as ChildProcessWithoutNullStreams;
 
-  const name = containerNameFor(requireSupervisorHandle(opts));
+  const graceSeconds = opts.shutdownGraceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
 
-  return wireAgentChild(child, vendor, { stop: dockerStopFor(name) });
+  return wireAgentChild(child, vendor, { stop: dockerStopFor(name, graceSeconds) });
 }

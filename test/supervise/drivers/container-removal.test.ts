@@ -48,10 +48,17 @@ test(
       '300',
     ]) as ChildProcessWithoutNullStreams;
 
+    // 🛑 PID 1 INSIDE A CONTAINER IGNORES SIGTERM BY DEFAULT (the kernel's
+    // own rule for an init process, not a `sleep` quirk) — `docker stop`
+    // always waits out its FULL `-t` window here, it never exits early.
+    // A production-sized grace period (#149 raised the default to 60s)
+    // would make this test's real `docker stop` take 60s, nearly as long as
+    // the safety bound below. Pin it short so the test stays fast and the
+    // bound stays a bound, not a race.
     const agentChild = wireAgentChild(
       rawChild,
       { routeEvent: () => undefined, encodeInput: (text) => text },
-      { stop: dockerStopFor(name) },
+      { stop: dockerStopFor(name, 2) },
     );
 
     try {
