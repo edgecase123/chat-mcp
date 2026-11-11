@@ -349,7 +349,41 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         process.exit(1);
       }
 
-      console.log(`${action} accepted for ${handle}`);
+      if (action === 'restart') {
+        console.log(`restart accepted for ${handle}`);
+        return;
+      }
+
+      console.log(`stop accepted for ${handle} — waiting for teardown`);
+
+      // 🛑 THE SOCKET FILE IS THE SIGNAL, and the supervisor unlinks it only
+      // AFTER the container is gone. Polling the container here instead would
+      // report nothing for a non-containerized child, which has no container.
+      const { socketPathFor } = await import('./util/paths.js');
+      const { existsSync } = await import('node:fs');
+      const { DEFAULT_SHUTDOWN_GRACE_SECONDS } = await import(
+        './supervise/drivers/containerized.js'
+      );
+      // One grace period plus the daemon's own removal step, plus a margin.
+      // `--now` skips the notice but `docker stop -t` still waits out its full
+      // grace, so this ceiling is the same either way.
+      const STOP_WAIT_MS = DEFAULT_SHUTDOWN_GRACE_SECONDS * 1000 + 15_000;
+      const path = socketPathFor(handle);
+      const deadline = Date.now() + STOP_WAIT_MS;
+
+      while (existsSync(path) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
+      if (existsSync(path)) {
+        console.error(
+          `${handle} did not confirm teardown within ${Math.round(STOP_WAIT_MS / 1000)}s. ` +
+            `It may still be shutting down — check \`docker ps\`.`,
+        );
+        process.exit(1);
+      }
+
+      console.log(`${handle} stopped`);
     });
 
   program
@@ -452,7 +486,10 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       // A bus-delivered `agents stop` reaches the supervisor, not this signal
       // handler, so the exit has to be wired to the stop itself. Without it the
       // process survives its own stop — the #136 symptom all over again.
-      sup.onStopped(() => process.exit(0));
+      sup.onStopped(() => {
+        console.log(`${handle} stopped`);
+        process.exit(0);
+      });
 
       const shutdown = (): void => {
         void sup.stop('graceful');

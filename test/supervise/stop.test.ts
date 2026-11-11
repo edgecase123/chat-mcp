@@ -17,13 +17,23 @@ interface FakeChild {
   sent: string[];
   killed: boolean;
   finishTurn: () => void;
+  /** Resolve this child's `awaitTeardown()`, standing in for `docker stop`. */
+  finishTeardown: () => void;
+  teardownAwaited: boolean;
 }
 
 function recordingChild(children: FakeChild[]) {
   return () => {
     const sent: string[] = [];
     let endTurn: (() => void) | undefined;
-    const rec: FakeChild = { sent, killed: false, finishTurn: () => endTurn?.() };
+    let releaseTeardown: (() => void) | undefined;
+    const rec: FakeChild = {
+      sent,
+      killed: false,
+      finishTurn: () => endTurn?.(),
+      finishTeardown: () => releaseTeardown?.(),
+      teardownAwaited: false,
+    };
     children.push(rec);
 
     return {
@@ -39,6 +49,13 @@ function recordingChild(children: FakeChild[]) {
       onExit: () => undefined,
       kill: () => {
         rec.killed = true;
+      },
+      awaitTeardown: () => {
+        rec.teardownAwaited = true;
+
+        return new Promise<void>((resolve) => {
+          releaseTeardown = resolve;
+        });
       },
     };
   };
@@ -83,6 +100,7 @@ test('a stop control kills the child without respawning it', async () => {
     assert.equal(children[0].killed, true);
     assert.equal(children[0].sent.length, 0);
   } finally {
+    children[0]?.finishTeardown();
     await sup.stop('now');
   }
 });
@@ -115,11 +133,12 @@ test('a graceful stop warns the child before killing it', async () => {
     assert.equal(children[0].killed, true);
     assert.equal(children.length, 1);
   } finally {
+    children[0]?.finishTeardown();
     await sup.stop('now');
   }
 });
 
-test('onStopped fires once a bus-delivered stop completes', async () => {
+test('onStopped waits for the teardown rather than firing on the kill', async () => {
   const children: FakeChild[] = [];
   const handle = `stop-${process.pid}-cb`;
   const sup = await supervisorFor(handle, children);
@@ -140,6 +159,15 @@ test('onStopped fires once a bus-delivered stop completes', async () => {
 
     await settle();
 
+    // 🛑 THE ASSERTION IS THE ZERO. `docker stop` runs detached, so firing the
+    // exit hook on the kill reports "stopped" while the container is still up.
+    assert.equal(children[0].killed, true);
+    assert.equal(children[0].teardownAwaited, true);
+    assert.equal(stopped, 0);
+
+    children[0].finishTeardown();
+    await settle();
+
     // The CLI's only exit signal. Without it the supervise process survives its
     // own stop and the operator sees nothing happen.
     assert.equal(stopped, 1);
@@ -149,6 +177,80 @@ test('onStopped fires once a bus-delivered stop completes', async () => {
     await sup.stop('now');
     assert.equal(stopped, 1);
   } finally {
+    children[0]?.finishTeardown();
     await sup.stop('now');
   }
+});
+
+test('a wake arriving during the teardown is refused, not delivered', async () => {
+  const children: FakeChild[] = [];
+  const handle = `stop-${process.pid}-window`;
+  const sup = await supervisorFor(handle, children);
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 5,
+      to: handle,
+      from: 'cli',
+      ts: Date.now(),
+      control: { kind: 'stop', mode: 'now' },
+    });
+
+    await settle();
+
+    // The socket outlives the child for up to the full grace period, so this
+    // window is real and a sender in it must not be told `sent`.
+    const late = await deliverToSupervisor(handle, {
+      id: 6,
+      to: handle,
+      from: 'someone',
+      ts: Date.now(),
+      body: 'hello?',
+    });
+
+    assert.equal(late?.ok, false);
+    assert.equal(children[0].sent.length, 0);
+  } finally {
+    children[0]?.finishTeardown();
+    await sup.stop('now');
+  }
+});
+
+test('a driver with no awaitTeardown still stops', async () => {
+  const children: FakeChild[] = [];
+  const handle = `stop-${process.pid}-no-teardown`;
+  const db = new DatabaseSync(':memory:');
+  migrate(db);
+
+  // The seam is optional by contract. A driver that omits it must not hang the
+  // stop waiting for a hook that was never there.
+  const sup = await startSupervisor({
+    handle,
+    db,
+    extraDirs: DIRS,
+    spawnChild: () => {
+      const base = recordingChild(children)();
+
+      return { ...base, awaitTeardown: undefined };
+    },
+    log: () => undefined,
+  });
+
+  let stopped = 0;
+  sup.onStopped(() => {
+    stopped += 1;
+  });
+
+  await deliverToSupervisor(handle, {
+    id: 4,
+    to: handle,
+    from: 'cli',
+    ts: Date.now(),
+    control: { kind: 'stop', mode: 'now' },
+  });
+
+  await settle();
+
+  assert.equal(children[0].killed, true);
+  assert.equal(stopped, 1);
 });

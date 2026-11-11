@@ -737,8 +737,20 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       });
     }
 
+    // 🛑 `kill()` RETURNS BEFORE THE CONTAINER IS DOWN. It spawns `docker stop`
+    // detached on purpose, so firing `onStopped` here reports "stopped" while
+    // the container is still shutting down. The wait is what makes the printed
+    // confirmation true.
+    const current = child;
+    current.kill();
+    await current.awaitTeardown?.();
+
+    // 🛑 CLOSED AFTER THE TEARDOWN, NOT BEFORE, SO THE SOCKET'S DISAPPEARANCE
+    // MEANS "FULLY STOPPED". That is the one signal `agents stop` can wait on
+    // for every driver — a host child has no container to poll. Envelopes
+    // arriving in this window are refused above, not delivered to a dead child.
     await listener.close();
-    child.kill();
+
     // Registration happens in the CHILD, via the shim. So this deletes a row
     // this process did not write, which is why it is opt-in and not default.
     if (opts.ephemeral === true) dao.deleteAgent(approvalsDb, opts.handle);
@@ -747,6 +759,13 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   };
 
   const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
+    // 🛑 THE SOCKET OUTLIVES THE CHILD DURING A TEARDOWN, by up to the full
+    // grace period. Without this a wake in that window is "delivered" to a
+    // child that is already being killed, and the sender is told `sent`.
+    if (hasStopped) {
+      return { ok: false, error: 'supervisor is stopping' };
+    }
+
     // A restart command is out-of-band, not a chat message or an approval,
     // and must run before either of those checks.
     if (envelope.control?.kind === 'restart') {

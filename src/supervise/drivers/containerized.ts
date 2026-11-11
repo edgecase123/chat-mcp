@@ -145,6 +145,46 @@ export function dockerStopFor(
 }
 
 /**
+ * `awaitTeardown()` for a container by name: resolve once it is gone.
+ *
+ * 🛑 `docker wait` IS THE WRONG TOOL. It resolves on the container EXITING,
+ * and a `--rm` container is removed a moment later — so a restart in that
+ * window still meets `Conflict. The container name is already in use`. This
+ * polls for the NAME being free, which is the condition the next spawn needs.
+ *
+ * Resolves rather than throwing on timeout. A stop that cannot confirm is
+ * still a stop, and the caller prints what it was able to observe.
+ */
+export function dockerTeardownFor(
+  name: string,
+  graceSeconds: number = DEFAULT_SHUTDOWN_GRACE_SECONDS,
+): () => Promise<void> {
+  const POLL_MS = 250;
+
+  return async () => {
+    // One grace period plus a margin for the daemon's own removal step.
+    const deadline = Date.now() + graceSeconds * 1000 + 5_000;
+
+    while (Date.now() < deadline) {
+      let present = false;
+      try {
+        const out = execFileSync('docker', ['ps', '-aq', '--filter', `name=^${name}$`], {
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+        present = out.toString().trim().length > 0;
+      } catch {
+        // No daemon, or docker gone. Nothing left to wait for.
+        return;
+      }
+
+      if (!present) return;
+
+      await new Promise((r) => setTimeout(r, POLL_MS));
+    }
+  };
+}
+
+/**
  * Spawn a vendor's CLI inside `docker run`.
  *
  * 🛑 ONE `docker run` PROCESS, DRIVEN OVER STDIN AND STDOUT. No `docker exec`,
@@ -180,5 +220,8 @@ export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {})
 
   const graceSeconds = opts.shutdownGraceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
 
-  return wireAgentChild(child, vendor, { stop: dockerStopFor(name, graceSeconds) });
+  return wireAgentChild(child, vendor, {
+    stop: dockerStopFor(name, graceSeconds),
+    teardown: dockerTeardownFor(name, graceSeconds),
+  });
 }
