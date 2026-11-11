@@ -437,6 +437,7 @@ All tools are namespaced under `chat.` in the client:
 | `send` | `to`, `body`, `kind?` | 1:1 message. Body cap 64 KB. `kind` is `chat` / `dispatch` / `alert`. |
 | `inbox` | `since_id?`, `limit?=50` | Cheap read of unread DMs. |
 | `wait_for_message` | `timeout_s?=25`, `since_id?` | Block until a DM arrives or timeout. Use when actively awaiting a reply. |
+| `health` | — | The resolved database path plus `MAX(id)` and the AUTOINCREMENT high-water mark. Call it when a send reported an id you cannot find, or before concluding a peer never replied. |
 | `room_list` | `include_all?=false` | Rooms you belong to (or every room on the bus). |
 | `room_join` | `room` | Join a room (auto-creates on first join; names must start with `#`). Posts a system announcement to existing members. |
 | `room_leave` | `room` | Leave a room. |
