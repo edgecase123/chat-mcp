@@ -1,6 +1,33 @@
 # Container Sandboxing (#129) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> 🛑 **THIS IS A RECORD, NOT A WORK ORDER. DO NOT IMPLEMENT IT.**
+>
+> All nine tasks below are already on `main`. An agent that works through this
+> plan rebuilds shipped code.
+>
+> | task | on `main` as |
+> |---|---|
+> | 1 Mounts registry | `src/supervise/mounts.ts` |
+> | 2 Shared auth token storage | `src/supervise/auth.ts` |
+> | 3 `mount` and `auth` CLI commands | `src/index.ts`, `src/util/subcommands.ts:31-33` |
+> | 4 Image build + per-handle confirm state | `src/supervise/container.ts` |
+> | 5 The docker-claude driver | `src/supervise/drivers/containerized.ts` |
+> | 6 `--container` flag, confirm gate, fail-fast | `src/index.ts`, `containerized.ts` |
+> | 7 Mount advertisement on first dispatch | `src/supervise/index.ts` |
+> | 8 `chat-mcp agents restart <handle>` | `src/index.ts`, `--now` included |
+> | 9 Dockerfile, packaging, smoke test | `Dockerfile`, `package.json` `files` |
+>
+> ⚠️ **The checkboxes were never ticked, and they are not a progress signal.**
+> They are demoted to plain bullets below so this file cannot be read as a task
+> list. They are NOT ticked, because that would claim a per-step verification
+> nobody did.
+>
+> ⚠️ **`drivers/docker-claude.ts` is a pre-rename name and does not exist.**
+> #131 PR 3 collapsed that driver into `drivers/containerized.ts`. Every
+> mention of it below predates the rename.
+>
+> Verified against `origin/main` at `0cd0c1e`: 11 of the 12 targets in the File
+> structure block exist. `docker-claude.ts` is the one that does not.
 
 **Goal:** Spawn a supervised agent inside a Docker container instead of as a bare host process, so a permission grant can no longer reach beyond the agent's own clone.
 
@@ -35,7 +62,7 @@
 - Create: `src/supervise/mounts.ts`
 - Test: `test/supervise/mounts.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```typescript
 import { test } from 'node:test';
@@ -97,12 +124,12 @@ test('a malformed mounts.json reads as empty rather than throwing', async () => 
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `npm test -- --test-name-pattern='mount'`
 Expected: FAIL — `Cannot find module '../../src/supervise/mounts.js'`
 
-- [ ] **Step 3: Write the implementation**
+- **Step 3: Write the implementation**
 
 ```typescript
 import { existsSync, readFileSync } from 'node:fs';
@@ -180,12 +207,12 @@ export function containerPathFor(key: string): string {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `npm test -- --test-name-pattern='mount'`
 Expected: PASS, 7 tests
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/supervise/mounts.ts test/supervise/mounts.test.ts
@@ -200,7 +227,7 @@ git commit -m "feat(#129): add the per-handle extra-mount registry"
 - Create: `src/supervise/auth.ts`
 - Test: `test/supervise/auth.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```typescript
 import { test } from 'node:test';
@@ -243,12 +270,12 @@ test('setting a new token replaces the old one, not appends', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `npm test -- --test-name-pattern='token'`
 Expected: FAIL — `Cannot find module '../../src/supervise/auth.js'`
 
-- [ ] **Step 3: Write the implementation**
+- **Step 3: Write the implementation**
 
 ```typescript
 import { existsSync, readFileSync } from 'node:fs';
@@ -288,12 +315,12 @@ export function readToken(): string | null {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `npm test -- --test-name-pattern='token'`
 Expected: PASS, 6 tests
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/supervise/auth.ts test/supervise/auth.test.ts
@@ -309,11 +336,11 @@ git commit -m "feat(#129): add shared OAuth token storage for containerized agen
 - Modify: `src/util/subcommands.ts`
 - Test: `test/supervise/subcommands.test.ts` (existing file — extend it)
 
-- [ ] **Step 1: Read the existing test to match its shape**
+- **Step 1: Read the existing test to match its shape**
 
 `test/supervise/subcommands.test.ts` already asserts `KNOWN_SUBCOMMANDS` — read it before writing Step 2 so the new assertions match its existing style exactly (do not reformat the file).
 
-- [ ] **Step 2: Write the failing test (append to the existing file)**
+- **Step 2: Write the failing test (append to the existing file)**
 
 ```typescript
 test('mount, auth and agents are registered, or they silently fall through to shim mode', () => {
@@ -323,12 +350,12 @@ test('mount, auth and agents are registered, or they silently fall through to sh
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- **Step 3: Run test to verify it fails**
 
 Run: `npm test -- --test-name-pattern='mount, auth and agents'`
 Expected: FAIL — `has('mount')` is `false`
 
-- [ ] **Step 4: Implement — `src/util/subcommands.ts`**
+- **Step 4: Implement — `src/util/subcommands.ts`**
 
 Add to the `KNOWN_SUBCOMMANDS` set (keep every existing entry):
 
@@ -338,7 +365,7 @@ Add to the `KNOWN_SUBCOMMANDS` set (keep every existing entry):
   'agents',
 ```
 
-- [ ] **Step 5: Implement — `src/index.ts`**
+- **Step 5: Implement — `src/index.ts`**
 
 Add after the `project` command block:
 
@@ -411,12 +438,12 @@ Add after the `project` command block:
     });
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- **Step 6: Run test to verify it passes**
 
 Run: `npm test -- --test-name-pattern='mount, auth and agents'`
 Expected: PASS
 
-- [ ] **Step 7: Commit**
+- **Step 7: Commit**
 
 ```bash
 git add src/index.ts src/util/subcommands.ts test/supervise/subcommands.test.ts
@@ -431,7 +458,7 @@ git commit -m "feat(#129): add mount and auth CLI commands"
 - Create: `src/supervise/container.ts`
 - Test: `test/supervise/container.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```typescript
 import { test } from 'node:test';
@@ -505,12 +532,12 @@ test('the printed plan names mounts, env var NAMES only, binary and network', ()
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `npm test -- --test-name-pattern='image|confirmed|plan'`
 Expected: FAIL — `Cannot find module '../../src/supervise/container.js'`
 
-- [ ] **Step 3: Write the implementation**
+- **Step 3: Write the implementation**
 
 ```typescript
 import { existsSync, readFileSync } from 'node:fs';
@@ -629,12 +656,12 @@ export function describePlan(plan: ContainerPlan): string {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `npm test -- --test-name-pattern='image|confirmed|plan'`
 Expected: PASS, 6 tests
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/supervise/container.ts test/supervise/container.test.ts
@@ -651,7 +678,7 @@ git commit -m "feat(#129): add container image build and per-handle confirm stat
 - Modify: `src/supervise/drivers/index.ts`
 - Test: `test/supervise/drivers/docker-claude.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```typescript
 import { test } from 'node:test';
@@ -730,12 +757,12 @@ test('the invocation runs the image with --rm, never leaving a stopped container
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `npm test -- --test-name-pattern='docker|token is injected|allow-dangerously'`
 Expected: FAIL — `Cannot find module '../../../src/supervise/drivers/docker-claude.js'`
 
-- [ ] **Step 3: Implement — `src/supervise/child.ts`**
+- **Step 3: Implement — `src/supervise/child.ts`**
 
 Add one field to `SpawnOptions` (next to `cwd`):
 
@@ -748,7 +775,7 @@ Add one field to `SpawnOptions` (next to `cwd`):
   readonly supervisorHandle?: string;
 ```
 
-- [ ] **Step 4: Implement — `src/supervise/drivers/docker-claude.ts`**
+- **Step 4: Implement — `src/supervise/drivers/docker-claude.ts`**
 
 ```typescript
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -932,7 +959,7 @@ export function spawnDockerClaude(opts: SpawnOptions = {}): AgentChild {
 }
 ```
 
-- [ ] **Step 5: Implement — `src/supervise/drivers/index.ts`**
+- **Step 5: Implement — `src/supervise/drivers/index.ts`**
 
 ```typescript
 import { spawnDockerClaude } from './docker-claude.js';
@@ -953,12 +980,12 @@ const DRIVERS: Record<DriverName, Driver> = {
 
 (`redispatchPrompt` is reused as-is — the docker driver still runs the Claude Code CLI, so its approval-redispatch wording is identical. It is only reachable for a containerized handle if a future change re-enables the host grant path; today's #129 scope never calls it for this driver, but keeping one wording avoids a second copy that could drift.)
 
-- [ ] **Step 6: Run test to verify it passes**
+- **Step 6: Run test to verify it passes**
 
 Run: `npm test -- --test-name-pattern='docker|token is injected|allow-dangerously'`
 Expected: PASS, 8 tests
 
-- [ ] **Step 7: Commit**
+- **Step 7: Commit**
 
 ```bash
 git add src/supervise/child.ts src/supervise/drivers/docker-claude.ts src/supervise/drivers/index.ts test/supervise/drivers/docker-claude.test.ts
@@ -974,7 +1001,7 @@ git commit -m "feat(#129): add the docker-claude container driver"
 - Modify: `src/index.ts`
 - Test: `test/supervise/container-gate.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```typescript
 import { test } from 'node:test';
@@ -1075,12 +1102,12 @@ test('a CONFIRMED handle with a token spawns via the docker driver', async () =>
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `npm test -- --test-name-pattern='container supervisor|UNCONFIRMED|CONFIRMED handle'`
 Expected: FAIL — none of these checks exist yet, so the first two tests do not reject and the third passes vacuously (confirm the diff by reading the failure text, not just the exit code).
 
-- [ ] **Step 3: Implement — `src/supervise/index.ts`**
+- **Step 3: Implement — `src/supervise/index.ts`**
 
 Add a field to `SupervisorOptions` (near `driver`):
 
@@ -1132,7 +1159,7 @@ Pass `opts.handle` through as `supervisorHandle` at both spawn sites (initial sp
     });
 ```
 
-- [ ] **Step 4: Implement — `src/index.ts`, the interactive confirm**
+- **Step 4: Implement — `src/index.ts`, the interactive confirm**
 
 The confirm PROMPT itself (Step 3's test above only covers the already-confirmed and never-confirmed cases; the interactive y/N path is a CLI concern, not a `startSupervisor` concern, so it belongs in the command action, before `startSupervisor` is ever called):
 
@@ -1182,12 +1209,12 @@ At the top of the `supervise` command's `.action`, before calling `startSupervis
       }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- **Step 5: Run test to verify it passes**
 
 Run: `npm test -- --test-name-pattern='container supervisor|UNCONFIRMED|CONFIRMED handle'`
 Expected: PASS, 3 tests
 
-- [ ] **Step 6: Commit**
+- **Step 6: Commit**
 
 ```bash
 git add src/supervise/index.ts src/index.ts test/supervise/container-gate.test.ts
@@ -1202,7 +1229,7 @@ git commit -m "feat(#129): gate container spawn on a token and a one-time confir
 - Modify: `src/supervise/index.ts`
 - Test: `test/supervise/mount-banner.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```typescript
 import { test } from 'node:test';
@@ -1303,12 +1330,12 @@ test('a non-container (bare host) spawn never gets a mount banner', async () => 
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `npm test -- --test-name-pattern='mount banner|container\\) spawn'`
 Expected: FAIL — no banner text is produced
 
-- [ ] **Step 3: Implement — `src/supervise/index.ts`**
+- **Step 3: Implement — `src/supervise/index.ts`**
 
 Near the top of `startSupervisor`, after `dirs`/`driver` are known:
 
@@ -1355,12 +1382,12 @@ to:
 
 (Task 8 resets `needsMountBanner = true` inside the restart path — not added here, since restart does not exist yet in this task.)
 
-- [ ] **Step 4: Run test to verify it passes**
+- **Step 4: Run test to verify it passes**
 
 Run: `npm test -- --test-name-pattern='mount banner|container\\) spawn'`
 Expected: PASS, 2 tests
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add src/supervise/index.ts test/supervise/mount-banner.test.ts
@@ -1377,7 +1404,7 @@ git commit -m "feat(#129): advertise registered mounts on the first dispatch pro
 - Modify: `src/index.ts`
 - Test: `test/supervise/restart.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- **Step 1: Write the failing test**
 
 ```typescript
 import { test } from 'node:test';
@@ -1535,12 +1562,12 @@ test('restarting an unknown handle (no supervisor listening) returns null, not a
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- **Step 2: Run test to verify it fails**
 
 Run: `npm test -- --test-name-pattern='restart'`
 Expected: FAIL — `envelope.control` is not read anywhere, so these acks never arrive / the child is never killed
 
-- [ ] **Step 3: Implement — `src/supervise/socket.ts`**
+- **Step 3: Implement — `src/supervise/socket.ts`**
 
 ```typescript
 export interface RestartControl {
@@ -1555,7 +1582,7 @@ export interface WakeEnvelope {
 }
 ```
 
-- [ ] **Step 4: Implement — `src/supervise/index.ts`**
+- **Step 4: Implement — `src/supervise/index.ts`**
 
 Add near `replaceChild` (same scope, same closed-over `child`/`queue`/`wireChild`/`turnEndListeners`):
 
@@ -1645,12 +1672,12 @@ Wire the control check into the bind handler, BEFORE the approval check:
 
 ⚠️ **`queue.offer` is reassigned here**, which only works if `TurnQueue`'s `offer` is an own instance method, not a prototype method bound at construction. Read `src/supervise/turn-queue.ts` before this step — if `offer` is a class method accessed via the prototype, reassigning the property on the instance still works in JS (it shadows the prototype lookup), but confirm `queue` is a plain instance (not frozen) before relying on this. If `TurnQueue` turns out to expose `offer` any other way, use a local wrapper flag instead: track `awaitingNoticeReply` by comparing `queue.depth` before/after `queue.offer(...)`, since the exact mechanism is secondary to the invariant the test asserts (the reply's turn-end, not an earlier one, triggers the kill).
 
-- [ ] **Step 5: Run test to verify it passes**
+- **Step 5: Run test to verify it passes**
 
 Run: `npm test -- --test-name-pattern='restart'`
 Expected: PASS, 4 tests
 
-- [ ] **Step 6: Implement — `src/index.ts`, the CLI verb**
+- **Step 6: Implement — `src/index.ts`, the CLI verb**
 
 ```typescript
   program
@@ -1681,12 +1708,12 @@ Expected: PASS, 4 tests
     });
 ```
 
-- [ ] **Step 7: Run the full suite once**
+- **Step 7: Run the full suite once**
 
 Run: `npm test`
 Expected: PASS, every existing test still green plus the new ones
 
-- [ ] **Step 8: Commit**
+- **Step 8: Commit**
 
 ```bash
 git add src/supervise/socket.ts src/supervise/index.ts src/index.ts test/supervise/restart.test.ts
@@ -1701,7 +1728,7 @@ git commit -m "feat(#129): add chat-mcp agents restart, graceful by default"
 - Create: `Dockerfile`
 - Modify: `package.json`
 
-- [ ] **Step 1: Write the Dockerfile**
+- **Step 1: Write the Dockerfile**
 
 ```dockerfile
 # chat-mcp agent image — node + git + the claude CLI, nothing else (#129).
@@ -1725,16 +1752,16 @@ RUN npm ci --omit=dev
 COPY dist ./dist
 ```
 
-- [ ] **Step 2: Add `Dockerfile` to the npm package**
+- **Step 2: Add `Dockerfile` to the npm package**
 
 In `package.json`, add `"Dockerfile"` to the `"files"` array (alongside `"dist"`, `"web"`, `"README.md"`, `"DESIGN.md"`, `"LICENSE"`) — without this an installed (non-source-checkout) `chat-mcp` cannot find it and `dockerfilePath()` throws.
 
-- [ ] **Step 3: Build the image for real, once, by hand**
+- **Step 3: Build the image for real, once, by hand**
 
 Run: `npm run build && docker build -t chat-mcp-agent:local -f Dockerfile .`
 Expected: exits 0. If `claude --version` fails inside (step 1's flagged assumption), fix the package name here before proceeding — do not guess a second name without checking `npm view <name>` first.
 
-- [ ] **Step 4: One real end-to-end smoke test, by hand (not in the suite — this needs a live token and Docker)**
+- **Step 4: One real end-to-end smoke test, by hand (not in the suite — this needs a live token and Docker)**
 
 ```bash
 chat-mcp project set smoke-container ~/dev/chat-mcp
@@ -1745,7 +1772,7 @@ chat-mcp supervise smoke-container --container --no-reply
 
 Confirm the y/N prompt appears with mount paths and env var NAMES only (no token value on screen), confirm yes, and confirm the supervisor logs `child acts as "smoke-container-agent"` and does not immediately exit. Then from a second terminal: `chat-mcp send smoke-container "say hi"` — confirm the container responds, confirm `docker ps` shows the container while it runs and shows nothing once the supervisor is stopped (`Ctrl-C`), proving `--rm` actually cleaned up.
 
-- [ ] **Step 5: Commit**
+- **Step 5: Commit**
 
 ```bash
 git add Dockerfile package.json

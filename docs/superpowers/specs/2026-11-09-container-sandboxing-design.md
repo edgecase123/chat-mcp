@@ -1,5 +1,24 @@
 # Container sandboxing for supervised agents (#129)
 
+> ✅ **THIS SPEC IS IMPLEMENTED. It is a record of the agreed design, not a
+> proposal awaiting a build.**
+>
+> Every mechanism below is on `main` as of `0cd0c1e`. The companion plan at
+> `docs/superpowers/plans/2026-11-09-container-sandboxing-design.md` carries the
+> task-by-task map of what shipped where.
+>
+> ⚠️ **`drivers/docker-claude.ts` (line 21) does not exist.** #131 PR 3
+> collapsed that driver into `drivers/containerized.ts`.
+>
+> ⚠️ **The graceful-restart requirement shipped separately, as #153.** The
+> notice-then-wait design and the bounded-timeout fallback are
+> `sendNoticeThenFinish` and `shutdownGraceSeconds` in
+> `src/supervise/index.ts`, not unbuilt work.
+>
+> 🛑 **One thing this spec assumes is still open as #148**: whether a
+> containerized agent notices SIGTERM at all. The graceful path depends on a
+> handler that may not exist.
+
 ## Problem
 
 A supervised agent's permission grant constrains nothing beyond the CLI's own prompts. Once a command is approved it runs with the full access of the host process, not just the agent's assigned clone.
