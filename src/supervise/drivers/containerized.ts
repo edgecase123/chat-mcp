@@ -4,6 +4,7 @@ import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
 import { mountsFor, containerPathFor } from '../mounts.js';
 import { readToken } from '../auth.js';
+import { checkedProjectPath } from '../containment.js';
 import {
   ensureMcpConfigDir,
   mcpConfigPathFor,
@@ -100,6 +101,21 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
     '-v',
     `${stateDir()}:${containerStateDir(vendor)}`,
   ];
+
+  // 🛑 AFTER THE PROJECT MOUNT, NOT BEFORE. The whole mechanism is nested bind
+  // precedence: the inner `:ro` mount has to be layered over the wider
+  // read-write one. Measured on Docker 24.0.7 / macOS — read still works,
+  // every write, create and unlink under it is refused, including nested ones.
+  // ⚠️ UNRUN ON A LINUX HOST.
+  //
+  // 🛑 THE CHECKED REAL PATH ON THE HOST SIDE, the DECLARED relative path on
+  // the container side. The real path is what is actually being mounted, and
+  // the container side has to match where the project mount already puts it.
+  for (const entry of opts.readOnlyPaths ?? []) {
+    const noun = 'read-only path';
+    const hostPath = checkedProjectPath(projectDir, entry, noun);
+    args.push('-v', `${hostPath}:${CONTAINER_PROJECT_DIR}/${entry}:ro`);
+  }
 
   for (const [key, hostDir] of Object.entries(mountsFor(supervisorHandle))) {
     args.push('-v', `${hostDir}:${containerPathFor(key)}`);

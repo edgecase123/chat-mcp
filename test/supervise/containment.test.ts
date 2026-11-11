@@ -95,3 +95,34 @@ test('a project directory that is not on disk reads as MISSING', () => {
     /does not exist/,
   );
 });
+
+// ── checkedProjectPath — the shared realpath check ───────────────────────────
+
+test('a directory inside the project resolves to its absolute path', async () => {
+  const { checkedProjectPath } = await import('../../src/supervise/containment.js');
+  const dir = project();
+
+  assert.equal(checkedProjectPath(dir, 'scripts', 'read-only path'), join(dir, 'scripts'));
+});
+
+test('🛑 a directory that is a SYMLINK OUT of the project is refused', async () => {
+  const { checkedProjectPath } = await import('../../src/supervise/containment.js');
+  const dir = project();
+  symlinkSync('/etc', join(dir, 'conf'));
+
+  assert.throws(
+    () => checkedProjectPath(dir, 'conf', 'read-only path'),
+    // macOS realpaths `/etc` to `/private/etc`, so anchor on the suffix.
+    /resolves to "[^"]*\/etc", which is outside/,
+  );
+});
+
+test('the NOUN names what was missing, so the message is not script-specific', async () => {
+  const { checkedProjectPath } = await import('../../src/supervise/containment.js');
+  const dir = project();
+
+  assert.throws(
+    () => checkedProjectPath(dir, 'nope', 'read-only path'),
+    /read-only path does not exist/,
+  );
+});

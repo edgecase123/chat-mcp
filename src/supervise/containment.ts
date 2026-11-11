@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, normalize, resolve } from 'node:path';
 
 /**
  * Is a path inside a directory, after symlinks?
@@ -52,21 +52,64 @@ export function realContains(dir: string, target: string): boolean {
 }
 
 /**
- * The absolute path a manifest's script actually runs, or throw.
+ * Refuse a relative path that is absolute, control-charactered, or that
+ * LEXICALLY leaves the project. Returns the normalised form.
  *
- * ⚠️ MISSING AND OUTSIDE ARE DIFFERENT ERRORS. Reporting a typo'd script as a
- * containment refusal sends the operator hunting a permissions problem that
- * does not exist — the same distinction `resolveCwd` makes.
+ * 🛑 LEXICAL ONLY, SO IT IS NOT CONTAINMENT. It exists for the one caller that
+ * has no project directory to resolve against — manifest PARSE time, where
+ * there is no file on disk either. Anything that then acts on the path goes
+ * through `checkedProjectPath`.
  */
-export function checkedScriptPath(projectDir: string, script: UncheckedScript): string {
-  const target = join(projectDir, script.relative);
+export function containedRelative(raw: unknown, noun: string): string {
+  if (typeof raw !== 'string' || raw.length === 0) {
+    throw new Error(`${noun} must be a non-empty string`);
+  }
+
+  if (isAbsolute(raw)) {
+    throw new Error(`${noun} must be a relative path, got "${raw}"`);
+  }
+
+  // 🛑 BEFORE normalize(). A NUL makes `scripts/gate.sh\0../../bin/sh`
+  // normalise to the innocent-looking `scripts/bin/sh`, and a newline or a
+  // control character only surfaces as an ERR_INVALID_ARG_VALUE at spawn time.
+  if (/[\u0000-\u001f\u007f]/.test(raw)) {
+    throw new Error(`${noun} has a control character in it: "${raw}"`);
+  }
+
+  const normalised = normalize(raw);
+  // 🛑 SEGMENTS, NOT `startsWith('../')`. On win32 `normalize` returns
+  // `..\bin\sh`, which a forward-slash prefix check reads as contained. A
+  // filename that merely BEGINS with dots, like `..foo`, is legitimate.
+  const segments = normalised.split(/[\\/]/);
+
+  if (segments[0] === '..') {
+    throw new Error(`${noun} must stay inside the project, got "${raw}"`);
+  }
+
+  if (segments.some((segment) => segment.startsWith('-'))) {
+    throw new Error(`${noun} must not have a path segment starting with "-", got "${raw}"`);
+  }
+
+  return normalised;
+}
+
+/**
+ * The absolute path a project-relative entry actually resolves to, or throw.
+ *
+ * ⚠️ MISSING AND OUTSIDE ARE DIFFERENT ERRORS. Reporting a typo'd path as a
+ * containment refusal sends the operator hunting a permissions problem that
+ * does not exist — the same distinction `resolveCwd` makes. `noun` is what the
+ * caller is checking, so neither message is script-specific.
+ */
+export function checkedProjectPath(projectDir: string, relative: string, noun: string): string {
+  const target = join(projectDir, containedRelative(relative, noun));
   let real: string;
 
   try {
     real = realpathSync(target);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new Error(`command script does not exist: ${target}`);
+      throw new Error(`${noun} does not exist: ${target}`);
     }
 
     throw err;
@@ -74,10 +117,15 @@ export function checkedScriptPath(projectDir: string, script: UncheckedScript): 
 
   if (!realContains(projectDir, real)) {
     throw new Error(
-      `refusing to run "${script.relative}": it resolves to "${real}", which is outside ` +
+      `refusing "${relative}": it resolves to "${real}", which is outside ` +
         `the project directory "${projectDir}"`,
     );
   }
 
   return real;
+}
+
+/** The absolute path a manifest's script actually runs, or throw. */
+export function checkedScriptPath(projectDir: string, script: UncheckedScript): string {
+  return checkedProjectPath(projectDir, script.relative, 'command script');
 }

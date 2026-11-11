@@ -147,6 +147,21 @@ export interface SpawnOptions {
   readonly supervisorHandle?: string;
 
   /**
+   * Project-relative paths the container gets as nested READ-ONLY bind mounts,
+   * layered over the read-write project mount.
+   *
+   * 🛑 THE PROJECT DECLARES THESE AND chat-mcp SHIPS NO DEFAULT. Deriving them
+   * from a command's script path would encode one consumer's directory layout
+   * — `dirname('scripts/gate.sh')` covers `scripts/lib/` only because that
+   * project nests that way (lee, 2026-11-11).
+   *
+   * 🛑 THE GUARANTEE IS NARROW: the agent cannot change WHAT THE BROKER
+   * INVOKES. It is not "the broker runs only trusted code" — the agent still
+   * writes every other file, and a gate runs the agent's own application code.
+   */
+  readonly readOnlyPaths?: readonly string[];
+
+  /**
    * Seconds between a shutdown notice and `kill()` (#149). For a
    * containerized child this is also `docker stop`'s `-t`. Default
    * `DEFAULT_SHUTDOWN_GRACE_SECONDS` (60), per-handle overridable.
