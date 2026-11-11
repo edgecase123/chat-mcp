@@ -21,11 +21,27 @@ test('an untouched database says nothing has ever been written', () => {
   assert.match(healthReading(health(null, null)), /No message has ever been written/);
 });
 
+test('🛑 an EMPTIED table is not an untouched one — the sequence survives a DELETE', () => {
+  // `sqlite_sequence` keeps its row after `DELETE FROM messages`, with or
+  // without a WHERE, so deleting every row leaves max_id null beside a live
+  // mark. Reading that as "nothing was ever written" is the opposite of what
+  // happened. `deleteRoomMessages` and `deleteDmMessages` both reach it.
+  const reading = healthReading(health(null, 13504));
+
+  assert.doesNotMatch(reading, /No message has ever been written/);
+  assert.match(reading, /13504/);
+  assert.match(reading, /every row is now gone/);
+});
+
 test('🛑 marks that agree name the id, so a HIGHER reported id is the fiction', () => {
   const reading = healthReading(health(13504, 13504));
 
   assert.match(reading, /13504/);
   assert.match(reading, /did not persist/);
+  // Equal marks only prove the LATEST row survived. Claiming the whole table
+  // is intact reads as "no holes anywhere", which these two numbers cannot say.
+  assert.doesNotMatch(reading, /The table is intact/);
+  assert.match(reading, /nothing about holes/);
 });
 
 test('🛑 max_id BELOW the sequence says the row was written and removed', () => {

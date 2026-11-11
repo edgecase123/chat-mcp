@@ -8,22 +8,25 @@ import type { ShimContext } from '../index.js';
 /**
  * What the two marks mean, in a sentence.
  *
- * 🛑 EVERY BRANCH IS A CLAIM ABOUT WHAT HAPPENED, so each one is tested. The
- * four states are genuinely different: the marks AGREEING means no INSERT was
- * ever attempted, which is #138, while `max_id` below the mark means a row
- * was written and removed. One number cannot tell those apart.
+ * 🛑 EVERY BRANCH IS A CLAIM ABOUT WHAT HAPPENED, so each one is tested. One
+ * number cannot tell "no INSERT was ever attempted" apart from "rows were
+ * written and removed" — an empty table with a live high-water mark is the
+ * second, not the first.
  */
 export function healthReading(health: BusHealth): string {
   const { max_id, autoincrement_seq } = health;
 
-  if (max_id === null) return 'No message has ever been written to this database.';
+  if (max_id === null) {
+    if (autoincrement_seq === null) return 'No message has ever been written to this database.';
+    return `The table is EMPTY, but the high-water mark is ${autoincrement_seq}, so ids up to there were written and every row is now gone. Deleting a room's or a DM's messages does this.`;
+  }
 
   if (autoincrement_seq === null) {
     return `The table holds ids up to ${max_id}, but sqlite_sequence carries no row for it, so the high-water mark is unreadable. A restore that dropped sqlite_sequence does this.`;
   }
 
   if (max_id === autoincrement_seq) {
-    return `The table is intact at id ${max_id}. A send claiming a HIGHER id than this did not persist.`;
+    return `The TOP of the table is intact at id ${max_id}. A send claiming a HIGHER id than this did not persist. These two marks say nothing about holes below ${max_id}.`;
   }
 
   if (max_id < autoincrement_seq) {

@@ -59,3 +59,19 @@ test('🛑 max_id falls BELOW the sequence once a row is removed, which is what 
   assert.equal(health.autoincrement_seq, last.id);
   assert.ok(health.max_id < health.autoincrement_seq);
 });
+
+test('🛑 deleting every message leaves max_id null beside a LIVE high-water mark', () => {
+  // The state `healthReading` used to call "no message has ever been written".
+  // `sqlite_sequence` survives a DELETE, so an emptied table is distinguishable
+  // from a fresh one — and `deleteDmMessages` is a production path to it.
+  const db = freshDb();
+  dao.insertMessage(db, { from: 'a', to: 'b', body: 'one' });
+  const last = dao.insertMessage(db, { from: 'a', to: 'b', body: 'two' });
+
+  dao.deleteDmMessages(db, 'a', 'b');
+
+  const health = dao.busHealth(db);
+
+  assert.equal(health.max_id, null);
+  assert.equal(health.autoincrement_seq, last.id);
+});
