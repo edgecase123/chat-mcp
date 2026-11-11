@@ -8,6 +8,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-2nd-sup-'));
 
 const { startSupervisor } = await import('../../src/supervise/index.js');
 import type { AgentChild } from '../../src/supervise/drivers/claude.js';
+import { supervisorOptions } from '../support/supervisor-options.js';
 
 const DIRS = [process.cwd()];
 
@@ -40,24 +41,24 @@ test('a second supervisor for a live handle refuses BEFORE it spawns anything', 
     return fakeChild();
   };
 
-  const first = await startSupervisor({
+  const first = await startSupervisor(supervisorOptions({
     extraDirs: DIRS,
     handle: 'twice',
     spawnChild,
     log: () => undefined,
-  });
+  }));
 
   assert.equal(spawns, 1, 'the first supervisor must spawn');
 
   try {
     await assert.rejects(
       () =>
-        startSupervisor({
+        startSupervisor(supervisorOptions({
           extraDirs: DIRS,
           handle: 'twice',
           spawnChild,
           log: () => undefined,
-        }),
+        })),
       /already listening/,
     );
 
@@ -70,7 +71,7 @@ test('a second supervisor for a live handle refuses BEFORE it spawns anything', 
 /** The negative control: a free handle still spawns, so the guard is not a blanket refusal. */
 test('a free handle still spawns', async () => {
   let spawns = 0;
-  const sup = await startSupervisor({
+  const sup = await startSupervisor(supervisorOptions({
     extraDirs: DIRS,
     handle: 'only-one',
     spawnChild: (): AgentChild => {
@@ -79,7 +80,7 @@ test('a free handle still spawns', async () => {
       return fakeChild();
     },
     log: () => undefined,
-  });
+  }));
 
   try {
     assert.equal(spawns, 1);

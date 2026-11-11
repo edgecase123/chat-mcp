@@ -9,6 +9,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-bind-first-'));
 const { startSupervisor } = await import('../../src/supervise/index.js');
 const { socketPathFor } = await import('../../src/util/paths.js');
 import type { AgentChild } from '../../src/supervise/child.js';
+import { supervisorOptions } from '../support/supervisor-options.js';
 
 const DIRS = [process.cwd()];
 
@@ -88,7 +89,7 @@ function topLevelYields(window: string[]): string[] {
 test('the wake socket is listening BEFORE the child is spawned', async () => {
   let listeningAtSpawn: boolean | null = null;
 
-  const sup = await startSupervisor({
+  const sup = await startSupervisor(supervisorOptions({
     extraDirs: DIRS,
     handle: 'bind-first',
     spawnChild: (): AgentChild => {
@@ -97,7 +98,7 @@ test('the wake socket is listening BEFORE the child is spawned', async () => {
       return fakeChild();
     },
     log: () => undefined,
-  });
+  }));
 
   try {
     assert.equal(
@@ -169,14 +170,14 @@ test('a spawn failure does not strand the socket on the handle', async () => {
 
   await assert.rejects(
     () =>
-      startSupervisor({
+      startSupervisor(supervisorOptions({
         extraDirs: DIRS,
         handle: 'spawn-throws',
         spawnChild: (): AgentChild => {
           throw new Error('docker is not running');
         },
         log: () => undefined,
-      }),
+      })),
     /docker is not running/,
   );
 

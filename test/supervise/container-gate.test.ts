@@ -11,6 +11,7 @@ const { migrate } = await import('../../src/storage/db.js');
 const { startSupervisor } = await import('../../src/supervise/index.js');
 const { setToken } = await import('../../src/supervise/auth.js');
 const { markConfirmed } = await import('../../src/supervise/container.js');
+import { supervisorOptions } from '../support/supervisor-options.js';
 
 const DIRS = [process.cwd()];
 
@@ -27,14 +28,14 @@ test('a container supervisor with no token fails fast naming the fix', async () 
 
   await assert.rejects(
     () =>
-      startSupervisor({
+      startSupervisor(supervisorOptions({
         handle,
         db,
         extraDirs: DIRS,
         driver: 'docker-claude',
         reply: false,
         log: () => undefined,
-      }),
+      })),
     /chat-mcp auth set-token/,
   );
 });
@@ -46,14 +47,14 @@ test('an UNCONFIRMED container handle refuses to spawn without --now-style overr
 
   await assert.rejects(
     () =>
-      startSupervisor({
+      startSupervisor(supervisorOptions({
         handle,
         db,
         extraDirs: DIRS,
         driver: 'docker-claude',
         reply: false,
         log: () => undefined,
-      }),
+      })),
     /not confirmed/,
   );
 });
@@ -65,7 +66,7 @@ test('a CONFIRMED handle with a token spawns via the docker driver', async () =>
   markConfirmed(handle);
 
   const spawned: unknown[] = [];
-  const sup = await startSupervisor({
+  const sup = await startSupervisor(supervisorOptions({
     handle,
     db,
     extraDirs: DIRS,
@@ -86,7 +87,7 @@ test('a CONFIRMED handle with a token spawns via the docker driver', async () =>
         kill: () => undefined,
       };
     },
-  });
+  }));
 
   try {
     assert.equal(spawned.length, 1);

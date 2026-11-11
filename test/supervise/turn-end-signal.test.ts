@@ -11,6 +11,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-turnend-'));
 const { migrate } = await import('../../src/storage/db.js');
 const { startSupervisor } = await import('../../src/supervise/index.js');
 import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
+import { supervisorOptions } from '../support/supervisor-options.js';
 
 /**
  * 🛑 THE SUPERVISOR KNOWS WHEN A TURN ENDS AND WOULD NOT TELL ANYONE.
@@ -41,13 +42,13 @@ test('a caller can observe the turn ending, instead of timing it', async () => {
     kill: () => undefined,
   });
 
-  const sup = await startSupervisor({
+  const sup = await startSupervisor(supervisorOptions({
     handle: `turn-${process.pid}`,
     db,
     extraDirs: [process.cwd()],
     spawnChild,
     log: () => undefined,
-  });
+  }));
 
   try {
     let turns = 0;
