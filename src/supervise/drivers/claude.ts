@@ -2,12 +2,12 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { AgentChild, SpawnOptions } from '../child.js';
-import { createLineParser } from '../child.js';
 import { type RateLimitSnapshot } from '../rate-limit.js';
 import { parseClaudeRateLimit } from './claude-events.js';
 import { denialFromClaude, rememberClaudeToolUse } from './claude-events.js';
 import type { Denial } from '../denial.js';
 import { ensureMcpConfigDir, mcpConfigPathFor, writePrivateFileSync } from '../../util/paths.js';
+import { wireAgentChild } from './wiring.js';
 
 /**
  * The Claude Code driver: the ONLY file that knows this CLI's flags and event
@@ -249,6 +249,14 @@ export function routeClaudeEvent(
   if (event.type === 'result') on.turnEnd();
 }
 
+/** The documented streaming-input shape: one JSON user message per line. */
+export function claudeEncodeInput(text: string): string {
+  return `${JSON.stringify({
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'text', text }] },
+  })}\n`;
+}
+
 export function spawnClaude(opts: SpawnOptions = {}): AgentChild {
   const child: ChildProcessWithoutNullStreams = spawn(
     opts.binary ?? 'claude',
@@ -256,71 +264,5 @@ export function spawnClaude(opts: SpawnOptions = {}): AgentChild {
     { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] },
   ) as ChildProcessWithoutNullStreams;
 
-  const eventCbs: ((e: Record<string, unknown>) => void)[] = [];
-  const turnEndCbs: (() => void)[] = [];
-  const usageCbs: ((s: RateLimitSnapshot) => void)[] = [];
-  const denialCbs: ((d: Denial) => void)[] = [];
-  const sessionCbs: ((id: string) => void)[] = [];
-  let lastSession: string | null = null;
-
-  const feed = createLineParser((parsed) => {
-    for (const cb of eventCbs) cb(parsed);
-
-    routeClaudeEvent(parsed, {
-      turnEnd: () => {
-        for (const cb of turnEndCbs) cb();
-      },
-      usage: (snapshot) => {
-        for (const cb of usageCbs) cb(snapshot);
-      },
-      denial: (d) => {
-        for (const cb of denialCbs) cb(d);
-      },
-      session: (id) => {
-        // Only the FIRST sighting matters; every later event repeats it.
-        if (lastSession === id) return;
-        lastSession = id;
-        for (const cb of sessionCbs) cb(id);
-      },
-    });
-  });
-
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', feed);
-
-  return {
-    // Claude Code emits `rate_limit_event` unprompted, so this driver meters.
-    reportsUsage: true,
-    send(text: string): void {
-      // The documented streaming-input shape: one JSON user message per line.
-      const message = {
-        type: 'user',
-        message: { role: 'user', content: [{ type: 'text', text }] },
-      };
-      child.stdin.write(`${JSON.stringify(message)}\n`);
-    },
-    onTurnEnd(cb): void {
-      turnEndCbs.push(cb);
-    },
-    onUsage(cb): void {
-      usageCbs.push(cb);
-    },
-    onDenial(cb): void {
-      denialCbs.push(cb);
-    },
-    onSession(cb): void {
-      sessionCbs.push(cb);
-      // A late subscriber must not miss an id that already arrived.
-      if (lastSession) cb(lastSession);
-    },
-    onEvent(cb): void {
-      eventCbs.push(cb);
-    },
-    onExit(cb): void {
-      child.on('exit', (code, signal) => cb(code, signal));
-    },
-    kill(): void {
-      child.kill();
-    },
-  };
+  return wireAgentChild(child, { routeEvent: routeClaudeEvent, encodeInput: claudeEncodeInput });
 }
