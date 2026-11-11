@@ -327,11 +327,11 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
 
   program
     .command('agents <action> <handle>')
-    .description('Control a running supervisor: restart')
+    .description('Control a running supervisor: restart, stop')
     .option('--now', 'skip the graceful notice and kill immediately', false)
     .action(async (action: string, handle: string, o: { now?: boolean }) => {
-      if (action !== 'restart') {
-        console.error(`Error: unknown action "${action}". Use restart.`);
+      if (action !== 'restart' && action !== 'stop') {
+        console.error(`Error: unknown action "${action}". Use restart or stop.`);
         process.exit(1);
       }
 
@@ -341,7 +341,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         to: handle,
         from: 'cli',
         ts: Date.now(),
-        control: { kind: 'restart', mode: o.now ? 'now' : 'graceful' },
+        control: { kind: action, mode: o.now ? 'now' : 'graceful' },
       });
 
       if (!ack) {
@@ -349,7 +349,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         process.exit(1);
       }
 
-      console.log(`restart accepted for ${handle}`);
+      console.log(`${action} accepted for ${handle}`);
     });
 
   program
@@ -449,8 +449,13 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         allowedTools: typeof o.allowedTools === 'string' ? o.allowedTools.split(',') : undefined,
         container: (o as unknown as { container?: boolean }).container,
       });
+      // A bus-delivered `agents stop` reaches the supervisor, not this signal
+      // handler, so the exit has to be wired to the stop itself. Without it the
+      // process survives its own stop — the #136 symptom all over again.
+      sup.onStopped(() => process.exit(0));
+
       const shutdown = (): void => {
-        void sup.stop('graceful').then(() => process.exit(0));
+        void sup.stop('graceful');
       };
       process.on('SIGINT', shutdown);
       process.on('SIGTERM', shutdown);

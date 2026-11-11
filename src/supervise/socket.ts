@@ -70,6 +70,20 @@ export interface RestartControl {
   readonly mode: 'graceful' | 'now';
 }
 
+/**
+ * An out-of-band stop command for a running supervisor.
+ *
+ * Same two modes as a restart, with no respawn afterwards. It exists because
+ * the operator's own Ctrl-C does not always reach the supervise process, and
+ * `kill -INT` from a second terminal was the only confirmed way out.
+ */
+export interface StopControl {
+  readonly kind: 'stop';
+  readonly mode: 'graceful' | 'now';
+}
+
+export type SupervisorControl = RestartControl | StopControl;
+
 export interface WakeEnvelope {
   readonly id: number;
   readonly to: string;
@@ -88,8 +102,8 @@ export interface WakeEnvelope {
    */
   readonly approval?: ApprovalAnswer;
 
-  /** An out-of-band control command, e.g. a CLI-initiated restart. Absent for a chat wake or an approval. */
-  readonly control?: RestartControl;
+  /** An out-of-band control command, e.g. a CLI-initiated restart or stop. Absent for a chat wake or an approval. */
+  readonly control?: SupervisorControl;
 }
 
 export interface WakeAck {
