@@ -4,6 +4,7 @@ import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
 import { mountsFor, containerPathFor } from '../mounts.js';
 import { readToken } from '../auth.js';
+import { checkedMountPath } from '../containment.js';
 import {
   ensureMcpConfigDir,
   mcpConfigPathFor,
@@ -100,6 +101,17 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
     '-v',
     `${stateDir()}:${containerStateDir(vendor)}`,
   ];
+
+  // 🛑 BOTH SIDES COME FROM ONE CHECKED VALUE. A host side built from the
+  // realpath and a container side built from the raw declared string let a
+  // symlink put one directory at two container paths, only one read-only.
+  //
+  // Order does not matter — measured both ways, the daemon sorts bind
+  // destinations. ⚠️ Docker 24.0.7 / macOS, UNRUN ON LINUX.
+  for (const entry of opts.readOnlyPaths ?? []) {
+    const { host, inner } = checkedMountPath(projectDir, entry, 'read-only path');
+    args.push('-v', `${host}:${CONTAINER_PROJECT_DIR}/${inner}:ro`);
+  }
 
   for (const [key, hostDir] of Object.entries(mountsFor(supervisorHandle))) {
     args.push('-v', `${hostDir}:${containerPathFor(key)}`);
