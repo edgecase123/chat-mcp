@@ -8,6 +8,12 @@ import type { AddressInfo } from 'node:net';
 import { migrate } from '../../src/storage/db.js';
 import * as dao from '../../src/storage/dao.js';
 import { route, type RouteContext } from '../../src/cli/web/server.js';
+import { ALL_CAPABILITIES } from '../../src/cli/web/credential.js';
+
+/** The api credential every request below presents. Minted per process in production. */
+const TEST_TOKEN = 'test-token-for-route-tests';
+const COOKIE = `chat_mcp_api=${TEST_TOKEN}`;
+
 import { packageVersion } from '../../src/util/version.js';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
@@ -123,7 +129,7 @@ test('the browser UI reports the package version', async () => {
     display_name: 'operator',
     metadata: {},
   });
-  const ctx: RouteContext = { handle: 'operator', db, sseClients: new Set(), port: 0 };
+  const ctx: RouteContext = { handle: 'operator', db, sseClients: new Set(), port: 0, token: TEST_TOKEN, capabilities: ALL_CAPABILITIES };
   const server: Server = createServer((req, res) => {
     void route(req, res, ctx);
   });
@@ -132,7 +138,9 @@ test('the browser UI reports the package version', async () => {
   ctx.port = port;
 
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/whoami`);
+    const res = await fetch(`http://127.0.0.1:${port}/api/whoami`, {
+      headers: { Cookie: COOKIE },
+    });
     const body = (await res.json()) as { version?: string };
     assert.equal(res.status, 200);
     assert.equal(body.version, declaredVersion());

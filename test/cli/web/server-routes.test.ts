@@ -6,6 +6,12 @@ import { AddressInfo } from 'node:net';
 import { migrate } from '../../../src/storage/db.js';
 import * as dao from '../../../src/storage/dao.js';
 import { route, type RouteContext } from '../../../src/cli/web/server.js';
+import { ALL_CAPABILITIES } from '../../../src/cli/web/credential.js';
+
+/** The api credential every request below presents. Minted per process in production. */
+const TEST_TOKEN = 'test-token-for-route-tests';
+const COOKIE = `chat_mcp_api=${TEST_TOKEN}`;
+
 
 /**
  * 🛑 THESE ENDPOINTS DESTROY DATA. /api/kick deletes an agent and every room
@@ -32,7 +38,7 @@ async function harness(handle = 'operator'): Promise<Harness> {
     dao.upsertAgent(db, { handle: h, pid: 1, session_id: h, display_name: h, metadata: {} });
   }
   // Assigned after listen; every request is served after that.
-  const ctx: RouteContext = { handle, db, sseClients: new Set(), port: 0 };
+  const ctx: RouteContext = { handle, db, sseClients: new Set(), port: 0, token: TEST_TOKEN, capabilities: ALL_CAPABILITIES };
   const server = createServer((req, res) => { void route(req, res, ctx); });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
@@ -59,7 +65,9 @@ function raw(
   opts: { path: string; method?: string; host?: string; origin?: string; body?: string },
 ): Promise<{ status: number; body: string }> {
   const { port } = new URL(h.origin);
-  const headers: Record<string, string> = {};
+  // The api credential, so these tests exercise the guard they are ABOUT
+  // rather than the 401 in front of it. The credential tests send none.
+  const headers: Record<string, string> = { Cookie: COOKIE };
   if (opts.host !== undefined) headers.Host = opts.host;
   if (opts.origin !== undefined) headers.Origin = opts.origin;
 
@@ -82,7 +90,7 @@ function raw(
 async function post(h: Harness, path: string, body: unknown, origin?: string): Promise<Response> {
   return fetch(`${h.origin}${path}`, {
     method: 'POST',
-    headers: origin === undefined ? {} : { Origin: origin },
+    headers: origin === undefined ? { Cookie: COOKIE } : { Cookie: COOKIE, Origin: origin },
     body: JSON.stringify(body),
   });
 }
