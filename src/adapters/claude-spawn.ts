@@ -1,7 +1,7 @@
 import type { SpawnOptions } from '../supervise/child.js';
 import type { ChildGrant } from '../supervise/grant.js';
 import type { SandboxMode, VendorSpawn } from '../supervise/vendor.js';
-import { claudeArgs, routeClaudeEvent } from '../supervise/drivers/claude.js';
+import { claudeArgs, claudeEncodeInput, routeClaudeEvent } from '../supervise/drivers/claude.js';
 import { redispatchPrompt } from '../supervise/drivers/claude-redispatch.js';
 import { writeContainerMcpConfig } from '../supervise/drivers/docker-claude.js';
 import { IMAGE_TAG } from '../supervise/container.js';
@@ -48,11 +48,7 @@ export const claudeSpawn: VendorSpawn = {
 
   routeEvent: routeClaudeEvent,
 
-  encodeInput: (text: string): string =>
-    `${JSON.stringify({
-      type: 'user',
-      message: { role: 'user', content: [{ type: 'text', text }] },
-    })}\n`,
+  encodeInput: claudeEncodeInput,
 
   redispatchPrompt,
 };

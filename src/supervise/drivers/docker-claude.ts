@@ -1,13 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentChild, SpawnOptions } from '../child.js';
-import { createLineParser } from '../child.js';
-import { type RateLimitSnapshot } from '../rate-limit.js';
-import type { Denial } from '../denial.js';
-import { routeClaudeEvent } from './claude.js';
+import { claudeEncodeInput, routeClaudeEvent } from './claude.js';
 import { mountsFor, containerPathFor } from '../mounts.js';
 import { readToken } from '../auth.js';
 import { IMAGE_TAG } from '../container.js';
 import { stateDir, mcpConfigPathFor, ensureMcpConfigDir, writePrivateFileSync } from '../../util/paths.js';
+import { wireAgentChild } from './wiring.js';
 
 /**
  * The container driver: the Claude Code CLI run inside `docker run` instead
@@ -111,70 +109,8 @@ export function spawnDockerClaude(opts: SpawnOptions = {}): AgentChild {
     { stdio: ['pipe', 'pipe', 'pipe'] },
   ) as ChildProcessWithoutNullStreams;
 
-  const eventCbs: ((e: Record<string, unknown>) => void)[] = [];
-  const turnEndCbs: (() => void)[] = [];
-  const usageCbs: ((s: RateLimitSnapshot) => void)[] = [];
-  const denialCbs: ((d: Denial) => void)[] = [];
-  const sessionCbs: ((id: string) => void)[] = [];
-  let lastSession: string | null = null;
-
-  const feed = createLineParser((parsed) => {
-    for (const cb of eventCbs) cb(parsed);
-
-    routeClaudeEvent(parsed, {
-      turnEnd: () => {
-        for (const cb of turnEndCbs) cb();
-      },
-      usage: (snapshot) => {
-        for (const cb of usageCbs) cb(snapshot);
-      },
-      denial: (d) => {
-        for (const cb of denialCbs) cb(d);
-      },
-      session: (id) => {
-        if (lastSession === id) return;
-        lastSession = id;
-        for (const cb of sessionCbs) cb(id);
-      },
-    });
-  });
-
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', feed);
-
-  return {
-    reportsUsage: true,
-    send(text: string): void {
-      const message = {
-        type: 'user',
-        message: { role: 'user', content: [{ type: 'text', text }] },
-      };
-      child.stdin.write(`${JSON.stringify(message)}\n`);
-    },
-    onTurnEnd(cb): void {
-      turnEndCbs.push(cb);
-    },
-    onUsage(cb): void {
-      usageCbs.push(cb);
-    },
-    onDenial(cb): void {
-      denialCbs.push(cb);
-    },
-    onSession(cb): void {
-      sessionCbs.push(cb);
-      if (lastSession) cb(lastSession);
-    },
-    onEvent(cb): void {
-      eventCbs.push(cb);
-    },
-    onExit(cb): void {
-      child.on('exit', (code, signal) => cb(code, signal));
-    },
-    kill(): void {
-      // Terminates the `docker run` process itself. No `docker exec`, ever
-      // — decision 8. Container removal is `--rm`'s job, shown only by a
-      // manual run against real Docker, not by this call.
-      child.kill();
-    },
-  };
+  // Terminates the `docker run` process itself. No `docker exec`, ever —
+  // decision 8. Container removal is `--rm`'s job, shown only by a manual
+  // run against real Docker, not by `wireAgentChild`'s `kill()`.
+  return wireAgentChild(child, { routeEvent: routeClaudeEvent, encodeInput: claudeEncodeInput });
 }
