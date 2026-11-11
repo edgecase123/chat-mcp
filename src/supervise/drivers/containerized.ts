@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentChild, SpawnOptions } from '../child.js';
 import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
@@ -152,13 +152,31 @@ export function dockerStopFor(
  * `container-removal.test.ts`, not just asserted here.
  */
 export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {}): AgentChild {
+  const name = containerNameFor(requireSupervisorHandle(opts));
+
+  // 🛑 CLEAR THE NAME FIRST, SYNCHRONOUSLY. The name is fixed per handle, and
+  // `kill()` no longer waits for the teardown — so restarting a handle inside
+  // the grace window meets `Conflict. The container name is already in use`
+  // (claude2, PR #153 re-review). `-f` SIGKILLs rather than waiting out a
+  // grace period, so this is short even against a container mid-stop, and it
+  // also clears the stale container a crashed supervisor leaves behind.
+  //
+  // Only ever this handle's own container: the live-handle guard refuses a
+  // second supervisor before reaching here, so there is no running agent to
+  // take down.
+  try {
+    execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' });
+  } catch {
+    // Nothing by that name — the normal case, and not distinguishable from a
+    // missing docker without a logger at this layer.
+  }
+
   const child: ChildProcessWithoutNullStreams = spawn(
     'docker',
     dockerArgsForVendor(vendor, opts),
     { stdio: ['pipe', 'pipe', 'pipe'] },
   ) as ChildProcessWithoutNullStreams;
 
-  const name = containerNameFor(requireSupervisorHandle(opts));
   const graceSeconds = opts.shutdownGraceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
 
   return wireAgentChild(child, vendor, { stop: dockerStopFor(name, graceSeconds) });
