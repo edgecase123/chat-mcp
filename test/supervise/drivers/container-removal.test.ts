@@ -14,6 +14,16 @@ function dockerAvailable(): boolean {
 }
 
 /**
+ * How long the container may take to appear in `docker ps`.
+ *
+ * 🛑 `docker run` PULLS THE IMAGE INSIDE THIS BUDGET, and a pull is invisible
+ * to `docker ps`. Exceeding it is therefore not evidence the wiring broke.
+ * Do not raise it to quiet a red run — read the stderr the rejection now
+ * carries and fix the cause it names.
+ */
+const STARTUP_BOUND_MS = 20000;
+
+/**
  * 🛑 FORCE-REMOVE IN A `finally`, EVERY TIME. A first version of this test
  * left a live container behind on BOTH assertion failure and timeout —
  * reproduced on two separate machines (claude1, then claude2 independently),
@@ -48,6 +58,43 @@ test(
       '300',
     ]) as ChildProcessWithoutNullStreams;
 
+    // 🛑 THE EVIDENCE A BARE TIMEOUT THREW AWAY. A slow pull, a denied pull,
+    // a registry rate limit and a dead daemon all end with no container in
+    // `docker ps`, so the startup bound below cannot tell them apart on its
+    // own. `docker run` says which one it was on stderr and in its exit code,
+    // and nothing was reading either.
+    let runStderr = '';
+    rawChild.stderr.setEncoding('utf8');
+    rawChild.stderr.on('data', (chunk: string) => {
+      runStderr += chunk;
+    });
+
+    // A spawn failure arrives as an `error` event, never on stderr and never
+    // as an exit code. Without this listener it surfaced as a bare
+    // `spawn docker ENOENT` with no container name and no stage attached.
+    let spawnError: Error | undefined;
+    rawChild.on('error', (err: Error) => {
+      spawnError = err;
+    });
+
+    let runExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+    rawChild.on('exit', (code, signal) => {
+      runExit = { code, signal };
+    });
+
+    /** Everything `docker run` reported, so a rejection names its own cause. */
+    const runEvidence = (): string => {
+      const lines: string[] = [];
+      if (spawnError) lines.push(`spawn error: ${spawnError.message}`);
+      lines.push(
+        runExit
+          ? `docker run exited: code=${runExit.code} signal=${runExit.signal}`
+          : 'docker run was still running',
+      );
+      lines.push(runStderr.trim() ? `docker run stderr:\n${runStderr.trim()}` : 'stderr was empty');
+      return lines.join('\n');
+    };
+
     // 🛑 PID 1 INSIDE A CONTAINER IGNORES SIGTERM BY DEFAULT (the kernel's
     // own rule for an init process, not a `sleep` quirk) — `docker stop`
     // always waits out its FULL `-t` window here, it never exits early.
@@ -71,9 +118,13 @@ test(
           if (out) {
             clearInterval(poll);
             resolve(undefined);
-          } else if (Date.now() - started > 20000) {
+          } else if (Date.now() - started > STARTUP_BOUND_MS) {
             clearInterval(poll);
-            reject(new Error('container never started'));
+            reject(
+              new Error(
+                `container ${name} never started within ${STARTUP_BOUND_MS}ms\n${runEvidence()}`,
+              ),
+            );
           }
         }, 200);
       });
