@@ -60,3 +60,30 @@ test('it passes every field the caller did give straight through', () => {
   assert.equal(opts.reply, false);
   assert.equal(opts.log, log);
 });
+
+/**
+ * 🛑 AN EXPLICIT `vendor: undefined` MUST STILL GET THE DEFAULT. The parameter
+ * type allows it, and a spread-order implementation would overwrite the default
+ * with `undefined` and make the return type a lie.
+ */
+test('🛑 an explicit `vendor: undefined` still yields the real default', () => {
+  const opts = supervisorOptions({ handle: 'h1', vendor: undefined });
+
+  assert.equal(opts.vendor, claudeSpawn);
+});
+
+/**
+ * 🛑 THE WHOLE REASON lee RULED FOR A TEST-SIDE FACTORY. If someone later
+ * widened the parameter to `Partial<SupervisorOptions>` to quiet a new error,
+ * the factory would start laundering `handle` too and nothing would fail.
+ *
+ * The `@ts-expect-error` is what makes this non-vacuous, and it is CONSUMED
+ * today — `tsc -p tsconfig.test.json` reports no unused-directive on it. It
+ * only runs in CI once slice 5 of #166 switches the typecheck on.
+ */
+test('🛑 a missing required field stays a COMPILE error, not a silent default', () => {
+  // @ts-expect-error `handle` is required and the factory must not supply it
+  const opts = supervisorOptions({});
+
+  assert.equal(opts.vendor, claudeSpawn);
+});
