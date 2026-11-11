@@ -11,6 +11,7 @@ const { startSupervisor } = await import('../../src/supervise/index.js');
 const { migrate } = await import('../../src/storage/db.js');
 const dao = await import('../../src/storage/dao.js');
 import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
+import { supervisorOptions } from '../support/supervisor-options.js';
 
 /**
  * 🛑 EVERY LIVE HARNESS RUN LEFT A THROWAWAY AGENT ON THE BUS FOREVER.
@@ -64,14 +65,14 @@ function dbWithAgent(handle: string): DatabaseSync {
 }
 
 function start(handle: string, db: DatabaseSync, ephemeral?: boolean) {
-  return startSupervisor({
+  return startSupervisor(supervisorOptions({
     extraDirs: DIRS,
     handle,
     db,
     ephemeral,
     spawnChild: (_o: SpawnOptions) => fakeChild(),
     log: () => undefined,
-  });
+  }));
 }
 
 test('🚨 an ephemeral supervisor deregisters its agent on stop', async () => {

@@ -13,6 +13,7 @@ const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
 import type { AgentChild, SpawnOptions } from '../../src/supervise/drivers/claude.js';
 import type { RateLimitSnapshot } from '../../src/supervise/rate-limit.js';
 const { parseClaudeRateLimit: parseRateLimitEvent } = await import('../../src/supervise/drivers/claude-events.js');
+import { supervisorOptions } from '../support/supervisor-options.js';
 
 /**
  * 🛑 DIRECTORIES ARE DECLARED, NOT INFERRED. The chat spawns the agent now,
@@ -67,11 +68,11 @@ function fakeChild(): {
 }
 
 const start = (handle: string, f: ReturnType<typeof fakeChild>) =>
-  startSupervisor({ extraDirs: SUPERVISOR_TEST_DIRS,
+  startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS,
     handle,
     spawnChild: (_o: SpawnOptions) => f.child,
     log: () => undefined,
-  });
+  }));
 
 const env = (id: number, body?: string, to = 'sup') => ({ id, to, from: 'claude1', ts: 1, body });
 
@@ -224,12 +225,12 @@ test('the gate is WIRED, not just built: a full window HOLDS the message', async
   // it worked and no caller. Same failure lee caught earlier in this session
   // with the socket body, repeated hours later.
   const f = fakeChild();
-  const s = await startSupervisor({ extraDirs: SUPERVISOR_TEST_DIRS,
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS,
     handle: 'gated',
     spawnChild: () => f.child,
     log: () => undefined,
     utilizationCeiling: 0.9,
-  });
+  }));
 
   try {
     await deliverToSupervisor('gated', env(1, 'first'));
@@ -253,12 +254,12 @@ test('the gate is WIRED, not just built: a full window HOLDS the message', async
 
 test('a held message is RELEASED when the window reports room, never dropped', async () => {
   const f = fakeChild();
-  const s = await startSupervisor({ extraDirs: SUPERVISOR_TEST_DIRS,
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS,
     handle: 'release',
     spawnChild: () => f.child,
     log: () => undefined,
     utilizationCeiling: 0.9,
-  });
+  }));
 
   try {
     f.emitEvent(rl(0.95));
@@ -279,7 +280,7 @@ test('a held message is RELEASED when the window reports room, never dropped', a
 
 test('a non-allowed status holds even at zero utilization', async () => {
   const f = fakeChild();
-  const s = await startSupervisor({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'blocked', spawnChild: () => f.child, log: () => undefined });
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'blocked', spawnChild: () => f.child, log: () => undefined }));
 
   try {
     f.emitEvent(rl(0.01, 'blocked'));
@@ -292,7 +293,7 @@ test('a non-allowed status holds even at zero utilization', async () => {
 
 test('rateLimits() reports utilization and never a dollar figure', async () => {
   const f = fakeChild();
-  const s = await startSupervisor({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'report', spawnChild: () => f.child, log: () => undefined });
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'report', spawnChild: () => f.child, log: () => undefined }));
 
   try {
     assert.match(s.rateLimits(), /not yet observed/);
@@ -347,7 +348,7 @@ test('a driver that reports NO usage is UNMETERED and says so, not "unknown" for
   const lines: string[] = [];
   let endTurn: (() => void) | undefined;
 
-  const s = await startSupervisor({ extraDirs: SUPERVISOR_TEST_DIRS,
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS,
     handle: 'unmetered',
     log: (l) => lines.push(l),
     spawnChild: () => ({
@@ -367,7 +368,7 @@ test('a driver that reports NO usage is UNMETERED and says so, not "unknown" for
       onExit: () => undefined,
       kill: () => undefined,
     }),
-  });
+  }));
 
   try {
     // It still dispatches — unmetered is a CHOICE, not a refusal.
@@ -389,7 +390,7 @@ test('a driver that reports NO usage is UNMETERED and says so, not "unknown" for
 test('a METERED driver says "not yet observed" at startup, which is a different thing', async () => {
   const f = fakeChild();
   const lines: string[] = [];
-  const s = await startSupervisor({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'metered', spawnChild: () => f.child, log: (l) => lines.push(l) });
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'metered', spawnChild: () => f.child, log: (l) => lines.push(l) }));
 
   try {
     assert.ok(lines.some((l) => /not yet observed/.test(l)));
@@ -404,7 +405,7 @@ test('describe() HAS a production caller now — startup logs it', async () => {
   // had one commit earlier.
   const f = fakeChild();
   const lines: string[] = [];
-  const s = await startSupervisor({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'logged', spawnChild: () => f.child, log: (l) => lines.push(l) });
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'logged', spawnChild: () => f.child, log: (l) => lines.push(l) }));
 
   try {
     assert.ok(lines.some((l) => /^rate limits:/.test(l)), 'startup must report the gate state');

@@ -10,6 +10,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-stop-'));
 const { migrate } = await import('../../src/storage/db.js');
 const { startSupervisor } = await import('../../src/supervise/index.js');
 const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
+import { supervisorOptions } from '../support/supervisor-options.js';
 
 const DIRS = [process.cwd()];
 
@@ -74,13 +75,13 @@ function recordingChild(children: FakeChild[]) {
 async function supervisorFor(handle: string, children: FakeChild[]) {
   const db = new DatabaseSync(':memory:');
   migrate(db);
-  return startSupervisor({
+  return startSupervisor(supervisorOptions({
     handle,
     db,
     extraDirs: DIRS,
     spawnChild: recordingChild(children),
     log: () => undefined,
-  });
+  }));
 }
 
 async function settle(): Promise<void> {
@@ -278,14 +279,14 @@ test('a stop ack carries the supervisor own grace, not the CLI default', async (
   // A per-handle override is real and tested elsewhere. The CLI sizes its wait
   // from this number, so an ack that omitted it would make a healthy stop on a
   // long-grace handle report failure.
-  const sup = await startSupervisor({
+  const sup = await startSupervisor(supervisorOptions({
     handle,
     db,
     extraDirs: DIRS,
     spawnChild: recordingChild(children),
     shutdownGraceSeconds: 90,
     log: () => undefined,
-  });
+  }));
 
   try {
     const ack = await deliverToSupervisor(handle, {
@@ -358,7 +359,7 @@ test('a driver with no awaitTeardown still stops', async () => {
 
   // The seam is optional by contract. A driver that omits it must not hang the
   // stop waiting for a hook that was never there.
-  const sup = await startSupervisor({
+  const sup = await startSupervisor(supervisorOptions({
     handle,
     db,
     extraDirs: DIRS,
@@ -368,7 +369,7 @@ test('a driver with no awaitTeardown still stops', async () => {
       return { ...base, awaitTeardown: undefined };
     },
     log: () => undefined,
-  });
+  }));
 
   let stopped = 0;
   sup.onStopped(() => {

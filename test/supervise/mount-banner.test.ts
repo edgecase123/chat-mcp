@@ -13,6 +13,7 @@ const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
 const { setToken } = await import('../../src/supervise/auth.js');
 const { markConfirmed } = await import('../../src/supervise/container.js');
 const { registerMount } = await import('../../src/supervise/mounts.js');
+import { supervisorOptions } from '../support/supervisor-options.js';
 
 const DIRS = [process.cwd()];
 
@@ -47,7 +48,7 @@ test('a fresh container spawn prepends the mount banner to the FIRST prompt only
 
   const sent: string[] = [];
   const children: ReturnType<typeof fakeChild>[] = [];
-  const sup = await startSupervisor({
+  const sup = await startSupervisor(supervisorOptions({
     handle,
     db,
     extraDirs: DIRS,
@@ -59,7 +60,7 @@ test('a fresh container spawn prepends the mount banner to the FIRST prompt only
       children.push(c);
       return c;
     },
-  });
+  }));
 
   try {
     await deliverToSupervisor(handle, { id: 1, to: handle, from: 'lee', ts: Date.now(), body: 'hi' });
@@ -86,14 +87,14 @@ test('the docker-claude driver gets the mount banner even without an explicit co
   registerMount(handle, 'local-context', extra);
 
   const sent: string[] = [];
-  const sup = await startSupervisor({
+  const sup = await startSupervisor(supervisorOptions({
     handle,
     db,
     extraDirs: DIRS,
     driver: 'docker-claude',
     log: () => undefined,
     spawnChild: () => fakeChild(sent),
-  });
+  }));
 
   try {
     await deliverToSupervisor(handle, { id: 1, to: handle, from: 'lee', ts: Date.now(), body: 'hi' });
@@ -110,13 +111,13 @@ test('a non-container (bare host) spawn never gets a mount banner', async () => 
   const handle = `mb-bare-${process.pid}`;
 
   const sent: string[] = [];
-  const sup = await startSupervisor({
+  const sup = await startSupervisor(supervisorOptions({
     handle,
     db,
     extraDirs: DIRS,
     log: () => undefined,
     spawnChild: () => fakeChild(sent),
-  });
+  }));
 
   try {
     await deliverToSupervisor(handle, { id: 1, to: handle, from: 'lee', ts: Date.now(), body: 'hi' });
