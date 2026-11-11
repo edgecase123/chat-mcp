@@ -262,6 +262,33 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   const initialGrant = opts.grant ?? buildGrant(opts, dirs);
 
   /**
+   * 🛑 THE BIND IS THE ONLY ATOMIC CLAIM ON A HANDLE, SO IT RUNS BEFORE THE
+   * SPAWN. `refuseIfSupervisorLive` at the top of this function is advisory by
+   * construction — `existsSync` plus a liveness probe — so two supervisors can
+   * both read "not live" and both go on to spawn. The containerized spawn then
+   * runs `docker rm -f` on a name derived from the handle, which SIGKILLs the
+   * first supervisor's live agent.
+   *
+   * Both destructive steps the earlier guard was protecting are still
+   * downstream of this line: the per-handle MCP config is written inside the
+   * driver, and so is the `docker rm -f`. Every throwing precondition is
+   * upstream of it, so a refused start never reaches the bind.
+   */
+  let onWake: ((envelope: WakeEnvelope) => WakeAck) | null = null;
+
+  const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
+    // 🛑 FIRST STATEMENT, ABOVE THE STOP BRANCH, AND THE ORDER IS THE POINT.
+    // The real handler closes over eight bindings declared below the spawn.
+    // The first it touches is `doStop`, inside a `setImmediate`, where a
+    // temporal-dead-zone throw lands outside this call stack and takes the
+    // supervisor down instead of refusing a wake. lee ruled on 2026-11-11 that
+    // a wake arriving here is refused rather than queued.
+    if (onWake === null) return { ok: false, error: 'supervisor is still starting' };
+
+    return onWake(envelope);
+  });
+
+  /**
    * The live child. Mutable, because replacing it is a first-class operation.
    *
    * 🛑 IT USED TO BE `const` AND SPAWNED EXACTLY ONCE, which is how the
@@ -270,7 +297,17 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * changed the child's `--allowedTools`. The next attempt was denied again.
    * `grantedCommands` was written and never read.
    */
-  let child = spawnFn({ ...opts, cwd: childCwd, grant: initialGrant, supervisorHandle: opts.handle });
+  let child: AgentChild;
+
+  try {
+    child = spawnFn({ ...opts, cwd: childCwd, grant: initialGrant, supervisorHandle: opts.handle });
+  } catch (err) {
+    // The listener was holding the handle for a start that is not happening.
+    // Leaving it bound would make one failed start a permanent one.
+    await listener.close();
+
+    throw err;
+  }
   let currentGrant = initialGrant;
   let currentModel = opts.model;
 
@@ -782,7 +819,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     for (const cb of stoppedListeners) cb();
   };
 
-  const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
+  onWake = (envelope): WakeAck => {
     // 🛑 A STOP IS CHECKED BEFORE THE STOPPING GUARD, so `--now` can escalate a
     // graceful stop mid-grace. Refusing it would tell the operator their
     // escalation landed while they wait out the original period — #136's own
@@ -843,7 +880,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
     // The ack tells the SENDER what happened, which a file write never could.
     return { ok: true, queued: queue.offer(prompt) };
-  });
+  };
 
   log(`supervisor listening for [${opts.handle}] at ${listener.socketPath}`);
 
