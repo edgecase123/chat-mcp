@@ -273,6 +273,11 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * downstream of this line: the per-handle MCP config is written inside the
    * driver, and so is the `docker rm -f`. Every throwing precondition is
    * upstream of it, so a refused start never reaches the bind.
+   *
+   * ⚠️ THAT COVERS THE PRECONDITIONS ONLY. Below the bind, the window is
+   * guarded at the spawn and nowhere else, so a throw between the spawn and
+   * the handler install would strand both the listener and the child. Nothing
+   * there throws today.
    */
   let onWake: ((envelope: WakeEnvelope) => WakeAck) | null = null;
 
@@ -304,7 +309,15 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   } catch (err) {
     // The listener was holding the handle for a start that is not happening.
     // Leaving it bound would make one failed start a permanent one.
-    await listener.close();
+    //
+    // 🛑 THE CLOSE MUST NOT REPLACE THE SPAWN'S ERROR. A rejecting `close()`
+    // would skip the throw below and show the operator a teardown failure
+    // instead of the reason their agent never started.
+    try {
+      await listener.close();
+    } catch {
+      // Swallowed on purpose; `err` is the one worth reporting.
+    }
 
     throw err;
   }

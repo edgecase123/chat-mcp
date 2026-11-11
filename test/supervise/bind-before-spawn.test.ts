@@ -28,6 +28,40 @@ function fakeChild(): AgentChild {
 }
 
 /**
+ * Every `await` in `window` that is NOT inside a nested function body.
+ *
+ * 🛑 A BLOCK IS NOT A FUNCTION. An `await` inside an `if`, `try` or `for` at
+ * this level still yields, so it counts; one inside `const doStop = async
+ * (...) => {` does not, because that body runs later.
+ *
+ * ⚠️ IT DOES NOT READ INDENTATION, and the first version did. `/^ {2}\S/`
+ * tests the line the `await` sits on, so `helper(\n  await x(),\n)` and
+ * `if (c) {\n  await x();\n}` both hid a real yield from it — 1 of 3 detected
+ * on a synthetic window. Found by claude1 reviewing this PR.
+ */
+function topLevelYields(window: string[]): string[] {
+  const hits: string[] = [];
+  /** Per open brace: was it a function body? */
+  const scopes: boolean[] = [];
+
+  for (const raw of window) {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+
+    const code = raw.replace(/\/\/.*$/, '');
+
+    if (!scopes.includes(true) && /\bawait\b/.test(code)) hits.push(trimmed);
+
+    for (const ch of code) {
+      if (ch === '{') scopes.push(/=>|\bfunction\b/.test(code));
+      else if (ch === '}') scopes.pop();
+    }
+  }
+
+  return hits;
+}
+
+/**
  * 🛑 THE BIND IS THE ONLY STEP THAT CANNOT BE WON TWICE, so it has to happen
  * before the spawn rather than 500 lines after it. `refuseIfSupervisorLive` is
  * `existsSync` plus a liveness probe, so two supervisors can both read "not
@@ -87,20 +121,25 @@ test('🛑 nothing yields between the bind and the handler install', () => {
   assert.equal(binds.length, 1, 'the window is defined by ONE bind; find them all before trusting this');
 
   const bindAt = lines.findIndex((l) => l.includes('WakeListener.bind('));
+  // The wrapper closure is part of the bind statement, so the window starts
+  // after it closes.
+  const wrapperEnd = lines.findIndex((l, i) => i > bindAt && l === '  });');
   const installAt = lines.findIndex((l) => /^\s*onWake = /.test(l));
-  assert.ok(installAt > bindAt, 'the handler install must follow the bind');
+  assert.ok(wrapperEnd > bindAt, "the bind's wrapper must close");
+  assert.ok(installAt > wrapperEnd, 'the handler install must follow the bind');
 
-  // Statements at the function's own indent level. The wrapper's body is
-  // deeper, so an `await` inside a closure is correctly not a yield here.
-  const yields = lines
-    .slice(bindAt + 1, installAt)
-    .map((text, i) => ({ line: bindAt + 2 + i, text: text.trim() }))
-    .filter(({ text }, i) => /\bawait\b/.test(text) && /^ {2}\S/.test(lines[bindAt + 1 + i]));
-
+  // 🛑 EXACTLY ONE, AND IT IS WHY THE REFUSAL IS LIVE CODE RATHER THAN DEAD.
+  // The spawn-failure path awaits `listener.close()`, so the socket is open
+  // across a yield while no handler is installed. That path throws and never
+  // reaches the install, so it cannot make the SUCCESS path reachable — but a
+  // wake arriving during that teardown is answered by the refusal.
+  //
+  // Pinned rather than asserted empty: a NEW yield here fails this test, which
+  // is the alarm. Found by the detector itself, not by reading the diff.
   assert.deepEqual(
-    yields,
-    [],
-    `a top-level await here makes the pre-spawn gap reachable, so the refusal stops being dead code: ${JSON.stringify(yields)}`,
+    topLevelYields(lines.slice(wrapperEnd + 1, installAt)),
+    ['await listener.close();'],
+    'a NEW top-level await here puts the success path in the gap; add it only with the refusal in mind',
   );
 });
 
