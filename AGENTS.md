@@ -57,6 +57,10 @@ and any `test/supervise/*.test.ts` for the pattern.
 ## Review order: self, then sibling
 
 Run the matching `.claude/agents/*.md` reviewer(s) on your own diff **before**
-handing it to the other agent for peer review. Same rule as `leagues`'
-CLAUDE.md. A finding a sub-agent catches pre-review costs nothing; the same
+handing it to the other agent for peer review. "Matching" means the diff
+falls inside that agent's own `description:` frontmatter trigger — a diff
+that matches no reviewer is exempt; say so at handoff instead of staying
+silent. Adapted from `leagues`' CLAUDE.md, which anchors the same reviewers
+to before the gate — this repo has none, so the anchor is before sibling
+handoff. A finding a sub-agent catches pre-review costs nothing; the same
 finding caught by the sibling costs a round trip back to you.
