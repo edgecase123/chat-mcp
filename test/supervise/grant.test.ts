@@ -411,25 +411,31 @@ test('every path in the generated command is absolute, because the child has a d
 });
 
 /**
- * 🛑 THE REGISTRY IS THE WHOLE POINT OF THE SPLIT. Before it,
- * `startSupervisor` imported `spawnClaude` by name — everything else was
- * already behind the seam, so that one line was the entire remaining coupling.
+ * 🛑 ALIAS RESOLUTION IS THE WHOLE POINT OF THE SPLIT (#131 PR 3). Before it,
+ * `docker-claude` was a sibling driver entry, not a mode of `claude` — see
+ * `test/supervise/drivers/aliases.test.ts` for the full (vendor, mode) table.
+ * This test only checks that the two remaining call sites in
+ * `startSupervisor` still reach a real spawner and a real re-dispatch
+ * template, through the vendor the CALLER resolves and injects — `supervise/`
+ * itself never resolves a vendor NAME, to keep the layering rule intact.
  */
-test('the driver registry knows claude and refuses an unknown name', async () => {
-  const { driverFor, DRIVER_NAMES } = await import('../../src/supervise/drivers/index.js');
+test('the injected vendor is a real spawner with a real re-dispatch template', async () => {
+  const { resolveDriver } = await import('../../src/supervise/drivers/index.js');
+  const { spawnFor } = await import('../../src/adapters/index.js');
 
-  assert.ok(DRIVER_NAMES.includes('claude'), 'the only driver that exists is not registered');
+  const selection = resolveDriver({});
+  assert.deepEqual(selection, { vendor: 'claude', mode: 'host' });
 
-  const claude = driverFor('claude');
-  assert.equal(typeof claude.spawn, 'function');
+  const vendor = spawnFor(selection.vendor);
 
-  // 🛑 The re-dispatch wording travels WITH the driver. A seam test caught it
+  // 🛑 The re-dispatch wording travels WITH the vendor. A seam test caught it
   // living above the driver, where it named Claude Code's own flag.
-  assert.equal(typeof claude.redispatchPrompt, 'function');
+  assert.equal(typeof vendor.redispatchPrompt, 'function');
+  assert.equal(typeof vendor.argsFor, 'function');
 
   // 🛑 A silent fallback would mean asking for Cursor and getting Claude,
   // which looks exactly like Cursor working.
-  assert.throws(() => driverFor('cursor'), /unknown agent driver "cursor"/);
+  assert.throws(() => spawnFor('cursor'), /cursor/);
 });
 
 /**

@@ -1,5 +1,8 @@
 import type { AgentChild, SpawnOptions } from './child.js';
-import { driverFor } from './drivers/index.js';
+import type { VendorSpawn } from './vendor.js';
+import { resolveDriver } from './drivers/index.js';
+import { spawnOnHost } from './drivers/host.js';
+import { spawnContainerized } from './drivers/containerized.js';
 import { TurnQueue } from './turn-queue.js';
 import { WakeListener, type WakeAck, type WakeEnvelope } from './socket.js';
 import { RateLimitGate } from './rate-limit.js';
@@ -71,6 +74,13 @@ export interface SupervisorOptions extends SpawnOptions {
    * (`chat-mcp supervise <handle> --container` prompts for this once).
    */
   readonly container?: boolean;
+
+  /**
+   * Which vendor's CLI this handle spawns. Resolved by the CALLER (the CLI
+   * imports `adapters/index.js`'s `spawnFor`; `supervise/` never does — see
+   * the layering rule in `supervise/drivers/index.ts`).
+   */
+  readonly vendor: VendorSpawn;
 
   /** Injected so the supervisor is testable without touching the real bus. */
   readonly db?: Parameters<typeof dao.insertApproval>[0];
@@ -152,16 +162,14 @@ function buildGrant(opts: SupervisorOptions, dirs: readonly string[]): ChildGran
 
 export async function startSupervisor(opts: SupervisorOptions): Promise<Supervisor> {
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
-  const driver = driverFor(opts.driver ?? 'claude');
+  const selection = resolveDriver({ driver: opts.driver, container: opts.container });
 
-  // 🛑 GATED ON THE DRIVER TOO, NOT JUST `opts.container`. Selecting
-  // `docker-claude` already means "run this in a container" — a caller who
-  // passes the driver without the flag still gets a container child, so
-  // checking `opts.container` alone would let that path skip the token and
-  // confirm checks the container driver requires. Every other container-only
-  // decision in this function (mount banner included) must share this same
-  // predicate rather than re-deriving it.
-  const isContainerSpawn = Boolean(opts.container) || opts.driver === 'docker-claude';
+  // 🛑 THE MODE IS THE GATE, NOT A DRIVER-NAME STRING. `resolveDriver` already
+  // folds `--driver docker-claude` and `--container` into one `SandboxMode`,
+  // so every container-only decision in this function (mount banner included)
+  // reads `selection.mode` rather than re-deriving container-ness from a name
+  // a second vendor could spell differently.
+  const isContainerSpawn = selection.mode === 'docker';
 
   if (isContainerSpawn) {
     const { readToken } = await import('./auth.js');
@@ -211,7 +219,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   // Injected in tests; the real one is the shared bus database the web UI
   // already reads.
   const approvalsDb = opts.db ?? openDb();
-  const spawnFn = opts.spawnChild ?? driver.spawn;
+  const spawnFn =
+    opts.spawnChild ??
+    ((o: SpawnOptions) =>
+      selection.mode === 'docker'
+        ? spawnContainerized(opts.vendor, o)
+        : spawnOnHost(opts.vendor, o));
 
   /**
    * 🛑 `initialGrant`, NOT `grant`. It is the set at SPAWN and it never
@@ -578,7 +591,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
           answer.grantForms?.length ? [...answer.grantForms] : answer.grant ? [answer.grant] : [],
         ),
       },
-      driver.redispatchPrompt({
+      opts.vendor.redispatchPrompt({
         // 🛑 THE COMMAND, NOT THE PROSE. `requested` is a sentence; a child
         // asked to attempt it types something no grant covers.
         grantedCommand:

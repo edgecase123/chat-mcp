@@ -4,15 +4,46 @@ import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
 import { mountsFor, containerPathFor } from '../mounts.js';
 import { readToken } from '../auth.js';
-import { stateDir } from '../../util/paths.js';
+import {
+  ensureMcpConfigDir,
+  mcpConfigPathFor,
+  stateDir,
+  writePrivateFileSync,
+} from '../../util/paths.js';
 
 export const CONTAINER_PROJECT_DIR = '/work';
+const CONTAINER_CHAT_MCP_ENTRY = '/opt/chat-mcp/dist/index.js';
 
 export { containerPathFor };
 
 /** Where the bus's state dir lands inside the container, for this vendor. */
 export function containerStateDir(vendor: VendorSpawn): string {
   return `${vendor.containerHome}/.chat-mcp`;
+}
+
+/**
+ * Overwrite this handle's MCP config with CONTAINER-side command/args.
+ *
+ * Every vendor's container image bundles chat-mcp at the same fixed path, so
+ * this is generic plumbing, not vendor-specific — the vendor only decides
+ * WHETHER its CLI is pointed at this file for a given mode (`mcpConfigFor`).
+ *
+ * The file itself is written to the HOST path (`mcpConfigPathFor`), which
+ * lives under `stateDir()` and is therefore already bind-mounted into the
+ * container — so the content just needs to point at paths that exist
+ * INSIDE the container, not at this host process's own node binary.
+ */
+export function writeContainerMcpConfig(childHandle: string, vendor: VendorSpawn): string {
+  ensureMcpConfigDir();
+  const hostPath = mcpConfigPathFor(childHandle);
+  const config = {
+    mcpServers: {
+      chat: { command: 'node', args: [CONTAINER_CHAT_MCP_ENTRY, '--handle', childHandle] },
+    },
+  };
+  writePrivateFileSync(hostPath, `${JSON.stringify(config, null, 2)}\n`);
+
+  return `${containerStateDir(vendor)}/mcp/${childHandle}.json`;
 }
 
 export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): string[] {

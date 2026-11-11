@@ -1,13 +1,11 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import type { AgentChild, SpawnOptions } from '../child.js';
+import type { SpawnOptions } from '../child.js';
 import { type RateLimitSnapshot } from '../rate-limit.js';
 import { parseClaudeRateLimit } from './claude-events.js';
 import { denialFromClaude, rememberClaudeToolUse } from './claude-events.js';
 import type { Denial } from '../denial.js';
 import { ensureMcpConfigDir, mcpConfigPathFor, writePrivateFileSync } from '../../util/paths.js';
-import { wireAgentChild } from './wiring.js';
 
 /**
  * The Claude Code driver: the ONLY file that knows this CLI's flags and event
@@ -255,14 +253,4 @@ export function claudeEncodeInput(text: string): string {
     type: 'user',
     message: { role: 'user', content: [{ type: 'text', text }] },
   })}\n`;
-}
-
-export function spawnClaude(opts: SpawnOptions = {}): AgentChild {
-  const child: ChildProcessWithoutNullStreams = spawn(
-    opts.binary ?? 'claude',
-    claudeArgs(opts),
-    { cwd: opts.cwd, stdio: ['pipe', 'pipe', 'pipe'] },
-  ) as ChildProcessWithoutNullStreams;
-
-  return wireAgentChild(child, { routeEvent: routeClaudeEvent, encodeInput: claudeEncodeInput });
 }
