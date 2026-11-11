@@ -565,7 +565,7 @@ test('more requests than the in-flight cap are refused rather than all run', asy
  * refusal that names what a path resolved to is an arbitrary-path existence and
  * realpath oracle for the whole host.
  */
-test('a refusal never carries a host path', async (t) => {
+test('a refusal never carries a host path — the containment refusal', async (t) => {
   const dir = project(ECHO);
   symlinkSync('/bin/sh', join(dir, 'scripts', 'gate.sh'));
 
@@ -585,3 +585,32 @@ test('a refusal never carries a host path', async (t) => {
     `the refusal leaked a path: ${String(reply?.error)}`,
   );
 });
+
+/**
+ * ⚠️ THE SIBLING ABOVE REACHES `checkedScriptPath` AND STOPS THERE. This one
+ * reaches `runScript`, where `execFile` puts the absolute path into
+ * `err.message` — a different mechanism for the same property, so neither test
+ * covers the other.
+ */
+test('a refusal never carries a host path — a spawn failure', async (t) => {
+  const dir = project(ECHO, { 'gate.sh': '#!/bin/sh\necho hi\n' });
+
+  chmodSync(join(dir, 'scripts', 'gate.sh'), 0o644);
+
+  const broker = await brokerFor(`h23-${process.pid}`, dir);
+  t.after(() => broker.close());
+
+  const [reply] = await replies(
+    broker.port,
+    [{ id: 1, token: 'tok-secret', op: 'run-command', name: 'gate', params: { lane: 'php' } }],
+    1500,
+  );
+
+  assert.equal(reply?.ok, false);
+  assert.equal(
+    (reply?.error as string).includes('/'),
+    false,
+    `the refusal leaked a path: ${String(reply?.error)}`,
+  );
+});
+

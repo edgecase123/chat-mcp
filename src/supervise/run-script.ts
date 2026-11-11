@@ -77,7 +77,12 @@ export function runScript(
         return;
       }
 
-      reject(new Error(err.message));
+      // 🛑 NEVER forward `err.message`. `execFile` writes the absolute script
+      // path into it on a spawn failure, and `broker.ts` makes this string the
+      // reply an agent inside a container reads.
+      const code = typeof err.code === 'string' ? err.code : 'unknown';
+
+      reject(new Error(`the command could not be started (${code})`));
     });
   });
 }
