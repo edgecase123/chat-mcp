@@ -81,3 +81,30 @@ test('🛑 a traversing handle is refused rather than reaching another manifest'
   assert.throws(() => manifestPathFor('a/b'), /Invalid handle/);
   assert.throws(() => manifestPathFor(''), /Invalid handle/);
 });
+
+/**
+ * 🛑 A TRAILING SLASH ON `CHAT_MCP_HOME` PUT THE DIRECTORY INSIDE THE MOUNT.
+ *
+ * `${stateDir()}-manifests` with `CHAT_MCP_HOME=/x/` gives `/x/-manifests`,
+ * which is a CHILD. Found by claude1 reviewing the slice, and the guards above
+ * could not see it because they all run on one `mkdtempSync` path with no
+ * trailing slash.
+ *
+ * ⚠️ THE SLASH IS PARAMETERISED ON PURPOSE. A guard hardcoding one spelling of
+ * the state dir cannot fail on the other.
+ */
+for (const home of ['/tmp/chat-mcp-trailing', '/tmp/chat-mcp-trailing/']) {
+  test(`🛑 the manifest dir stays outside the mount for CHAT_MCP_HOME "${home}"`, (t) => {
+    const saved = process.env.CHAT_MCP_HOME;
+    t.after(() => {
+      process.env.CHAT_MCP_HOME = saved;
+    });
+    process.env.CHAT_MCP_HOME = home;
+
+    assert.equal(
+      manifestDir().startsWith(`${home.replace(/\/$/, '')}/`),
+      false,
+      `${manifestDir()} is inside the mounted state dir ${stateDir()}`,
+    );
+  });
+}

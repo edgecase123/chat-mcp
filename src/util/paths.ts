@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { mkdirSync, chmodSync, existsSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { assertHandle } from './naming.js';
@@ -134,7 +134,10 @@ export function ensureMcpConfigDir(): string {
  * refusal. A `homedir()` path would bypass it and write to the real tree.
  */
 export function manifestDir(): string {
-  return `${stateDir()}-manifests`;
+  // 🛑 `resolve` IS LOAD-BEARING. A `CHAT_MCP_HOME` ending in `/` made this
+  // `/x/-manifests` — a CHILD of the mount, which is the one thing it must
+  // never be. See the parameterised trailing-slash test.
+  return `${resolve(stateDir())}-manifests`;
 }
 
 /** 🛑 The handle becomes a filename, so it is validated. See the test. */
