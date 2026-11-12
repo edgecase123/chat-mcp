@@ -6,16 +6,39 @@ import { join } from 'node:path';
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-commands-'));
 
-const { parseManifest, readManifest, listCommands, resolveArgv } = await import(
-  '../../src/supervise/commands.js'
-);
+const {
+  parseManifest: parseRaw,
+  readManifest,
+  listCommands,
+  resolveArgv,
+} = await import('../../src/supervise/commands.js');
 type CommandParam = import('../../src/supervise/commands.js').CommandParam;
+
+/** Absolute, because `projectDir` must be. Never touched on disk here. */
+const PROJECT_DIR = '/srv/project';
+
+/**
+ * `parseManifest` with the required `projectDir` filled in.
+ *
+ * 🛑 THE CASES THAT ARE ABOUT `projectDir` ITSELF CALL `parseRaw` DIRECTLY, or
+ * this helper would supply the very field they assert is required. A manifest
+ * that names its own `projectDir` still wins — the spread comes second.
+ */
+function parseManifest(raw: unknown): ReturnType<typeof parseRaw> {
+  const withDir =
+    typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+      ? { projectDir: PROJECT_DIR, ...raw }
+      : raw;
+
+  return parseRaw(withDir);
+}
 
 /**
  * The sample the ticket names: one enumerated positional with a default,
  * matching a script whose body is `MODE="${1:-all}"`.
  */
 const GATE = {
+  projectDir: PROJECT_DIR,
   commands: [
     {
       name: 'run-gate',
@@ -381,4 +404,129 @@ test('🛑 a prototype key cannot stand in for a supplied value', () => {
   // `{}.toString` is truthy, so a plain `params[name]` lookup would have found
   // a function here rather than reporting the param as missing.
   assert.throws(() => resolveArgv(m, 'g', Object.create({ mode: 'x' })), /needs a value for "mode"/);
+});
+
+
+// ── #133 slice 3a: the manifest declares its own project directory ──────────
+
+test('the manifest carries its own projectDir, so nothing reads projects.json', () => {
+  const m = parseRaw({ projectDir: '/srv/project', commands: [] });
+
+  assert.equal(m.projectDir, '/srv/project');
+});
+
+test('🛑 projectDir is REQUIRED, because there is no safe place to fall back to', () => {
+  // Falling back to `dirsFor(handle)` reads `projects.json`, which sits inside
+  // the state directory every container mounts read-write.
+  assert.throws(() => parseRaw({ commands: [] }), /needs a non-empty "projectDir"/);
+  assert.throws(() => parseRaw({ projectDir: '', commands: [] }), /needs a non-empty "projectDir"/);
+  assert.throws(() => parseRaw({ projectDir: 7, commands: [] }), /needs a non-empty "projectDir"/);
+});
+
+test('🛑 projectDir must be ABSOLUTE, unlike every other path in the manifest', () => {
+  // A relative one would resolve against the supervisor's cwd, which is not
+  // the project and is not even stable.
+  assert.throws(
+    () => parseRaw({ projectDir: 'srv/project', commands: [] }),
+    /must be an absolute path/,
+  );
+  assert.throws(() => parseRaw({ projectDir: './project', commands: [] }), /must be an absolute path/);
+});
+
+test('projectDir with a control character in it refuses', () => {
+  assert.throws(
+    () => parseRaw({ projectDir: '/srv/pro\u0000ject', commands: [] }),
+    /control character/,
+  );
+});
+
+test('projectDir is normalised, so one directory has one spelling', () => {
+  assert.equal(parseRaw({ projectDir: '/srv//project/', commands: [] }).projectDir, '/srv/project/');
+  assert.equal(parseRaw({ projectDir: '/srv/./project', commands: [] }).projectDir, '/srv/project');
+});
+
+// ── #133 slice 3a: the declared read-only paths ─────────────────────────────
+
+test('readOnlyPaths parses and keeps the declared order', () => {
+  const m = parseManifest({ readOnlyPaths: ['scripts', 'bin'], commands: [] });
+
+  assert.deepEqual(m.readOnlyPaths, ['scripts', 'bin']);
+});
+
+test('🛑 chat-mcp SHIPS NO DEFAULT: absent readOnlyPaths stays absent', () => {
+  // Deriving `dirname(spec.script)` would encode one consumer's layout.
+  const m = parseManifest({ commands: [{ name: 'g', script: 'scripts/gate.sh' }] });
+
+  assert.equal(m.readOnlyPaths, undefined);
+  assert.ok(!('readOnlyPaths' in m), 'the key itself must be absent, not undefined');
+});
+
+test('an empty readOnlyPaths array is kept as empty, not dropped', () => {
+  // Declaring none and declaring nothing are the same to the spawn, but an
+  // operator who wrote `[]` deliberately should see it round-trip.
+  assert.deepEqual(parseManifest({ readOnlyPaths: [], commands: [] }).readOnlyPaths, []);
+});
+
+test('a readOnlyPaths that is not an array refuses', () => {
+  assert.throws(() => parseManifest({ readOnlyPaths: 'scripts', commands: [] }), /must be an array/);
+});
+
+test('🛑 a read-only path gets the SAME containment check as a script path', () => {
+  // One shared `containedRelative`, so there is no second copy to drift.
+  for (const [entry, pattern] of [
+    ['/etc', /must be a relative path/],
+    ['../../etc', /must stay inside the project/],
+    ['scripts/../../etc', /must stay inside the project/],
+    ['scripts/\u0000x', /control character/],
+    ['-rf', /starting with "-"/],
+    ['', /must be a non-empty string/],
+  ] as const) {
+    assert.throws(
+      () => parseManifest({ readOnlyPaths: [entry], commands: [] }),
+      pattern,
+      `accepted ${JSON.stringify(entry)}`,
+    );
+  }
+});
+
+test('🛑 EVERY spelling of the project root refuses, or the agent cannot edit its own repo', () => {
+  for (const entry of ['.', './', 'scripts/..', 'scripts/../.']) {
+    assert.throws(
+      () => parseManifest({ readOnlyPaths: [entry], commands: [] }),
+      /may not be the project root/,
+      `accepted ${JSON.stringify(entry)}`,
+    );
+  }
+});
+
+test('a read-only path is canonicalised, so the stored value is the one that gets mounted', () => {
+  const m = parseManifest({
+    readOnlyPaths: ['scripts/', 'bin///', './lib', 'a/./b'],
+    commands: [],
+  });
+
+  assert.deepEqual(m.readOnlyPaths, ['scripts', 'bin', 'lib', 'a/b']);
+});
+
+test('🛑 a DUPLICATE read-only path refuses, including two spellings of one directory', () => {
+  // Silently de-duplicating hides an author's mistake, and `scripts` plus
+  // `scripts/` is the shape that mistake takes.
+  assert.throws(
+    () => parseManifest({ readOnlyPaths: ['scripts', 'scripts/'], commands: [] }),
+    /duplicate read-only path "scripts"/,
+  );
+});
+
+test('readManifest reads projectDir and readOnlyPaths off disk too', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-manifest-fields-'));
+  const path = join(dir, 'commands.json');
+  writeFileSync(
+    path,
+    JSON.stringify({ projectDir: '/srv/project', readOnlyPaths: ['scripts'], commands: [] }),
+  );
+
+  const m = readManifest(path);
+
+  assert.equal(m.projectDir, '/srv/project');
+  assert.deepEqual(m.readOnlyPaths, ['scripts']);
 });

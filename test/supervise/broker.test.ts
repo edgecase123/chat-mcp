@@ -21,7 +21,14 @@ function project(
   const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-project-'));
 
   mkdirSync(join(dir, '.chat-mcp'), { recursive: true });
-  writeFileSync(join(dir, MANIFEST_RELATIVE), JSON.stringify(commands));
+  // `projectDir` is required as of slice 3a. A non-object is left alone, so the
+  // malformed-manifest cases still reach the parser as they were written.
+  const manifest =
+    typeof commands === 'object' && commands !== null && !Array.isArray(commands)
+      ? { projectDir: dir, ...commands }
+      : commands;
+
+  writeFileSync(join(dir, MANIFEST_RELATIVE), JSON.stringify(manifest));
   mkdirSync(join(dir, 'scripts'), { recursive: true });
 
   for (const [name, body] of Object.entries(scripts)) {

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, normalize } from 'node:path';
-import type { UncheckedScript } from './containment.js';
+import { containedRelative, type UncheckedScript } from './containment.js';
 
 /**
  * The commands a supervised agent may ask the host to run.
@@ -41,6 +41,31 @@ export interface CommandSpec {
 }
 
 export interface CommandManifest {
+  /**
+   * The directory every command in this manifest runs in. ABSOLUTE.
+   *
+   * 🛑 IT IS DECLARED HERE RATHER THAN READ FROM `projects.json`, because that
+   * file lives inside the state directory every container mounts READ-WRITE.
+   * An agent that can rewrite it points the broker at a tree of its own
+   * choosing, and no read-only mount helps — it protects the scripts of
+   * whichever tree gets picked, not which tree gets picked.
+   *
+   * `dirsFor` still decides where an AGENT works. That is a different question
+   * from what the BROKER runs, and the two shared one answer.
+   */
+  readonly projectDir: string;
+
+  /**
+   * Project-relative paths the spawn mounts READ-ONLY, nested inside the
+   * read-write project mount. Absent means none; chat-mcp ships no default.
+   *
+   * ⚠️ THE LIST MUST COVER WHAT THE SCRIPTS SOURCE, AND NOTHING HERE CAN
+   * CHECK THAT. A declared entry script that sources a sibling leaves the
+   * sibling writable unless the sibling is declared too. chat-mcp cannot know
+   * what bash sources, so the completeness of this list is the project's.
+   */
+  readonly readOnlyPaths?: readonly string[];
+
   readonly commands: readonly CommandSpec[];
 }
 
@@ -127,51 +152,75 @@ function assertUniqueNames(
 /**
  * Refuse a script path that is absolute or that LEXICALLY leaves the project.
  *
- * 🛑 LEXICAL ONLY, AND THAT IS NOT CONTAINMENT. A symlink inside the project
- * still escapes it, and this runs at parse time with no project directory and
- * no file on disk, so it cannot resolve one. `checkedScriptPath` is the real
- * check and `UncheckedScript` is what forces a caller through it.
- *
- * Normalise first: `scripts/../../bin/sh` does not begin with `..` but
- * resolves outside, so a prefix check on the raw string reads it as contained.
+ * 🛑 THE CHECK ITSELF LIVES IN `containment.ts`, shared with the read-only
+ * paths and with the spawn. It was duplicated here once, and the realpath
+ * lesson that `allowlist.ts` already carried did not cross the copy.
  */
 function containedScript(commandName: string, raw: unknown): string {
+  return containedRelative(raw, `command "${commandName}" script`);
+}
+
+/**
+ * The directory the broker runs this manifest's commands in.
+ *
+ * 🛑 ABSOLUTE, UNLIKE EVERY OTHER PATH HERE. A script path is relative because
+ * it is resolved against this one. This one has nothing to be resolved against
+ * at the only place it is read, so a relative value would resolve against the
+ * supervisor's own working directory.
+ */
+function parseProjectDir(raw: unknown): string {
   if (typeof raw !== 'string' || raw.length === 0) {
-    throw new Error(`command "${commandName}" needs a non-empty "script"`);
+    throw new Error('a command manifest needs a non-empty "projectDir"');
   }
 
-  if (isAbsolute(raw)) {
-    throw new Error(`command "${commandName}" script must be a relative path, got "${raw}"`);
-  }
-
-  // 🛑 BEFORE normalize(). A NUL makes `scripts/gate.sh\0../../bin/sh`
-  // normalise to the innocent-looking `scripts/bin/sh`, and a newline or a
-  // control character only surfaces as an ERR_INVALID_ARG_VALUE at spawn time.
+  // Before normalize(), for the same reason containedRelative checks first.
   if (/[\u0000-\u001f\u007f]/.test(raw)) {
-    throw new Error(`command "${commandName}" script has a control character in it`);
+    throw new Error(`"projectDir" has a control character in it: "${raw}"`);
   }
 
-  const normalised = normalize(raw);
-  // 🛑 SEGMENTS, NOT `startsWith('../')`. On win32 `normalize` returns
-  // `..\bin\sh`, which a forward-slash prefix check reads as contained. A
-  // filename that merely BEGINS with dots, like `..foo`, is legitimate.
-  const segments = normalised.split(/[\\/]/);
-
-  if (segments[0] === '..') {
-    throw new Error(
-      `command "${commandName}" script must stay inside the project, got "${raw}"`,
-    );
+  if (!isAbsolute(raw)) {
+    throw new Error(`"projectDir" must be an absolute path, got "${raw}"`);
   }
 
-  // `execFile`'s own first argument is the program, so a leading `-` is an
-  // option injection into the spawn itself.
-  if (segments.some((segment) => segment.startsWith('-'))) {
-    throw new Error(
-      `command "${commandName}" script must not have a path segment starting with "-", got "${raw}"`,
-    );
+  return normalize(raw);
+}
+
+/**
+ * The declared read-only paths, canonicalised the way the spawn will use them.
+ *
+ * ⚠️ LEXICAL ONLY. `checkedMountPath` does the realpath work at spawn time,
+ * where there is a directory on disk to resolve against. Refusing the obvious
+ * shapes here means a manifest typo reports itself as a manifest error rather
+ * than as a failed spawn.
+ */
+function parseReadOnlyPaths(raw: unknown): readonly string[] | undefined {
+  if (raw === undefined) return undefined;
+
+  if (!Array.isArray(raw)) {
+    throw new Error('a command manifest\'s "readOnlyPaths" must be an array');
   }
 
-  return normalised;
+  const noun = 'read-only path';
+  // Trailing slashes stripped so the stored value is the one the spawn mounts.
+  // Two spellings of one directory is how a duplicate goes unnoticed.
+  const paths = raw.map((entry) => containedRelative(entry, noun).replace(/\/+$/, ''));
+
+  for (const path of paths) {
+    // `.`, `./` and `scripts/..` all land here, and mounting the root
+    // read-only stops the agent editing the repo it is working in.
+    if (path === '' || path === '.') {
+      throw new Error(`a ${noun} may not be the project root`);
+    }
+  }
+
+  const seen = new Set<string>();
+
+  for (const path of paths) {
+    if (seen.has(path)) throw new Error(`duplicate ${noun} "${path}" in the manifest`);
+    seen.add(path);
+  }
+
+  return paths;
 }
 
 function parseParam(commandName: string, raw: unknown): CommandParam {
@@ -246,10 +295,12 @@ export function parseManifest(raw: unknown): CommandManifest {
     throw new Error('a command manifest needs a "commands" array');
   }
 
+  const projectDir = parseProjectDir(raw.projectDir);
+  const readOnlyPaths = parseReadOnlyPaths(raw.readOnlyPaths);
   const commands = raw.commands.map(parseCommand);
   assertUniqueNames(commands, (dup) => `duplicate command "${dup}" in the manifest`);
 
-  return { commands };
+  return { projectDir, ...(readOnlyPaths ? { readOnlyPaths } : {}), commands };
 }
 
 /**
