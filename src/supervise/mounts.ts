@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { ensureStateDir, stateDir, writePrivateFileSync } from '../util/paths.js';
+import { assertProjectDirOutsideState } from './containment.js';
 
 /**
  * Extra read-write mounts a containerized agent gets, beyond its project
@@ -51,6 +52,11 @@ export function registerMount(
       `cannot mount "${dir}" under key "${key}": no such directory (resolved to ${abs})`,
     );
   }
+
+  // 🛑 AN EXTRA MOUNT HAS NO `:ro`, so this is the same hole as a project tree
+  // above the state directory, through a different door. Found by claude2
+  // reviewing a fix that guarded the project surface and stopped there.
+  assertProjectDirOutsideState(abs);
 
   const config = readMounts();
   const existing = config.agents[handle] ?? {};

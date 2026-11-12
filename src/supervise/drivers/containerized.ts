@@ -4,7 +4,7 @@ import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
 import { mountsFor, containerPathFor } from '../mounts.js';
 import { readToken } from '../auth.js';
-import { checkedMountPath } from '../containment.js';
+import { assertProjectDirOutsideState, checkedMountPath } from '../containment.js';
 import {
   ensureMcpConfigDir,
   mcpConfigPathFor,
@@ -88,6 +88,12 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
     throw new Error('a containerized spawn needs a resolved cwd');
   }
 
+  // 🛑 CHECKED HERE AS WELL AS AT REGISTRATION. `projects.json` is a file on
+  // disk, so a registration made before this guard existed is still live, and
+  // `opts.cwd` can reach this from `resolveCwd` without passing
+  // `registerProject` at all. The argv below is what mounts it.
+  assertProjectDirOutsideState(projectDir);
+
   const args = [
     'run',
     '-i',
@@ -113,7 +119,11 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
     args.push('-v', `${host}:${CONTAINER_PROJECT_DIR}/${inner}:ro`);
   }
 
+  // 🛑 AN EXTRA MOUNT CARRIES NO `:ro`, so it is the project-tree hole through a
+  // different door. Re-checked here because `mounts.json` outlives the guard in
+  // `registerMount`.
   for (const [key, hostDir] of Object.entries(mountsFor(supervisorHandle))) {
+    assertProjectDirOutsideState(hostDir);
     args.push('-v', `${hostDir}:${containerPathFor(key)}`);
   }
 

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { join } from 'node:path';
 import { ensureStateDir, stateDir, writePrivateFileSync } from '../util/paths.js';
+import { assertProjectDirOutsideState } from './containment.js';
 
 /**
  * Which project directory each agent works in.
@@ -71,6 +72,10 @@ export function registerProject(handle: string, dir: string): string[] {
   if (!existsSync(abs)) {
     throw new Error(`cannot register "${dir}": no such directory (resolved to ${abs})`);
   }
+
+  // Refuse at REGISTRATION as well as at spawn, so the operator finds out when
+  // they type it rather than when an agent fails to start.
+  assertProjectDirOutsideState(abs);
 
   const config = readProjects();
   const existing = config.agents[handle] ?? [];

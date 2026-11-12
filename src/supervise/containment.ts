@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs';
-import { isAbsolute, join, normalize, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, resolve } from 'node:path';
+import { manifestDir, stateDir } from '../util/paths.js';
 
 /**
  * Is a path inside a directory, after symlinks?
@@ -49,6 +50,87 @@ export function realContains(dir: string, target: string): boolean {
   }
 
   return real === base || real.startsWith(`${base}/`);
+}
+
+/**
+ * The real path a path WILL have once it exists, resolved through its deepest
+ * existing ancestor.
+ *
+ * 🛑 `realContains` SKIPS realpath ON A MISSING TARGET, so a path that does not
+ * exist yet under a SYMLINKED ancestor reads as outside the directory that will
+ * hold it. Measured: `manifestDir()` is created on demand by
+ * `ensureManifestDir`, and on macOS `/var` is a symlink to `/private/var`:
+ *
+ *   base   realpath(/var/folders/../parent)  -> /private/var/folders/../parent
+ *   target /var/folders/../parent/x-manifests   (absent, so NOT realpathed)
+ *   startsWith -> false, and the mount would have carried it in
+ */
+function realPathWhenCreated(target: string): string {
+  let current = resolve(target);
+  const tail: string[] = [];
+
+  for (;;) {
+    try {
+      return join(realpathSync(current), ...tail);
+    } catch {
+      const parent = dirname(current);
+
+      // `dirname('/') === '/'`, so this is the root and nothing resolved.
+      if (parent === current) return resolve(target);
+
+      tail.unshift(basename(current));
+      current = parent;
+    }
+  }
+}
+
+/**
+ * `realContains`, for two paths that may not exist YET.
+ *
+ * 🛑 NOT `realContains`. It returns false on a base that is not on disk —
+ * deliberate there, so an absent allowed directory contains nothing — but here
+ * the base is a project tree Docker CREATES as the bind source, and
+ * `ensureStateDir` then fills the sandbox in underneath it.
+ */
+function containsWhenCreated(dir: string, target: string): boolean {
+  const base = realPathWhenCreated(dir);
+  const real = realPathWhenCreated(target);
+
+  return real === base || real.startsWith(`${base}/`);
+}
+
+/**
+ * Refuse a project directory that CONTAINS the sandbox's own state, or throw.
+ *
+ * 🛑 THE MANIFEST CHECK IS THE HALF THAT CLOSES A HOLE. `manifestDir()` is
+ * bind-mounted nowhere, so a project tree above it is the only way in, and the
+ * broker executes from it. `stateDir()` is mounted read-write regardless (#188),
+ * so refusing an ancestor of THAT is defence in depth, not the barrier.
+ *
+ * 🛑 BOTH CHECKS ARE STILL NEEDED, AND A SYMLINK IS WHAT SEPARATES THEM.
+ * `manifestDir()` is `${stateDir()}-manifests`, a sibling, so an ancestor of
+ * one is normally an ancestor of the other — until `stateDir()` resolves away:
+ *
+ *   CHAT_MCP_HOME=/a/b/state -> /x/y/real   /a/b does NOT contain it
+ *   manifestDir()             = /a/b/state-manifests    /a/b DOES
+ *
+ * ⚠️ REFUSING, NOT EXCLUDING. A nested `:ro` mount over the sensitive paths
+ * still DISCLOSES `chat.db` — every room and DM — which is #162.
+ */
+export function assertProjectDirOutsideState(projectDir: string): void {
+  if (containsWhenCreated(projectDir, stateDir())) {
+    throw new Error(
+      `refusing "${projectDir}": it contains the state directory "${stateDir()}", ` +
+        'so mounting it would put the sandbox inside the container read-write',
+    );
+  }
+
+  if (containsWhenCreated(projectDir, manifestDir())) {
+    throw new Error(
+      `refusing "${projectDir}": it contains the manifest directory "${manifestDir()}", ` +
+        'so the agent could edit the manifest the broker executes from',
+    );
+  }
 }
 
 /**
