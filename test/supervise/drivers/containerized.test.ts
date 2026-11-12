@@ -1,6 +1,6 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, realpathSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawn as realSpawn } from 'node:child_process';
@@ -9,7 +9,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-driver-'
 
 const { setToken } = await import('../../../src/supervise/auth.js');
 const { stateDir } = await import('../../../src/util/paths.js');
-const { registerMount } = await import('../../../src/supervise/mounts.js');
+const { registerMount, mountsPath } = await import('../../../src/supervise/mounts.js');
 const { claudeSpawn } = await import('../../../src/adapters/claude-spawn.js');
 const {
   dockerArgsForVendor,
@@ -449,6 +449,27 @@ test('🛑 a project dir ABOVE the state directory refuses the spawn argv', () =
 
   assert.throws(
     () => dockerArgsFor({ cwd: dirname(realpathSync(stateDir())), supervisorHandle: 'claude1' }),
+    /state directory/,
+  );
+});
+
+/**
+ * 🛑 #183, AND THE EXTRA MOUNTS ARE THE SURFACE A NAME-SCOPED AUDIT MISSES.
+ * `mounts.json` is a file, so a key registered before the guard existed is
+ * still live, and this loop is the last thing that can refuse it.
+ */
+test('🛑 an extra mount ABOVE the state directory refuses the spawn argv', () => {
+  setToken('sk-ant-oat-x');
+
+  // 🛑 WRITTEN STRAIGHT TO THE FILE, because `registerMount` now refuses it.
+  // That IS the case under test: a key registered before the guard existed.
+  writeFileSync(
+    mountsPath(),
+    JSON.stringify({ agents: { claude8: { evil: dirname(realpathSync(stateDir())) } } }),
+  );
+
+  assert.throws(
+    () => dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude8' }),
     /state directory/,
   );
 });

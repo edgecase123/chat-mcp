@@ -2,13 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-mounts-'));
 
 const { registerMount, readMounts, mountsFor, mountsPath, containerPathFor } = await import(
   '../../src/supervise/mounts.js'
 );
+const { stateDir } = await import('../../src/util/paths.js');
 
 const HOST_DIR = mkdtempSync(join(tmpdir(), 'chat-mcp-mount-src-'));
 
@@ -62,4 +63,21 @@ test('containerPathFor returns /mnt/{key}', () => {
 
 test('containerPathFor works for different keys', () => {
   assert.equal(containerPathFor('memory'), '/mnt/memory');
+});
+
+/**
+ * 🛑 #183, SECOND SURFACE. Found by claude2 reviewing the first fix, which
+ * guarded `registerProject` and the project mount and stopped there.
+ *
+ * An extra mount is bind-mounted with NO `:ro`, so a mount key pointed above
+ * the state directory carries `chat.db` and the manifest in read-write exactly
+ * as the project tree did.
+ */
+test('🛑 a mount ABOVE the state directory is refused', () => {
+  assert.throws(() => registerMount('claude1', 'evil', dirname(stateDir())), /state directory/);
+});
+
+/** A control: an ordinary directory still registers. */
+test('and an ordinary directory still registers', () => {
+  assert.deepEqual(registerMount('claude7', 'ok', HOST_DIR), { ok: resolve(HOST_DIR) });
 });

@@ -119,7 +119,11 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
     args.push('-v', `${host}:${CONTAINER_PROJECT_DIR}/${inner}:ro`);
   }
 
+  // 🛑 AN EXTRA MOUNT CARRIES NO `:ro`, so it is the project-tree hole through a
+  // different door. Re-checked here because `mounts.json` outlives the guard in
+  // `registerMount`.
   for (const [key, hostDir] of Object.entries(mountsFor(supervisorHandle))) {
+    assertProjectDirOutsideState(hostDir);
     args.push('-v', `${hostDir}:${containerPathFor(key)}`);
   }
 
