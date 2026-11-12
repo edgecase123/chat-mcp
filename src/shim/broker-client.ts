@@ -1,4 +1,4 @@
-import { connect, type Socket } from 'node:net';
+import { connect } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
 import { isRecord } from '../supervise/commands.js';
 
@@ -30,6 +30,7 @@ export interface BrokerAddress {
 export const NO_BROKER = 'this agent is not running under a command broker';
 export const REFUSED = 'the command broker is not accepting connections';
 export const CLOSED_SILENTLY = 'the command broker closed the connection without answering';
+export const TIMED_OUT = 'the command broker did not answer in time';
 
 /**
  * Where the broker is, or null when this session has no broker at all.
@@ -86,12 +87,17 @@ export function askBroker(
     const finish = (err: Error | null, payload?: Record<string, unknown>) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       socket.destroy();
       if (err) reject(err);
       else resolve(payload ?? {});
     };
 
-    socket.setTimeout(deadline, () => finish(new Error(CLOSED_SILENTLY)));
+    // 🛑 A REAL TIMER, NOT `socket.setTimeout`. That one is an IDLE timeout:
+    // any byte from the peer resets it, so a peer that dribbles one unmatched
+    // line per second holds the call open forever. Reproduced by claude1 —
+    // `deadlineMs` 400 was still hanging at 3000ms.
+    const timer = setTimeout(() => finish(new Error(TIMED_OUT)), deadline);
 
     // Only a refused CONNECT means nothing is listening. A reset mid-stream is
     // a connection that existed and then stopped answering, which is the same

@@ -10,7 +10,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-client-'));
 const { CommandBroker } = await import('../../src/supervise/broker.js');
 const { registerProject } = await import('../../src/supervise/projects.js');
 const { ensureManifestDir, manifestPathFor } = await import('../../src/util/paths.js');
-const { askBroker, brokerAddress, CLOSED_SILENTLY, REFUSED } = await import(
+const { askBroker, brokerAddress, CLOSED_SILENTLY, REFUSED, TIMED_OUT } = await import(
   '../../src/shim/broker-client.js'
 );
 
@@ -172,4 +172,35 @@ test('nothing listening on the port reads as a refused connection', async (t) =>
     askBroker('list-commands', {}, { address: { port, token: TOKEN }, deadlineMs: 5_000 }),
     (err: Error) => err.message === REFUSED,
   );
+});
+
+test('🛑 A PEER THAT DRIBBLES UNMATCHED LINES STILL HITS THE DEADLINE', async (t) => {
+  // The bug claude1 found: `socket.setTimeout` is an IDLE timeout, so any byte
+  // from the peer resets it and the call never ends. This server answers, but
+  // never with our id, forever.
+  const { createServer } = await import('node:net');
+  const noise = createServer((socket) => {
+    const tick = setInterval(() => socket.write(`${JSON.stringify({ id: -1, ok: true })}\n`), 50);
+    socket.on('close', () => clearInterval(tick));
+    socket.on('error', () => clearInterval(tick));
+  });
+
+  await new Promise<void>((resolve) => noise.listen(0, '127.0.0.1', () => resolve()));
+  const { port } = noise.address() as { port: number };
+  t.after(() => new Promise<void>((resolve) => noise.close(() => resolve())));
+
+  const started = Date.now();
+
+  await assert.rejects(
+    askBroker('list-commands', {}, {
+      address: { port, token: TOKEN },
+      deadlineMs: 400,
+    }),
+    // Named, because "it rejected" would also pass on a client that crashed.
+    (err: Error) => err.message === TIMED_OUT,
+  );
+
+  const elapsed = Date.now() - started;
+
+  assert.ok(elapsed < 3_000, `took ${elapsed}ms, so the deadline was being reset by the writes`);
 });
