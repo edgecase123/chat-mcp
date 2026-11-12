@@ -1,8 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { statSync } from 'node:fs';
 import * as dao from '../../storage/dao.js';
 import type { BusHealth } from '../../storage/dao.js';
-import { identityFor, SCHEMA_VERSION } from '../../storage/db.js';
+import { identityFor, identityOf, SCHEMA_VERSION } from '../../storage/db.js';
 import type { FileIdentity } from '../../storage/db.js';
 import { dbPath } from '../../util/paths.js';
 import type { ShimContext } from '../index.js';
@@ -82,28 +81,19 @@ export function identityReading(
   };
 }
 
-/**
- * The identity of whatever is at the database path right now.
- *
- * ⚠️ ONLY ENOENT IS A DIAGNOSIS. A missing file is the strongest form of the
- * fault and `identityReading` says so, which is a louder answer than a thrown
- * stat. Anything else — EACCES on the state directory, ELOOP on a symlink
- * cycle — is a fault of its own, and reporting it as "the file no longer
- * exists" would be a confident false statement. `health` fails loudly instead.
- *
- * ⚠️ Rejected: comparing the identity of the connection's own open handle.
- * `node:sqlite` exposes no fd, so the TOCTOU window between the open and the
- * stat in `openDb` is not closeable here.
- */
-export function currentIdentity(): FileIdentity | null {
-  try {
-    const now = statSync(dbPath());
-    return { dev: now.dev, ino: now.ino };
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw err;
-  }
-}
+/** Everything `health` reports. `warnings` is absent, never empty, when all is well. */
+export type HealthResult = BusHealth & {
+  handle: string;
+  db_path: string;
+  schema_version_expected: number;
+  schema_matches: boolean;
+  db_identity_at_open: FileIdentity | null;
+  db_identity_now: FileIdentity | null;
+  db_identity_matches: boolean;
+  reading: string;
+  identity_reading: string;
+  warnings?: string[];
+};
 
 /** Everything `health` reports, assembled from marks the caller has already taken. */
 export function healthResult(args: {
@@ -112,7 +102,7 @@ export function healthResult(args: {
   health: BusHealth;
   atOpen: FileIdentity | undefined;
   now: FileIdentity | null;
-}): Record<string, unknown> {
+}): HealthResult {
   const { handle, db_path, health, atOpen, now } = args;
   const schemaMatches = health.schema_version === SCHEMA_VERSION;
   const identity = identityReading(atOpen, now);
@@ -155,12 +145,17 @@ export function installHealth(server: McpServer, ctx: ShimContext): void {
     // 🛑 NO try/catch. An unreadable database must surface as a tool error,
     // not as a reading with nulls in it. lee, on #138: fail loudly.
     async () => {
+      // 🛑 RESOLVED ONCE. Reporting `db_path` from one resolution while
+      // statting another would let the two disagree, which is the exact class
+      // of fault this tool exists to catch.
+      const path = dbPath();
+
       const result = healthResult({
         handle: ctx.handle,
-        db_path: dbPath(),
+        db_path: path,
         health: dao.busHealth(ctx.db),
         atOpen: identityFor(ctx.db),
-        now: currentIdentity(),
+        now: identityOf(path),
       });
 
       return {

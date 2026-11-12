@@ -350,6 +350,29 @@ export function identityFor(db: Db): FileIdentity | undefined {
   return identities.get(db);
 }
 
+/**
+ * The identity of whatever is at `path` now, or null when nothing is.
+ *
+ * 🛑 ONLY "NOTHING IS THERE" IS A DIAGNOSIS. ENOENT is the file being gone and
+ * ENOTDIR is a parent component that stopped being a directory, which is the
+ * same fault reached one level up — both mean there is no database file at this
+ * path, as firmly as each other.
+ *
+ * ⚠️ EACCES AND ELOOP ARE RETHROWN ON PURPOSE. A permission change and a
+ * symlink cycle are faults of their own, and reporting either as "the file no
+ * longer exists" would be a confident false statement about a chmod mistake.
+ */
+export function identityOf(path: string): FileIdentity | null {
+  try {
+    const found = statSync(path);
+    return { dev: found.dev, ino: found.ino };
+  } catch (err) {
+    const { code } = err as NodeJS.ErrnoException;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+    throw err;
+  }
+}
+
 /** Undefined only for a database that did not come from `openDb` — see `insertMessage`. */
 export function verifierFor(db: Db): Db | undefined {
   return verifiers.get(db);
@@ -363,8 +386,10 @@ export function openDb(): Db {
   // this path. Statting later would record the REPLACEMENT file's identity on a
   // swap mid-startup, so `health` would compare a mark to itself and report OK
   // for a connection writing to the file that was moved away.
-  const opened = statSync(dbPath());
-  identities.set(db, { dev: opened.dev, ino: opened.ino });
+  const opened = identityOf(dbPath());
+  // Unset rather than null on the impossible branch, so `health` reports the
+  // mark as UNREADABLE instead of as a divergence it cannot substantiate.
+  if (opened) identities.set(db, opened);
 
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA synchronous = NORMAL');
