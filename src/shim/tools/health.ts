@@ -1,7 +1,9 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { statSync } from 'node:fs';
 import * as dao from '../../storage/dao.js';
 import type { BusHealth } from '../../storage/dao.js';
-import { SCHEMA_VERSION } from '../../storage/db.js';
+import { identityFor, SCHEMA_VERSION } from '../../storage/db.js';
+import type { FileIdentity } from '../../storage/db.js';
 import { dbPath } from '../../util/paths.js';
 import type { ShimContext } from '../index.js';
 
@@ -36,34 +38,130 @@ export function healthReading(health: BusHealth): string {
   return `MAX(id) ${max_id} is ABOVE the high-water mark ${autoincrement_seq}, so sqlite_sequence was reset or lost rather than rows going missing.`;
 }
 
+/**
+ * Whether the file this connection holds is still the file at this path.
+ *
+ * 🛑 THE TWO ID MARKS CANNOT SEE #138, BECAUSE THE WRITE SUCCEEDED. Nothing
+ * was locked out and the ids were sequential, which is what a commit to a
+ * store nobody else was reading looks like. Device plus inode is the mark that
+ * can disagree with the path, so each branch here is a claim and is tested.
+ */
+export function identityReading(
+  atOpen: FileIdentity | undefined | null,
+  now: FileIdentity | undefined | null,
+): { matches: boolean; reading: string } {
+  if (!atOpen) {
+    return {
+      matches: false,
+      // Not a match and not a fault. Claiming either would be an instrument
+      // that could not say no.
+      reading:
+        'This connection did not record a file identity at open, so whether the file moved underneath it is UNREADABLE. Only a database opened through openDb carries the mark.',
+    };
+  }
+
+  const at = `device ${atOpen.dev} inode ${atOpen.ino}`;
+
+  if (!now) {
+    return {
+      matches: false,
+      reading: `The database file at this path NO LONGER EXISTS. This connection is still writing to the deleted file it opened (${at}), where no other process can read it.`,
+    };
+  }
+
+  if (atOpen.dev === now.dev && atOpen.ino === now.ino) {
+    return {
+      matches: true,
+      reading: `The file this connection holds IS the file at this path (${at}).`,
+    };
+  }
+
+  return {
+    matches: false,
+    reading: `This connection opened ${at}, but this path NOW resolves to device ${now.dev} inode ${now.ino}. The file was replaced underneath the connection, so every write since lands in a file no other process can read — while the path, and every tool that reports one, stays identical. This is #138.`,
+  };
+}
+
+/**
+ * The identity of whatever is at the database path right now.
+ *
+ * ⚠️ ONLY ENOENT IS A DIAGNOSIS. A missing file is the strongest form of the
+ * fault and `identityReading` says so, which is a louder answer than a thrown
+ * stat. Anything else — EACCES on the state directory, ELOOP on a symlink
+ * cycle — is a fault of its own, and reporting it as "the file no longer
+ * exists" would be a confident false statement. `health` fails loudly instead.
+ *
+ * ⚠️ Rejected: comparing the identity of the connection's own open handle.
+ * `node:sqlite` exposes no fd, so the TOCTOU window between the open and the
+ * stat in `openDb` is not closeable here.
+ */
+export function currentIdentity(): FileIdentity | null {
+  try {
+    const now = statSync(dbPath());
+    return { dev: now.dev, ino: now.ino };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+/** Everything `health` reports, assembled from marks the caller has already taken. */
+export function healthResult(args: {
+  handle: string;
+  db_path: string;
+  health: BusHealth;
+  atOpen: FileIdentity | undefined;
+  now: FileIdentity | null;
+}): Record<string, unknown> {
+  const { handle, db_path, health, atOpen, now } = args;
+  const schemaMatches = health.schema_version === SCHEMA_VERSION;
+  const identity = identityReading(atOpen, now);
+
+  // 🛑 ONE ARRAY, NOT A KEY PER SOURCE. A caller that reads `warning` and finds
+  // a schema mismatch there stops looking, so a second concurrent fault would
+  // be invisible. Both faults are reportable at once and both arrive here.
+  const warnings = [
+    schemaMatches
+      ? null
+      : `This database is at schema ${health.schema_version} but this build expects ${SCHEMA_VERSION}. Another version migrated it.`,
+    identity.matches ? null : identity.reading,
+  ].filter((w): w is string => w !== null);
+
+  return {
+    handle,
+    db_path,
+    ...health,
+    schema_version_expected: SCHEMA_VERSION,
+    schema_matches: schemaMatches,
+    db_identity_at_open: atOpen ?? null,
+    db_identity_now: now,
+    db_identity_matches: identity.matches,
+    reading: healthReading(health),
+    identity_reading: identity.reading,
+    // Omitted rather than empty, so the key's PRESENCE is the signal.
+    ...(warnings.length > 0 ? { warnings } : {}),
+  };
+}
+
 export function installHealth(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
     'health',
     {
-      title: 'Is the bus actually writing?',
+      title: 'Is the bus actually writing, and to the right file?',
       description:
-        "Report the database this shim resolved and the two id marks that say whether a reported message id is real: MAX(id) and the AUTOINCREMENT high-water mark. Call it when a send claimed an id you cannot find, when a peer's reply never arrives, or before concluding a sibling never answered — a send that reports success while nothing persists is a known failure (#138), and this is the check that catches it without shelling out to sqlite3.",
+        "Report the database this shim resolved, the two id marks that say whether a reported message id is real (MAX(id) and the AUTOINCREMENT high-water mark), and whether the file this connection holds is still the file at that path. Call it when a send claimed an id you cannot find, when a peer's reply never arrives, or before concluding a sibling never answered. A send that reports success while the peer sees nothing is a known failure (#138) and has two shapes: the write never landed, which the id marks catch, or it landed in a replaced file at the same path, which only the device+inode comparison catches — lsof and PRAGMA database_list both report a path and cannot see it.",
       inputSchema: {},
     },
     // 🛑 NO try/catch. An unreadable database must surface as a tool error,
     // not as a reading with nulls in it. lee, on #138: fail loudly.
     async () => {
-      const health = dao.busHealth(ctx.db);
-      const schemaMatches = health.schema_version === SCHEMA_VERSION;
-
-      const result = {
+      const result = healthResult({
         handle: ctx.handle,
         db_path: dbPath(),
-        ...health,
-        schema_version_expected: SCHEMA_VERSION,
-        schema_matches: schemaMatches,
-        reading: healthReading(health),
-        ...(schemaMatches
-          ? {}
-          : {
-              warning: `This database is at schema ${health.schema_version} but this build expects ${SCHEMA_VERSION}. Another version migrated it.`,
-            }),
-      };
+        health: dao.busHealth(ctx.db),
+        atOpen: identityFor(ctx.db),
+        now: currentIdentity(),
+      });
 
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
