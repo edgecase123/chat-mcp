@@ -1,8 +1,6 @@
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { dirsFor } from './projects.js';
+import { manifestPathFor } from '../util/paths.js';
 import {
   isRecord,
   listCommands,
@@ -13,9 +11,6 @@ import {
 } from './commands.js';
 import { checkedScriptPath } from './containment.js';
 import { runScript, type ScriptResult, type ScriptRunner } from './run-script.js';
-
-/** Where a project declares the commands it offers, relative to its directory. */
-export const MANIFEST_RELATIVE = join('.chat-mcp', 'commands.json');
 
 /**
  * 🛑 LOOPBACK IS NOT THE BOUNDARY. A container reaches a host `127.0.0.1` bind
@@ -78,41 +73,6 @@ class Refusal extends Error {
     this.name = 'Refusal';
     this.detail = cause instanceof Error ? cause.message : String(cause ?? publicMessage);
   }
-}
-
-/**
- * The one directory a handle's commands come from.
- *
- * 🛑 TWO CANDIDATES IS A REFUSAL. `dirsFor` returns an array, and taking the
- * first would silently run a command in a tree the operator did not mean —
- * the failure `dirsFor`'s own docblock exists to prevent.
- */
-function projectDirFor(handle: string): string {
-  let dirs: string[];
-
-  try {
-    dirs = dirsFor(handle);
-  } catch (err) {
-    throw new Refusal('no project directory is configured for this agent', err);
-  }
-
-  const withManifest = dirs.filter((dir) => existsSync(join(dir, MANIFEST_RELATIVE)));
-
-  if (withManifest.length === 0) {
-    throw new Refusal(
-      'this project offers no commands',
-      new Error(`no ${MANIFEST_RELATIVE} in ${dirs.join(', ')}`),
-    );
-  }
-
-  if (withManifest.length > 1) {
-    throw new Refusal(
-      'this agent has commands in more than one project, so the broker refuses to guess',
-      new Error(`manifests in ${withManifest.join(', ')}`),
-    );
-  }
-
-  return withManifest[0] as string;
 }
 
 /**
@@ -326,14 +286,24 @@ export class CommandBroker {
     throw new Refusal('unknown op');
   }
 
+  /**
+   * 🛑 THE MANIFEST IS THE ONLY SOURCE OF THE DIRECTORY. `projects.json` sits
+   * in the state directory every container mounts READ-WRITE, so an agent that
+   * rewrote it would pick the tree its own commands run in. See the test that
+   * rewrites it and asserts the directory does not move.
+   *
+   * One manifest per handle gives one directory, so no candidate can conflict.
+   */
   private manifestFor(handle: string): { dir: string; manifest: CommandManifest } {
-    const dir = projectDirFor(handle);
+    let manifest: CommandManifest;
 
     try {
-      return { dir, manifest: readManifest(join(dir, MANIFEST_RELATIVE)) };
+      manifest = readManifest(manifestPathFor(handle));
     } catch (err) {
-      throw new Refusal('this project has no usable command manifest', err);
+      throw new Refusal('this agent has no usable command manifest', err);
     }
+
+    return { dir: manifest.projectDir, manifest };
   }
 
   private async runCommand(
