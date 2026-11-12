@@ -6,7 +6,9 @@ import { join } from 'node:path';
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-containment-'));
 
-const { realContains, checkedScriptPath } = await import('../../src/supervise/containment.js');
+const { realContains, checkedScriptPath, assertProjectDirOutsideState } = await import(
+  '../../src/supervise/containment.js',
+);
 
 function project(): string {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'chat-mcp-proj-')));
@@ -140,4 +142,27 @@ test('🛑 a path containing a COLON is refused, because it is a field delimiter
   // `-v <host>:<dest>:ro` splits on `:`, so `evil:dir` makes a four-field spec.
   // Docker refuses it outright — one bad declared path denies the whole spawn.
   assert.throws(() => containedRelative('scripts/evil:dir', 'read-only path'), /colon/);
+});
+
+// ── assertProjectDirOutsideState ─────────────────────────────────────────────
+
+/**
+ * 🛑 `realContains` BAILS ON A BASE THAT IS NOT ON DISK, so resolving only the
+ * TARGET leaves an ancestor of a not-yet-created state dir passing. Docker then
+ * creates the bind source, and `ensureStateDir` fills the sandbox in underneath.
+ */
+test('🛑 an ancestor of the state directory refuses even when NEITHER is on disk yet', () => {
+  const home = process.env.CHAT_MCP_HOME as string;
+  const absent = join(realpathSync(tmpdir()), `chat-mcp-absent-${process.pid}`);
+  process.env.CHAT_MCP_HOME = join(absent, 'state');
+
+  try {
+    // Positive control: a sibling tree is still allowed under this same HOME,
+    // so the refusal below is containment and not the absent HOME itself.
+    assert.doesNotThrow(() => assertProjectDirOutsideState(project()));
+
+    assert.throws(() => assertProjectDirOutsideState(absent), /state directory/);
+  } finally {
+    process.env.CHAT_MCP_HOME = home;
+  }
 });

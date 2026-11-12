@@ -53,26 +53,6 @@ export function realContains(dir: string, target: string): boolean {
 }
 
 /**
- * Refuse a project directory that CONTAINS the sandbox's own state, or throw.
- *
- * 🛑 A PROJECT TREE ABOVE THE STATE DIRECTORY MOUNTS THE SANDBOX INTO ITSELF.
- * `-v <projectDir>:/work` is read-write, so registering `$HOME` carries
- * `~/.chat-mcp`, `~/.chat-mcp-manifests` and `chat.db` straight into the
- * container. The manifest is the surface the broker executes from, so an agent
- * that can edit its own manifest runs anything on the host.
- *
- * 🛑 BOTH CHECKS ARE NEEDED, AND A SYMLINK IS WHAT SEPARATES THEM.
- * `manifestDir()` is `${stateDir()}-manifests`, a sibling, so an ancestor of
- * one is normally an ancestor of the other. But `realContains` resolves its
- * target while `manifestDir()` is built from the UNRESOLVED path:
- *
- *   CHAT_MCP_HOME=/a/b/state -> /x/y/real   realContains(/a/b, state) FALSE
- *   manifestDir()             = /a/b/state-manifests     under /a/b   TRUE
- *
- * ⚠️ REFUSING, NOT EXCLUDING. A nested `:ro` mount over the sensitive paths
- * still DISCLOSES `chat.db` — every room and DM — which is #162.
- */
-/**
  * The real path a path WILL have once it exists, resolved through its deepest
  * existing ancestor.
  *
@@ -104,15 +84,48 @@ function realPathWhenCreated(target: string): string {
   }
 }
 
+/**
+ * Refuse a project directory that CONTAINS the sandbox's own state, or throw.
+ *
+ * 🛑 THE MANIFEST CHECK IS THE HALF THAT CLOSES A HOLE. `manifestDir()` is
+ * bind-mounted nowhere, so a project tree above it is the only way in, and the
+ * broker executes from it. `stateDir()` is mounted read-write regardless (#188),
+ * so refusing an ancestor of THAT is defence in depth, not the barrier.
+ *
+ * 🛑 BOTH CHECKS ARE STILL NEEDED, AND A SYMLINK IS WHAT SEPARATES THEM.
+ * `manifestDir()` is `${stateDir()}-manifests`, a sibling, so an ancestor of
+ * one is normally an ancestor of the other — until `stateDir()` resolves away:
+ *
+ *   CHAT_MCP_HOME=/a/b/state -> /x/y/real   /a/b does NOT contain it
+ *   manifestDir()             = /a/b/state-manifests    /a/b DOES
+ *
+ * ⚠️ REFUSING, NOT EXCLUDING. A nested `:ro` mount over the sensitive paths
+ * still DISCLOSES `chat.db` — every room and DM — which is #162.
+ */
+/**
+ * `realContains`, for two paths that may not exist YET.
+ *
+ * 🛑 NOT `realContains`. It returns false on a base that is not on disk —
+ * deliberate there, so an absent allowed directory contains nothing — but here
+ * the base is a project tree Docker CREATES as the bind source, and
+ * `ensureStateDir` then fills the sandbox in underneath it.
+ */
+function containsWhenCreated(dir: string, target: string): boolean {
+  const base = realPathWhenCreated(dir);
+  const real = realPathWhenCreated(target);
+
+  return real === base || real.startsWith(`${base}/`);
+}
+
 export function assertProjectDirOutsideState(projectDir: string): void {
-  if (realContains(projectDir, realPathWhenCreated(stateDir()))) {
+  if (containsWhenCreated(projectDir, stateDir())) {
     throw new Error(
       `refusing "${projectDir}": it contains the state directory "${stateDir()}", ` +
         'so mounting it would put the sandbox inside the container read-write',
     );
   }
 
-  if (realContains(projectDir, realPathWhenCreated(manifestDir()))) {
+  if (containsWhenCreated(projectDir, manifestDir())) {
     throw new Error(
       `refusing "${projectDir}": it contains the manifest directory "${manifestDir()}", ` +
         'so the agent could edit the manifest the broker executes from',
