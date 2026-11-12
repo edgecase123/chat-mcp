@@ -8,20 +8,36 @@ import { join } from 'node:path';
 // 🛑 BEFORE any import that resolves a state path.
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-broker-'));
 
-const { CommandBroker, MANIFEST_RELATIVE } = await import('../../src/supervise/broker.js');
+const { CommandBroker } = await import('../../src/supervise/broker.js');
 const { registerProject } = await import('../../src/supervise/projects.js');
+const { ensureManifestDir, manifestPathFor } = await import('../../src/util/paths.js');
 
 type Broker = Awaited<ReturnType<typeof CommandBroker.bind>>;
 
-/** A project directory with a manifest and the scripts it names. */
+/**
+ * What each fixture directory declares, keyed by that directory.
+ *
+ * The manifest is no longer written inside the project, so the fixture holds it
+ * until a handle is known and `installManifest` puts it in the store.
+ */
+const manifests = new Map<string, unknown>();
+
+/** A project directory with the scripts its manifest names. */
 function project(
   commands: unknown,
   scripts: Readonly<Record<string, string>> = {},
 ): string {
   const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-project-'));
 
-  mkdirSync(join(dir, '.chat-mcp'), { recursive: true });
-  writeFileSync(join(dir, MANIFEST_RELATIVE), JSON.stringify(commands));
+  // `projectDir` is required as of slice 3a. A non-object is left alone, so the
+  // malformed-manifest cases still reach the parser as they were written.
+  manifests.set(
+    dir,
+    typeof commands === 'object' && commands !== null && !Array.isArray(commands)
+      ? { projectDir: dir, ...commands }
+      : commands,
+  );
+
   mkdirSync(join(dir, 'scripts'), { recursive: true });
 
   for (const [name, body] of Object.entries(scripts)) {
@@ -31,6 +47,23 @@ function project(
   }
 
   return dir;
+}
+
+/** Put `dir`'s manifest where the broker reads it: the store, keyed by handle. */
+function installManifest(handle: string, dir: string): void {
+  ensureManifestDir();
+  writeFileSync(manifestPathFor(handle), JSON.stringify(manifests.get(dir)));
+}
+
+/**
+ * Register `dir` for `handle` AND install its manifest.
+ *
+ * Registration no longer decides where commands run. It stays because an agent
+ * really is registered, so the tests run against the shape production has.
+ */
+function registerWith(handle: string, dir: string): void {
+  registerProject(handle, dir);
+  installManifest(handle, dir);
 }
 
 /**
@@ -86,7 +119,7 @@ const ECHO = {
 };
 
 async function brokerFor(handle: string, dir: string, token = 'tok-secret'): Promise<Broker> {
-  registerProject(handle, dir);
+  registerWith(handle, dir);
 
   return CommandBroker.bind({ authenticate: (t) => (t === token ? handle : null) });
 }
@@ -156,7 +189,7 @@ test('a handle named in the request is ignored', async (t) => {
   const alpha = `alpha-${process.pid}`;
   const beta = `beta-${process.pid}`;
 
-  registerProject(beta, project({ commands: [{ name: 'beta-only', script: 'scripts/b.sh' }] }));
+  registerWith(beta, project({ commands: [{ name: 'beta-only', script: 'scripts/b.sh' }] }));
 
   const broker = await brokerFor(alpha, project(ECHO));
   t.after(() => broker.close());
@@ -240,7 +273,7 @@ test('a hanging command times out and the broker still answers afterwards', asyn
   const manifest = { commands: [{ name: 'hang', script: 'scripts/hang.sh' }] };
   const dir = project(manifest, { 'hang.sh': '#!/bin/sh\nsleep 30\n' });
 
-  registerProject(`h9-${process.pid}`, dir);
+  registerWith(`h9-${process.pid}`, dir);
   const broker = await CommandBroker.bind({
     authenticate: (tkn) => (tkn === 'tok-secret' ? `h9-${process.pid}` : null),
     timeoutMs: 300,
@@ -294,15 +327,21 @@ test('close() settles while a connection is still open', async () => {
 });
 
 /**
- * 🛑 TWO CANDIDATE DIRECTORIES IS A REFUSAL, NOT A COIN TOSS. `dirsFor` returns
- * an array, and silently taking the first is exactly the wrong-tree failure its
- * own docblock exists to prevent.
+ * 🛑 THE ATTACK SLICE 3A EXISTS TO STOP. `projects.json` lives in the state
+ * directory every container mounts READ-WRITE, so the agent can rewrite it.
+ * Before this slice that moved the directory its own commands ran in.
+ *
+ * The control is that `decoy` holds a DIFFERENT, runnable script under the same
+ * command name. A broker that honoured the registration would answer `decoy`,
+ * so this fails loudly rather than vacuously.
  */
-test('a handle with manifests in two registered directories is refused', async (t) => {
+test('rewriting the registration does not move where a command runs', async (t) => {
   const handle = `h12-${process.pid}`;
+  const real = project(ECHO, { 'gate.sh': '#!/bin/sh\necho real\n' });
+  const decoy = project(ECHO, { 'gate.sh': '#!/bin/sh\necho decoy\n' });
 
-  registerProject(handle, project(ECHO));
-  registerProject(handle, project({ commands: [{ name: 'other', script: 'scripts/o.sh' }] }));
+  registerWith(handle, real);
+  registerProject(handle, decoy);
 
   const broker = await CommandBroker.bind({
     authenticate: (tkn) => (tkn === 'tok-secret' ? handle : null),
@@ -310,14 +349,19 @@ test('a handle with manifests in two registered directories is refused', async (
   t.after(() => broker.close());
 
   const [reply] = await replies(broker.port, [
-    { id: 1, token: 'tok-secret', op: 'list-commands' },
+    { id: 1, token: 'tok-secret', op: 'run-command', name: 'gate', params: { lane: 'php' } },
   ]);
 
-  assert.equal(reply?.ok, false);
-  assert.match(reply?.error as string, /refuses to guess/);
+  assert.equal(reply?.ok, true, `the broker refused: ${String(reply?.error)}`);
+  assert.match(reply?.stdout as string, /real/);
+  assert.doesNotMatch(reply?.stdout as string, /decoy/);
 });
 
-test('a handle with no registered directory is refused, not defaulted to cwd', async (t) => {
+/**
+ * 🛑 NO MANIFEST IS A REFUSAL, NOT A DEFAULT. A broker that fell back to its own
+ * cwd would run the operator's shell commands from wherever it happened to start.
+ */
+test('a handle with no manifest is refused, not defaulted to cwd', async (t) => {
   const broker = await CommandBroker.bind({
     authenticate: (tkn) => (tkn === 'tok-secret' ? `nowhere-${process.pid}` : null),
   });
@@ -328,7 +372,31 @@ test('a handle with no registered directory is refused, not defaulted to cwd', a
   ]);
 
   assert.equal(reply?.ok, false);
-  assert.match(reply?.error as string, /no project directory is configured/);
+  assert.match(reply?.error as string, /no usable command manifest/);
+});
+
+/**
+ * A registration is not needed at all now. This is the other half of the
+ * rewrite test: the manifest alone is sufficient, so `projects.json` is not
+ * consulted on either the present or the absent path.
+ */
+test('a handle with a manifest but no registration still runs its command', async (t) => {
+  const handle = `h12b-${process.pid}`;
+  const dir = project(ECHO, { 'gate.sh': '#!/bin/sh\necho unregistered\n' });
+
+  installManifest(handle, dir);
+
+  const broker = await CommandBroker.bind({
+    authenticate: (tkn) => (tkn === 'tok-secret' ? handle : null),
+  });
+  t.after(() => broker.close());
+
+  const [reply] = await replies(broker.port, [
+    { id: 1, token: 'tok-secret', op: 'run-command', name: 'gate', params: { lane: 'php' } },
+  ]);
+
+  assert.equal(reply?.ok, true, `the broker refused: ${String(reply?.error)}`);
+  assert.match(reply?.stdout as string, /unregistered/);
 });
 
 /**
@@ -470,7 +538,7 @@ test('an envelope split mid-character is reassembled intact', async (t) => {
  * a missing `return` hands back, and a `handle === null` gate lets it through.
  */
 test('an authenticate that returns undefined does not authenticate', async (t) => {
-  registerProject(`h19-${process.pid}`, project(ECHO));
+  registerWith(`h19-${process.pid}`, project(ECHO));
   const broker = await CommandBroker.bind({
     authenticate: () => undefined as unknown as string | null,
   });
@@ -503,7 +571,7 @@ test('an authenticate that returns an empty string does not authenticate', async
  */
 test('a throwing authenticate refuses the caller and leaves the broker alive', async (t) => {
   const handle = `h20-${process.pid}`;
-  registerProject(handle, project(ECHO));
+  registerWith(handle, project(ECHO));
 
   let explode = true;
   const broker = await CommandBroker.bind({
@@ -540,7 +608,7 @@ test('more requests than the in-flight cap are refused rather than all run', asy
   const dir = project(manifest, { 'slow.sh': '#!/bin/sh\nsleep 1\necho done\n' });
   const handle = `h21-${process.pid}`;
 
-  registerProject(handle, dir);
+  registerWith(handle, dir);
   const broker = await CommandBroker.bind({
     authenticate: (tkn) => (tkn === 'tok-secret' ? handle : null),
     maxInFlight: 1,

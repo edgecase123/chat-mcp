@@ -1,7 +1,8 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { mkdirSync, chmodSync, existsSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import type { Stats } from 'node:fs';
+import { assertHandle } from './naming.js';
 
 /**
  * 🛑 UNDER THE TEST RUNNER, THE DEFAULT PATH IS REFUSED. Ruled by lee.
@@ -115,6 +116,40 @@ export function mcpConfigPathFor(handle: string): string {
 export function ensureMcpConfigDir(): string {
   ensureStateDir();
   const dir = mcpConfigDir();
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  chmodVerified(dir, STATE_DIR_MODE);
+
+  return dir;
+}
+
+/**
+ * Where the command manifests live, one JSON file per handle.
+ *
+ * 🛑 A SIBLING OF THE STATE DIR, NEVER A CHILD. `dockerArgsForVendor` mounts
+ * `stateDir()` whole and read-write, so a manifest beneath it is one the agent
+ * can edit — and the manifest is the authorization surface, so editing it
+ * widens the agent's own grant.
+ *
+ * Deriving it from `stateDir()` also inherits that function's test-runner
+ * refusal. A `homedir()` path would bypass it and write to the real tree.
+ */
+export function manifestDir(): string {
+  // 🛑 `resolve` IS LOAD-BEARING. A `CHAT_MCP_HOME` ending in `/` made this
+  // `/x/-manifests` — a CHILD of the mount, which is the one thing it must
+  // never be. See the parameterised trailing-slash test.
+  return `${resolve(stateDir())}-manifests`;
+}
+
+/** 🛑 The handle becomes a filename, so it is validated. See the test. */
+export function manifestPathFor(handle: string): string {
+  assertHandle(handle);
+
+  return join(manifestDir(), `${handle}.json`);
+}
+
+/** Not `ensureStateDir` first — this is a sibling, not a child. */
+export function ensureManifestDir(): string {
+  const dir = manifestDir();
   mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
   chmodVerified(dir, STATE_DIR_MODE);
 
