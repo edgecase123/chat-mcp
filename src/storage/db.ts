@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { chmodSync, existsSync } from 'node:fs';
+import { chmodSync, existsSync, statSync } from 'node:fs';
 import { dbPath, ensureStateDir, STATE_FILE_MODE } from '../util/paths.js';
 
 export type Db = DatabaseSync;
@@ -332,6 +332,24 @@ export function migrate(db: Db): void {
  */
 const verifiers = new WeakMap<Db, Db>();
 
+/** The device and inode of the file a connection actually opened. */
+export type FileIdentity = { readonly dev: number; readonly ino: number };
+
+/**
+ * What each connection's file WAS, so a swap underneath it becomes visible.
+ *
+ * 🛑 A PATH IS NOT AN IDENTITY. `lsof` and `PRAGMA database_list` both report
+ * the path a connection was opened on, so neither can tell a replaced file at
+ * that path from the original. Recording the inode at open is what gives
+ * `health` a mark that can disagree with the path.
+ */
+const identities = new WeakMap<Db, FileIdentity>();
+
+/** Undefined only for a database that did not come from `openDb`. */
+export function identityFor(db: Db): FileIdentity | undefined {
+  return identities.get(db);
+}
+
 /** Undefined only for a database that did not come from `openDb` — see `insertMessage`. */
 export function verifierFor(db: Db): Db | undefined {
   return verifiers.get(db);
@@ -340,6 +358,14 @@ export function verifierFor(db: Db): Db | undefined {
 export function openDb(): Db {
   ensureStateDir();
   const db = new DatabaseSync(dbPath());
+
+  // 🛑 BEFORE THE VERIFIER OPEN AND BEFORE `migrate`, both of which re-resolve
+  // this path. Statting later would record the REPLACEMENT file's identity on a
+  // swap mid-startup, so `health` would compare a mark to itself and report OK
+  // for a connection writing to the file that was moved away.
+  const opened = statSync(dbPath());
+  identities.set(db, { dev: opened.dev, ino: opened.ino });
+
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA synchronous = NORMAL');
   db.exec('PRAGMA foreign_keys = ON');
