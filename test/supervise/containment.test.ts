@@ -58,11 +58,18 @@ test('a real script inside the project resolves to its absolute path', () => {
 
 test('🛑 a script that is a SYMLINK OUT of the project is refused', () => {
   const dir = project();
-  symlinkSync('/bin/sh', join(dir, 'scripts', 'escape.sh'));
+  // A target we own, so realpath cannot land somewhere else: on Linux
+  // /bin/sh is itself a symlink to /usr/bin/dash.
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'chat-mcp-outside-')));
+  const target = join(outside, 'escape.sh');
+  writeFileSync(target, '#!/bin/sh\n');
+  symlinkSync(target, join(dir, 'scripts', 'escape.sh'));
 
   assert.throws(
     () => checkedScriptPath(dir, { relative: 'scripts/escape.sh' }),
-    /resolves to "\/bin\/sh", which is outside/,
+    (err: unknown) =>
+      err instanceof Error &&
+      err.message.includes(`resolves to "${target}", which is outside`),
   );
 });
 
