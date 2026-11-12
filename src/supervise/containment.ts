@@ -85,6 +85,21 @@ function realPathWhenCreated(target: string): string {
 }
 
 /**
+ * `realContains`, for two paths that may not exist YET.
+ *
+ * 🛑 NOT `realContains`. It returns false on a base that is not on disk —
+ * deliberate there, so an absent allowed directory contains nothing — but here
+ * the base is a project tree Docker CREATES as the bind source, and
+ * `ensureStateDir` then fills the sandbox in underneath it.
+ */
+function containsWhenCreated(dir: string, target: string): boolean {
+  const base = realPathWhenCreated(dir);
+  const real = realPathWhenCreated(target);
+
+  return real === base || real.startsWith(`${base}/`);
+}
+
+/**
  * Refuse a project directory that CONTAINS the sandbox's own state, or throw.
  *
  * 🛑 THE MANIFEST CHECK IS THE HALF THAT CLOSES A HOLE. `manifestDir()` is
@@ -102,21 +117,6 @@ function realPathWhenCreated(target: string): string {
  * ⚠️ REFUSING, NOT EXCLUDING. A nested `:ro` mount over the sensitive paths
  * still DISCLOSES `chat.db` — every room and DM — which is #162.
  */
-/**
- * `realContains`, for two paths that may not exist YET.
- *
- * 🛑 NOT `realContains`. It returns false on a base that is not on disk —
- * deliberate there, so an absent allowed directory contains nothing — but here
- * the base is a project tree Docker CREATES as the bind source, and
- * `ensureStateDir` then fills the sandbox in underneath it.
- */
-function containsWhenCreated(dir: string, target: string): boolean {
-  const base = realPathWhenCreated(dir);
-  const real = realPathWhenCreated(target);
-
-  return real === base || real.startsWith(`${base}/`);
-}
-
 export function assertProjectDirOutsideState(projectDir: string): void {
   if (containsWhenCreated(projectDir, stateDir())) {
     throw new Error(
