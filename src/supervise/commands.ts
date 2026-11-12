@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, normalize } from 'node:path';
-import { containedRelative, type UncheckedScript } from './containment.js';
+import { assertNoControlChars, containedRelative, type UncheckedScript } from './containment.js';
 
 /**
  * The commands a supervised agent may ask the host to run.
@@ -173,10 +173,7 @@ function parseProjectDir(raw: unknown): string {
     throw new Error('a command manifest needs a non-empty "projectDir"');
   }
 
-  // Before normalize(), for the same reason containedRelative checks first.
-  if (/[\u0000-\u001f\u007f]/.test(raw)) {
-    throw new Error(`"projectDir" has a control character in it: "${raw}"`);
-  }
+  assertNoControlChars(raw, '"projectDir"');
 
   if (!isAbsolute(raw)) {
     throw new Error(`"projectDir" must be an absolute path, got "${raw}"`);

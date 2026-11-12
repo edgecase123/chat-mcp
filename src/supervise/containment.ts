@@ -52,6 +52,17 @@ export function realContains(dir: string, target: string): boolean {
 }
 
 /**
+ * 🛑 CALL THIS BEFORE normalize(). A NUL makes `scripts/gate.sh\0../../bin/sh`
+ * normalise to the innocent-looking `scripts/bin/sh`, and a newline or a
+ * control character only surfaces as an ERR_INVALID_ARG_VALUE at spawn time.
+ */
+export function assertNoControlChars(raw: string, noun: string): void {
+  if (/[\u0000-\u001f\u007f]/.test(raw)) {
+    throw new Error(`${noun} has a control character in it: "${raw}"`);
+  }
+}
+
+/**
  * Refuse a relative path that is absolute, control-charactered, or that
  * LEXICALLY leaves the project. Returns the normalised form.
  *
@@ -69,12 +80,7 @@ export function containedRelative(raw: unknown, noun: string): string {
     throw new Error(`${noun} must be a relative path, got "${raw}"`);
   }
 
-  // 🛑 BEFORE normalize(). A NUL makes `scripts/gate.sh\0../../bin/sh`
-  // normalise to the innocent-looking `scripts/bin/sh`, and a newline or a
-  // control character only surfaces as an ERR_INVALID_ARG_VALUE at spawn time.
-  if (/[\u0000-\u001f\u007f]/.test(raw)) {
-    throw new Error(`${noun} has a control character in it: "${raw}"`);
-  }
+  assertNoControlChars(raw, noun);
 
   const normalised = normalize(raw);
   // 🛑 SEGMENTS, NOT `startsWith('../')`. On win32 `normalize` returns
