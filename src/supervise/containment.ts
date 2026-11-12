@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs';
-import { isAbsolute, join, normalize, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, resolve } from 'node:path';
+import { manifestDir, stateDir } from '../util/paths.js';
 
 /**
  * Is a path inside a directory, after symlinks?
@@ -49,6 +50,74 @@ export function realContains(dir: string, target: string): boolean {
   }
 
   return real === base || real.startsWith(`${base}/`);
+}
+
+/**
+ * Refuse a project directory that CONTAINS the sandbox's own state, or throw.
+ *
+ * 🛑 A PROJECT TREE ABOVE THE STATE DIRECTORY MOUNTS THE SANDBOX INTO ITSELF.
+ * `-v <projectDir>:/work` is read-write, so registering `$HOME` carries
+ * `~/.chat-mcp`, `~/.chat-mcp-manifests` and `chat.db` straight into the
+ * container. The manifest is the surface the broker executes from, so an agent
+ * that can edit its own manifest runs anything on the host.
+ *
+ * 🛑 BOTH CHECKS ARE NEEDED, AND A SYMLINK IS WHAT SEPARATES THEM.
+ * `manifestDir()` is `${stateDir()}-manifests`, a sibling, so an ancestor of
+ * one is normally an ancestor of the other. But `realContains` resolves its
+ * target while `manifestDir()` is built from the UNRESOLVED path:
+ *
+ *   CHAT_MCP_HOME=/a/b/state -> /x/y/real   realContains(/a/b, state) FALSE
+ *   manifestDir()             = /a/b/state-manifests     under /a/b   TRUE
+ *
+ * ⚠️ REFUSING, NOT EXCLUDING. A nested `:ro` mount over the sensitive paths
+ * still DISCLOSES `chat.db` — every room and DM — which is #162.
+ */
+/**
+ * The real path a path WILL have once it exists, resolved through its deepest
+ * existing ancestor.
+ *
+ * 🛑 `realContains` SKIPS realpath ON A MISSING TARGET, so a path that does not
+ * exist yet under a SYMLINKED ancestor reads as outside the directory that will
+ * hold it. Measured: `manifestDir()` is created on demand by
+ * `ensureManifestDir`, and on macOS `/var` is a symlink to `/private/var`:
+ *
+ *   base   realpath(/var/folders/../parent)  -> /private/var/folders/../parent
+ *   target /var/folders/../parent/x-manifests   (absent, so NOT realpathed)
+ *   startsWith -> false, and the mount would have carried it in
+ */
+function realPathWhenCreated(target: string): string {
+  let current = resolve(target);
+  const tail: string[] = [];
+
+  for (;;) {
+    try {
+      return join(realpathSync(current), ...tail);
+    } catch {
+      const parent = dirname(current);
+
+      // `dirname('/') === '/'`, so this is the root and nothing resolved.
+      if (parent === current) return resolve(target);
+
+      tail.unshift(basename(current));
+      current = parent;
+    }
+  }
+}
+
+export function assertProjectDirOutsideState(projectDir: string): void {
+  if (realContains(projectDir, realPathWhenCreated(stateDir()))) {
+    throw new Error(
+      `refusing "${projectDir}": it contains the state directory "${stateDir()}", ` +
+        'so mounting it would put the sandbox inside the container read-write',
+    );
+  }
+
+  if (realContains(projectDir, realPathWhenCreated(manifestDir()))) {
+    throw new Error(
+      `refusing "${projectDir}": it contains the manifest directory "${manifestDir()}", ` +
+        'so the agent could edit the manifest the broker executes from',
+    );
+  }
 }
 
 /**

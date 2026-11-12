@@ -2,12 +2,13 @@ import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawn as realSpawn } from 'node:child_process';
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-driver-'));
 
 const { setToken } = await import('../../../src/supervise/auth.js');
+const { stateDir } = await import('../../../src/util/paths.js');
 const { registerMount } = await import('../../../src/supervise/mounts.js');
 const { claudeSpawn } = await import('../../../src/adapters/claude-spawn.js');
 const {
@@ -429,4 +430,25 @@ test('a project directory reached through a SYMLINK still mounts its real paths'
   const args = dockerArgsFor({ cwd: link, supervisorHandle: 'claude1', readOnlyPaths: ['scripts'] });
 
   assert.ok(args.includes(`${real}/scripts:${CONTAINER_PROJECT_DIR}/scripts:ro`));
+});
+
+/**
+ * 🛑 #183. REFUSED AT SPAWN TOO, not only at registration. `projects.json` is a
+ * file on disk, so a registration that predates this guard is still there, and
+ * `opts.cwd` reaches the driver from `resolveCwd` rather than only from
+ * `registerProject`.
+ *
+ * The argv is what mounts it, so this is the last place that can say no.
+ */
+test('🛑 a project dir ABOVE the state directory refuses the spawn argv', () => {
+  setToken('sk-ant-oat-x');
+
+  // Positive control: the same call with an ordinary project dir succeeds, so
+  // the refusal below is the containment check and not a missing token.
+  assert.ok(dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' }).length > 0);
+
+  assert.throws(
+    () => dockerArgsFor({ cwd: dirname(realpathSync(stateDir())), supervisorHandle: 'claude1' }),
+    /state directory/,
+  );
 });
