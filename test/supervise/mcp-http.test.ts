@@ -26,6 +26,12 @@ interface Harness {
 
   /** How many servers `serverFor` has been asked for. */
   readonly built: () => number;
+
+  /** How many of those the service has released. */
+  readonly released: () => number;
+
+  /** Releases still in flight. See `McpHttpService.releasing`. */
+  readonly pending: () => number;
 }
 
 /**
@@ -37,6 +43,8 @@ interface Harness {
  */
 async function harness(): Promise<Harness> {
   const open: ShimContext[] = [];
+  const released: ShimContext[] = [];
+  let closed = false;
 
   const service = McpHttpService.create({
     authenticate: authenticateToken,
@@ -49,7 +57,15 @@ async function harness(): Promise<Harness> {
         adapterStatus: { installed: true, framework: null, hint: null },
       };
       open.push(ctx);
-      return buildServer(ctx);
+
+      return {
+        server: buildServer(ctx),
+        close: async () => {
+          released.push(ctx);
+          await ctx.notify.close();
+          ctx.db.close();
+        },
+      };
     },
   });
 
@@ -64,10 +80,20 @@ async function harness(): Promise<Harness> {
   return {
     url: `http://127.0.0.1:${port}/mcp`,
     built: () => open.length,
+    released: () => released.length,
+    pending: () => service.pendingReleases,
+
+    // 🛑 IDEMPOTENT. A test that closes to assert the teardown released its
+    // contexts is still closed again by its own `t.after`.
     close: async () => {
+      if (closed) return;
+      closed = true;
+
       await service.close();
       await new Promise<void>((resolve) => http.close(() => resolve()));
+
       for (const ctx of open) {
+        if (released.includes(ctx)) continue;
         await ctx.notify.close();
         ctx.db.close();
       }
@@ -121,14 +147,20 @@ async function post(
 }
 
 /** `post`'s sibling for the methods that carry no body. */
-async function bare(url: string, token: string, method: 'GET' | 'DELETE'): Promise<Reply> {
-  const res = await fetch(url, {
-    method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: 'application/json, text/event-stream',
-    },
-  });
+async function bare(
+  url: string,
+  token: string,
+  method: 'GET' | 'DELETE',
+  sessionId?: string,
+): Promise<Reply> {
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${token}`,
+    accept: 'application/json, text/event-stream',
+  };
+
+  if (sessionId) headers['mcp-session-id'] = sessionId;
+
+  const res = await fetch(url, { method, headers });
 
   return { status: res.status, text: await res.text(), sessionId: null };
 }
@@ -334,4 +366,79 @@ test('🛑 a body DECLARING more than the cap is refused 413 before it is read',
   // 🛑 THE CONTROL. A legal request on the same service is not refused, so the
   // 413 above was the declared length and not the service rejecting everything.
   assert.equal((await post(h.url, token, INITIALIZE)).status, 200);
+});
+
+/**
+ * 🛑 A SESSION THAT ENDS MUST GIVE BACK ITS DATABASE HANDLE AND ITS POLLER.
+ * `onsessionclosed` only dropped the map entry, so a caller could loop
+ * initialize → DELETE → initialize on ONE keep-alive connection and accumulate
+ * a SQLite handle and a NotifyBus per lap. The socket cap does not reach a
+ * serial loop, because it only ever holds one connection.
+ */
+test('🚨 a DELETEd session RELEASES its context', async (t) => {
+  const h = await harness();
+
+  t.after(h.close);
+
+  const token = mintToken('http-release');
+  const id = await openSession(h.url, token);
+
+  assert.equal(h.built(), 1);
+  assert.equal(h.released(), 0, 'released before the session ended');
+
+  assert.equal((await bare(h.url, token, 'DELETE', id)).status, 200);
+
+  assert.equal(h.released(), 1, 'the DELETEd session never released its context');
+});
+
+test('🚨 a serial initialize/DELETE loop accumulates NOTHING', async (t) => {
+  const h = await harness();
+
+  t.after(h.close);
+
+  const token = mintToken('http-loop');
+  const laps = 5;
+
+  for (let i = 0; i < laps; i++) {
+    const id = await openSession(h.url, token);
+    assert.equal((await bare(h.url, token, 'DELETE', id)).status, 200);
+  }
+
+  assert.equal(h.built(), laps, 'the control: every lap really did build a server');
+  assert.equal(h.released(), laps, `${laps - h.released()} of ${laps} contexts were kept`);
+
+  // 🛑 THE BOOKKEEPING MUST NOT ACCUMULATE EITHER, or this test's name is a
+  // false claim. The release promises were retained until `close()`, so the
+  // service grew one entry per lap while reporting every context released.
+  await drained();
+
+  assert.equal(h.pending(), 0, `${h.pending()} release promises were retained after ${laps} laps`);
+});
+
+/** Let the in-flight releases settle. Each awaits a NotifyBus and a database handle. */
+async function drained(): Promise<void> {
+  for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
+ * 🛑 THE TWO TEARDOWN PATHS MUST AGREE ON ONE OWNER. A session still live when
+ * the service closes is released here and nowhere else, and a session already
+ * DELETEd must not be released twice.
+ */
+test('🚨 close() releases a session that is still live, exactly once', async (t) => {
+  const h = await harness();
+
+  t.after(h.close);
+
+  const token = mintToken('http-close');
+  const live = await openSession(h.url, token);
+  const doomed = await openSession(h.url, token);
+
+  assert.equal((await bare(h.url, token, 'DELETE', doomed)).status, 200);
+  assert.equal(h.released(), 1);
+  assert.ok(live, 'the control: a second session was open');
+
+  await h.close();
+
+  assert.equal(h.released(), 2, 'close() left a live session holding its context');
 });

@@ -21,13 +21,30 @@ export interface McpHttpOptions {
    * throws `Already connected to a transport` and takes the process with it —
    * pinned by `🛑 ONE handle with TWO sessions gets TWO servers`.
    */
-  readonly serverFor: (handle: string) => McpServer;
+  readonly serverFor: (handle: string) => SessionServer;
+}
+
+/**
+ * A server and whatever opening it cost, so one owner can give both back.
+ *
+ * 🛑 THE CALLER CANNOT RELEASE THIS ITSELF. It never learns the session id —
+ * the transport mints that after `serverFor` has already returned — so only
+ * this service knows when the session ended. The host bus kept an array it
+ * drained at shutdown, and a caller looping initialize → DELETE on ONE
+ * keep-alive connection grew it a database handle and a poller per lap.
+ */
+export interface SessionServer {
+  readonly server: McpServer;
+
+  /** Called exactly once, however the session ends. */
+  close(): Promise<void>;
 }
 
 interface Session {
   readonly handle: string;
   readonly transport: StreamableHTTPServerTransport;
   readonly server: McpServer;
+  readonly release: () => Promise<void>;
 }
 
 /**
@@ -43,6 +60,20 @@ interface Session {
  */
 export class McpHttpService {
   private readonly sessions = new Map<string, Session>();
+
+  /** 🛑 `onsessionclosed` IS SYNCHRONOUS, so its release is awaited here
+   * instead. Without this, `close()` can return while a database handle is
+   * still being given back.
+   *
+   * 🛑 EACH ENTRY REMOVES ITSELF ON SETTLE. An array that only drained at
+   * `close()` grew one entry per initialize → DELETE lap, which is the same
+   * unbounded growth this class exists to stop. */
+  private readonly releasing = new Set<Promise<void>>();
+
+  /** Test seam. The count of releases still in flight; see `releasing`. */
+  get pendingReleases(): number {
+    return this.releasing.size;
+  }
 
   private constructor(private readonly opts: McpHttpOptions) {}
 
@@ -112,7 +143,10 @@ export class McpHttpService {
 
     for (const session of open) {
       await session.server.close();
+      await session.release();
     }
+
+    await Promise.all(this.releasing);
   }
 
   /**
@@ -132,17 +166,34 @@ export class McpHttpService {
     res: ServerResponse,
     body: unknown,
   ): Promise<void> {
-    const server = this.opts.serverFor(handle);
+    const built = this.opts.serverFor(handle);
+    const { server } = built;
     const opened: string[] = [];
+
+    // 🛑 ONCE, AND FROM WHICHEVER PATH GETS THERE FIRST. A session that is
+    // DELETEd and then caught again by `close()` would otherwise close a
+    // database handle twice.
+    let released = false;
+    const release = async (): Promise<void> => {
+      if (released) return;
+      released = true;
+      await built.close();
+    };
 
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => {
         opened.push(id);
-        this.sessions.set(id, { handle, transport, server });
+        this.sessions.set(id, { handle, transport, server, release });
       },
       onsessionclosed: (id) => {
         this.sessions.delete(id);
+
+        const done = release().finally(() => {
+          this.releasing.delete(done);
+        });
+
+        this.releasing.add(done);
       },
     });
 
@@ -151,7 +202,10 @@ export class McpHttpService {
     try {
       await transport.handleRequest(req, res, body);
     } finally {
-      if (opened.length === 0) await server.close();
+      if (opened.length === 0) {
+        await server.close();
+        await release();
+      }
     }
   }
 
