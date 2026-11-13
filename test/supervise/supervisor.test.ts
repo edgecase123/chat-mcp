@@ -615,3 +615,89 @@ test('a driver that DECLARES false is legal and still starts', async () => {
     await s.stop();
   }
 });
+
+test('an undeclared driver has its spawned child KILLED before the error propagates', async () => {
+  // claude2, PR 218: every fake's `kill` is `() => undefined`, so deleting the
+  // kill block passed. The guard reads a property of a child that already
+  // EXISTS, so without this the process or container is orphaned.
+  let kills = 0;
+  const bare = () =>
+    ({
+      reportsUsage: true,
+      // reportsContext deliberately absent.
+      send: () => undefined,
+      onTurnEnd: () => undefined,
+      onContext: () => undefined,
+      onUsage: () => undefined,
+      onDenial: () => undefined,
+      onSession: () => undefined,
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      kill: () => {
+        kills += 1;
+      },
+    }) as unknown as AgentChild;
+
+  let started: Awaited<ReturnType<typeof startSupervisor>> | undefined;
+
+  try {
+    await assert.rejects(async () => {
+      started = await startSupervisor(
+        supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'killspy', spawnChild: bare }),
+      );
+    }, /reportsContext/);
+  } finally {
+    await started?.stop();
+  }
+
+  assert.equal(kills, 1, 'the orphaned child must be killed exactly once');
+});
+
+test('a RESTART into an undeclared child surfaces the error and does not leave a half-dead pair', async () => {
+  // claude2, PR 218: the guard is reachable from three spawn sites and only
+  // the first was covered. `doRestart` kills the old child BEFORE spawning,
+  // so a throw there must not be swallowed into a supervisor that looks alive.
+  const handle = `undeclrestart${process.pid % 1000}`;
+  let spawns = 0;
+  let kills = 0;
+
+  const child = (declared: boolean) =>
+    ({
+      ...(declared ? { reportsUsage: true, reportsContext: true } : { reportsUsage: true }),
+      send: () => undefined,
+      onTurnEnd: () => undefined,
+      onContext: () => undefined,
+      onUsage: () => undefined,
+      onDenial: () => undefined,
+      onSession: () => undefined,
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      kill: () => {
+        kills += 1;
+      },
+    }) as unknown as AgentChild;
+
+  // The FIRST spawn is well-formed, so the supervisor starts. The second is
+  // not — which is the only way this path is reachable, since a real driver
+  // that declared both fields once will declare them again.
+  const s = await startSupervisor(
+    supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle, spawnChild: () => child(spawns++ === 0) }),
+  );
+
+  try {
+    const ack = await deliverToSupervisor(handle, {
+      id: 1,
+      to: handle,
+      from: 'cli',
+      ts: Date.now(),
+      control: { kind: 'restart', mode: 'now' },
+    });
+
+    // 🛑 WHATEVER THE ANSWER IS, IT MUST NOT BE A SILENT `ok`. An operator
+    // told the restart worked, with no child running, is the worst outcome.
+    assert.notEqual(ack?.ok, true, `a failed respawn must not ack ok: ${JSON.stringify(ack)}`);
+    assert.equal(kills, 2, 'the old child and the undeclared replacement are both killed');
+  } finally {
+    await s.stop();
+  }
+});
