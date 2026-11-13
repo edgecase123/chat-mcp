@@ -65,15 +65,51 @@ test('🛑 the two declarations do not cross — each field carries its OWN vend
   }
 });
 
-test('🛑 a vendor that declares NOTHING is refused, rather than wired as reporting both', () => {
+test('🛑 a vendor omitting EITHER declaration is refused, naming the field it omitted', () => {
   // `tsconfig.json` includes `src/**` only, so a JavaScript vendor or a test
   // fake omitting a field compiles and runs. The hard-coded `true` used to
   // launder that omission into a confident declaration; now the omission
   // reaches `assertDeclaresCapabilities` and stops there.
-  const agent = wireAgentChild(fakeProcess() as never, INERT as never);
+  //
+  // 🛑 ONE FIELD AT A TIME, BECAUSE THE FIRST CUT WAS VACUOUS. It omitted
+  // BOTH and matched /reportsUsage/, so a wiring with
+  // `reportsContext: vendor.reportsContext ?? true` passed it. Said by
+  // claude2-agent on PR 220, and the same thing claude2 said about PR 218 —
+  // the table in `supervisor.test.ts` is the one this mirrors.
+  const OTHER = { reportsUsage: 'reportsContext', reportsContext: 'reportsUsage' } as const;
 
-  assert.throws(() => assertDeclaresCapabilities(agent), /reportsUsage/);
+  for (const field of ['reportsUsage', 'reportsContext'] as const) {
+    const declared: Record<string, unknown> = { reportsUsage: true, reportsContext: true };
+    delete declared[field];
+
+    const agent = wireAgentChild(fakeProcess() as never, {
+      ...INERT,
+      ...declared,
+    } as never);
+
+    assert.throws(
+      () => assertDeclaresCapabilities(agent),
+      new RegExp(field),
+      `omitting ${field} was not refused`,
+    );
+    assert.doesNotMatch(
+      agentError(agent),
+      new RegExp(OTHER[field]),
+      `the refusal named ${OTHER[field]}, which WAS declared`,
+    );
+  }
 });
+
+/** The message `assertDeclaresCapabilities` refuses this child with. */
+function agentError(agent: Parameters<typeof assertDeclaresCapabilities>[0]): string {
+  try {
+    assertDeclaresCapabilities(agent);
+  } catch (err) {
+    return (err as Error).message;
+  }
+
+  return '';
+}
 
 test('the Claude Code vendor declares that it reports both readings', () => {
   // It genuinely routes both. This is the one vendor that exists, so it is

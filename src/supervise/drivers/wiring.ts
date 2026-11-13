@@ -17,12 +17,15 @@ import type { VendorSpawn } from '../vendor.js';
  */
 export function wireAgentChild(
   child: ChildProcessWithoutNullStreams,
-  // 🛑 DERIVED FROM `VendorSpawn`, NOT RESTATED. Spelling these four fields
-  // out again is how the next capability flag reproduces #219: add it to
-  // `VendorSpawn`, forget it here, and the pass-through silently drops it
-  // while `tsc` stays green, because a narrow structural type is satisfied by
-  // a wider argument. Still a PROJECTION, so a test fake owes four fields
-  // rather than the whole vendor. Raised by the dry-solid reviewer.
+  // A PROJECTION of `VendorSpawn`, so the field TYPES are not restated here
+  // and a test fake still owes four fields rather than a whole vendor.
+  //
+  // ⚠️ IT DOES NOT GUARD THE NEXT CAPABILITY FLAG, and an earlier version of
+  // this comment claimed it did. What guards that is `AgentChild` declaring
+  // the field REQUIRED: the return literal below then fails to typecheck
+  // until the pass-through is added. Measured, by adding a fifth flag to both
+  // contracts and omitting it here — `tsc` named this function's return.
+  // Keep a new capability required on `AgentChild` and that stays true.
   vendor: Pick<VendorSpawn, 'routeEvent' | 'encodeInput' | 'reportsUsage' | 'reportsContext'>,
   opts: {
     /**
