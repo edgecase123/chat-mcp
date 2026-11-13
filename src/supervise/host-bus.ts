@@ -1,6 +1,6 @@
-import { buildServer, shimContextFor, type ShimContext } from '../shim/index.js';
+import { buildServer, shimContextFor } from '../shim/index.js';
 import type { BusEndpoint } from './child.js';
-import { authenticateToken, mintToken } from './handle-tokens.js';
+import { authenticateToken, mintToken, revokeToken } from './handle-tokens.js';
 import { McpHttpListener } from './mcp-listener.js';
 
 export interface HostBus {
@@ -20,8 +20,6 @@ export interface HostBus {
  * NEEDS. The container that held the old one is gone with `--rm`.
  */
 export async function openHostBus(childHandle: string): Promise<HostBus> {
-  const open: ShimContext[] = [];
-
   const listener = await McpHttpListener.bind({
     authenticate: authenticateToken,
 
@@ -42,24 +40,33 @@ export async function openHostBus(childHandle: string): Promise<HostBus> {
         force: true,
       });
 
-      open.push(ctx);
-
-      return buildServer(ctx);
+      // 🛑 THE SERVICE OWNS THE TEARDOWN, NOT THIS. It is the only side that
+      // learns when a session ended, so handing it the release is what stops a
+      // serial initialize → DELETE loop growing a handle and a poller per lap.
+      return {
+        server: buildServer(ctx),
+        close: async () => {
+          await ctx.notify.close();
+          ctx.db.close();
+        },
+      };
     },
   });
 
   return {
     endpoint: { url: listener.url, token: mintToken(childHandle) },
 
-    // 🛑 THE CONTEXTS TOO, NOT JUST THE SOCKET. Each session opened a database
-    // handle and a NotifyBus, and closing the listener releases neither.
+    // 🛑 THE CREDENTIAL TOO, NOT JUST THE SOCKET. The container runs with
+    // `--rm`, so it is gone, but its token was minted on disk and
+    // `authenticateToken` reads it from there — it stayed valid against every
+    // listener opened afterwards.
+    //
+    // 🛑 SAFE ONLY BECAUSE OF WHEN THIS RUNS. `supervise/index.ts` kills the
+    // child and awaits its teardown before closing the bus, so revoking here
+    // cannot race a live child's own credential.
     close: async (): Promise<void> => {
       await listener.close();
-
-      for (const ctx of open) {
-        await ctx.notify.close();
-        ctx.db.close();
-      }
+      revokeToken(childHandle);
     },
   };
 }

@@ -53,3 +53,26 @@ test('🚨 a session over the host bus REGISTERS the child on the bus', async (t
   assert.ok(agent, 'the child never registered, so list_agents cannot see it');
   assert.equal(agent.handle, 'claude1-agent');
 });
+
+/**
+ * 🛑 THE CONTAINER IS STARTED WITH `--rm`, SO ITS CREDENTIAL OUTLIVES IT. The
+ * token was minted when the bus opened and never revoked, and
+ * `authenticateToken` reads it off disk — so a leaked token stayed valid
+ * against every listener opened afterwards, for a child that no longer exists.
+ *
+ * 🛑 SAFE ONLY BECAUSE `close()` RUNS AFTER THE TEARDOWN. `supervise/index.ts`
+ * kills the child and awaits its teardown first, so revoking here cannot race
+ * a live child's own credential.
+ */
+test('🚨 close() REVOKES the child token, so a dead container cannot come back', async () => {
+  const { authenticateToken } = await import('../../src/supervise/handle-tokens.js');
+
+  const bus = await openHostBus('claude1-gone');
+  const { token } = bus.endpoint;
+
+  assert.equal(authenticateToken(token), 'claude1-gone', 'the control: it worked while open');
+
+  await bus.close();
+
+  assert.equal(authenticateToken(token), null, 'the token still authenticates a dead container');
+});
