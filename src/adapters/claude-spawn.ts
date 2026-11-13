@@ -22,7 +22,24 @@ function containerArgs(opts: SpawnOptions): string[] {
     'stream-json',
     '--input-format',
     'stream-json',
-    '--allow-dangerously-skip-permissions',
+    // 🛑 THE ACTIVATOR, NOT THE ENABLER. Claude Code ships two flags that
+    // read as synonyms and are not:
+    //
+    //   --allow-dangerously-skip-permissions
+    //       "Enable bypassing all permission checks AS AN OPTION, without it
+    //        being enabled by default."
+    //   --dangerously-skip-permissions
+    //       "Bypass all permission checks."
+    //
+    // The enabler alone was passed for a week. Permission checks still ran,
+    // nothing in a container answers a prompt, and so every containerized
+    // agent was DENIED the bus tool it was spawned to use.
+    //
+    // ⚠️ THE ENABLER IS NOT PASSED, AND THAT IS MEASURED RATHER THAN ASSUMED.
+    // A live container with this flag ALONE answered on the bus. Carrying a
+    // second flag that demonstrably changes nothing is noise in the one arg
+    // list where a reader must be able to tell what is load-bearing.
+    '--dangerously-skip-permissions',
   ];
 
   if (opts.model) args.push('--model', opts.model);

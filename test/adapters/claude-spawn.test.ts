@@ -7,12 +7,37 @@ test('host mode passes the permission flags, never the container bypass', () => 
 
   assert.ok(args.includes('--permission-mode'));
   assert.ok(!args.includes('--allow-dangerously-skip-permissions'));
+  assert.ok(!args.includes('--dangerously-skip-permissions'));
 });
 
-test('🛑 docker mode passes the bypass and NONE of the host permission flags', () => {
+/**
+ * 🛑 THIS TEST PINNED THE BUG FOR A WEEK. It asserted
+ * `--allow-dangerously-skip-permissions` and passed, while every containerized
+ * agent was denied every tool it tried to use.
+ *
+ * The two flags are NOT synonyms, and the CLI's own help says so:
+ *
+ *   --allow-dangerously-skip-permissions
+ *       "Enable bypassing all permission checks AS AN OPTION, without it
+ *        being enabled by default."
+ *   --dangerously-skip-permissions
+ *       "Bypass all permission checks."
+ *
+ * The first makes the bypass AVAILABLE. Only the second turns it ON. The
+ * container passed the enabler alone, so permission checks still ran with
+ * nothing there to answer them — and the agent's reply on the bus was
+ * denied. It said so out loud and nothing was logging it.
+ */
+test('🛑 docker mode ENABLES the bypass AND TURNS IT ON', () => {
   const args = claudeSpawn.argsFor({}, 'docker');
 
-  assert.ok(args.includes('--allow-dangerously-skip-permissions'));
+  assert.ok(
+    args.includes('--dangerously-skip-permissions'),
+    'the bypass is available but never activated; every tool call will be denied',
+  );
+  // ⚠️ MEASURED. A live container with the activator ALONE answered on the
+  // bus, so the enabler is redundant and is not passed.
+  assert.ok(!args.includes('--allow-dangerously-skip-permissions'));
   // Decision 4: the two sets are mutually exclusive. A container child that
   // also got --permission-mode would be gated twice and stall.
   assert.ok(!args.includes('--permission-mode'));
