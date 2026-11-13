@@ -471,7 +471,11 @@ test('EVERY child callback registration goes through the generation guard', () =
   // original bug was `onTurnEnd` being ABSENT, not unwrapped. "Every
   // registration present is wrapped" is a different property from "every
   // required callback is registered". Raised by claude1.
-  const REQUIRED = ['onTurnEnd', 'onSession', 'onDenial', 'onUsage', 'onExit'];
+  // ⚠️ `onEvent` JOINED THE LIST DELIBERATELY. It carries the child's own
+  // output to the log, and a stale child keeps emitting — so its text would
+  // otherwise be logged as the LIVE child's answer, which is the exact
+  // ambiguity that logging was added to remove.
+  const REQUIRED = ['onTurnEnd', 'onSession', 'onDenial', 'onUsage', 'onExit', 'onEvent'];
   const present = registrations.map(([, name]) => name);
 
   assert.deepEqual(
