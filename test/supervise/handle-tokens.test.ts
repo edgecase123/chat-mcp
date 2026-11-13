@@ -101,10 +101,16 @@ test('🛑 a handle that is not a legal handle is REFUSED, not minted for', () =
  * 🛑 `constructor` IS A LEGAL HANDLE AND MUST WORK. `__proto__` is refused for
  * starting with `_`, not for being a prototype key, so banning prototype names
  * was never the fix — one file per handle is. This is the test that says so.
+ *
+ * `toString` is refused, and ONLY because of its capital S. It is the paired
+ * control for the handle case rule, not evidence that prototype keys are
+ * special-cased — see `🛑 a handle carrying a CAPITAL is refused`.
  */
 test('🛑 a handle that collides with an Object prototype key still authenticates', () => {
   assert.equal(authenticateToken(mintToken('constructor')), 'constructor');
-  assert.equal(authenticateToken(mintToken('toString')), 'toString');
+
+  assert.throws(() => mintToken('toString'), /Invalid handle/);
+  assert.equal(authenticateToken(mintToken('tostring')), 'tostring');
 });
 
 /**
