@@ -181,6 +181,33 @@ test('🛑 a MISSING wake adapter puts its hint in the SERVED instructions, whic
   assert.match(instructions, /HINT-SENTINEL/);
 });
 
+/**
+ * 🛑 TWO SESSIONS, ONE HANDLE. The test below uses two DIFFERENT handles, so a
+ * cache keyed on `ctx.handle` passes it — measured by claude2 at 1308/1308.
+ * Unit 2 serves one server PER SESSION, and a handle can hold several sessions.
+ *
+ * Concurrent, not sequential. A sequential pair would connect the cached
+ * instance after the first call had closed it, which the SDK permits.
+ */
+test('🛑 ONE handle with TWO sessions gets TWO servers, so a per-HANDLE cache cannot pass', async (t) => {
+  const first = contextFor('build-server-shared');
+  const second = contextFor('build-server-shared');
+
+  t.after(async () => {
+    await first.notify.close();
+    await second.notify.close();
+    first.db.close();
+    second.db.close();
+  });
+
+  assert.notEqual(first.session_id, second.session_id, 'the fixture must vary the session, not the handle');
+
+  const [a, b] = await Promise.all([served(first), served(second)]);
+
+  assert.deepEqual(a.tools, TOOLS);
+  assert.deepEqual(b.tools, TOOLS);
+});
+
 test('two contexts get INDEPENDENT servers, which is what per-session HTTP needs', async (t) => {
   const a = contextFor('build-server-a');
   const b = contextFor('build-server-b');
