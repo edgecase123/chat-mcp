@@ -4,9 +4,15 @@
  * Handles and room names live in the same DAO column (`messages.to_handle`),
  * so they must be distinguishable. Convention: room names always start with
  * `#`; handles never do.
+ *
+ * 🛑 BOTH ARE LOWERCASE-ONLY, AND FOR A HANDLE THAT IS A SECURITY PROPERTY. A
+ * handle becomes a filename in six places and macOS APFS is case-insensitive,
+ * so `Alice` and `alice` shared one file and the token store answered one
+ * agent with the other's identity. Pinned by `🛑 a handle carrying a CAPITAL
+ * is refused`.
  */
 
-const HANDLE_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ROOM_RE = /^#[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export function isRoomName(s: string): boolean {
@@ -28,7 +34,7 @@ export function assertRoomName(s: string): void {
 export function assertHandle(s: string): void {
   if (!isHandle(s)) {
     throw new Error(
-      `Invalid handle "${s}". Handles must match [a-zA-Z0-9][a-zA-Z0-9_-]{0,63} (no # prefix).`,
+      `Invalid handle "${s}". Handles must match [a-z0-9][a-z0-9_-]{0,63} (lowercase, no # prefix).`,
     );
   }
 }

@@ -47,7 +47,15 @@ export function notifyDir(): string {
   return join(stateDir(), 'notify');
 }
 
+/**
+ * 🛑 THE HANDLE BECOMES A FILENAME, SO IT IS VALIDATED. Narrowing the handle
+ * pattern reaches only the paths that call the validator, and this one did not.
+ * Pinned by `🛑 EVERY path builder that makes a handle into a filename
+ * REFUSES an illegal handle`.
+ */
 export function notifyPathFor(handle: string): string {
+  assertHandle(handle);
+
   return join(notifyDir(), handle);
 }
 
@@ -62,7 +70,10 @@ export function socketDir(): string {
   return join(stateDir(), 'sock');
 }
 
+/** 🛑 The handle becomes a filename, so it is validated. See the test. */
 export function socketPathFor(handle: string): string {
+  assertHandle(handle);
+
   return join(socketDir(), handle);
 }
 
@@ -109,7 +120,10 @@ export function mcpConfigDir(): string {
   return join(stateDir(), 'mcp');
 }
 
+/** 🛑 The handle becomes a filename, so it is validated. See the test. */
 export function mcpConfigPathFor(handle: string): string {
+  assertHandle(handle);
+
   return join(mcpConfigDir(), `${handle}.json`);
 }
 
@@ -166,6 +180,8 @@ export function adaptersDir(): string {
  * rename doesn't silently desync the two sides.
  */
 export function adapterScriptPath(framework: string, handle: string): string {
+  assertHandle(handle);
+
   return join(adaptersDir(), `${framework}-${handle}.sh`);
 }
 
