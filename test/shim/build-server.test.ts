@@ -47,7 +47,40 @@ function contextFor(handle: string): ShimContext {
   };
 }
 
-test('🛑 buildServer SERVES all 22 tools, so a transport swap cannot silently drop one', async (t) => {
+/**
+ * 🛑 22 TOOLS, NOT 21 INSTALLERS. The two numbers are different claims and
+ * both read "22" in prose, which is how a count test ends up pinning the wrong
+ * one. `index.ts` makes 21 `install*` calls; `claims.ts` registers three tools
+ * and `installInboxResource` registers none, so 20 tool installers give 22.
+ *
+ * The SET, not the count. A count alone passes a rename.
+ */
+const TOOLS = [
+  'claim',
+  'claims',
+  'health',
+  'inbox',
+  'list_agents',
+  'register',
+  'release',
+  'report_context',
+  'room_boot',
+  'room_delete',
+  'room_inbox',
+  'room_join',
+  'room_leave',
+  'room_list',
+  'room_members',
+  'room_send',
+  'search',
+  'send',
+  'set_status',
+  'set_style',
+  'wait_for_message',
+  'whoami',
+];
+
+test('🛑 buildServer SERVES exactly these 22 TOOLS, so neither a drop nor a rename passes', async (t) => {
   const ctx = contextFor('build-server-probe');
 
   t.after(async () => {
@@ -55,17 +88,7 @@ test('🛑 buildServer SERVES all 22 tools, so a transport swap cannot silently 
     ctx.db.close();
   });
 
-  const names = await toolsOf(ctx);
-
-  // The COUNT is the guard. 20 installer files register 22 tools, because
-  // `claims.ts` registers three. A dropped `install*` call fails here.
-  assert.equal(names.length, 22, `expected 22 tools, got ${names.length}: ${names.join(', ')}`);
-
-  // A spot-check per family, so a count that stays 22 while a name changes
-  // still fails.
-  for (const expected of ['whoami', 'send', 'inbox', 'room_join', 'claims', 'health', 'search']) {
-    assert.ok(names.includes(expected), `missing tool "${expected}" in: ${names.join(', ')}`);
-  }
+  assert.deepEqual(await toolsOf(ctx), TOOLS);
 });
 
 test('two contexts get INDEPENDENT servers, which is what per-session HTTP needs', async (t) => {
@@ -85,5 +108,5 @@ test('two contexts get INDEPENDENT servers, which is what per-session HTTP needs
   const [first, second] = await Promise.all([toolsOf(a), toolsOf(b)]);
 
   assert.deepEqual(first, second);
-  assert.equal(first.length, 22);
+  assert.deepEqual(first, TOOLS);
 });
