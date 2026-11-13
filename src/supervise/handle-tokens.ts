@@ -1,84 +1,108 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { ensureStateDir, stateDir, writePrivateFileSync } from '../util/paths.js';
+import { assertHandle } from '../util/naming.js';
+import { chmodVerified, stateDir, writePrivateFileSync } from '../util/paths.js';
 
 const TOKEN_BYTES = 32;
 
-/** Pinned by `the stored file holds NO token, only its digest`. */
+/** Pinned by `the stored file holds NO token, only its SHA-256`. */
 const DIGEST = 'sha256';
 
+const HEX_DIGEST = /^[0-9a-f]{64}$/;
+const SUFFIX = '.json';
+const DIR_MODE = 0o700;
+
 interface TokenFile {
-  handles: Record<string, string>;
+  digest: string;
 }
 
-export function handleTokensPath(): string {
-  return join(stateDir(), 'handle-tokens.json');
+/**
+ * 🛑 ONE FILE PER HANDLE, AND THAT IS THE FIX FOR A MEASURED DATA LOSS. A
+ * single shared JSON file made `mintToken` a read-modify-write with no lock:
+ * four concurrent mints returned four tokens and the file kept three, so one
+ * agent started holding a credential that authenticated as nobody. Separate
+ * files cannot lose a sibling's write.
+ *
+ * Pinned by `🛑 CONCURRENT mints of DISTINCT handles all keep working`.
+ */
+export function handleTokensDir(): string {
+  return join(stateDir(), 'tokens');
+}
+
+/**
+ * 🛑 THE HANDLE BECOMES A FILENAME, SO IT IS VALIDATED — same reason as
+ * `manifestPathFor`. It also closes a second data loss: `__proto__` assigned
+ * into a `JSON.parse` object hit the inherited setter, so minting returned a
+ * token and stored nothing.
+ */
+export function handleTokenPathFor(handle: string): string {
+  assertHandle(handle);
+
+  return join(handleTokensDir(), `${handle}${SUFFIX}`);
 }
 
 function digestOf(token: string): Buffer {
   return createHash(DIGEST).update(token, 'utf8').digest();
 }
 
-/**
- * Throws on a file it cannot parse rather than returning an empty map.
- *
- * Rejected: swallowing the parse error. That turns a corrupt file into
- * "every token is wrong", which looks identical to an attack and sends the
- * operator hunting the caller instead of the file.
- */
-function readTokens(): Record<string, string> {
-  const path = handleTokensPath();
+function ensureTokensDir(): string {
+  const dir = handleTokensDir();
 
-  if (!existsSync(path)) return {};
+  mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  chmodVerified(dir, DIR_MODE);
 
-  const parsed = JSON.parse(readFileSync(path, 'utf8')) as TokenFile;
-
-  if (typeof parsed?.handles !== 'object' || parsed.handles === null) {
-    throw new Error(`${path} has no "handles" object`);
-  }
-
-  return parsed.handles;
-}
-
-function writeTokens(handles: Record<string, string>): void {
-  ensureStateDir();
-  writePrivateFileSync(handleTokensPath(), `${JSON.stringify({ handles }, null, 2)}\n`);
+  return dir;
 }
 
 /**
  * Mint `handle`'s bearer token, returning it ONCE. Only its digest is stored,
  * so nothing that reads the file afterwards can authenticate with it.
  *
- * Replaces any token the handle already had — see `🛑 re-minting a handle
- * INVALIDATES the token it had before`.
+ * Replaces any token the handle already had, which is what a container restart
+ * needs — see `🛑 re-minting a handle INVALIDATES the token it had before`.
+ *
+ * Written to a temp name and renamed, so a concurrent reader sees either the
+ * old file or the new one and never a half-written digest.
  */
 export function mintToken(handle: string): string {
-  if (handle.trim().length === 0) {
-    throw new Error('refusing to mint a token for an empty handle');
-  }
-
+  const path = handleTokenPathFor(handle);
   const token = randomBytes(TOKEN_BYTES).toString('base64url');
-  const handles = readTokens();
+  const payload: TokenFile = { digest: digestOf(token).toString('hex') };
 
-  handles[handle] = digestOf(token).toString('hex');
-  writeTokens(handles);
+  ensureTokensDir();
+
+  const staging = `${path}.${process.pid}.tmp`;
+
+  writePrivateFileSync(staging, `${JSON.stringify(payload, null, 2)}\n`);
+  renameSync(staging, path);
 
   return token;
 }
 
 export function revokeToken(handle: string): void {
-  const handles = readTokens();
+  rmSync(handleTokenPathFor(handle), { force: true });
+}
 
-  if (!(handle in handles)) return;
+/**
+ * 🛑 A MALFORMED DIGEST THROWS RATHER THAN NEVER MATCHING. A non-hex value
+ * decodes to a zero-length buffer, so the length guard skipped it and that
+ * handle stopped authenticating forever with no signal — indistinguishable
+ * from an attacker presenting a forged token. Found by claude2.
+ */
+function digestIn(path: string): Buffer {
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as TokenFile;
 
-  delete handles[handle];
-  writeTokens(handles);
+  if (typeof parsed?.digest !== 'string' || !HEX_DIGEST.test(parsed.digest)) {
+    throw new Error(`${path} does not hold a ${DIGEST} hex digest`);
+  }
+
+  return Buffer.from(parsed.digest, 'hex');
 }
 
 /**
  * 🛑 THE CALLER'S IDENTITY COMES FROM ITS SECRET, NEVER FROM A FIELD IT FILLS
- * IN. This is what `BrokerOptions.authenticate` and the HTTP transport both
+ * IN. This is what `BrokerOptions.authenticate` and `McpHttpService` both
  * want, so neither invents its own comparison.
  *
  * Both sides are fixed-width digests, so a wrong-length token is refused
@@ -87,18 +111,29 @@ export function revokeToken(handle: string): void {
  *
  * Rejected: returning inside the loop on the first match. An early return
  * makes the work depend on WHICH handle matched, and the whole reason for
- * `timingSafeEqual` here is that the work must not depend on the secret.
+ * `timingSafeEqual` here is that the work must not depend on the secret. Two
+ * handles holding one digest is the deterministic proof — a full scan sees
+ * both and refuses, an early return answers the first. claude2's test.
  */
 export function authenticateToken(token: string): string | null {
-  const presented = digestOf(token);
-  let found: string | null = null;
+  const dir = handleTokensDir();
 
-  for (const [handle, stored] of Object.entries(readTokens())) {
-    const candidate = Buffer.from(stored, 'hex');
+  if (!existsSync(dir)) return null;
+
+  const presented = digestOf(token);
+  const matched: string[] = [];
+
+  for (const entry of readdirSync(dir).sort()) {
+    if (!entry.endsWith(SUFFIX)) continue;
+
+    const candidate = digestIn(join(dir, entry));
 
     if (candidate.length !== presented.length) continue;
-    if (timingSafeEqual(candidate, presented)) found = handle;
+    if (timingSafeEqual(candidate, presented)) matched.push(entry.slice(0, -SUFFIX.length));
   }
 
-  return found;
+  // 🛑 AMBIGUOUS MEANS REFUSE. Two handles sharing a digest is a hand-edited
+  // file, not a collision anyone can produce, and guessing which one the
+  // caller is would be the one thing this function must never do.
+  return matched.length === 1 ? (matched[0] as string) : null;
 }

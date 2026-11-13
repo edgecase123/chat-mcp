@@ -1,16 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 // 🛑 BEFORE any import that resolves a state path.
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-handle-tokens-'));
 
-const { mintToken, authenticateToken, revokeToken, handleTokensPath } = await import(
-  '../../src/supervise/handle-tokens.js'
-);
+const { mintToken, authenticateToken, revokeToken, handleTokenPathFor, handleTokensDir } =
+  await import('../../src/supervise/handle-tokens.js');
 
 /**
  * 🛑 THE PAIRED CONTROL IS THE POINT. "A wrong token is refused" passes for a
@@ -64,24 +64,90 @@ test('🛑 a token of the WRONG LENGTH is refused, never thrown — the compare 
  */
 test('🛑 the stored file holds NO token, only its SHA-256 — an encoding of the token does not pass', () => {
   const token = mintToken('tok-ondisk');
-  const stored = (JSON.parse(readFileSync(handleTokensPath(), 'utf8')) as {
-    handles: Record<string, string>;
-  }).handles;
+  const raw = readFileSync(handleTokenPathFor('tok-ondisk'), 'utf8');
+  const stored = (JSON.parse(raw) as { digest: string }).digest;
 
-  assert.equal(stored['tok-ondisk'], createHash('sha256').update(token, 'utf8').digest('hex'));
+  assert.equal(stored, createHash('sha256').update(token, 'utf8').digest('hex'));
 
-  // Second layer, and the control for it: the handle IS in the text, so a
-  // missing token is about the token rather than about an empty file.
-  const raw = readFileSync(handleTokensPath(), 'utf8');
-
+  // Second layer, and its control: the digest IS in the text, so a missing
+  // token is about the token rather than about reading an empty file.
   assert.doesNotMatch(raw, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.match(raw, /tok-ondisk/);
+  assert.match(raw, new RegExp(stored));
 });
 
-test('the stored file is private to the operator', () => {
+test('the stored file is private to the operator, and so is its directory', () => {
   mintToken('tok-mode');
 
-  assert.equal(statSync(handleTokensPath()).mode & 0o777, 0o600);
+  assert.equal(statSync(handleTokenPathFor('tok-mode')).mode & 0o777, 0o600);
+  assert.equal(statSync(handleTokensDir()).mode & 0o777, 0o700);
+});
+
+/**
+ * 🛑 THE HANDLE BECOMES A FILENAME. `__proto__` previously returned a token and
+ * stored NOTHING — assigning it into a `JSON.parse` object hit the inherited
+ * setter, so the caller held a credential for nobody. Found by claude2.
+ */
+test('🛑 a handle that is not a legal handle is REFUSED, not minted for', () => {
+  for (const bad of ['__proto__', '../escape', 'has/slash', '', '#room', '_leading']) {
+    assert.throws(() => mintToken(bad), /Invalid handle/, `mintToken accepted ${JSON.stringify(bad)}`);
+  }
+
+  // The control: a legal handle still mints, so the throws above are about the
+  // names and not about minting being broken.
+  assert.equal(authenticateToken(mintToken('tok-legal')), 'tok-legal');
+});
+
+/**
+ * 🛑 `constructor` IS A LEGAL HANDLE AND MUST WORK. `__proto__` is refused for
+ * starting with `_`, not for being a prototype key, so banning prototype names
+ * was never the fix — one file per handle is. This is the test that says so.
+ */
+test('🛑 a handle that collides with an Object prototype key still authenticates', () => {
+  assert.equal(authenticateToken(mintToken('constructor')), 'constructor');
+  assert.equal(authenticateToken(mintToken('toString')), 'toString');
+});
+
+/**
+ * 🛑 THE DETERMINISTIC PROOF THAT THE SCAN DOES NOT RETURN EARLY, claude2's
+ * construction. Two handles holding one digest: a full scan sees both and
+ * refuses, an early return answers whichever it met first.
+ *
+ * 🛑 REFUSING IS THE BEHAVIOUR, NOT A SIDE EFFECT. Guessing which of two
+ * handles a caller is would be the one thing this function must never do.
+ */
+test('🛑 TWO handles sharing one digest are BOTH refused, which an early return could not do', () => {
+  const token = mintToken('tok-twin-a');
+  const digest = createHash('sha256').update(token, 'utf8').digest('hex');
+
+  // Written directly — minting cannot produce a collision.
+  writeFileSync(handleTokenPathFor('tok-twin-b'), JSON.stringify({ digest }));
+
+  assert.equal(authenticateToken(token), null);
+
+  // The control: removing the twin restores the single answer, so the refusal
+  // above was the ambiguity and not a broken scan.
+  revokeToken('tok-twin-b');
+
+  assert.equal(authenticateToken(token), 'tok-twin-a');
+});
+
+/**
+ * 🛑 A MALFORMED DIGEST THROWS. A non-hex value decodes to a ZERO-LENGTH
+ * buffer, so the length guard skipped it and that handle stopped
+ * authenticating forever with no signal. Found by claude2.
+ */
+test('🛑 a digest that is not hex THROWS and names its file, rather than silently never matching', () => {
+  const token = mintToken('tok-corrupt-neighbour');
+
+  writeFileSync(handleTokenPathFor('tok-corrupt'), JSON.stringify({ digest: 'zzzz-not-hex' }));
+
+  assert.throws(() => authenticateToken(token), /tok-corrupt\.json/);
+
+  // The control: with the corrupt file gone the neighbour authenticates, so
+  // the throw was the file and not the token.
+  revokeToken('tok-corrupt');
+
+  assert.equal(authenticateToken(token), 'tok-corrupt-neighbour');
 });
 
 /**
@@ -105,4 +171,39 @@ test('revoking a handle refuses its token and leaves every other handle working'
 
   assert.equal(authenticateToken(doomed), null);
   assert.equal(authenticateToken(spared), 'tok-spared');
+});
+
+/**
+ * 🛑 THE BLOCKER claude2 MEASURED ON `ce5c91f`: four concurrent mints, one
+ * token silently discarded. Read-modify-write on one shared file.
+ *
+ * Real child processes, because the race is between PROCESSES — two agents
+ * being spawned at once is the production case, and nothing in one event loop
+ * reproduces it.
+ */
+test('🛑 CONCURRENT mints of DISTINCT handles all keep working, so no token is handed out dead', async () => {
+  const handles = ['conc-alpha', 'conc-beta', 'conc-gamma', 'conc-delta'];
+  const root = resolve(import.meta.dirname, '../..');
+  const child = join(root, 'test/fixtures/mint-one.mts');
+
+  const tokens = await Promise.all(
+    handles.map(
+      (handle) =>
+        new Promise<string>((ok, bad) => {
+          execFile(
+            process.execPath,
+            ['--import', 'tsx', child, handle, root],
+            { env: { ...process.env } },
+            (err, stdout) => (err ? bad(err) : ok(stdout.trim())),
+          );
+        }),
+    ),
+  );
+
+  assert.equal(new Set(tokens).size, handles.length, 'a handle was handed a duplicate token');
+
+  // 🛑 EVERY ONE, NOT "most". One lost write is the whole finding.
+  for (const [i, handle] of handles.entries()) {
+    assert.equal(authenticateToken(tokens[i] as string), handle, `${handle}'s token is dead`);
+  }
 });
