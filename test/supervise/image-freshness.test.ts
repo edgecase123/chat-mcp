@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  utimesSync,
+  symlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -131,35 +138,139 @@ test('⚠️ a changed package.json forces a rebuild', () => {
  * a source that `BUILD_INPUT_PATHS` does not cover, so the third instance
  * cannot ship.
  */
-test('🛑 EVERY source the Dockerfile copies is a hashed build input', () => {
-  const dockerfile = readFileSync(dockerfilePath(), 'utf8');
+/**
+ * Every path a Dockerfile reads OUT OF THE BUILD CONTEXT.
+ *
+ * 🛑 `ADD` COUNTS AND LINE CONTINUATIONS MUST BE JOINED FIRST. The first
+ * version matched `COPY` on a raw line and FAILED OPEN on both — an added
+ * `ADD entrypoint.sh` parsed clean while being completely unhashed. A guard
+ * that fails open is worse than no guard, because it is read as a promise.
+ * Measured and raised by claude2 on PR 211.
+ *
+ * ⚠️ `--from=` IS EXCLUDED ON PURPOSE. It copies from an earlier build
+ * STAGE, not from the context, so there is no local file to hash.
+ */
+export function contextSources(dockerfile: string): string[] {
+  const joined = dockerfile.replace(/\\\r?\n/g, ' ');
+  const sources: string[] = [];
 
-  const copied = dockerfile
-    .split('\n')
-    .filter((line) => /^\s*COPY\s/i.test(line))
-    .flatMap((line) => line.trim().split(/\s+/).slice(1))
-    .filter((token) => !token.startsWith('--'))
-    // The last token of a COPY is the DESTINATION, not a source.
-    .slice(0, -1)
-    .filter((token) => token !== '.' && token !== './');
+  for (const raw of joined.split('\n')) {
+    const line = raw.trim();
 
-  assert.ok(copied.length > 0, 'no COPY sources parsed; this guard is stale');
+    if (line.startsWith('#')) continue;
+    if (!/^(COPY|ADD)\s/i.test(line)) continue;
 
-  const unhashed = copied.filter(
+    let rest = line.slice(line.indexOf(' ') + 1).trim();
+    let fromStage = false;
+
+    while (rest.startsWith('--')) {
+      const flag = /^(\S+)\s*/.exec(rest);
+
+      if (!flag) break;
+      if (flag[1]!.startsWith('--from=')) fromStage = true;
+
+      rest = rest.slice(flag[0].length);
+    }
+
+    if (fromStage) continue;
+
+    // The JSON-array form is as legal as the shell form.
+    const tokens: string[] = rest.startsWith('[')
+      ? (JSON.parse(rest) as string[])
+      : rest.split(/\s+/);
+
+    // ⚠️ PER LINE. The first version sliced the FLATTENED list, so it
+    // dropped one token in total and a third COPY leaked its destination
+    // through as a phantom source.
+    sources.push(...tokens.slice(0, -1).filter((t) => t !== '.' && t !== './'));
+  }
+
+  return sources;
+}
+
+/**
+ * 🛑 THE GUARD FOR THE WHOLE CLASS, NOT THE INSTANCES WE FOUND.
+ *
+ * `dist` was missed, then both manifests were missed in the fix for `dist`.
+ * Same defect each time: the Dockerfile reads something the hash does not.
+ * This fails the moment a `COPY` or `ADD` names a context source that
+ * `BUILD_INPUT_PATHS` does not cover.
+ */
+test('🛑 EVERY source the Dockerfile reads from the context is a hashed build input', () => {
+  const sources = contextSources(readFileSync(dockerfilePath(), 'utf8'));
+
+  // ⚠️ AN EXACT COUNT, NOT `> 0`. A parser that finds 1 of 3 would
+  // otherwise pass while seeing almost nothing. Raised by claude2.
+  assert.equal(
+    sources.length,
+    BUILD_INPUT_PATHS.length,
+    `parsed ${sources.length} context source(s) (${sources.join(', ')}); the guard is stale`,
+  );
+
+  const unhashed = sources.filter(
     (src) => !(BUILD_INPUT_PATHS as readonly string[]).includes(src),
   );
 
   assert.deepEqual(
     unhashed,
     [],
-    `the Dockerfile copies ${unhashed.join(', ')}, which the freshness hash never reads`,
+    `the Dockerfile reads ${unhashed.join(', ')}, which the freshness hash never sees`,
   );
 });
 
 /**
- * 🛑 THE REGRESSION ITSELF, STATED AS THE ORIGINAL SYMPTOM. Before the fix
- * these two trees hashed IDENTICALLY, because only the Dockerfile was read.
+ * ⚠️ THE GUARD'S OWN PAIRED CONTROLS. Each row is a shape that the first
+ * parser got wrong, and three of them FAILED OPEN.
  */
+test('⚠️ the Dockerfile parser sees ADD, continuations and the JSON form', () => {
+  const cases: [string, string, string[]][] = [
+    ['plain COPY', 'COPY dist ./dist', ['dist']],
+    ['ADD, which was invisible', 'ADD entrypoint.sh /entrypoint.sh', ['entrypoint.sh']],
+    ['two sources on one line', 'COPY package.json package-lock.json ./', ['package.json', 'package-lock.json']],
+    ['a line continuation', 'COPY \\\n  tsconfig.json \\\n  ./', ['tsconfig.json']],
+    ['the JSON-array form', 'COPY ["src.js", "dest.js"]', ['src.js']],
+    ['a comment, not an instruction', '# COPY secrets.env ./', []],
+    ['--chown does not eat the source', 'COPY --chown=agent:agent dist ./dist', ['dist']],
+    ['--from reads a STAGE, not the context', 'COPY --from=build /app/dist ./dist', []],
+  ];
+
+  for (const [label, line, expected] of cases) {
+    assert.deepEqual(contextSources(line), expected, label);
+  }
+});
+
+/**
+ * ⚠️ THE DESTINATION-LEAK CONTROL. The first parser sliced the FLATTENED
+ * token list, so with three instructions a destination leaked through as a
+ * phantom source and the guard failed for the wrong reason.
+ */
+test('⚠️ a third COPY does not leak its destination as a source', () => {
+  const dockerfile = ['COPY a ./a', 'COPY b ./b', 'COPY c ./c'].join('\n');
+
+  assert.deepEqual(contextSources(dockerfile), ['a', 'b', 'c']);
+});
+
+/**
+ * 🛑 A BROKEN SYMLINK UNDER dist TOOK THE SUPERVISOR DOWN. `statSync`
+ * throws on one, so `supervise --container` died with an opaque ENOENT
+ * instead of rebuilding the image. Raised by claude2 on PR 211.
+ */
+test('🛑 a broken symlink under dist does not throw, and still moves the hash', () => {
+  const intact = dist({ 'index.js': 'x' });
+
+  const dangling = dist({ 'index.js': 'x' });
+  symlinkSync(join(dangling, 'dist', 'nowhere'), join(dangling, 'dist', 'link.js'));
+
+  const hashed = buildInputsHash(dangling);
+
+  assert.equal(typeof hashed, 'string');
+  assert.notEqual(
+    hashed,
+    buildInputsHash(intact),
+    'a dangling link hashed the same as no link, so swapping a real file for one would not rebuild',
+  );
+});
+
 test('🛑 a dist WITHOUT the HTTP bus hashes differently from one WITH it', () => {
   const stale = dist({ 'supervise/index.js': 'x' });
   const current = dist({

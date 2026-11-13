@@ -71,11 +71,35 @@ function contextPath(): string {
   return dirname(dockerfilePath());
 }
 
+/**
+ * What kind of thing `path` is, without ever throwing.
+ *
+ * 🛑 `statSync` THROWS ON A BROKEN SYMLINK, and `dist` is build output that
+ * a half-finished build leaves them in. An unguarded stat took
+ * `supervise --container` down with an opaque ENOENT instead of rebuilding
+ * the image — the one action that would have cleared it. Raised by claude2
+ * on PR 211.
+ */
+function kindOf(path: string): 'file' | 'dir' | 'unreadable' {
+  try {
+    return statSync(path).isDirectory() ? 'dir' : 'file';
+  } catch {
+    return 'unreadable';
+  }
+}
+
+/**
+ * Entries under `root`, relative to it. A single file yields `['']`.
+ *
+ * ⚠️ AN UNREADABLE ENTRY IS KEPT, NOT SKIPPED. Dropping it would make a
+ * tree with a broken symlink hash identically to one without, so replacing a
+ * real file with a dangling link would not rebuild.
+ */
 function filesUnder(root: string): string[] {
-  if (!statSync(root).isDirectory()) return [''];
+  if (kindOf(root) !== 'dir') return [''];
 
   return readdirSync(root, { recursive: true, encoding: 'utf8' })
-    .filter((rel) => statSync(join(root, rel)).isFile())
+    .filter((rel) => kindOf(join(root, rel)) !== 'dir')
     .sort();
 }
 
@@ -110,8 +134,16 @@ export function buildInputsHash(context: string = contextPath()): string {
     }
 
     for (const rel of filesUnder(root)) {
+      const full = rel ? join(root, rel) : root;
+
       hash.update(`\0${input}/${rel}\0`);
-      hash.update(readFileSync(rel ? join(root, rel) : root));
+
+      if (kindOf(full) === 'unreadable') {
+        hash.update('\0unreadable\0');
+        continue;
+      }
+
+      hash.update(readFileSync(full));
     }
   }
 
