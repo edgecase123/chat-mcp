@@ -100,14 +100,22 @@ function containsWhenCreated(dir: string, target: string): boolean {
 }
 
 /**
- * Refuse a project directory that CONTAINS the sandbox's own state, or throw.
+ * Refuse a project directory that OVERLAPS the sandbox's own state, or throw.
  *
- * 🛑 THE MANIFEST CHECK IS THE HALF THAT CLOSES A HOLE. `manifestDir()` is
- * bind-mounted nowhere, so a project tree above it is the only way in, and the
- * broker executes from it. `stateDir()` is mounted read-write regardless (#188),
- * so refusing an ancestor of THAT is defence in depth, not the barrier.
+ * 🛑 OVERLAP IS TWO-DIRECTIONAL AND ONLY ONE HALF IS OBVIOUS. An ANCESTOR
+ * carries the state in under the project mount. A DESCENDANT is the same hole
+ * through the other door: `<state>/tokens` is neither equal to nor an ancestor
+ * of `<state>`, so a one-way check allows it and it lands at `/work`
+ * read-write. `authenticateToken` then trusts the digest written there, which
+ * is the forgery #188 describes. Both directions have a test.
  *
- * 🛑 BOTH CHECKS ARE STILL NEEDED, AND A SYMLINK IS WHAT SEPARATES THEM.
+ * 🛑 THE STATE-DIR CHECK ONLY BECAME A BARRIER RECENTLY. `stateDir()` was
+ * bind-mounted read-write on every containerized spawn, so this changed nothing
+ * the container could already reach. That mount is gone, so the project mount
+ * is the only remaining route in. `manifestDir()` was always the live half,
+ * because it is bind-mounted nowhere and the broker executes from it.
+ *
+ * 🛑 BOTH PATHS ARE STILL NEEDED, AND A SYMLINK IS WHAT SEPARATES THEM.
  * `manifestDir()` is `${stateDir()}-manifests`, a sibling, so an ancestor of
  * one is normally an ancestor of the other — until `stateDir()` resolves away:
  *
@@ -118,18 +126,31 @@ function containsWhenCreated(dir: string, target: string): boolean {
  * still DISCLOSES `chat.db` — every room and DM — which is #162.
  */
 export function assertProjectDirOutsideState(projectDir: string): void {
-  if (containsWhenCreated(projectDir, stateDir())) {
-    throw new Error(
-      `refusing "${projectDir}": it contains the state directory "${stateDir()}", ` +
-        'so mounting it would put the sandbox inside the container read-write',
-    );
-  }
+  assertDisjoint(
+    projectDir,
+    stateDir(),
+    'state directory',
+    'mounting it would put the sandbox inside the container read-write',
+  );
 
-  if (containsWhenCreated(projectDir, manifestDir())) {
-    throw new Error(
-      `refusing "${projectDir}": it contains the manifest directory "${manifestDir()}", ` +
-        'so the agent could edit the manifest the broker executes from',
-    );
+  assertDisjoint(
+    projectDir,
+    manifestDir(),
+    'manifest directory',
+    'the agent could edit the manifest the broker executes from',
+  );
+}
+
+/** Neither path may contain the other. */
+function assertDisjoint(projectDir: string, sensitive: string, noun: string, why: string): void {
+  const overlap = containsWhenCreated(projectDir, sensitive)
+    ? 'contains'
+    : containsWhenCreated(sensitive, projectDir)
+      ? 'is inside'
+      : null;
+
+  if (overlap !== null) {
+    throw new Error(`refusing "${projectDir}": it ${overlap} the ${noun} "${sensitive}", so ${why}`);
   }
 }
 

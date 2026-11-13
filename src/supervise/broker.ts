@@ -1,6 +1,7 @@
-import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
+import { createServer, type Server, type Socket } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
 import { isRecord, type ListedCommand } from './commands.js';
+import { BIND_ADDRESS, listenOnLoopback } from './loopback.js';
 import {
   DEFAULT_MAX_BUFFER,
   DEFAULT_TIMEOUT_MS,
@@ -9,13 +10,6 @@ import {
   runCommandFor,
 } from './run-command-service.js';
 import { type ScriptResult, type ScriptRunner } from './run-script.js';
-
-/**
- * 🛑 LOOPBACK IS NOT THE BOUNDARY. A container reaches a host `127.0.0.1` bind
- * through `host.docker.internal` on Docker Desktop, measured. The token is what
- * separates callers; this only keeps the broker off the operator's LAN.
- */
-const BIND_ADDRESS = '127.0.0.1';
 
 const DEFAULT_MAX_IN_FLIGHT = 4;
 const DEFAULT_MAX_CONNECTIONS = 8;
@@ -87,15 +81,7 @@ export class CommandBroker {
     server.maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
     server.on('connection', (socket) => broker.accept(socket));
 
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, BIND_ADDRESS, () => {
-        server.removeListener('error', reject);
-        resolve();
-      });
-    });
-
-    broker.boundPort = (server.address() as AddressInfo).port;
+    broker.boundPort = await listenOnLoopback(server);
 
     return broker;
   }

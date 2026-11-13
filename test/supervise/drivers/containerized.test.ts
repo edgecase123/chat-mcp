@@ -12,16 +12,23 @@ const { stateDir } = await import('../../../src/util/paths.js');
 const { registerMount, mountsPath } = await import('../../../src/supervise/mounts.js');
 const { claudeSpawn } = await import('../../../src/adapters/claude-spawn.js');
 const {
-  dockerArgsForVendor,
+  dockerRunPlan,
   CONTAINER_PROJECT_DIR,
-  containerStateDir,
+  CONTAINER_MCP_CONFIG_ENV,
   containerPathFor,
+  containerMcpConfigPath,
+  containerBusUrl,
 } = await import('../../../src/supervise/drivers/containerized.js');
 
 const PROJECT_DIR = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-project-'));
 
-function dockerArgsFor(opts: Parameters<typeof dockerArgsForVendor>[1]) {
-  return dockerArgsForVendor(claudeSpawn, opts);
+function dockerRunPlanFor(opts: Parameters<typeof dockerRunPlan>[1]) {
+  return dockerRunPlan(claudeSpawn, opts);
+}
+
+/** The argv alone, for the many tests that assert only on mounts and flags. */
+function dockerArgsFor(opts: Parameters<typeof dockerRunPlan>[1]) {
+  return dockerRunPlanFor(opts).args;
 }
 
 /**
@@ -100,11 +107,38 @@ test('the project dir is bind-mounted to the fixed in-container work dir', () =>
   assert.ok(args.includes(`${PROJECT_DIR}:${CONTAINER_PROJECT_DIR}`));
 });
 
-test('the chat-mcp state dir is bind-mounted so the bus is reachable in-container', async () => {
+/**
+ * 🛑 THE MOUNT IS WHAT LET A CONTAINER FORGE ANY HANDLE'S IDENTITY. `tokens/`
+ * is a child of `stateDir()`, and `authenticateToken` trusts whatever digest
+ * is on disk — so a container could overwrite `tokens/claude1.json` with a
+ * digest it chose, present the matching token, and BE claude1 against both the
+ * MCP listener and the command broker. It also exposed `chat.db` and
+ * `secrets.env` outright.
+ *
+ * The bus is reached over HTTP now, so nothing in there is needed.
+ */
+test('🚨 the chat-mcp state dir is NOT bind-mounted, so tokens and chat.db stay on the host', async () => {
   const { stateDir } = await import('../../../src/util/paths.js');
   setToken('sk-ant-oat-x');
   const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
-  assert.ok(args.includes(`${stateDir()}:${containerStateDir(claudeSpawn)}`));
+
+  for (const arg of args) {
+    assert.ok(
+      !arg.startsWith(`${stateDir()}:`),
+      `the state dir is still mounted as ${arg}`,
+    );
+  }
+});
+
+/**
+ * The paired control. An argv that mounted nothing at all would pass the test
+ * above, and the agent would have no project to work on.
+ */
+test('🚨 the project mount survives the state-dir removal', () => {
+  setToken('sk-ant-oat-x');
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+
+  assert.ok(args.includes(`${PROJECT_DIR}:${CONTAINER_PROJECT_DIR}`));
 });
 
 test('a registered extra mount appears at /mnt/<key>', () => {
@@ -115,10 +149,37 @@ test('a registered extra mount appears at /mnt/<key>', () => {
   assert.ok(args.includes(`${extraDir}:${containerPathFor('local-context')}`));
 });
 
+/**
+ * 🛑 THIS TEST'S NAME ALWAYS CLAIMED THE SECURE PROPERTY AND ITS BODY ASSERTED
+ * THE OPPOSITE. It read `args.includes('CLAUDE_CODE_OAUTH_TOKEN=<value>')`,
+ * which is the value IN the argv — readable by `ps` for the life of the
+ * container, and the thing `AGENTS.md` forbids in those words. The name is
+ * what was right, so the body moved to meet it.
+ */
 test('the token is injected by NAME via -e, and the value never appears as a bare arg', () => {
   setToken('sk-ant-oat-secret-value');
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
-  assert.ok(args.includes('CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-secret-value'));
+  const { args } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+
+  assert.ok(args.includes('-e'), 'no -e at all');
+  assert.ok(args.includes('CLAUDE_CODE_OAUTH_TOKEN'), 'the var is not passed by name');
+
+  for (const arg of args) {
+    assert.ok(
+      !arg.includes('sk-ant-oat-secret-value'),
+      `the token value reached the docker argv as ${arg}`,
+    );
+  }
+});
+
+/**
+ * The paired control for the test above. An argv that simply dropped the token
+ * would pass it, and the container would then start with no credential.
+ */
+test('the token reaches the container through the spawn env instead', () => {
+  setToken('sk-ant-oat-secret-value');
+  const { env } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+
+  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, 'sk-ant-oat-secret-value');
 });
 
 test('the child command always carries --allow-dangerously-skip-permissions, never --permission-mode', () => {
@@ -472,4 +533,123 @@ test('🛑 an extra mount ABOVE the state directory refuses the spawn argv', () 
     () => dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude8' }),
     /state directory/,
   );
+});
+
+
+const BUS = { url: 'http://127.0.0.1:54321/mcp', token: 'bus-token-secret' };
+
+function dockerBusPlan() {
+  setToken('sk-ant-oat-x');
+
+  return dockerRunPlanFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: 'claude1',
+    bus: BUS,
+    grant: { handle: 'claude1-agent', configPath: '/unused/host/path.json', tools: [] },
+  });
+}
+
+function busConfig(): Record<string, any> {
+  const raw = dockerBusPlan().env[CONTAINER_MCP_CONFIG_ENV];
+
+  assert.ok(raw, `nothing in ${CONTAINER_MCP_CONFIG_ENV}`);
+
+  return JSON.parse(raw) as Record<string, any>;
+}
+
+test('🚨 the container config is an HTTP entry, not a command that opens the host database', () => {
+  const chat = busConfig().mcpServers.chat;
+
+  assert.equal(chat.type, 'http');
+  assert.equal(chat.headers.Authorization, `Bearer ${BUS.token}`);
+  assert.equal(chat.command, undefined, 'still launching a stdio shim inside the container');
+});
+
+/**
+ * 🛑 THE TRAP IN THIS WHOLE PIECE. `McpHttpListener.url` is the HOST's view,
+ * and `127.0.0.1` inside a container is the CONTAINER. Shipping the listener's
+ * url verbatim gives the agent a bus that is silently unreachable — it looks
+ * configured and connects to nothing.
+ */
+test('🚨 the config url points at the host, never at the container own loopback', () => {
+  const { url } = busConfig().mcpServers.chat;
+
+  assert.equal(url, 'http://host.docker.internal:54321/mcp');
+  assert.ok(!url.includes('127.0.0.1'), `the container would dial itself: ${url}`);
+});
+
+test('🚨 containerBusUrl keeps the port and the path while moving only the host', () => {
+  assert.equal(containerBusUrl('http://127.0.0.1:9/mcp'), 'http://host.docker.internal:9/mcp');
+});
+
+test('🚨 the bearer token never appears in the docker argv', () => {
+  const { args } = dockerBusPlan();
+
+  for (const arg of args) {
+    assert.ok(!arg.includes(BUS.token), `the bus token reached the argv as ${arg}`);
+  }
+
+  assert.ok(args.includes(CONTAINER_MCP_CONFIG_ENV), 'the config is not passed by name');
+});
+
+/**
+ * The control for the prelude: the CLI's own arguments must survive it as
+ * separate argv entries. `sh -c 'script' name args…` puts them in `"$@"`, so
+ * nothing is re-quoted or re-split.
+ */
+test('🚨 the command is wrapped so the config is written INSIDE the container', () => {
+  const { args } = dockerBusPlan();
+  const sh = args.indexOf('sh');
+
+  assert.ok(sh > 0, 'no sh prelude');
+  assert.equal(args[sh + 1], '-c');
+  assert.ok(args[sh + 2]?.includes(containerMcpConfigPath(claudeSpawn)), 'writes the wrong path');
+  assert.ok(args[sh + 2]?.includes('exec "$@"'), 'never execs the real CLI');
+  assert.equal(args[sh + 3], 'sh', 'no $0 placeholder, so the first CLI arg is eaten');
+  assert.equal(args[sh + 4], 'claude');
+  assert.ok(args.includes('--allow-dangerously-skip-permissions'), 'CLI flags did not survive');
+});
+
+test('🚨 a containerized spawn with no bus endpoint refuses rather than starting blind', () => {
+  setToken('sk-ant-oat-x');
+
+  assert.throws(
+    () =>
+      dockerRunPlanFor({
+        cwd: PROJECT_DIR,
+        supervisorHandle: 'claude1',
+        grant: { handle: 'claude1-agent', configPath: '/unused.json', tools: [] },
+      }),
+    /bus/i,
+  );
+});
+
+
+/**
+ * 🚨 `docker rm -f` SIGKILLs this handle's live container. Running it before
+ * the plan is validated means a spawn that cannot possibly succeed still takes
+ * the running agent down on its way to throwing.
+ */
+test('🚨 a plan that cannot be built kills nothing', async (t) => {
+  setToken('sk-ant-oat-x');
+
+  const { calls } = mockDocker(t);
+
+  const { spawnContainerized } = await import(
+    `../../../src/supervise/drivers/containerized.js?order-test=${Date.now()}`
+  );
+
+  assert.throws(
+    () =>
+      spawnContainerized(claudeSpawn, {
+        cwd: PROJECT_DIR,
+        supervisorHandle: 'claude1',
+        grant: { handle: 'claude1-agent', configPath: '/unused.json', tools: [] },
+      }),
+    /bus/i,
+  );
+
+  const removals = calls.filter((argv) => argv[0] === 'rm');
+
+  assert.deepEqual(removals, [], `the live container was removed anyway: ${JSON.stringify(removals)}`);
 });

@@ -13,6 +13,7 @@ import { dirsFor } from './projects.js';
 import { allowlistWith, resolveCwd } from './allowlist.js';
 import { commandFromGrant, grantFor, grantVariants } from './denial.js';
 import { writeClaudeMcpConfig } from './drivers/claude.js';
+import { openHostBus, type HostBus } from './host-bus.js';
 
 /**
  * The supervisor: it owns the loop the harness used to own.
@@ -279,6 +280,17 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * the handler install would strand both the listener and the child. Nothing
    * there throws today.
    */
+  /**
+   * 🛑 OPENED BEFORE THE SPAWN, BECAUSE THE CHILD IS CONFIGURED WITH ITS URL.
+   * A containerized child reaches the bus over HTTP and nothing else — the
+   * state-dir mount that used to carry it is gone, so without this the spawn
+   * refuses rather than starting an agent that answers nothing.
+   *
+   * Host children keep the stdio shim, which needs no socket.
+   */
+  const hostBus: HostBus | undefined =
+    isContainerSpawn && initialGrant ? await openHostBus(initialGrant.handle) : undefined;
+
   let onWake: ((envelope: WakeEnvelope) => WakeAck) | null = null;
 
   const listener = await WakeListener.bind(opts.handle, (envelope): WakeAck => {
@@ -305,7 +317,13 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   let child: AgentChild;
 
   try {
-    child = spawnFn({ ...opts, cwd: childCwd, grant: initialGrant, supervisorHandle: opts.handle });
+    child = spawnFn({
+      ...opts,
+      cwd: childCwd,
+      grant: initialGrant,
+      supervisorHandle: opts.handle,
+      bus: hostBus?.endpoint,
+    });
   } catch (err) {
     // The listener was holding the handle for a start that is not happening.
     // Leaving it bound would make one failed start a permanent one.
@@ -317,6 +335,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       await listener.close();
     } catch {
       // Swallowed on purpose; `err` is the one worth reporting.
+    }
+
+    try {
+      await hostBus?.close();
+    } catch {
+      // Same reason: the spawn's error is the one the operator needs.
     }
 
     throw err;
@@ -824,6 +848,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // for every driver — a host child has no container to poll. Envelopes
     // arriving in this window are refused above, not delivered to a dead child.
     await listener.close();
+    await hostBus?.close();
 
     // Registration happens in the CHILD, via the shim. So this deletes a row
     // this process did not write, which is why it is opt-in and not default.

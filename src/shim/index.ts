@@ -164,7 +164,23 @@ export function buildServer(ctx: ShimContext): McpServer {
   return server;
 }
 
-export async function runShim(opts: ShimOptions): Promise<void> {
+export interface ShimContextOptions {
+  handle: string;
+  /** How this session is woken. The stdio shim and the host bus differ here. */
+  adapterStatus: AdapterStatus;
+  /** Claim the handle even if a live process holds it. See `ShimOptions`. */
+  force?: boolean;
+}
+
+/**
+ * A session's context, REGISTERED on the bus.
+ *
+ * 🛑 THE REGISTRATION IS THE REASON THIS IS SHARED. The host bus built the
+ * other four fields by hand and missed this one, so a containerized child was
+ * absent from `list_agents` and a sibling read it as never started. Two copies
+ * of a five-step construction is how the fifth step goes missing.
+ */
+export function shimContextFor(opts: ShimContextOptions): ShimContext {
   const db = openDb();
   const notify = new NotifyBus(opts.handle);
   const session_id = randomUUID();
@@ -178,8 +194,16 @@ export async function runShim(opts: ShimOptions): Promise<void> {
     force: opts.force,
   });
 
-  const adapterStatus = checkWakeAdapter(opts.handle);
-  const ctx: ShimContext = { handle: opts.handle, session_id, db, notify, adapterStatus };
+  return { handle: opts.handle, session_id, db, notify, adapterStatus: opts.adapterStatus };
+}
+
+export async function runShim(opts: ShimOptions): Promise<void> {
+  const ctx = shimContextFor({
+    handle: opts.handle,
+    adapterStatus: checkWakeAdapter(opts.handle),
+    force: opts.force,
+  });
+  const { db, notify } = ctx;
   const server = buildServer(ctx);
 
   const transport = new StdioServerTransport();

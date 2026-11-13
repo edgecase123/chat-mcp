@@ -117,7 +117,17 @@ export interface AgentChild {
   awaitTeardown?(): Promise<void>;
 }
 
+/** Where a containerized child reaches the host bus, and the secret that lets it. */
+export interface BusEndpoint {
+  /** The HOST-side url, as `McpHttpListener.url` reports it. */
+  readonly url: string;
+  readonly token: string;
+}
+
 export interface SpawnOptions {
+  /** Required for a containerized spawn that carries a grant. */
+  readonly bus?: BusEndpoint;
+
   readonly binary?: string;
   readonly model?: string;
   readonly resumeSessionId?: string;

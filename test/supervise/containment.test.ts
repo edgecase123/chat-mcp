@@ -166,3 +166,38 @@ test('🛑 an ancestor of the state directory refuses even when NEITHER is on di
     process.env.CHAT_MCP_HOME = home;
   }
 });
+
+/**
+ * 🛑 CONTAINMENT IS TWO-DIRECTIONAL. Refusing only an ANCESTOR of the state
+ * directory leaves the descendant door open: `<state>/tokens` is neither equal
+ * to nor an ancestor of `<state>`, so it mounted at `/work` read-write and
+ * `authenticateToken` trusts whatever digest is written there.
+ */
+test('🛑 a project directory INSIDE the state directory is refused', async () => {
+  const { stateDir } = await import('../../src/util/paths.js');
+  const inside = join(stateDir(), 'tokens');
+
+  assert.throws(() => assertProjectDirOutsideState(inside), /state directory/);
+});
+
+test('🛑 a project directory INSIDE the manifest directory is refused', async () => {
+  const { manifestDir } = await import('../../src/util/paths.js');
+  const inside = join(manifestDir(), 'claude1');
+
+  assert.throws(() => assertProjectDirOutsideState(inside), /manifest directory/);
+});
+
+/**
+ * 🛑 THE ORDERING THE `assertNoControlChars` DOCBLOCK ASSERTS, AS A TEST. A NUL
+ * before a `..` normalises to an innocent-looking `scripts/bin/sh`, so a
+ * control-char check that ran AFTER `normalize` would pass this. The existing
+ * control-char cases have no `..` and stay green under either order.
+ */
+test('🛑 a NUL hiding a traversal is refused, which pins the check BEFORE normalize', async () => {
+  const { containedRelative } = await import('../../src/supervise/containment.js');
+
+  assert.throws(
+    () => containedRelative('scripts/gate.sh\u0000../../bin/sh', 'command script'),
+    /control character/,
+  );
+});

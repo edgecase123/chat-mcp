@@ -139,7 +139,7 @@ export function ensureMcpConfigDir(): string {
 /**
  * Where the command manifests live, one JSON file per handle.
  *
- * 🛑 A SIBLING OF THE STATE DIR, NEVER A CHILD. `dockerArgsForVendor` mounts
+ * 🛑 A SIBLING OF THE STATE DIR, NEVER A CHILD. `dockerRunPlan` mounted
  * `stateDir()` whole and read-write, so a manifest beneath it is one the agent
  * can edit — and the manifest is the authorization surface, so editing it
  * widens the agent's own grant.
