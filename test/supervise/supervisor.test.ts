@@ -477,3 +477,79 @@ test('a driver that DOES report context says so at startup, and does not claim t
     await s.stop();
   }
 });
+
+/**
+ * #217, raised by claude2 reviewing PR 218: counting the fakes fixes today's
+ * 14 and not the 15th, written next month. `tsconfig.json` covers `src/**`
+ * only, so a test fake or a JS driver that omits a capability reads
+ * `undefined` — which is FALSY, so the supervisor would announce UNREPORTED
+ * about a driver that never said anything. That is the exact "inferred from
+ * silence" failure the flag exists to end, arriving through the back door.
+ */
+test('a driver that OMITS a capability fails fast, instead of being read as false', async () => {
+  const bare = () =>
+    ({
+      // reportsUsage and reportsContext deliberately absent.
+      send: () => undefined,
+      onTurnEnd: () => undefined,
+      onContext: () => undefined,
+      onUsage: () => undefined,
+      onDenial: () => undefined,
+      onSession: () => undefined,
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      kill: () => undefined,
+    }) as unknown as AgentChild;
+
+  // ⚠️ THE `finally` IS NOT DECORATION. Before the guard existed this call
+  // RESOLVED, leaving a live supervisor holding a socket, and the test file
+  // hung with no failure line rather than failing. A rejection assertion on
+  // something that allocates must still release it.
+  let started: Awaited<ReturnType<typeof startSupervisor>> | undefined;
+
+  try {
+    await assert.rejects(
+      async () => {
+        started = await startSupervisor(
+          supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'undeclared', spawnChild: bare }),
+        );
+      },
+      /reportsUsage|reportsContext/,
+      'an undeclared capability must name itself, not be silently read as false',
+    );
+  } finally {
+    await started?.stop();
+  }
+});
+
+test('a driver that DECLARES false is legal and still starts', async () => {
+  // 🛑 THE PAIRED CONTROL, AND THE WHOLE DISTINCTION. lee ruled "dispatch and
+  // announce the blank", so a declared `false` is a CHOICE. Only an ABSENT
+  // declaration is the error. A guard that cannot tell them apart would
+  // refuse the very driver #217 exists to support.
+  const lines: string[] = [];
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS,
+    handle: 'declaredfalse',
+    log: (l) => lines.push(l),
+    spawnChild: () => ({
+      reportsUsage: false,
+      reportsContext: false,
+      send: () => undefined,
+      onTurnEnd: () => undefined,
+      onContext: () => undefined,
+      onUsage: () => undefined,
+      onDenial: () => undefined,
+      onSession: () => undefined,
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      kill: () => undefined,
+    }),
+  }));
+
+  try {
+    assert.ok(lines.some((l) => /UNREPORTED/.test(l)), 'a declared false still announces');
+    assert.ok(lines.some((l) => /UNMETERED/.test(l)));
+  } finally {
+    await s.stop();
+  }
+});

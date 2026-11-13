@@ -1,4 +1,5 @@
 import type { AgentChild, SpawnOptions } from './child.js';
+import { assertDeclaresCapabilities } from './child.js';
 import type { VendorSpawn } from './vendor.js';
 import { resolveDriver } from './drivers/index.js';
 import { spawnOnHost } from './drivers/host.js';
@@ -251,12 +252,17 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   // Injected in tests; the real one is the shared bus database the web UI
   // already reads.
   const approvalsDb = opts.db ?? openDb();
-  const spawnFn =
+  const spawnRaw =
     opts.spawnChild ??
     ((o: SpawnOptions) =>
       selection.mode === 'docker'
         ? spawnContainerized(opts.vendor, o)
         : spawnOnHost(opts.vendor, o));
+
+  // 🛑 WRAPPED ONCE, NOT ASSERTED AT EACH CALL SITE. The child is spawned in
+  // three places — first start, restart, replace — and a guard repeated three
+  // times is a guard that will be two next time someone adds a fourth.
+  const spawnFn = (o: SpawnOptions): AgentChild => assertDeclaresCapabilities(spawnRaw(o));
 
   /**
    * 🛑 `initialGrant`, NOT `grant`. It is the set at SPAWN and it never

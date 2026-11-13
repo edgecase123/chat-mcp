@@ -210,6 +210,37 @@ export interface SpawnOptions {
 }
 
 /** Split a byte stream into whole JSON lines. Partial lines are held back. */
+/**
+ * Every capability on a child is SAID, in a boolean, or the spawn fails.
+ *
+ * 🛑 AN ABSENT FIELD IS NOT A `false`. It reads as `undefined`, which is
+ * falsy, so the supervisor would announce the restrictive state — UNMETERED,
+ * UNREPORTED — about a driver that never said anything. That is inference
+ * from silence wearing a declaration's clothes, and it is the failure both
+ * flags exist to end.
+ *
+ * 🛑 THE TYPE SYSTEM DOES NOT COVER THIS. `tsconfig.json` includes `src/**`
+ * only, so a test fake or a JavaScript driver omitting a field compiles and
+ * runs. Raised by claude2 reviewing PR 218: counting today's fakes fixes
+ * today's fakes, not the one written next month.
+ *
+ * A DECLARED `false` is legal and is not an error — lee, 2026-11-13:
+ * *"dispatch and announce the blank"*.
+ */
+export function assertDeclaresCapabilities(child: AgentChild): AgentChild {
+  for (const field of ['reportsUsage', 'reportsContext'] as const) {
+    if (typeof child[field] !== 'boolean') {
+      throw new Error(
+        `driver did not declare ${field}. A capability is declared, never inferred from silence: ` +
+          `an absent field reads as undefined, and the supervisor would announce the restrictive ` +
+          `state about a driver that said nothing. Set ${field} to true or false.`,
+      );
+    }
+  }
+
+  return child;
+}
+
 export function createLineParser(
   onLine: (parsed: Record<string, unknown>) => void,
 ): (chunk: string) => void {
