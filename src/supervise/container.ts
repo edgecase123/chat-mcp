@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync as realExecFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -55,8 +55,99 @@ export function dockerfilePath(): string {
   throw new Error(`cannot locate Dockerfile next to ${import.meta.url}`);
 }
 
-function dockerfileHash(): string {
-  return createHash('sha256').update(readFileSync(dockerfilePath())).digest('hex');
+/**
+ * Every path the Dockerfile copies into the image, relative to the build
+ * context. The hash covers all of them.
+ *
+ * 🛑 KEEP THIS IN STEP WITH THE DOCKERFILE'S `COPY` LINES. A build input
+ * that is copied but not hashed is invisible to the freshness check, which is
+ * the whole defect this file exists to fix. `DockerfileInputsTest` fails if
+ * the Dockerfile copies something this list does not name.
+ */
+export const BUILD_INPUT_PATHS = ['package.json', 'package-lock.json', 'dist'] as const;
+
+/** The build context: `docker build` is handed `dirname(dockerfilePath())`. */
+function contextPath(): string {
+  return dirname(dockerfilePath());
+}
+
+/**
+ * What kind of thing `path` is, without ever throwing.
+ *
+ * 🛑 `statSync` THROWS ON A BROKEN SYMLINK, and `dist` is build output that
+ * a half-finished build leaves them in. An unguarded stat took
+ * `supervise --container` down with an opaque ENOENT instead of rebuilding
+ * the image — the one action that would have cleared it. Raised by claude2
+ * on PR 211.
+ */
+function kindOf(path: string): 'file' | 'dir' | 'unreadable' {
+  try {
+    return statSync(path).isDirectory() ? 'dir' : 'file';
+  } catch {
+    return 'unreadable';
+  }
+}
+
+/**
+ * Entries under `root`, relative to it. A single file yields `['']`.
+ *
+ * ⚠️ AN UNREADABLE ENTRY IS KEPT, NOT SKIPPED. Dropping it would make a
+ * tree with a broken symlink hash identically to one without, so replacing a
+ * real file with a dangling link would not rebuild.
+ */
+function filesUnder(root: string): string[] {
+  if (kindOf(root) !== 'dir') return [''];
+
+  return readdirSync(root, { recursive: true, encoding: 'utf8' })
+    .filter((rel) => kindOf(join(root, rel)) !== 'dir')
+    .sort();
+}
+
+/**
+ * 🛑 THE DOCKERFILE ALONE IS NOT WHAT THE IMAGE CONTAINS. It says
+ * `COPY dist ./dist`, so the image is mostly BUILT CODE that the Dockerfile's
+ * own bytes never change. Hashing only the Dockerfile reported an image built
+ * before three merges as current, and the container then ran a `dist` with no
+ * HTTP bus in it at all — `agents start` came up and answered nothing.
+ *
+ * ⚠️ `package-lock.json` COUNTS TOO, and it was the second half of the same
+ * hole. The Dockerfile copies it and runs `npm ci`, so bumping a dependency
+ * changes what the image contains while the Dockerfile stays byte-identical.
+ * Raised by claude2 on PR 211.
+ *
+ * 🛑 CONTENT, NOT MTIME. A rebuild that writes identical bytes must not force
+ * a docker build, and a stale `dist` restored with a fresh mtime must not pass.
+ */
+export function buildInputsHash(context: string = contextPath()): string {
+  const hash = createHash('sha256');
+
+  hash.update(readFileSync(dockerfilePath()));
+
+  for (const input of BUILD_INPUT_PATHS) {
+    const root = join(context, input);
+
+    if (!existsSync(root)) {
+      // A distinct value, so a MISSING input can never collide with a
+      // present one that happens to be empty.
+      hash.update(`\0absent:${input}\0`);
+      continue;
+    }
+
+    for (const rel of filesUnder(root)) {
+      const full = rel ? join(root, rel) : root;
+
+      hash.update(`\0${input}/${rel}\0`);
+
+      if (kindOf(full) === 'unreadable') {
+        hash.update('\0unreadable\0');
+        continue;
+      }
+
+      hash.update(readFileSync(full));
+    }
+  }
+
+  return hash.digest('hex');
 }
 
 type Runner = (cmd: string, args: readonly string[]) => Buffer;
@@ -64,7 +155,7 @@ type Runner = (cmd: string, args: readonly string[]) => Buffer;
 export function imageNeedsBuild(run: Runner = realExecFileSync): boolean {
   const state = readContainerState();
 
-  if (state.builtHash !== dockerfileHash()) return true;
+  if (state.builtHash !== buildInputsHash()) return true;
 
   try {
     run('docker', ['image', 'inspect', IMAGE_TAG]);
@@ -77,7 +168,7 @@ export function imageNeedsBuild(run: Runner = realExecFileSync): boolean {
 export function buildImage(run: Runner = realExecFileSync): void {
   run('docker', ['build', '-t', IMAGE_TAG, '-f', dockerfilePath(), dirname(dockerfilePath())]);
 
-  writeContainerState({ ...readContainerState(), builtHash: dockerfileHash() });
+  writeContainerState({ ...readContainerState(), builtHash: buildInputsHash() });
 }
 
 export function isConfirmed(handle: string): boolean {
