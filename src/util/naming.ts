@@ -31,10 +31,19 @@ export function assertRoomName(s: string): void {
   }
 }
 
+/**
+ * The refusal text, in one place.
+ *
+ * The shim entry point prints this without throwing, so that an operator who
+ * mistypes a handle is told what is wrong instead of being shown a crash.
+ * Separate copies of the sentence would drift.
+ */
+export function handleRefusal(s: string): string {
+  return `Invalid handle "${s}". Handles must match [a-z0-9][a-z0-9_-]{0,63} (lowercase, no # prefix).`;
+}
+
 export function assertHandle(s: string): void {
   if (!isHandle(s)) {
-    throw new Error(
-      `Invalid handle "${s}". Handles must match [a-z0-9][a-z0-9_-]{0,63} (lowercase, no # prefix).`,
-    );
+    throw new Error(handleRefusal(s));
   }
 }
