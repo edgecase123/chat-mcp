@@ -56,11 +56,27 @@ export function dockerfilePath(): string {
 }
 
 /**
- * The build context the Dockerfile copies in. `docker build` is handed
- * `dirname(dockerfilePath())`, so `dist` is resolved against the same root.
+ * Every path the Dockerfile copies into the image, relative to the build
+ * context. The hash covers all of them.
+ *
+ * 🛑 KEEP THIS IN STEP WITH THE DOCKERFILE'S `COPY` LINES. A build input
+ * that is copied but not hashed is invisible to the freshness check, which is
+ * the whole defect this file exists to fix. `DockerfileInputsTest` fails if
+ * the Dockerfile copies something this list does not name.
  */
-function distPath(): string {
-  return join(dirname(dockerfilePath()), 'dist');
+export const BUILD_INPUT_PATHS = ['package.json', 'package-lock.json', 'dist'] as const;
+
+/** The build context: `docker build` is handed `dirname(dockerfilePath())`. */
+function contextPath(): string {
+  return dirname(dockerfilePath());
+}
+
+function filesUnder(root: string): string[] {
+  if (!statSync(root).isDirectory()) return [''];
+
+  return readdirSync(root, { recursive: true, encoding: 'utf8' })
+    .filter((rel) => statSync(join(root, rel)).isFile())
+    .sort();
 }
 
 /**
@@ -70,26 +86,33 @@ function distPath(): string {
  * before three merges as current, and the container then ran a `dist` with no
  * HTTP bus in it at all — `agents start` came up and answered nothing.
  *
+ * ⚠️ `package-lock.json` COUNTS TOO, and it was the second half of the same
+ * hole. The Dockerfile copies it and runs `npm ci`, so bumping a dependency
+ * changes what the image contains while the Dockerfile stays byte-identical.
+ * Raised by claude2 on PR 211.
+ *
  * 🛑 CONTENT, NOT MTIME. A rebuild that writes identical bytes must not force
  * a docker build, and a stale `dist` restored with a fresh mtime must not pass.
  */
-export function buildInputsHash(root: string = distPath()): string {
+export function buildInputsHash(context: string = contextPath()): string {
   const hash = createHash('sha256');
 
   hash.update(readFileSync(dockerfilePath()));
 
-  if (!existsSync(root)) {
-    // A distinct value, so "no dist" can never collide with a built state.
-    return hash.update('\0no-dist').digest('hex');
-  }
+  for (const input of BUILD_INPUT_PATHS) {
+    const root = join(context, input);
 
-  const files = readdirSync(root, { recursive: true, encoding: 'utf8' })
-    .filter((rel) => statSync(join(root, rel)).isFile())
-    .sort();
+    if (!existsSync(root)) {
+      // A distinct value, so a MISSING input can never collide with a
+      // present one that happens to be empty.
+      hash.update(`\0absent:${input}\0`);
+      continue;
+    }
 
-  for (const rel of files) {
-    hash.update(`\0${rel}\0`);
-    hash.update(readFileSync(join(root, rel)));
+    for (const rel of filesUnder(root)) {
+      hash.update(`\0${input}/${rel}\0`);
+      hash.update(readFileSync(rel ? join(root, rel) : root));
+    }
   }
 
   return hash.digest('hex');

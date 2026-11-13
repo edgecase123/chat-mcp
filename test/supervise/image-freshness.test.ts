@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-freshness-'));
 
-const { buildInputsHash } = await import('../../src/supervise/container.js');
+const { buildInputsHash, BUILD_INPUT_PATHS, dockerfilePath } = await import(
+  '../../src/supervise/container.js'
+);
 
 /**
  * 🛑 THE FRESHNESS CHECK HASHED THE DOCKERFILE AND NOTHING ELSE, AND THE
@@ -22,14 +24,20 @@ const { buildInputsHash } = await import('../../src/supervise/container.js');
  * the test it was waiting for.
  */
 
-function dist(files: Record<string, string>): string {
-  const root = mkdtempSync(join(tmpdir(), 'chat-mcp-dist-'));
+/** A build context whose `dist/` holds `files`, plus the two manifests. */
+function dist(files: Record<string, string>, manifests?: Record<string, string>): string {
+  const root = mkdtempSync(join(tmpdir(), 'chat-mcp-ctx-'));
+
+  writeFileSync(join(root, 'package.json'), manifests?.['package.json'] ?? '{"name":"x"}');
+  writeFileSync(join(root, 'package-lock.json'), manifests?.['package-lock.json'] ?? '{"v":1}');
 
   for (const [rel, body] of Object.entries(files)) {
-    const full = join(root, rel);
+    const full = join(root, 'dist', rel);
     mkdirSync(join(full, '..'), { recursive: true });
     writeFileSync(full, body);
   }
+
+  if (Object.keys(files).length === 0) mkdirSync(join(root, 'dist'), { recursive: true });
 
   return root;
 }
@@ -62,7 +70,7 @@ test('🛑 a fresh mtime over IDENTICAL bytes does not force a rebuild', () => {
   const first = buildInputsHash(root);
 
   const future = new Date(Date.now() + 60_000);
-  utimesSync(join(root, 'supervise/mcp-http.js'), future, future);
+  utimesSync(join(root, 'dist/supervise/mcp-http.js'), future, future);
 
   assert.equal(buildInputsHash(root), first, 'the hash moved on an mtime alone');
 });
@@ -80,14 +88,72 @@ test('⚠️ moving a file without changing its bytes forces a rebuild', () => {
 });
 
 test('🛑 a MISSING dist is distinct from an empty one, and from any built state', () => {
-  const missing = join(tmpdir(), `chat-mcp-absent-${process.pid}`);
-  rmSync(missing, { recursive: true, force: true });
+  const missing = mkdtempSync(join(tmpdir(), 'chat-mcp-nodist-'));
+  writeFileSync(join(missing, 'package.json'), '{"name":"x"}');
+  writeFileSync(join(missing, 'package-lock.json'), '{"v":1}');
 
   const empty = dist({});
   const built = dist({ 'index.js': '' });
 
   assert.notEqual(buildInputsHash(missing), buildInputsHash(empty));
   assert.notEqual(buildInputsHash(missing), buildInputsHash(built));
+});
+
+/**
+ * ⚠️ THE SECOND HALF OF THE SAME HOLE. The Dockerfile copies both manifests
+ * and runs `npm ci`, so a dependency bump changes what the image contains
+ * while the Dockerfile stays byte-identical. Raised by claude2 on PR 211.
+ */
+test('⚠️ a bumped package-lock.json forces a rebuild', () => {
+  const before = dist({ 'index.js': 'x' }, { 'package-lock.json': '{"v":1}' });
+  const after = dist({ 'index.js': 'x' }, { 'package-lock.json': '{"v":2}' });
+
+  assert.notEqual(
+    buildInputsHash(before),
+    buildInputsHash(after),
+    'a dependency change would ship an image built against the old tree',
+  );
+});
+
+test('⚠️ a changed package.json forces a rebuild', () => {
+  const before = dist({ 'index.js': 'x' }, { 'package.json': '{"name":"x"}' });
+  const after = dist({ 'index.js': 'x' }, { 'package.json': '{"name":"y"}' });
+
+  assert.notEqual(buildInputsHash(before), buildInputsHash(after));
+});
+
+/**
+ * 🛑 THE GUARD FOR THE WHOLE CLASS, NOT THE TWO INSTANCES WE FOUND.
+ *
+ * `dist` was missed, then `package.json` and `package-lock.json` were missed
+ * in the fix for `dist`. Both are the same defect: the Dockerfile copies
+ * something the hash does not read. This fails the moment a `COPY` line names
+ * a source that `BUILD_INPUT_PATHS` does not cover, so the third instance
+ * cannot ship.
+ */
+test('🛑 EVERY source the Dockerfile copies is a hashed build input', () => {
+  const dockerfile = readFileSync(dockerfilePath(), 'utf8');
+
+  const copied = dockerfile
+    .split('\n')
+    .filter((line) => /^\s*COPY\s/i.test(line))
+    .flatMap((line) => line.trim().split(/\s+/).slice(1))
+    .filter((token) => !token.startsWith('--'))
+    // The last token of a COPY is the DESTINATION, not a source.
+    .slice(0, -1)
+    .filter((token) => token !== '.' && token !== './');
+
+  assert.ok(copied.length > 0, 'no COPY sources parsed; this guard is stale');
+
+  const unhashed = copied.filter(
+    (src) => !(BUILD_INPUT_PATHS as readonly string[]).includes(src),
+  );
+
+  assert.deepEqual(
+    unhashed,
+    [],
+    `the Dockerfile copies ${unhashed.join(', ')}, which the freshness hash never reads`,
+  );
 });
 
 /**
