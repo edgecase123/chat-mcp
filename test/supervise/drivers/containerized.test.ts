@@ -12,7 +12,7 @@ const { stateDir } = await import('../../../src/util/paths.js');
 const { registerMount, mountsPath } = await import('../../../src/supervise/mounts.js');
 const { claudeSpawn } = await import('../../../src/adapters/claude-spawn.js');
 const {
-  dockerArgsForVendor,
+  dockerRunPlan,
   CONTAINER_PROJECT_DIR,
   containerStateDir,
   containerPathFor,
@@ -20,8 +20,13 @@ const {
 
 const PROJECT_DIR = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-project-'));
 
-function dockerArgsFor(opts: Parameters<typeof dockerArgsForVendor>[1]) {
-  return dockerArgsForVendor(claudeSpawn, opts);
+function dockerRunPlanFor(opts: Parameters<typeof dockerRunPlan>[1]) {
+  return dockerRunPlan(claudeSpawn, opts);
+}
+
+/** The argv alone, for the many tests that assert only on mounts and flags. */
+function dockerArgsFor(opts: Parameters<typeof dockerRunPlan>[1]) {
+  return dockerRunPlanFor(opts).args;
 }
 
 /**
@@ -115,10 +120,37 @@ test('a registered extra mount appears at /mnt/<key>', () => {
   assert.ok(args.includes(`${extraDir}:${containerPathFor('local-context')}`));
 });
 
+/**
+ * 🛑 THIS TEST'S NAME ALWAYS CLAIMED THE SECURE PROPERTY AND ITS BODY ASSERTED
+ * THE OPPOSITE. It read `args.includes('CLAUDE_CODE_OAUTH_TOKEN=<value>')`,
+ * which is the value IN the argv — readable by `ps` for the life of the
+ * container, and the thing `AGENTS.md` forbids in those words. The name is
+ * what was right, so the body moved to meet it.
+ */
 test('the token is injected by NAME via -e, and the value never appears as a bare arg', () => {
   setToken('sk-ant-oat-secret-value');
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
-  assert.ok(args.includes('CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat-secret-value'));
+  const { args } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+
+  assert.ok(args.includes('-e'), 'no -e at all');
+  assert.ok(args.includes('CLAUDE_CODE_OAUTH_TOKEN'), 'the var is not passed by name');
+
+  for (const arg of args) {
+    assert.ok(
+      !arg.includes('sk-ant-oat-secret-value'),
+      `the token value reached the docker argv as ${arg}`,
+    );
+  }
+});
+
+/**
+ * The paired control for the test above. An argv that simply dropped the token
+ * would pass it, and the container would then start with no credential.
+ */
+test('the token reaches the container through the spawn env instead', () => {
+  setToken('sk-ant-oat-secret-value');
+  const { env } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+
+  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, 'sk-ant-oat-secret-value');
 });
 
 test('the child command always carries --allow-dangerously-skip-permissions, never --permission-mode', () => {

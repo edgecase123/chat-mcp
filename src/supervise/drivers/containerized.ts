@@ -64,7 +64,7 @@ export function containerNameFor(supervisorHandle: string): string {
   return `chat-mcp-${supervisorHandle}`;
 }
 
-/** The one place that validates the field both `dockerArgsForVendor` and `spawnContainerized` need. */
+/** The one place that validates the field both `dockerRunPlan` and `spawnContainerized` need. */
 function requireSupervisorHandle(opts: SpawnOptions): string {
   if (!opts.supervisorHandle) {
     throw new Error('a containerized spawn needs opts.supervisorHandle to find its mounts');
@@ -73,7 +73,22 @@ function requireSupervisorHandle(opts: SpawnOptions): string {
   return opts.supervisorHandle;
 }
 
-export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): string[] {
+/**
+ * The argv for `docker run`, plus the environment the docker CLIENT must be
+ * spawned with.
+ *
+ * 🛑 THE TWO HALVES SHIP TOGETHER OR THE CONTAINER STARTS WITH NO CREDENTIAL.
+ * `-e NAME` with no `=` tells docker to copy the value from its own
+ * environment, so argv alone is not a runnable plan. An earlier
+ * `dockerArgsForVendor` returned only the argv, and a caller keeping that
+ * shape would drop the token in silence.
+ */
+export interface DockerRunPlan {
+  readonly args: string[];
+  readonly env: NodeJS.ProcessEnv;
+}
+
+export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRunPlan {
   const token = readToken();
   if (!token) {
     throw new Error(
@@ -100,8 +115,11 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
     '--rm',
     '--name',
     containerNameFor(supervisorHandle),
+    // 🛑 BY NAME, NEVER `NAME=value`. The value in the argv is readable through
+    // `ps` for the life of the container, which `AGENTS.md` forbids in those
+    // words. Docker copies it from this process's environment instead.
     '-e',
-    `${vendor.authEnvVar}=${token}`,
+    vendor.authEnvVar,
     '-v',
     `${projectDir}:${CONTAINER_PROJECT_DIR}`,
     '-v',
@@ -134,7 +152,7 @@ export function dockerArgsForVendor(vendor: VendorSpawn, opts: SpawnOptions): st
     args.push('--mcp-config', vendor.mcpConfigFor(opts.grant, 'docker'), '--strict-mcp-config');
   }
 
-  return args;
+  return { args, env: { ...process.env, [vendor.authEnvVar]: token } };
 }
 
 /**
@@ -234,11 +252,12 @@ export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {})
     // missing docker without a logger at this layer.
   }
 
-  const child: ChildProcessWithoutNullStreams = spawn(
-    'docker',
-    dockerArgsForVendor(vendor, opts),
-    { stdio: ['pipe', 'pipe', 'pipe'] },
-  ) as ChildProcessWithoutNullStreams;
+  const plan = dockerRunPlan(vendor, opts);
+
+  const child: ChildProcessWithoutNullStreams = spawn('docker', plan.args, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: plan.env,
+  }) as ChildProcessWithoutNullStreams;
 
   const graceSeconds = opts.shutdownGraceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
 
