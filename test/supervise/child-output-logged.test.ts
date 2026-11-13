@@ -10,6 +10,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-childlog-'));
 
 const { migrate } = await import('../../src/storage/db.js');
 const { startSupervisor } = await import('../../src/supervise/index.js');
+const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
 import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
 import { supervisorOptions } from '../support/supervisor-options.js';
 
@@ -109,8 +110,13 @@ test('the supervisor logs a tool call the child made, by name', async () => {
  * with newlines stripped, so an alert banner plus `[chat-mcp] <from>:` filled
  * the whole line and a reviewer read the message body as MISSING. It was not
  * missing; it was off the end.
+ *
+ * ⚠️ THIS COVERS THE OUTPUT SIDE. The PROMPT side has its own test below,
+ * because an earlier version of this file was titled for `→ child:` and
+ * asserted only on `← child:` — so `index.ts`'s prompt log was unpinned while
+ * reading as covered. Found by claude2 on PR 209.
  */
-test('a truncated prompt log says it was truncated, and how long the text really was', async () => {
+test('a truncated line of CHILD OUTPUT says it was cut, and how long it really was', async () => {
   const db = new DatabaseSync(':memory:');
   migrate(db);
 
@@ -134,6 +140,111 @@ test('a truncated prompt log says it was truncated, and how long the text really
 
     assert.equal(said.length, 1, 'no child output was logged');
     assert.match(said[0]!, /5000 chars/, `truncation was silent: ${said[0]}`);
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🛑 THE PROMPT SIDE, PINNED. Nothing in `test/` asserted on the `→ child:`
+ * line, so the 80-character cut that caused the false diagnosis could have
+ * come back without a single test going red. Found by claude2 on PR 209.
+ */
+test('the prompt log carries the message BODY, not just the banner', async () => {
+  const db = new DatabaseSync(':memory:');
+  migrate(db);
+
+  const h = harness();
+  const handle = `childprompt-${process.pid}`;
+
+  const sup = await startSupervisor(supervisorOptions({
+    handle,
+    db,
+    extraDirs: [process.cwd()],
+    spawnChild: h.spawnChild,
+    log: (line: string) => h.lines.push(line),
+  }));
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 1,
+      to: handle,
+      from: 'lee',
+      ts: Date.now(),
+      kind: 'alert',
+      body: 'the gate is red on main',
+    });
+
+    const prompts = h.lines.filter((l) => l.startsWith('→ child:'));
+
+    assert.equal(prompts.length, 1, `no prompt was logged; lines were ${JSON.stringify(h.lines)}`);
+
+    // ⚠️ AN ALERT ON PURPOSE. The banner is what pushed the body past 80.
+    assert.match(prompts[0]!, /ALERT/, 'the alert banner is missing');
+    assert.match(prompts[0]!, /the gate is red on main/, 'THE BODY WAS CUT OFF AGAIN');
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🛑 A DEAD TURN MUST SAY SO, NOT PROVE ITSELF BY ABSENCE. A turn that
+ * errors emits `result` and no `assistant` event, so before this the exact
+ * failure under investigation logged nothing new at all.
+ */
+test('a failed turn logs its outcome instead of logging nothing', async () => {
+  const db = new DatabaseSync(':memory:');
+  migrate(db);
+
+  const h = harness();
+
+  const sup = await startSupervisor(supervisorOptions({
+    handle: `childresult-${process.pid}`,
+    db,
+    extraDirs: [process.cwd()],
+    spawnChild: h.spawnChild,
+    log: (line: string) => h.lines.push(line),
+  }));
+
+  try {
+    h.emitted()?.({ type: 'result', subtype: 'error_during_execution', is_error: true });
+
+    const outcomes = h.lines.filter((l) => l.startsWith('← result:'));
+
+    assert.equal(outcomes.length, 1, `the dead turn logged nothing; lines were ${JSON.stringify(h.lines)}`);
+    assert.match(outcomes[0]!, /subtype=error_during_execution/);
+    assert.match(outcomes[0]!, /is_error=true/);
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * ⚠️ THE PAIRED CONTROL. Without it the assertion above passes against a
+ * logger that prints `is_error=true` unconditionally.
+ */
+test('a successful turn logs is_error=false', async () => {
+  const db = new DatabaseSync(':memory:');
+  migrate(db);
+
+  const h = harness();
+
+  const sup = await startSupervisor(supervisorOptions({
+    handle: `childok-${process.pid}`,
+    db,
+    extraDirs: [process.cwd()],
+    spawnChild: h.spawnChild,
+    log: (line: string) => h.lines.push(line),
+  }));
+
+  try {
+    h.emitted()?.({ type: 'result', subtype: 'success', is_error: false });
+
+    const outcomes = h.lines.filter((l) => l.startsWith('← result:'));
+
+    assert.equal(outcomes.length, 1, 'the successful turn logged no outcome');
+    assert.match(outcomes[0]!, /subtype=success/);
+    assert.match(outcomes[0]!, /is_error=false/);
   } finally {
     await sup.stop();
   }

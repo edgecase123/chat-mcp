@@ -13,7 +13,11 @@ import { dirsFor } from './projects.js';
 import { allowlistWith, resolveCwd } from './allowlist.js';
 import { commandFromGrant, grantFor, grantVariants } from './denial.js';
 import { writeClaudeMcpConfig } from './drivers/claude.js';
-import { describeChildOutput, excerptForLog } from './drivers/claude-events.js';
+import {
+  describeChildOutput,
+  describeTurnResult,
+  excerptForLog,
+} from './drivers/claude-events.js';
 import { openHostBus, type HostBus } from './host-bus.js';
 
 /**
@@ -502,6 +506,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
         const said = describeChildOutput(event);
 
         if (said) log(`← child: ${said}`);
+
+        const outcome = describeTurnResult(event);
+
+        if (outcome) log(`← result: ${outcome}`);
       }),
     );
 

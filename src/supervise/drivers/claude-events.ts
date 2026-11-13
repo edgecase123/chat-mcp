@@ -157,7 +157,12 @@ export function excerptForLog(text: string): string {
 
   if (flat.length <= LOG_EXCERPT_LIMIT) return flat;
 
-  return `${flat.slice(0, LOG_EXCERPT_LIMIT)}… (${text.length} chars)`;
+  // ⚠️ `flat.length`, NOT `text.length`. The slice is taken from `flat`, and
+  // collapsing newlines to ` ⏎ ` changes the length in either direction — a
+  // wake prompt is `[chat-mcp] <from>:\n\n<body>`, so `flat` is the LONGER of
+  // the two there. Reporting the other one hands the reader a wrong
+  // remainder. Found by claude2 on PR 209.
+  return `${flat.slice(0, LOG_EXCERPT_LIMIT)}… (${flat.length} chars)`;
 }
 
 /**
@@ -196,4 +201,25 @@ export function describeChildOutput(event: Record<string, unknown>): string | un
   if (parts.length === 0) return undefined;
 
   return parts.join(' | ');
+}
+
+/**
+ * The outcome of a finished turn, as one log line.
+ *
+ * 🛑 WITHOUT THIS A DEAD TURN PROVES ITSELF BY ABSENCE. `describeChildOutput`
+ * covers `assistant` events only, and a turn that errors or is rejected emits
+ * `result` and no assistant event at all — so the failure we were chasing
+ * logged exactly what it logged before the child feed was wired up.
+ *
+ * An absence cannot tell "the agent said nothing" apart from "the event feed
+ * broke". This makes the outcome a positive statement. Raised by claude2 on
+ * PR 209.
+ */
+export function describeTurnResult(event: Record<string, unknown>): string | undefined {
+  if (event.type !== 'result') return undefined;
+
+  const subtype = typeof event.subtype === 'string' ? event.subtype : 'unknown';
+  const failed = event.is_error === true;
+
+  return `subtype=${subtype} is_error=${failed}`;
 }
