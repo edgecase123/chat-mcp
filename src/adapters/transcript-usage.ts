@@ -1,4 +1,6 @@
 import { openSync, readSync, fstatSync, closeSync } from 'node:fs';
+// `adapters/` may import from `supervise/`; the reverse is the banned edge.
+import { usedFromUsage, claudeContextUsage } from '../supervise/drivers/claude-events.js';
 
 /**
  * How many tokens an agent's context window actually holds, read from the
@@ -19,27 +21,6 @@ import { openSync, readSync, fstatSync, closeSync } from 'node:fs';
  * a `/clear` the next turn's cache read is small and the figure falls on its
  * own.
  */
-
-/** The usage shape we read. Everything else in the entry is ignored. */
-interface Usage {
-  input_tokens?: number;
-  cache_read_input_tokens?: number;
-  cache_creation_input_tokens?: number;
-}
-
-/**
- * Tokens the model was sent on this turn. Output tokens are deliberately NOT
- * counted: they are what the model produced, and they reach the window only
- * once they come back as input on the following turn — where this same sum
- * already includes them.
- */
-export function usedFromUsage(usage: Usage): number {
-  return (
-    (usage.input_tokens ?? 0) +
-    (usage.cache_read_input_tokens ?? 0) +
-    (usage.cache_creation_input_tokens ?? 0)
-  );
-}
 
 /**
  * The newest usage total in a block of transcript lines, or null.
@@ -63,7 +44,11 @@ export function newestUsedInLines(lines: string[]): number | null {
       continue;
     }
 
-    const usage = (parsed as { message?: { usage?: Usage } })?.message?.usage;
+    // 🛑 THE SAME PREDICATE THE SUPERVISOR USES. This used to test only that
+    // `message.usage` existed, so the two gauges selected entries by different
+    // rules and agreed only because every usage-bearing entry happens to be an
+    // `assistant` one.
+    const usage = claudeContextUsage(parsed);
     if (!usage) continue;
 
     const used = usedFromUsage(usage);

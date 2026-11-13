@@ -34,6 +34,7 @@ function harness() {
     reportsUsage: false,
     send: () => undefined,
     onTurnEnd: () => undefined,
+    onContext: () => undefined,
     onUsage: () => undefined,
     onDenial: () => undefined,
     onSession: (cb) => cb('sess'),

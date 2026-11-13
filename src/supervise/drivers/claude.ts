@@ -2,9 +2,10 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { SpawnOptions } from '../child.js';
 import { type RateLimitSnapshot } from '../rate-limit.js';
-import { parseClaudeRateLimit } from './claude-events.js';
+import { parseClaudeRateLimit, claudeContextSnapshot } from './claude-events.js';
 import { denialFromClaude, rememberClaudeToolUse } from './claude-events.js';
 import type { Denial } from '../denial.js';
+import type { ContextSnapshot } from '../context-gauge.js';
 import { ensureMcpConfigDir, mcpConfigPathFor, writePrivateFileSync } from '../../util/paths.js';
 
 /**
@@ -218,6 +219,7 @@ export function routeClaudeEvent(
   on: {
     turnEnd(): void;
     usage(snapshot: RateLimitSnapshot): void;
+    context?(snapshot: ContextSnapshot): void;
     denial?(denial: Denial): void;
     session?(id: string): void;
   },
@@ -241,6 +243,20 @@ export function routeClaudeEvent(
   // grant resumable instead of a restart.
   const id = event.session_id;
   if (typeof id === 'string' && on.session) on.session(id);
+
+  // ⚠️ A DIFFERENT WINDOW FROM `usage` AT THE TOP. That one is the
+  // subscription rate limit and gates dispatch; this one is the context window
+  // and only feeds the gauge. The raw stream calls both "usage".
+  //
+  // 🛑 LAST ON PURPOSE. The gauge handler does real I/O — a row write plus a
+  // notify per room member — and a throw here would abort the whole event,
+  // taking `rememberClaudeToolUse` with it. A later denial could then not name
+  // the invocation, which is the bug the ordering note above exists to stop.
+  // Nothing load-bearing may sit downstream of it. Raised by the dry-solid
+  // reviewer.
+  const context = claudeContextSnapshot(event);
+
+  if (context && on.context) on.context(context);
 
   // `result` is Claude Code's terminal event. An `assistant` event with no
   // following `result` is a turn still in flight.

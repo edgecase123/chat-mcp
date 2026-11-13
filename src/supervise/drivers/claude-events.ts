@@ -1,4 +1,5 @@
 import type { RateLimitSnapshot, WindowState } from '../rate-limit.js';
+import type { ContextSnapshot } from '../context-gauge.js';
 import type { Denial } from '../denial.js';
 
 /**
@@ -222,4 +223,171 @@ export function describeTurnResult(event: Record<string, unknown>): string | und
   const failed = event.is_error === true;
 
   return `subtype=${subtype} is_error=${failed}`;
+}
+
+/**
+ * The token fields Claude Code reports per turn. Everything else is ignored.
+ */
+export interface ClaudeUsage {
+  input_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+/**
+ * How full the context window is, from one turn's usage.
+ *
+ * 🛑 `output_tokens` IS NOT IN THE SUM, AND #213 ASKS FOR IT TO BE. Output
+ * reaches the window as the NEXT turn's input, where this sum already counts
+ * it, so the cost of leaving it out is that the gauge lags by one reply — not
+ * that it drifts.
+ *
+ * ⚠️ THE EVIDENCE IS ONE READING, AND `/context` IS NOT AN INDEPENDENT
+ * INSTRUMENT. On a live Opus 5 session this sum gave 118,783 against
+ * `/context`'s 118.8k, while adding output gave 119,360 and would have printed
+ * 119.4k. `/context` most likely computes from these same fields, so a match
+ * may only show it uses this formula. claude2's stronger test, not yet run:
+ * across two consecutive calls, `next.prompt_total - prev.prompt_total` should
+ * be at least `prev.output_tokens`.
+ */
+export function usedFromUsage(usage: ClaudeUsage): number {
+  return (
+    (usage.input_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0)
+  );
+}
+
+/**
+ * The live context size this event reports, or null if it reports none.
+ *
+ * 🛑 `assistant` ONLY, THOUGH `result` CARRIES `usage` TOO. The gauge is
+ * last-write-wins, so reading both is redundant rather than double-counted.
+ * The selection rule itself is `claudeContextUsage`, which the host hook now
+ * calls too — the claim that the two agree is pinned by
+ * `claude-context.test.ts`, which feeds one entry through both paths.
+ */
+export function parseClaudeContextUsed(event: Record<string, unknown>): number | null {
+  const usage = claudeContextUsage(event);
+
+  return usage === null ? null : usedFromUsage(usage);
+}
+
+/**
+ * The usage block on an entry that counts toward the window, or null.
+ *
+ * 🛑 ONE PREDICATE FOR BOTH PATHS. The supervisor reads a live event and the
+ * host hook reads a transcript line, and they MUST select the same entries or
+ * the two gauges diverge on shape rather than arithmetic. The host path used
+ * to test only that `message.usage` existed, with no `type` check — measured
+ * on a live transcript, 250 of 250 usage-bearing entries were `assistant`, so
+ * the two agreed by luck and not by construction.
+ */
+export function claudeContextUsage(entry: unknown): ClaudeUsage | null {
+  const e = entry as
+    | {
+        type?: unknown;
+        parent_tool_use_id?: unknown;
+        isSidechain?: unknown;
+        message?: { usage?: ClaudeUsage };
+      }
+    | null
+    | undefined;
+
+  if (!e || e.type !== 'assistant') return null;
+
+  // 🛑 A SUBAGENT'S TURN IS NOT THE PARENT'S WINDOW. A Task child emits its own
+  // `assistant` events on the same stream, carrying ITS small window. The gauge
+  // is last-write-wins, so one subagent turn would drop a 60% parent to 8% —
+  // and because the bands are hysteretic, that drop CLEARS the warned state and
+  // re-fires 70/85/95 on the way back up. The stream names the relationship in
+  // `parent_tool_use_id` (present and null on every main-session event,
+  // measured); a transcript spells it `isSidechain`. Raised by claude2.
+  if (e.parent_tool_use_id != null) return null;
+  if (e.isSidechain === true) return null;
+
+  const usage = e.message?.usage;
+
+  if (!usage || typeof usage !== 'object') return null;
+
+  // ⚠️ AN ALL-ZERO USAGE IS NOT A WINDOW OF ZERO. Claude Code emits synthetic
+  // assistant entries — API errors, interrupts — whose usage sums to nothing.
+  // Writing 0% would also clear the hysteresis and re-fire every band on the
+  // next real turn. Not observed in 285 live entries; cheap to refuse. Raised
+  // by claude2.
+  return usedFromUsage(usage) > 0 ? usage : null;
+}
+
+/**
+ * Context-window size per model id, or null when the id is not mapped.
+ *
+ * 🛑 EXACT MATCH, AND null RATHER THAN A FALLBACK. A prefix rule would quietly
+ * absorb the next model family, and returning the fallback here would make an
+ * unmapped id indistinguishable from a mapped one — so nothing would ever be
+ * logged and a wrong denominator would never surface.
+ */
+export const CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
+  'claude-fable-5-1': 1_000_000,
+  'claude-fable-5': 1_000_000,
+  'claude-mythos-5-1': 1_000_000,
+  'claude-opus-5': 1_000_000,
+  'claude-opus-4-8': 1_000_000,
+  'claude-opus-4-7': 1_000_000,
+  'claude-opus-4-6': 1_000_000,
+  'claude-sonnet-5': 1_000_000,
+  'claude-sonnet-4-6': 1_000_000,
+  'claude-haiku-4-5': 200_000,
+};
+
+export function contextWindowForModel(model: string): number | null {
+  return CONTEXT_WINDOWS[model] ?? null;
+}
+
+/**
+ * The window a supervisor measures against when the model id is not mapped.
+ *
+ * 🛑 THE SMALLEST KNOWN WINDOW, NOT THE LARGEST, AND THE DIRECTION IS THE
+ * WHOLE POINT. A too-large fallback reads LOW: a 200k model really at 150k
+ * shows 15%, so no band ever fires and the gauge goes quiet exactly when the
+ * agent is full. Too-small reads HIGH, which warns early and can pin at 100%.
+ * Only one of those is safe to be wrong in. lee ruled 200k on 2026-11-13,
+ * reversing an earlier ruling of 1,000,000; claude2 raised the direction.
+ *
+ * ⚠️ DERIVED FROM THE MAP so the two cannot drift. Adding a smaller model
+ * moves the fallback with it, which is the intended behaviour.
+ */
+export const FALLBACK_CONTEXT_WINDOW = Math.min(...Object.values(CONTEXT_WINDOWS));
+
+/**
+ * The context reading in this event, or null if it carries none.
+ *
+ * 🛑 THE MODEL COMES OFF THE TURN, NOT OFF A REMEMBERED `init`. Two earlier
+ * cuts kept the init model in module state — first a bare slot, then one keyed
+ * by `session_id`. Both measured the numerator against a denominator learned
+ * somewhere else, so a mid-session model change (`/model`, a fallback switch)
+ * emits no new `init` and leaves a confidently wrong percentage with
+ * `totalIsFallback` FALSE. `message.model` is on every assistant event —
+ * 285 of 285 on one host transcript, 28 of 28 on a live container stream — so
+ * the denominator now tracks the very turn that produced the numerator, and
+ * there is no state to go stale. Raised by claude2.
+ *
+ * 🛑 THE WINDOW IS RESOLVED HERE, BEHIND THE SEAM. The id-to-size map is as
+ * vendor-specific as the event shape it came from, so the supervisor is handed
+ * a finished snapshot and never learns a model name.
+ */
+export function claudeContextSnapshot(event: Record<string, unknown>): ContextSnapshot | null {
+  const usage = claudeContextUsage(event);
+
+  if (usage === null) return null;
+
+  const model = (event.message as { model?: unknown } | undefined)?.model;
+  const id = typeof model === 'string' && model.length > 0 ? model : null;
+  const mapped = id === null ? null : contextWindowForModel(id);
+
+  return {
+    used: usedFromUsage(usage),
+    total: mapped ?? FALLBACK_CONTEXT_WINDOW,
+    model: id,
+    totalIsFallback: mapped === null,
+  };
 }

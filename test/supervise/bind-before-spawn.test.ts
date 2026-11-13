@@ -19,6 +19,7 @@ function fakeChild(): AgentChild {
     reportsUsage: true,
     send: () => undefined,
     onTurnEnd: () => undefined,
+    onContext: () => undefined,
     onUsage: () => undefined,
     onDenial: () => undefined,
     onSession: () => undefined,

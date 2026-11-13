@@ -47,6 +47,7 @@ function recordingChild(children: FakeChild[]) {
       onTurnEnd: (cb: () => void) => {
         endTurn = cb;
       },
+      onContext: () => undefined,
       onUsage: () => undefined,
       onDenial: () => undefined,
       onSession: (cb: (id: string) => void) => cb('sess-1'),

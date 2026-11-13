@@ -1,4 +1,5 @@
 import type { RateLimitSnapshot } from './rate-limit.js';
+import type { ContextSnapshot } from './context-gauge.js';
 import type { Denial } from './denial.js';
 import type { ChildGrant } from './grant.js';
 
@@ -71,6 +72,19 @@ export interface AgentChild {
    * fine.
    */
   onUsage(cb: (snapshot: RateLimitSnapshot) => void): void;
+
+  /**
+   * How full the child's context window is, for CLIs that report it.
+   *
+   * 🛑 SEMANTIC, LIKE onUsage, AND FOR A DIFFERENT WINDOW. `onUsage` is the
+   * SUBSCRIPTION rate-limit window and gates dispatch; this is the CONTEXT
+   * window and only drives the gauge an operator reads. Conflating them cost
+   * a reader on #213, where both are called "usage" in the raw stream.
+   *
+   * A driver whose CLI reports no context simply never calls this, and the
+   * gauge stays unknown — which is reported rather than guessed.
+   */
+  onContext(cb: (snapshot: ContextSnapshot) => void): void;
 
   /**
    * The child was refused a tool and will not retry it this session.
