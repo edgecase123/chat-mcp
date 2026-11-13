@@ -63,8 +63,17 @@ export class McpHttpService {
 
   /** 🛑 `onsessionclosed` IS SYNCHRONOUS, so its release is awaited here
    * instead. Without this, `close()` can return while a database handle is
-   * still being given back. */
-  private readonly releasing: Promise<void>[] = [];
+   * still being given back.
+   *
+   * 🛑 EACH ENTRY REMOVES ITSELF ON SETTLE. An array that only drained at
+   * `close()` grew one entry per initialize → DELETE lap, which is the same
+   * unbounded growth this class exists to stop. */
+  private readonly releasing = new Set<Promise<void>>();
+
+  /** Test seam. The count of releases still in flight; see `releasing`. */
+  get pendingReleases(): number {
+    return this.releasing.size;
+  }
 
   private constructor(private readonly opts: McpHttpOptions) {}
 
@@ -179,7 +188,12 @@ export class McpHttpService {
       },
       onsessionclosed: (id) => {
         this.sessions.delete(id);
-        this.releasing.push(release());
+
+        const done = release().finally(() => {
+          this.releasing.delete(done);
+        });
+
+        this.releasing.add(done);
       },
     });
 

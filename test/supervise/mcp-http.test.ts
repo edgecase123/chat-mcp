@@ -29,6 +29,9 @@ interface Harness {
 
   /** How many of those the service has released. */
   readonly released: () => number;
+
+  /** Releases still in flight. See `McpHttpService.releasing`. */
+  readonly pending: () => number;
 }
 
 /**
@@ -78,6 +81,7 @@ async function harness(): Promise<Harness> {
     url: `http://127.0.0.1:${port}/mcp`,
     built: () => open.length,
     released: () => released.length,
+    pending: () => service.pendingReleases,
 
     // 🛑 IDEMPOTENT. A test that closes to assert the teardown released its
     // contexts is still closed again by its own `t.after`.
@@ -402,7 +406,19 @@ test('🚨 a serial initialize/DELETE loop accumulates NOTHING', async (t) => {
 
   assert.equal(h.built(), laps, 'the control: every lap really did build a server');
   assert.equal(h.released(), laps, `${laps - h.released()} of ${laps} contexts were kept`);
+
+  // 🛑 THE BOOKKEEPING MUST NOT ACCUMULATE EITHER, or this test's name is a
+  // false claim. The release promises were retained until `close()`, so the
+  // service grew one entry per lap while reporting every context released.
+  await drained();
+
+  assert.equal(h.pending(), 0, `${h.pending()} release promises were retained after ${laps} laps`);
 });
+
+/** Let the in-flight releases settle. Each awaits a NotifyBus and a database handle. */
+async function drained(): Promise<void> {
+  for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
+}
 
 /**
  * 🛑 THE TWO TEARDOWN PATHS MUST AGREE ON ONE OWNER. A session still live when
