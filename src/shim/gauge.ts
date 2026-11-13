@@ -98,10 +98,11 @@ export function nextGaugeState(percent: number, prevWarned: Threshold | null): G
 /**
  * Where a band's warning goes.
  *
- * 🛑 ONE DEFINITION FOR BOTH CALL SITES. `src/oneshot/report_context.ts` and
- * `src/shim/tools/report_context.ts` each tested `fire === 70` to pick DM
- * over room, so a second DM level meant editing a literal in two files.
- * `gauge-bands.test.ts` fails if either reintroduces one.
+ * 🛑 ONE CALLER, AND `gauge-bands.test.ts` FAILS IF A SECOND APPEARS.
+ * `src/oneshot/report_context.ts` and `src/shim/tools/report_context.ts` each
+ * tested `fire === 70` to pick DM over room, so a second DM level meant
+ * editing a literal in two files. Both now go through `applyContextReport`,
+ * which is the only thing that calls this.
  *
  * lee ruled on 2026-11-04 that the 50 band is DM-only, so it earns no room
  * post and no colour in the web gauge.

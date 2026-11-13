@@ -1,8 +1,7 @@
 import * as dao from '../storage/dao.js';
 import { usedFromTranscript } from '../adapters/transcript-usage.js';
 import { openDb } from '../storage/db.js';
-import { notifyPeer } from '../notify/bus.js';
-import { nextGaugeState, warningBody, deliveryFor, type Threshold } from '../shim/gauge.js';
+import { applyContextReport } from '../shim/gauge-report.js';
 
 export interface ReportContextOpts {
   handle: string;
@@ -15,11 +14,9 @@ export interface ReportContextOpts {
 }
 
 /**
- * Bash-invokable equivalent of the report_context MCP tool. Used by the
- * Claude Code PreToolUse adapter hook to push an estimated gauge without
- * having to speak the MCP protocol from a hook script. The DB write, the
- * hysteresis state machine, and the threshold-warning fanout are shared
- * with the MCP tool — this is a thin CLI wrapper around the same code.
+ * Bash-invokable equivalent of the report_context MCP tool, for the Claude
+ * Code PreToolUse hook. The write, the hysteresis and the warning fanout are
+ * `applyContextReport`; what lives here is this caller's own input policy.
  */
 export async function runReportContext(opts: ReportContextOpts): Promise<void> {
   if (!opts.handle) throw new Error('--handle is required');
@@ -56,75 +53,14 @@ export async function runReportContext(opts: ReportContextOpts): Promise<void> {
         `Unknown handle: ${opts.handle}. The agent must have registered on the bus first.`,
       );
     }
-    const prevWarned = (me.context_warned_threshold ?? null) as Threshold | null;
-    dao.setAgentContext(db, opts.handle, clamped, opts.total);
 
-    const percent = opts.total > 0 ? Math.round((clamped / opts.total) * 1000) / 10 : 0;
-    const transition = nextGaugeState(percent, prevWarned);
+    const report = applyContextReport(db, opts.handle, clamped, opts.total);
 
-    if (transition.next_warned !== prevWarned) {
-      dao.setAgentContextWarned(db, opts.handle, transition.next_warned);
-    }
-
-    const notified = { dm: 0, rooms: [] as string[] };
-    if (transition.fire != null) {
-      const body = warningBody(opts.handle, transition.fire, percent);
-      const delivery = deliveryFor(transition.fire);
-
-      if (delivery === 'dm') {
-        const result = dao.insertMessage(db, {
-          from: dao.SYSTEM_HANDLE,
-          to: opts.handle,
-          body,
-          kind: 'chat',
-        });
-        notifyPeer(opts.handle, {
-          id: result.id,
-          to: opts.handle,
-          from: dao.SYSTEM_HANDLE,
-          ts: result.sent_at,
-          body,
-          kind: 'chat',
-        });
-        notified.dm = 1;
-      } else {
-        const kind = delivery === 'alert' ? 'alert' : 'chat';
-        for (const room of dao.myRooms(db, opts.handle)) {
-          const result = dao.insertMessage(db, {
-            from: dao.SYSTEM_HANDLE,
-            to: room.name,
-            body,
-            kind,
-          });
-          for (const member of dao.roomMembers(db, room.name)) {
-            notifyPeer(member, {
-              id: result.id,
-              to: room.name,
-              from: dao.SYSTEM_HANDLE,
-              ts: result.sent_at,
-              body,
-              kind,
-            });
-          }
-          notified.rooms.push(room.name);
-        }
-      }
-    }
-
-    const payload = {
-      handle: opts.handle,
-      used: clamped,
-      total: opts.total,
-      percent,
-      warned: transition.next_warned,
-      fired: transition.fire,
-      notified,
-    };
     if (opts.json) {
-      process.stdout.write(`${JSON.stringify(payload)}\n`);
+      process.stdout.write(`${JSON.stringify({ handle: opts.handle, ...report })}\n`);
     } else {
-      const fired = transition.fire ? ` fired=${transition.fire}` : '';
-      process.stdout.write(`gauge handle=${opts.handle} ${percent}%${fired}\n`);
+      const fired = report.fired ? ` fired=${report.fired}` : '';
+      process.stdout.write(`gauge handle=${opts.handle} ${report.percent}%${fired}\n`);
     }
   } finally {
     db.close();

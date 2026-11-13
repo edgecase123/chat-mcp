@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { BANDS, nextGaugeState, warningBody, deliveryFor, PLANNING_BAND, type Threshold } from '../../src/shim/gauge.js';
 
 /**
@@ -101,20 +101,42 @@ test('🛑 the 50 body asks for a BREAK POINT; the 70 body asks for a compact', 
 
 /**
  * 🛑 THE ROUTING LIVED AS `fire === 70` IN TWO FILES, AND #105 ADDS A SECOND
- * DM LEVEL. One of the two would have been updated. This is the guard.
+ * DM LEVEL. One of the two would have been updated.
+ *
+ * ⚠️ THE TWO COPIES ARE NOW ONE, so naming the old two sites would assert
+ * nothing — both are clean because neither routes any more. #213 adds a THIRD
+ * reporter, so the guard is that exactly one file consults `deliveryFor`.
  */
-test('🛑 neither report_context hardcodes a band number for routing', () => {
-  const sites = ['src/oneshot/report_context.ts', 'src/shim/tools/report_context.ts'];
+test('🛑 exactly one site routes a band, so a new reporter cannot grow a copy', () => {
+  // 🛑 THE FILESYSTEM, NOT `git ls-files`. The first cut used git and read
+  // zero callers, because the one real caller was a NEW file and git lists
+  // only tracked ones. A third copy arrives untracked too.
+  const root = new URL('../../src/', import.meta.url);
+  const src = readdirSync(root, { recursive: true, encoding: 'utf8' })
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => `src/${f}`)
+    .sort();
 
-  for (const site of sites) {
-    const source = readFileSync(new URL(`../../${site}`, import.meta.url), 'utf8');
+  assert.ok(src.length > 50, `expected the source tree, found ${src.length} files — the glob broke`);
 
-    assert.doesNotMatch(
-      source,
-      /fire\s*===\s*\d+/,
-      `${site} compares fire to a literal band. Use deliveryFor() so one definition serves both sites.`,
-    );
-    assert.match(source, /deliveryFor/, `${site} does not consult deliveryFor()`);
+  const callers = src.filter((f) => {
+    if (f === 'src/shim/gauge.ts') return false; // where deliveryFor is DEFINED
+
+    return /deliveryFor\s*\(/.test(readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8'));
+  });
+
+  assert.deepEqual(
+    callers,
+    ['src/shim/gauge-report.ts'],
+    'band routing exists outside applyContextReport. Call it instead of re-deriving the delivery.',
+  );
+
+  // `gauge.ts` is skipped again: its own docblock QUOTES the `fire === 70`
+  // this guard exists to ban, and a prose mention is not a comparison.
+  for (const f of src.filter((x) => x !== 'src/shim/gauge.ts')) {
+    const source = readFileSync(new URL(`../../${f}`, import.meta.url), 'utf8');
+
+    assert.doesNotMatch(source, /fire\s*===\s*\d+/, `${f} compares fire to a literal band`);
   }
 });
 
