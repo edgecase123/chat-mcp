@@ -32,11 +32,16 @@ function project(
 }
 
 function install(handle: string, built: { dir: string; manifest: unknown }): string {
-  ensureManifestDir();
+  installManifestOnly(handle, built);
   registerProject(handle, built.dir);
-  writeFileSync(manifestPathFor(handle), JSON.stringify(built.manifest));
 
   return built.dir;
+}
+
+/** The manifest alone, so a test can point the REGISTRATION somewhere else. */
+function installManifestOnly(handle: string, built: { dir: string; manifest: unknown }): void {
+  ensureManifestDir();
+  writeFileSync(manifestPathFor(handle), JSON.stringify(built.manifest));
 }
 
 const GATE = {
@@ -131,4 +136,28 @@ test('a script outside the project directory is refused', async () => {
       return true;
     },
   );
+});
+
+/**
+ * 🛑 THE SIBLING OF `broker.test.ts`'s REGISTRATION TEST, AT THIS LAYER.
+ *
+ * That one drives the socket. This service is reachable with no socket at all,
+ * so the immunity needs pinning where the call now enters.
+ *
+ * 🛑 THE REGISTRATION HOLDS ONLY THE DECOY, NEVER BOTH. `registerProject`
+ * APPENDS, so registering real-then-decoy leaves real at index 0 and any
+ * implementation reading index 0 still passes. That shape is a decoy test.
+ */
+test('rewriting the registration does not move where a command runs', async () => {
+  const real = project(GATE, { 'gate.sh': '#!/bin/sh\necho real\n' });
+  const decoy = project(GATE, { 'gate.sh': '#!/bin/sh\necho decoy\n' });
+
+  installManifestOnly('swapped', real);
+  registerProject('swapped', decoy.dir);
+
+  const result = await runCommandFor('swapped', 'run-gate', {});
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /real/);
+  assert.doesNotMatch(result.stdout, /decoy/);
 });

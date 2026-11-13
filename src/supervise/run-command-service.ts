@@ -44,6 +44,7 @@ export interface RunCommandOptions {
  * the tree its own commands run in.
  *
  * One manifest per handle gives one directory, so no candidate can conflict.
+ * Pinned by `rewriting the registration does not move where a command runs`.
  */
 export function manifestFor(handle: string): { dir: string; manifest: CommandManifest } {
   let manifest: CommandManifest;
