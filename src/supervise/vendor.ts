@@ -60,6 +60,26 @@ export interface VendorSpawn {
   readonly containerHome: string;
   readonly authEnvVar: string;
 
+  /**
+   * This vendor's CLI reports usage-window state, and its `routeEvent` calls
+   * the `usage` sink.
+   *
+   * 🛑 DECLARED BY THE VENDOR, NOT BY THE WIRING. `wireAgentChild` hard-coded
+   * `true` for every vendor while the sinks it promises are OPTIONAL on
+   * `EventRouter`. So a vendor whose router never calls them still announced
+   * that a reading was coming, and the operator was told "awaiting the first
+   * reading" forever — the exact confusion #217 exists to end, defeated one
+   * layer down. #219.
+   *
+   * ⚠️ NOT DERIVED FROM WHETHER `routeEvent` LOOKS LIKE IT ROUTES ONE. That
+   * is inference from shape, one step from the inference from silence this
+   * whole seam replaces.
+   */
+  readonly reportsUsage: boolean;
+
+  /** This vendor's CLI reports context-window fullness. See `reportsUsage`. */
+  readonly reportsContext: boolean;
+
   readonly argsFor: (opts: SpawnOptions, mode: SandboxMode) => string[];
   /** The config path to point the CLI at, written first if the mode needs it. */
   readonly mcpConfigFor: (grant: ChildGrant, mode: SandboxMode) => string;

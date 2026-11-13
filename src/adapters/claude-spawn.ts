@@ -54,6 +54,11 @@ export const claudeSpawn: VendorSpawn = {
   containerHome: '/root',
   authEnvVar: 'CLAUDE_CODE_OAUTH_TOKEN',
 
+  // `routeClaudeEvent` calls both sinks, so both are true here and nowhere
+  // else. A vendor that routes neither declares `false` and still starts.
+  reportsUsage: true,
+  reportsContext: true,
+
   argsFor: (opts: SpawnOptions, mode: SandboxMode): string[] =>
     mode === 'docker' ? containerArgs(opts) : claudeArgs(opts),
 

@@ -26,6 +26,8 @@ test('a turn-end event reaches every onTurnEnd subscriber', async () => {
   const agent = wireAgentChild(proc as never, {
     routeEvent: routeClaudeEvent,
     encodeInput: (t) => `${t}\n`,
+    reportsUsage: true,
+    reportsContext: true,
   });
 
   let ends = 0;
@@ -49,6 +51,8 @@ test('🛑 a LATE onSession subscriber still receives an id that already arrived
   const agent = wireAgentChild(proc as never, {
     routeEvent: routeClaudeEvent,
     encodeInput: (t) => `${t}\n`,
+    reportsUsage: true,
+    reportsContext: true,
   });
 
   proc.stdout.write(`${JSON.stringify({ type: 'system', session_id: 'abc' })}\n`);
@@ -67,6 +71,8 @@ test('the same session id is reported once, not on every event that repeats it',
   const agent = wireAgentChild(proc as never, {
     routeEvent: routeClaudeEvent,
     encodeInput: (t) => `${t}\n`,
+    reportsUsage: true,
+    reportsContext: true,
   });
 
   const ids: string[] = [];
@@ -87,6 +93,8 @@ test('send writes the vendor envelope to stdin', () => {
   const agent = wireAgentChild(proc as never, {
     routeEvent: routeClaudeEvent,
     encodeInput: (t) => `ENVELOPE:${t}\n`,
+    reportsUsage: true,
+    reportsContext: true,
   });
 
   agent.send('ping');

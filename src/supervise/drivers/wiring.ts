@@ -4,7 +4,7 @@ import { createLineParser } from '../child.js';
 import type { RateLimitSnapshot } from '../rate-limit.js';
 import type { ContextSnapshot } from '../context-gauge.js';
 import type { Denial } from '../denial.js';
-import type { EventRouter } from '../vendor.js';
+import type { VendorSpawn } from '../vendor.js';
 
 /**
  * Turn a spawned process into an `AgentChild`.
@@ -17,7 +17,16 @@ import type { EventRouter } from '../vendor.js';
  */
 export function wireAgentChild(
   child: ChildProcessWithoutNullStreams,
-  vendor: { routeEvent: EventRouter; encodeInput: (text: string) => string },
+  // A PROJECTION of `VendorSpawn`, so the field TYPES are not restated here
+  // and a test fake still owes four fields rather than a whole vendor.
+  //
+  // ⚠️ IT DOES NOT GUARD THE NEXT CAPABILITY FLAG, and an earlier version of
+  // this comment claimed it did. What guards that is `AgentChild` declaring
+  // the field REQUIRED: the return literal below then fails to typecheck
+  // until the pass-through is added. Measured, by adding a fifth flag to both
+  // contracts and omitting it here — `tsc` named this function's return.
+  // Keep a new capability required on `AgentChild` and that stays true.
+  vendor: Pick<VendorSpawn, 'routeEvent' | 'encodeInput' | 'reportsUsage' | 'reportsContext'>,
   opts: {
     /**
      * Overrides how `kill()` ends the process.
@@ -74,8 +83,10 @@ export function wireAgentChild(
   child.stdout.on('data', feed);
 
   return {
-    reportsUsage: true,
-    reportsContext: true,
+    // The VENDOR's declaration, passed through. A hard-coded `true` here
+    // promised a reading for a router that may never call either sink. #219.
+    reportsUsage: vendor.reportsUsage,
+    reportsContext: vendor.reportsContext,
     send(text: string): void {
       child.stdin.write(vendor.encodeInput(text));
     },
