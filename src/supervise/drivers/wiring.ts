@@ -17,7 +17,12 @@ import type { EventRouter } from '../vendor.js';
  */
 export function wireAgentChild(
   child: ChildProcessWithoutNullStreams,
-  vendor: { routeEvent: EventRouter; encodeInput: (text: string) => string },
+  vendor: {
+    routeEvent: EventRouter;
+    encodeInput: (text: string) => string;
+    reportsUsage: boolean;
+    reportsContext: boolean;
+  },
   opts: {
     /**
      * Overrides how `kill()` ends the process.
@@ -74,8 +79,10 @@ export function wireAgentChild(
   child.stdout.on('data', feed);
 
   return {
-    reportsUsage: true,
-    reportsContext: true,
+    // The VENDOR's declaration, passed through. A hard-coded `true` here
+    // promised a reading for a router that may never call either sink. #219.
+    reportsUsage: vendor.reportsUsage,
+    reportsContext: vendor.reportsContext,
     send(text: string): void {
       child.stdin.write(vendor.encodeInput(text));
     },

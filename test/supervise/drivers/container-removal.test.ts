@@ -105,7 +105,7 @@ test(
     // bound stays a bound, not a race.
     const agentChild = wireAgentChild(
       rawChild,
-      { routeEvent: () => undefined, encodeInput: (text) => text },
+      { routeEvent: () => undefined, encodeInput: (text) => text, reportsUsage: false, reportsContext: false },
       { stop: dockerStopFor(name, 2) },
     );
 
