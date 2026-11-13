@@ -10,7 +10,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-rcs-'));
 const { Refusal, listCommandsFor, runCommandFor } = await import(
   '../../src/supervise/run-command-service.js'
 );
-const { registerProject } = await import('../../src/supervise/projects.js');
+const { dirsFor, registerProject } = await import('../../src/supervise/projects.js');
 const { ensureManifestDir, manifestPathFor } = await import('../../src/util/paths.js');
 
 /** A project directory with the scripts its manifest names. */
@@ -154,6 +154,10 @@ test('rewriting the registration does not move where a command runs', async () =
 
   installManifestOnly('swapped', real);
   registerProject('swapped', decoy.dir);
+
+  // POSITIVE CONTROL. Without it a `registerProject` that silently no-opped
+  // would leave this test green while proving nothing.
+  assert.deepEqual(dirsFor('swapped'), [decoy.dir]);
 
   const result = await runCommandFor('swapped', 'run-gate', {});
 
