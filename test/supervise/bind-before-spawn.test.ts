@@ -17,6 +17,7 @@ const DIRS = [process.cwd()];
 function fakeChild(): AgentChild {
   return {
     reportsUsage: true,
+    reportsContext: true,
     send: () => undefined,
     onTurnEnd: () => undefined,
     onContext: () => undefined,

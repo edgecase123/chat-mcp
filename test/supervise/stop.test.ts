@@ -43,6 +43,7 @@ function recordingChild(children: FakeChild[]) {
 
     return {
       reportsUsage: false,
+      reportsContext: true,
       send: (t: string) => sent.push(t),
       onTurnEnd: (cb: () => void) => {
         endTurn = cb;

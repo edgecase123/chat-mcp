@@ -46,6 +46,22 @@ export interface AgentChild {
    */
   readonly reportsUsage: boolean;
 
+  /**
+   * This driver's CLI reports how full the context window is.
+   *
+   * 🛑 DECLARED, NOT INFERRED FROM SILENCE, for the same reason
+   * `reportsUsage` is. A blank gauge used to have two causes an operator
+   * could not tell apart: a driver that never reports, and reporting that
+   * broke. Every other no-reading state logs — an unregistered child, a
+   * throwing write, an unmapped model, a stale reading. Only this one could
+   * not, because nothing said whether a figure was ever coming. #217.
+   *
+   * `false` is allowed and is not a bug. lee ruled on 2026-11-13:
+   * *"dispatch and announce the blank"*. The supervisor says it at startup
+   * and dispatches anyway, exactly as it does for an UNMETERED driver.
+   */
+  readonly reportsContext: boolean;
+
   /** Write one user message. Caller must not send another until the turn ends. */
   send(text: string): void;
 
@@ -81,8 +97,8 @@ export interface AgentChild {
    * window and only drives the gauge an operator reads. Conflating them cost
    * a reader on #213, where both are called "usage" in the raw stream.
    *
-   * A driver whose CLI reports no context simply never calls this, and the
-   * gauge stays unknown — which is reported rather than guessed.
+   * A driver whose CLI reports no context simply never calls this. Which
+   * driver that is comes from `reportsContext`, never from the silence.
    */
   onContext(cb: (snapshot: ContextSnapshot) => void): void;
 

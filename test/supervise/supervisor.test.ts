@@ -47,6 +47,7 @@ function fakeChild(): {
     },
     child: {
       reportsUsage: true,
+      reportsContext: true,
       send: (t) => sent.push(t),
       onTurnEnd: (cb) => {
         endTurn = cb;
@@ -354,6 +355,7 @@ test('a driver that reports NO usage is UNMETERED and says so, not "unknown" for
     log: (l) => lines.push(l),
     spawnChild: () => ({
       reportsUsage: false,
+      reportsContext: true,
       send: (t) => sent.push(t),
       onTurnEnd: (cb) => {
         endTurn = cb;
@@ -411,6 +413,66 @@ test('describe() HAS a production caller now — startup logs it', async () => {
 
   try {
     assert.ok(lines.some((l) => /^rate limits:/.test(l)), 'startup must report the gate state');
+  } finally {
+    await s.stop();
+  }
+});
+
+test('a driver that reports NO context announces the blank at startup and still dispatches', async () => {
+  // #217. A blank gauge had two causes an operator could not tell apart: a
+  // driver that reports no context at all, and reporting that broke. The
+  // rate-limit side has said which since PR 34; this side said nothing.
+  // lee, 2026-11-13: *"dispatch and announce the blank"*.
+  const sent: string[] = [];
+  const lines: string[] = [];
+  let endTurn: (() => void) | undefined;
+
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS,
+    handle: 'nocontext',
+    log: (l) => lines.push(l),
+    spawnChild: () => ({
+      reportsUsage: true,
+      reportsContext: false,
+      send: (t) => sent.push(t),
+      onTurnEnd: (cb) => {
+        endTurn = cb;
+      },
+      onContext: () => undefined,
+      onUsage: () => undefined,
+      onDenial: () => undefined,
+      onSession: () => undefined,
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      kill: () => undefined,
+    }),
+  }));
+
+  try {
+    // It still dispatches. A blank gauge is announced, never a refusal.
+    assert.equal((await deliverToSupervisor('nocontext', env(1, 'x')))?.queued, 'sent');
+
+    assert.ok(
+      lines.some((l) => /UNREPORTED/.test(l)),
+      `startup never said the gauge was unreported: ${lines.join(' | ')}`,
+    );
+    assert.ok(lines.some((l) => /context gauge:/.test(l)));
+    endTurn?.();
+  } finally {
+    await s.stop();
+  }
+});
+
+test('a driver that DOES report context says so at startup, and does not claim the blank', async () => {
+  // 🛑 THE PAIRED CONTROL. A test covering only the `false` driver leaves the
+  // `true` line unasserted, which is the dead-code shape `describe()` itself
+  // was in before #213.
+  const f = fakeChild();
+  const lines: string[] = [];
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'hascontext', spawnChild: () => f.child, log: (l) => lines.push(l) }));
+
+  try {
+    assert.ok(lines.some((l) => /^context gauge:/.test(l)), 'startup must report the gauge state');
+    assert.ok(!lines.some((l) => /UNREPORTED/.test(l)), 'a reporting driver is not unreported');
   } finally {
     await s.stop();
   }

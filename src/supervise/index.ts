@@ -21,6 +21,7 @@ import {
 import { openHostBus, type HostBus } from './host-bus.js';
 import { applyContextReport } from '../shim/gauge-report.js';
 import type { ContextSnapshot } from './context-gauge.js';
+import { describeContextGauge } from './context-gauge.js';
 
 /**
  * The supervisor: it owns the loop the harness used to own.
@@ -1029,6 +1030,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   // one commit earlier. Logged at startup so an UNMETERED driver announces
   // itself before it dispatches anything, rather than never.
   log(gate.describe());
+
+  // 🛑 THE SAME ANNOUNCE, FOR THE OTHER GAUGE. A driver that reports no
+  // context dispatches anyway and says so here — lee, 2026-11-13: *"dispatch
+  // and announce the blank"*. Without this line a blank gauge and a broken
+  // one look identical to an operator. #217.
+  log(describeContextGauge(child.reportsContext));
 
   return {
     socketPath: listener.socketPath,

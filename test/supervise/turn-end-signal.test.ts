@@ -30,6 +30,7 @@ test('a caller can observe the turn ending, instead of timing it', async () => {
 
   const spawnChild = (_opts: SpawnOptions): AgentChild => ({
     reportsUsage: false,
+    reportsContext: true,
     send: () => undefined,
     onTurnEnd: (cb) => {
       endTurn = cb;
