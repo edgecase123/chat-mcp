@@ -1,6 +1,7 @@
 import { createServer, connect, type Server, type Socket } from 'node:net';
 import { chmodSync, existsSync, unlinkSync } from 'node:fs';
 import { SOCKET_MODE, ensureSocketDir, socketPathFor } from '../util/paths.js';
+import { supervisorHandleFor } from './grant.js';
 
 /**
  * Direct delivery to a running supervisor.
@@ -317,14 +318,45 @@ async function isLive(path: string): Promise<boolean> {
  * is the normal case for an agent running on a harness watch. **The caller
  * falls back to `notifyPeer()`; it must not treat null as a failure.**
  */
+/**
+ * The socket to hand an envelope to, or `null` when nothing is listening.
+ *
+ * 🛑 A CHILD HANDLE FALLS BACK TO ITS SUPERVISOR, AND THAT IS THE WHOLE ARC.
+ * A supervised child is registered on the bus as `<handle>-agent` while the
+ * supervisor binds `<handle>` — deliberately, so the child cannot eat the
+ * deliveries meant for its supervisor (#35). On the host that costs nothing,
+ * because the child's own shim watches `notify/<handle>-agent`.
+ *
+ * 🛑 A CONTAINERIZED CHILD WATCHES NO NOTIFY FILE. The state dir is not
+ * mounted into it, so this socket is its only wake path. Without the fallback
+ * every message addressed to it returned `null` here and was dropped with no
+ * error on either side.
+ *
+ * The direct socket is tried FIRST, so a real supervisor whose own handle ends
+ * in `-agent` still wins over the one it would otherwise be mistaken for.
+ */
+function supervisorSocketFor(handle: string): string | null {
+  const direct = socketPathFor(handle);
+
+  if (existsSync(direct)) return direct;
+
+  const owner = supervisorHandleFor(handle);
+
+  if (owner === null) return null;
+
+  const viaOwner = socketPathFor(owner);
+
+  return existsSync(viaOwner) ? viaOwner : null;
+}
+
 export async function deliverToSupervisor(
   handle: string,
   envelope: WakeEnvelope,
   timeoutMs: number = ACK_TIMEOUT_MS,
 ): Promise<WakeAck | null> {
-  const path = socketPathFor(handle);
+  const path = supervisorSocketFor(handle);
 
-  if (!existsSync(path)) return null;
+  if (path === null) return null;
 
   return new Promise((resolve) => {
     let settled = false;
