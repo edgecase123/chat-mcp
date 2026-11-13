@@ -10,6 +10,7 @@ process.on('warning', (w) => {
 });
 
 import { Command } from 'commander';
+import { handleRefusal, isHandle } from './util/naming.js';
 import { KNOWN_SUBCOMMANDS } from './util/subcommands.js';
 import { packageVersion } from './util/version.js';
 
@@ -18,6 +19,14 @@ async function runShimEntry(handle: string | undefined, force = false): Promise<
     console.error('Error: --handle <handle> is required in MCP shim mode');
     process.exit(1);
   }
+  // 🛑 THE SAME REASON AS THE CLAIMED-HANDLE CATCH BELOW, reached by a
+  // different route. An invalid handle threw from inside `NotifyBus`, so the
+  // operator was shown a stack trace rather than told the handle was wrong.
+  if (!isHandle(handle)) {
+    console.error(`chat-mcp: ${handleRefusal(handle)}`);
+    process.exit(1);
+  }
+
   const { runShim } = await import('./shim/index.js');
 
   // 🛑 A refused claim must say WHY on stderr. An MCP client shows a stack
