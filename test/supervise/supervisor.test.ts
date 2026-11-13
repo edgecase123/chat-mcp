@@ -51,6 +51,7 @@ function fakeChild(): {
       onTurnEnd: (cb) => {
         endTurn = cb;
       },
+      onContext: () => undefined,
       onUsage: (cb) => {
         usage = cb;
       },
@@ -357,6 +358,7 @@ test('a driver that reports NO usage is UNMETERED and says so, not "unknown" for
       onTurnEnd: (cb) => {
         endTurn = cb;
       },
+      onContext: () => undefined,
       onUsage: () => undefined,
       // 🛑 ADDED WHEN THE SEAM GREW. These fakes were silently incomplete —
       // the supervisor called `child.onSession` and every test threw. A fake

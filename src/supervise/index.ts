@@ -19,6 +19,8 @@ import {
   excerptForLog,
 } from './drivers/claude-events.js';
 import { openHostBus, type HostBus } from './host-bus.js';
+import { applyContextReport } from '../shim/gauge-report.js';
+import type { ContextSnapshot } from './context-gauge.js';
 
 /**
  * The supervisor: it owns the loop the harness used to own.
@@ -444,6 +446,17 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   let childSession: string | null = null;
 
   /**
+   * Model ids already reported as having no known window, and whether the
+   * unregistered-child notice has been said.
+   *
+   * ⚠️ ONCE EACH, BECAUSE THE GAUGE FIRES EVERY TURN. An unconditional log
+   * would put the same line in front of the operator hundreds of times and
+   * train them to skip it, which is how a real warning stops being read.
+   */
+  const warnedFallbackWindows = new Set<string>();
+  let warnedUnregisteredGauge = false;
+
+  /**
    * Register every callback on the CURRENT child.
    *
    * 🛑 CALLED AGAIN AFTER A REPLACEMENT. Callbacks live on the instance, so a
@@ -474,6 +487,8 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
      *              X files a SECOND approval for the command lee just granted
      *   onUsage    benign, wrapped for uniformity — an unwrapped one is the
      *              exception a reader has to re-derive
+     *   onContext  a dying child's last turn would overwrite the LIVE child's
+     *              gauge, so the operator reads the dead session's fill
      *
      * ⚠️ `onTurnEnd` had `generation` in scope two lines above and did not
      * use it. A per-call check is something to forget; a wrapper is not.
@@ -528,6 +543,47 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     child.onSession(
       ifCurrent('onSession', (id) => {
         childSession = id;
+      }),
+    );
+
+    /**
+     * 🛑 THE GAUGE IS THE CHILD'S, NOT THE SUPERVISOR'S. Verified on the live
+     * bus: `list_agents` carried the blank on `claude2-agent`, and `claude2`
+     * was not listed at all. Writing it to `opts.handle` would fill a row
+     * nobody reads and leave the blank exactly where #213 found it.
+     */
+    child.onContext(
+      ifCurrent('onContext', (snapshot: ContextSnapshot) => {
+        const childHandle = currentGrant?.handle ?? childHandleFor(opts.handle);
+
+        // 🛑 AN UPDATE AGAINST A MISSING ROW IS A SILENT NO-OP, which is the
+        // exact failure class this ticket exists to end. The row is written
+        // by the SHIM when the child registers, so a reading can arrive first.
+        if (!dao.getAgent(approvalsDb, childHandle)) {
+          if (!warnedUnregisteredGauge) {
+            warnedUnregisteredGauge = true;
+            log(`context gauge: ${childHandle} has not registered on the bus yet; not reporting`);
+          }
+
+          return;
+        }
+
+        if (snapshot.totalIsFallback && !warnedFallbackWindows.has(snapshot.model ?? '')) {
+          warnedFallbackWindows.add(snapshot.model ?? '');
+          log(
+            `context gauge: no window size known for model "${snapshot.model ?? 'unreported'}"; ` +
+              `using ${snapshot.total} — the percentage is only as right as that guess`,
+          );
+        }
+
+        // Clamp rather than refuse: a real window larger than the mapped one
+        // means the map is stale, and a gauge pinned at 100% still says full.
+        applyContextReport(
+          approvalsDb,
+          childHandle,
+          Math.min(snapshot.used, snapshot.total),
+          snapshot.total,
+        );
       }),
     );
 

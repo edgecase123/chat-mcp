@@ -73,6 +73,7 @@ function recordingChild(children: FakeChild[]) {
       onTurnEnd: (cb) => {
         endTurn = cb;
       },
+      onContext: () => undefined,
       onUsage: () => undefined,
       onDenial: (cb) => {
         onDenial = cb as (d: unknown) => void;
@@ -475,7 +476,11 @@ test('EVERY child callback registration goes through the generation guard', () =
   // output to the log, and a stale child keeps emitting — so its text would
   // otherwise be logged as the LIVE child's answer, which is the exact
   // ambiguity that logging was added to remove.
-  const REQUIRED = ['onTurnEnd', 'onSession', 'onDenial', 'onUsage', 'onExit', 'onEvent'];
+  // ⚠️ `onContext` JOINED FOR #213. A replaced child keeps emitting turns, and
+  // an unguarded reading would overwrite the LIVE child's gauge with the dead
+  // session's number — a confidently wrong gauge, which is worse than the
+  // blank one #213 opened on.
+  const REQUIRED = ['onTurnEnd', 'onSession', 'onDenial', 'onUsage', 'onContext', 'onExit', 'onEvent'];
   const present = registrations.map(([, name]) => name);
 
   assert.deepEqual(

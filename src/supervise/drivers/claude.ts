@@ -2,9 +2,10 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { SpawnOptions } from '../child.js';
 import { type RateLimitSnapshot } from '../rate-limit.js';
-import { parseClaudeRateLimit } from './claude-events.js';
+import { parseClaudeRateLimit, claudeContextSnapshot } from './claude-events.js';
 import { denialFromClaude, rememberClaudeToolUse } from './claude-events.js';
 import type { Denial } from '../denial.js';
+import type { ContextSnapshot } from '../context-gauge.js';
 import { ensureMcpConfigDir, mcpConfigPathFor, writePrivateFileSync } from '../../util/paths.js';
 
 /**
@@ -218,6 +219,7 @@ export function routeClaudeEvent(
   on: {
     turnEnd(): void;
     usage(snapshot: RateLimitSnapshot): void;
+    context?(snapshot: ContextSnapshot): void;
     denial?(denial: Denial): void;
     session?(id: string): void;
   },
@@ -225,6 +227,13 @@ export function routeClaudeEvent(
   const usage = parseClaudeRateLimit(event);
 
   if (usage) on.usage(usage);
+
+  // ⚠️ A DIFFERENT WINDOW FROM `usage` ABOVE. That one is the subscription
+  // rate limit and gates dispatch; this one is the context window and only
+  // feeds the gauge. The raw stream calls both "usage".
+  const context = claudeContextSnapshot(event);
+
+  if (context && on.context) on.context(context);
 
   // 🛑 THE PRODUCER FOR THE APPROVAL PATH. Without this the detector was
   // imported and never called, `insertApproval` had no caller, and the whole

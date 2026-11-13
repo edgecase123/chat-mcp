@@ -2,6 +2,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { AgentChild } from '../child.js';
 import { createLineParser } from '../child.js';
 import type { RateLimitSnapshot } from '../rate-limit.js';
+import type { ContextSnapshot } from '../context-gauge.js';
 import type { Denial } from '../denial.js';
 import type { EventRouter } from '../vendor.js';
 
@@ -39,6 +40,7 @@ export function wireAgentChild(
   const eventCbs: ((e: Record<string, unknown>) => void)[] = [];
   const turnEndCbs: (() => void)[] = [];
   const usageCbs: ((s: RateLimitSnapshot) => void)[] = [];
+  const contextCbs: ((s: ContextSnapshot) => void)[] = [];
   const denialCbs: ((d: Denial) => void)[] = [];
   const sessionCbs: ((id: string) => void)[] = [];
   let lastSession: string | null = null;
@@ -52,6 +54,9 @@ export function wireAgentChild(
       },
       usage: (snapshot) => {
         for (const cb of usageCbs) cb(snapshot);
+      },
+      context: (snapshot) => {
+        for (const cb of contextCbs) cb(snapshot);
       },
       denial: (d) => {
         for (const cb of denialCbs) cb(d);
@@ -78,6 +83,9 @@ export function wireAgentChild(
     },
     onUsage(cb): void {
       usageCbs.push(cb);
+    },
+    onContext(cb): void {
+      contextCbs.push(cb);
     },
     onDenial(cb): void {
       denialCbs.push(cb);

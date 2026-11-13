@@ -2,6 +2,7 @@ import type { SpawnOptions } from './child.js';
 import type { ChildGrant } from './grant.js';
 import type { Denial } from './denial.js';
 import type { RateLimitSnapshot } from './rate-limit.js';
+import type { ContextSnapshot } from './context-gauge.js';
 import type { RedispatchInput } from './drivers/claude-redispatch.js';
 
 /**
@@ -28,6 +29,7 @@ export type EventRouter = (
   on: {
     turnEnd(): void;
     usage(snapshot: RateLimitSnapshot): void;
+    context?(snapshot: ContextSnapshot): void;
     denial?(denial: Denial): void;
     session?(id: string): void;
   },

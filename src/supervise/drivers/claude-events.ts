@@ -1,4 +1,5 @@
 import type { RateLimitSnapshot, WindowState } from '../rate-limit.js';
+import type { ContextSnapshot } from '../context-gauge.js';
 import type { Denial } from '../denial.js';
 
 /**
@@ -312,4 +313,53 @@ const CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
 
 export function contextWindowForModel(model: string): number | null {
   return CONTEXT_WINDOWS[model] ?? null;
+}
+
+/**
+ * The model the CURRENT child session runs, remembered across its events.
+ *
+ * ⚠️ MODULE STATE, LIKE `pendingCalls`, AND BOUNDED THE SAME WAY — one value,
+ * overwritten. A replacement child emits its own `init` before any turn of
+ * its own, so it cannot read its predecessor's window. A child that emits no
+ * `init` at all leaves this null, which reports as a declared fallback rather
+ * than as a wrong number.
+ */
+let currentModel: string | null = null;
+
+/**
+ * The context reading in this event, or null if it carries none.
+ *
+ * 🛑 THE WINDOW IS RESOLVED HERE, BEHIND THE SEAM. The id-to-size map is as
+ * vendor-specific as the event shape it came from, so the supervisor is
+ * handed a finished snapshot and never learns a model name.
+ */
+export function claudeContextSnapshot(event: Record<string, unknown>): ContextSnapshot | null {
+  // 🛑 RESET ON THE EVENT, NOT ON A PARSED MODEL. An `init` whose `model` is
+  // missing would otherwise leave the PREVIOUS session's window in place, and
+  // the next child would be measured against a denominator from the last one
+  // — a silently wrong percentage rather than a declared fallback.
+  if (event.type === 'system' && event.subtype === 'init') {
+    currentModel = parseClaudeModel(event);
+
+    // An `init` opens the session and reports no turn of its own.
+    return null;
+  }
+
+  const used = parseClaudeContextUsed(event);
+
+  if (used === null) return null;
+
+  const mapped = currentModel === null ? null : contextWindowForModel(currentModel);
+
+  return {
+    used,
+    total: mapped ?? FALLBACK_CONTEXT_WINDOW,
+    model: currentModel,
+    totalIsFallback: mapped === null,
+  };
+}
+
+/** Forget the remembered model. For tests that need a clean session. */
+export function resetClaudeContextModel(): void {
+  currentModel = null;
 }
