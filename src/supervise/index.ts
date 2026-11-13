@@ -1,4 +1,5 @@
 import type { AgentChild, SpawnOptions } from './child.js';
+import { assertDeclaresCapabilities } from './child.js';
 import type { VendorSpawn } from './vendor.js';
 import { resolveDriver } from './drivers/index.js';
 import { spawnOnHost } from './drivers/host.js';
@@ -21,6 +22,7 @@ import {
 import { openHostBus, type HostBus } from './host-bus.js';
 import { applyContextReport } from '../shim/gauge-report.js';
 import type { ContextSnapshot } from './context-gauge.js';
+import { describeContextGauge } from './context-gauge.js';
 
 /**
  * The supervisor: it owns the loop the harness used to own.
@@ -250,12 +252,37 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   // Injected in tests; the real one is the shared bus database the web UI
   // already reads.
   const approvalsDb = opts.db ?? openDb();
-  const spawnFn =
+  const spawnRaw =
     opts.spawnChild ??
     ((o: SpawnOptions) =>
       selection.mode === 'docker'
         ? spawnContainerized(opts.vendor, o)
         : spawnOnHost(opts.vendor, o));
+
+  // 🛑 WRAPPED ONCE, NOT ASSERTED AT EACH CALL SITE. The child is spawned in
+  // three places — first start, restart, replace — and a guard repeated three
+  // times is a guard that will be two next time someone adds a fourth.
+  const spawnFn = (o: SpawnOptions): AgentChild => {
+    const spawned = spawnRaw(o);
+
+    try {
+      return assertDeclaresCapabilities(spawned);
+    } catch (err) {
+      // 🛑 THE PROCESS ALREADY EXISTS BY THE TIME WE CAN CHECK IT. The guard
+      // reads a property of the returned child, so a real driver that omits a
+      // field has already spawned a process or a container when it throws —
+      // and nobody holds a reference to it. Raised by claude2 on PR 218.
+      try {
+        spawned.kill();
+      } catch (killErr) {
+        // Swallowed on purpose: `err` is the reason the operator needs, and a
+        // failing kill must not replace it. Logged so it is not invisible.
+        log(`could not kill the child of an undeclared driver: ${String(killErr)}`);
+      }
+
+      throw err;
+    }
+  };
 
   /**
    * 🛑 `initialGrant`, NOT `grant`. It is the set at SPAWN and it never
@@ -1029,6 +1056,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   // one commit earlier. Logged at startup so an UNMETERED driver announces
   // itself before it dispatches anything, rather than never.
   log(gate.describe());
+
+  // 🛑 THE SAME ANNOUNCE, FOR THE OTHER GAUGE. A driver that reports no
+  // context dispatches anyway and says so here — lee, 2026-11-13: *"dispatch
+  // and announce the blank"*. Without this line a blank gauge and a broken
+  // one look identical to an operator. #217.
+  log(describeContextGauge(child.reportsContext));
 
   return {
     socketPath: listener.socketPath,

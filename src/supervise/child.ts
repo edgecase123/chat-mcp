@@ -46,6 +46,22 @@ export interface AgentChild {
    */
   readonly reportsUsage: boolean;
 
+  /**
+   * This driver's CLI reports how full the context window is.
+   *
+   * 🛑 DECLARED, NOT INFERRED FROM SILENCE, for the same reason
+   * `reportsUsage` is. A blank gauge used to have two causes an operator
+   * could not tell apart: a driver that never reports, and reporting that
+   * broke. Every other no-reading state logs — an unregistered child, a
+   * throwing write, an unmapped model, a stale reading. Only this one could
+   * not, because nothing said whether a figure was ever coming. #217.
+   *
+   * `false` is allowed and is not a bug. lee ruled on 2026-11-13:
+   * *"dispatch and announce the blank"*. The supervisor says it at startup
+   * and dispatches anyway, exactly as it does for an UNMETERED driver.
+   */
+  readonly reportsContext: boolean;
+
   /** Write one user message. Caller must not send another until the turn ends. */
   send(text: string): void;
 
@@ -81,8 +97,8 @@ export interface AgentChild {
    * window and only drives the gauge an operator reads. Conflating them cost
    * a reader on #213, where both are called "usage" in the raw stream.
    *
-   * A driver whose CLI reports no context simply never calls this, and the
-   * gauge stays unknown — which is reported rather than guessed.
+   * A driver whose CLI reports no context simply never calls this. Which
+   * driver that is comes from `reportsContext`, never from the silence.
    */
   onContext(cb: (snapshot: ContextSnapshot) => void): void;
 
@@ -191,6 +207,37 @@ export interface SpawnOptions {
    * `DEFAULT_SHUTDOWN_GRACE_SECONDS` (60), per-handle overridable.
    */
   readonly shutdownGraceSeconds?: number;
+}
+
+/**
+ * Every capability on a child is SAID, in a boolean, or the spawn fails.
+ *
+ * 🛑 AN ABSENT FIELD IS NOT A `false`. It reads as `undefined`, which is
+ * falsy, so the supervisor would announce the restrictive state — UNMETERED,
+ * UNREPORTED — about a driver that never said anything. That is inference
+ * from silence wearing a declaration's clothes, and it is the failure both
+ * flags exist to end.
+ *
+ * 🛑 THE TYPE SYSTEM DOES NOT COVER THIS. `tsconfig.json` includes `src/**`
+ * only, so a test fake or a JavaScript driver omitting a field compiles and
+ * runs. Raised by claude2 reviewing PR 218: counting today's fakes fixes
+ * today's fakes, not the one written next month.
+ *
+ * A DECLARED `false` is legal and is not an error — lee, 2026-11-13:
+ * *"dispatch and announce the blank"*.
+ */
+export function assertDeclaresCapabilities(child: AgentChild): AgentChild {
+  for (const field of ['reportsUsage', 'reportsContext'] as const) {
+    if (typeof child[field] !== 'boolean') {
+      throw new Error(
+        `driver did not declare ${field}. A capability is declared, never inferred from silence: ` +
+          `an absent field reads as undefined, and the supervisor would announce the restrictive ` +
+          `state about a driver that said nothing. Set ${field} to true or false.`,
+      );
+    }
+  }
+
+  return child;
 }
 
 /** Split a byte stream into whole JSON lines. Partial lines are held back. */

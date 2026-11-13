@@ -16,6 +16,7 @@ const { childHandleFor } = await import('../../src/supervise/grant.js');
 const { deadPid } = await import('../support/dead-pid.js');
 import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
 import type { ContextSnapshot } from '../../src/supervise/context-gauge.js';
+const { describeContextGauge } = await import('../../src/supervise/context-gauge.js');
 import { supervisorOptions } from '../support/supervisor-options.js';
 
 /**
@@ -58,6 +59,7 @@ function harness() {
 
   const spawnChild = (_opts: SpawnOptions): AgentChild => ({
     reportsUsage: false,
+    reportsContext: true,
     send: () => undefined,
     onTurnEnd: () => undefined,
     onUsage: () => undefined,
@@ -242,4 +244,19 @@ test('a subagent turn never reaches the supervisor at all', () => {
   const seen = routed([{ ...TURN(8_000), parent_tool_use_id: 'toolu_abc' }]);
 
   assert.deepEqual(seen, []);
+});
+
+test('describeContextGauge names BOTH states, so a blank is never ambiguous', () => {
+  // #217. The paired control matters more than either line: a test covering
+  // only the `false` driver leaves the `true` line as dead code.
+  const silent = describeContextGauge(false);
+  const reporting = describeContextGauge(true);
+
+  assert.match(silent, /UNREPORTED/);
+  assert.match(silent, /^context gauge:/);
+
+  assert.match(reporting, /^context gauge:/);
+  assert.doesNotMatch(reporting, /UNREPORTED/, 'a reporting driver is not unreported');
+
+  assert.notEqual(silent, reporting, 'the two states must be distinguishable');
 });

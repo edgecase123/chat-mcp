@@ -32,6 +32,7 @@ function harness() {
 
   const spawnChild = (_opts: SpawnOptions): AgentChild => ({
     reportsUsage: false,
+    reportsContext: true,
     send: () => undefined,
     onTurnEnd: () => undefined,
     onContext: () => undefined,

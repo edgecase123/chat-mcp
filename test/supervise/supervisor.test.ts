@@ -47,6 +47,7 @@ function fakeChild(): {
     },
     child: {
       reportsUsage: true,
+      reportsContext: true,
       send: (t) => sent.push(t),
       onTurnEnd: (cb) => {
         endTurn = cb;
@@ -354,6 +355,7 @@ test('a driver that reports NO usage is UNMETERED and says so, not "unknown" for
     log: (l) => lines.push(l),
     spawnChild: () => ({
       reportsUsage: false,
+      reportsContext: true,
       send: (t) => sent.push(t),
       onTurnEnd: (cb) => {
         endTurn = cb;
@@ -411,6 +413,290 @@ test('describe() HAS a production caller now — startup logs it', async () => {
 
   try {
     assert.ok(lines.some((l) => /^rate limits:/.test(l)), 'startup must report the gate state');
+  } finally {
+    await s.stop();
+  }
+});
+
+test('a driver that reports NO context announces the blank at startup and still dispatches', async () => {
+  // #217. A blank gauge had two causes an operator could not tell apart: a
+  // driver that reports no context at all, and reporting that broke. The
+  // rate-limit side has said which since PR 34; this side said nothing.
+  // lee, 2026-11-13: *"dispatch and announce the blank"*.
+  const sent: string[] = [];
+  const lines: string[] = [];
+  let endTurn: (() => void) | undefined;
+
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS,
+    handle: 'nocontext',
+    log: (l) => lines.push(l),
+    spawnChild: () => ({
+      reportsUsage: true,
+      reportsContext: false,
+      send: (t) => sent.push(t),
+      onTurnEnd: (cb) => {
+        endTurn = cb;
+      },
+      onContext: () => undefined,
+      onUsage: () => undefined,
+      onDenial: () => undefined,
+      onSession: () => undefined,
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      kill: () => undefined,
+    }),
+  }));
+
+  try {
+    // It still dispatches. A blank gauge is announced, never a refusal.
+    assert.equal((await deliverToSupervisor('nocontext', env(1, 'x')))?.queued, 'sent');
+
+    assert.ok(
+      lines.some((l) => /UNREPORTED/.test(l)),
+      `startup never said the gauge was unreported: ${lines.join(' | ')}`,
+    );
+    assert.ok(lines.some((l) => /context gauge:/.test(l)));
+    endTurn?.();
+  } finally {
+    await s.stop();
+  }
+});
+
+test('a driver that DOES report context says so at startup, and does not claim the blank', async () => {
+  // 🛑 THE PAIRED CONTROL. A test covering only the `false` driver leaves the
+  // `true` line unasserted, which is the dead-code shape `describe()` itself
+  // was in before #213.
+  const f = fakeChild();
+  const lines: string[] = [];
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'hascontext', spawnChild: () => f.child, log: (l) => lines.push(l) }));
+
+  try {
+    assert.ok(lines.some((l) => /^context gauge:/.test(l)), 'startup must report the gauge state');
+    assert.ok(!lines.some((l) => /UNREPORTED/.test(l)), 'a reporting driver is not unreported');
+  } finally {
+    await s.stop();
+  }
+});
+
+/**
+ * #217, raised by claude2 reviewing PR 218: counting the fakes fixes today's
+ * 14 and not the 15th, written next month. `tsconfig.json` covers `src/**`
+ * only, so a test fake or a JS driver that omits a capability reads
+ * `undefined` — which is FALSY, so the supervisor would announce UNREPORTED
+ * about a driver that never said anything. That is the exact "inferred from
+ * silence" failure the flag exists to end, arriving through the back door.
+ */
+test('a driver that OMITS a capability fails fast, naming the field it omitted', async () => {
+  // 🛑 TABLE-DRIVEN BECAUSE THE FIRST CUT WAS VACUOUS, and claude2 said so on
+  // PR 218. It omitted BOTH fields and asserted /reportsUsage|reportsContext/,
+  // so a guard checking only ONE of them passed. Each case below omits or
+  // corrupts exactly one field, and asserts the message names THAT field and
+  // NOT the other.
+  const OTHER = { reportsUsage: 'reportsContext', reportsContext: 'reportsUsage' } as const;
+  // ⚠️ HANDLES STAY SHORT. The handle becomes a unix socket path, and macOS
+  // caps that at 104 bytes — a descriptive name threw `listen EINVAL` BEFORE
+  // the guard ran, so the rejection assertion passed on the wrong error.
+  let caseNo = 0;
+  const BAD: readonly [string, unknown][] = [
+    ['absent', undefined],
+    ['null', null],
+    ['a string', 'yes'],
+    ['a number', 1],
+  ];
+
+  for (const field of ['reportsUsage', 'reportsContext'] as const) {
+    for (const [label, value] of BAD) {
+      const declared: Record<string, unknown> = { reportsUsage: true, reportsContext: true };
+
+      if (value === undefined) delete declared[field];
+      else declared[field] = value;
+
+      const bare = () =>
+        ({
+          ...declared,
+          send: () => undefined,
+          onTurnEnd: () => undefined,
+          onContext: () => undefined,
+          onUsage: () => undefined,
+          onDenial: () => undefined,
+          onSession: () => undefined,
+          onEvent: () => undefined,
+          onExit: () => undefined,
+          kill: () => undefined,
+        }) as unknown as AgentChild;
+
+      // ⚠️ THE `finally` IS NOT DECORATION. Before the guard existed this call
+      // RESOLVED, leaving a live supervisor holding a socket, and the test
+      // file hung with no failure line rather than failing. A rejection
+      // assertion on something that allocates must still release it.
+      let started: Awaited<ReturnType<typeof startSupervisor>> | undefined;
+      const handle = `undecl${caseNo++}`;
+
+      try {
+        await assert.rejects(
+          async () => {
+            started = await startSupervisor(
+              supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle, spawnChild: bare }),
+            );
+          },
+          (err: Error) => {
+            assert.match(err.message, new RegExp(field), `${field} ${label}: the message must name the offending field`);
+            assert.doesNotMatch(
+              err.message,
+              new RegExp(OTHER[field]),
+              `${field} ${label}: naming the OTHER field means the guard did not check this one`,
+            );
+            return true;
+          },
+        );
+      } finally {
+        await started?.stop();
+      }
+    }
+  }
+});
+
+test('a failed start releases the socket, so one bad spawn is not a permanent one', async () => {
+  // claude2, PR 218: the listener is bound BEFORE the child is spawned, so a
+  // guard that throws at spawn must not leave the handle held.
+  const bare = () =>
+    ({
+      send: () => undefined,
+      onTurnEnd: () => undefined,
+      onContext: () => undefined,
+      onUsage: () => undefined,
+      onDenial: () => undefined,
+      onSession: () => undefined,
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      kill: () => undefined,
+    }) as unknown as AgentChild;
+
+  const opts = supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'releasesock', spawnChild: bare });
+  await assert.rejects(() => startSupervisor(opts));
+
+  // The proof is that a GOOD driver can take the handle afterwards. A missing
+  // socket file would also pass if the path were simply never created.
+  const f = fakeChild();
+  const s = await startSupervisor(
+    supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'releasesock', spawnChild: () => f.child }),
+  );
+  await s.stop();
+});
+
+test('a driver that DECLARES false is legal and still starts', async () => {
+  // 🛑 THE PAIRED CONTROL, AND THE WHOLE DISTINCTION. lee ruled "dispatch and
+  // announce the blank", so a declared `false` is a CHOICE. Only an ABSENT
+  // declaration is the error. A guard that cannot tell them apart would
+  // refuse the very driver #217 exists to support.
+  const lines: string[] = [];
+  const s = await startSupervisor(supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS,
+    handle: 'declaredfalse',
+    log: (l) => lines.push(l),
+    spawnChild: () => ({
+      reportsUsage: false,
+      reportsContext: false,
+      send: () => undefined,
+      onTurnEnd: () => undefined,
+      onContext: () => undefined,
+      onUsage: () => undefined,
+      onDenial: () => undefined,
+      onSession: () => undefined,
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      kill: () => undefined,
+    }),
+  }));
+
+  try {
+    assert.ok(lines.some((l) => /UNREPORTED/.test(l)), 'a declared false still announces');
+    assert.ok(lines.some((l) => /UNMETERED/.test(l)));
+  } finally {
+    await s.stop();
+  }
+});
+
+test('an undeclared driver has its spawned child KILLED before the error propagates', async () => {
+  // claude2, PR 218: every fake's `kill` is `() => undefined`, so deleting the
+  // kill block passed. The guard reads a property of a child that already
+  // EXISTS, so without this the process or container is orphaned.
+  let kills = 0;
+  const bare = () =>
+    ({
+      reportsUsage: true,
+      // reportsContext deliberately absent.
+      send: () => undefined,
+      onTurnEnd: () => undefined,
+      onContext: () => undefined,
+      onUsage: () => undefined,
+      onDenial: () => undefined,
+      onSession: () => undefined,
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      kill: () => {
+        kills += 1;
+      },
+    }) as unknown as AgentChild;
+
+  let started: Awaited<ReturnType<typeof startSupervisor>> | undefined;
+
+  try {
+    await assert.rejects(async () => {
+      started = await startSupervisor(
+        supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'killspy', spawnChild: bare }),
+      );
+    }, /reportsContext/);
+  } finally {
+    await started?.stop();
+  }
+
+  assert.equal(kills, 1, 'the orphaned child must be killed exactly once');
+});
+
+test('a RESTART into an undeclared child surfaces the error and does not leave a half-dead pair', async () => {
+  // claude2, PR 218: the guard is reachable from three spawn sites and only
+  // the first was covered. `doRestart` kills the old child BEFORE spawning,
+  // so a throw there must not be swallowed into a supervisor that looks alive.
+  const handle = `undeclrestart${process.pid % 1000}`;
+  let spawns = 0;
+  let kills = 0;
+
+  const child = (declared: boolean) =>
+    ({
+      ...(declared ? { reportsUsage: true, reportsContext: true } : { reportsUsage: true }),
+      send: () => undefined,
+      onTurnEnd: () => undefined,
+      onContext: () => undefined,
+      onUsage: () => undefined,
+      onDenial: () => undefined,
+      onSession: () => undefined,
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      kill: () => {
+        kills += 1;
+      },
+    }) as unknown as AgentChild;
+
+  // The FIRST spawn is well-formed, so the supervisor starts. The second is
+  // not — which is the only way this path is reachable, since a real driver
+  // that declared both fields once will declare them again.
+  const s = await startSupervisor(
+    supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle, spawnChild: () => child(spawns++ === 0) }),
+  );
+
+  try {
+    const ack = await deliverToSupervisor(handle, {
+      id: 1,
+      to: handle,
+      from: 'cli',
+      ts: Date.now(),
+      control: { kind: 'restart', mode: 'now' },
+    });
+
+    // 🛑 WHATEVER THE ANSWER IS, IT MUST NOT BE A SILENT `ok`. An operator
+    // told the restart worked, with no child running, is the worst outcome.
+    assert.notEqual(ack?.ok, true, `a failed respawn must not ack ok: ${JSON.stringify(ack)}`);
+    assert.equal(kills, 2, 'the old child and the undeclared replacement are both killed');
   } finally {
     await s.stop();
   }

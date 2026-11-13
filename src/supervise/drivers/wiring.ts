@@ -75,6 +75,7 @@ export function wireAgentChild(
 
   return {
     reportsUsage: true,
+    reportsContext: true,
     send(text: string): void {
       child.stdin.write(vendor.encodeInput(text));
     },

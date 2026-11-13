@@ -77,6 +77,7 @@ test('a CONFIRMED handle with a token spawns via the docker driver', async () =>
       spawned.push(opts);
       return {
         reportsUsage: false,
+        reportsContext: true,
         send: () => undefined,
         onTurnEnd: () => undefined,
         onContext: () => undefined,

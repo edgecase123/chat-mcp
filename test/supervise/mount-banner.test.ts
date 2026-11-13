@@ -22,6 +22,7 @@ function fakeChild(sent: string[]) {
   return {
     opts: undefined as unknown,
     reportsUsage: false,
+    reportsContext: true,
     send: (t: string) => sent.push(t),
     onTurnEnd: (cb: () => void) => {
       endTurn = cb;
