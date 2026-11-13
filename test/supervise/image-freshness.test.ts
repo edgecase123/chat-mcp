@@ -160,7 +160,11 @@ export function contextSources(dockerfile: string): string[] {
     if (line.startsWith('#')) continue;
     if (!/^(COPY|ADD)\s/i.test(line)) continue;
 
-    let rest = line.slice(line.indexOf(' ') + 1).trim();
+    // 🛑 A REGEX, NOT `indexOf(' ')`. A TAB after the instruction word made
+    // `indexOf` find the space before the DESTINATION instead, so
+    // `COPY\tsecrets.env ./` parsed to [] — a fail-open on one character.
+    // Measured and raised by claude2 on PR 211.
+    let rest = line.replace(/^(COPY|ADD)\s+/i, '').trim();
     let fromStage = false;
 
     while (rest.startsWith('--')) {
@@ -232,11 +236,35 @@ test('⚠️ the Dockerfile parser sees ADD, continuations and the JSON form', (
     ['a comment, not an instruction', '# COPY secrets.env ./', []],
     ['--chown does not eat the source', 'COPY --chown=agent:agent dist ./dist', ['dist']],
     ['--from reads a STAGE, not the context', 'COPY --from=build /app/dist ./dist', []],
+
+    // 🛑 EVERY ROW BELOW FAILED OPEN OR MISPARSED BEFORE. A tab is the
+    // one-character version of the whole defect.
+    ['a TAB after the instruction', 'COPY\tsecrets.env ./', ['secrets.env']],
+    ['a TAB after ADD', 'ADD\tentrypoint.sh /entrypoint.sh', ['entrypoint.sh']],
+    ['lowercase add', 'add entrypoint.sh /x', ['entrypoint.sh']],
+    ['runs of spaces', 'COPY   dist   ./dist', ['dist']],
+    ['a CRLF line ending', 'COPY dist ./dist\r', ['dist']],
   ];
 
   for (const [label, line, expected] of cases) {
     assert.deepEqual(contextSources(line), expected, label);
   }
+});
+
+/**
+ * ⚠️ A HEREDOC IS NOT SUPPORTED, AND IT FAILS CLOSED ON PURPOSE.
+ *
+ * `COPY <<EOF /app/f` writes inline content rather than reading a context
+ * file, so there is nothing to hash. The parser does not understand it and
+ * reports `<<EOF` as a source — which makes the class guard FAIL rather than
+ * pass. That is the correct direction: a shape nobody has thought about stops
+ * the build instead of being silently waved through.
+ */
+test('⚠️ an unsupported heredoc COPY fails the guard rather than passing it', () => {
+  const parsed = contextSources('COPY <<EOF /app/f');
+
+  assert.notDeepEqual(parsed, [], 'a heredoc parsed to nothing, which is a fail-open');
+  assert.ok(!(BUILD_INPUT_PATHS as readonly string[]).includes(parsed[0]!));
 });
 
 /**
