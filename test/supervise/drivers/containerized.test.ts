@@ -14,8 +14,11 @@ const { claudeSpawn } = await import('../../../src/adapters/claude-spawn.js');
 const {
   dockerRunPlan,
   CONTAINER_PROJECT_DIR,
+  CONTAINER_MCP_CONFIG_ENV,
   containerStateDir,
   containerPathFor,
+  containerMcpConfigPath,
+  containerBusUrl,
 } = await import('../../../src/supervise/drivers/containerized.js');
 
 const PROJECT_DIR = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-project-'));
@@ -503,5 +506,94 @@ test('🛑 an extra mount ABOVE the state directory refuses the spawn argv', () 
   assert.throws(
     () => dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude8' }),
     /state directory/,
+  );
+});
+
+
+const BUS = { url: 'http://127.0.0.1:54321/mcp', token: 'bus-token-secret' };
+
+function dockerBusPlan() {
+  setToken('sk-ant-oat-x');
+
+  return dockerRunPlanFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: 'claude1',
+    bus: BUS,
+    grant: { handle: 'claude1-agent', configPath: '/unused/host/path.json', tools: [] },
+  });
+}
+
+function busConfig(): Record<string, any> {
+  const raw = dockerBusPlan().env[CONTAINER_MCP_CONFIG_ENV];
+
+  assert.ok(raw, `nothing in ${CONTAINER_MCP_CONFIG_ENV}`);
+
+  return JSON.parse(raw) as Record<string, any>;
+}
+
+test('🚨 the container config is an HTTP entry, not a command that opens the host database', () => {
+  const chat = busConfig().mcpServers.chat;
+
+  assert.equal(chat.type, 'http');
+  assert.equal(chat.headers.Authorization, `Bearer ${BUS.token}`);
+  assert.equal(chat.command, undefined, 'still launching a stdio shim inside the container');
+});
+
+/**
+ * 🛑 THE TRAP IN THIS WHOLE PIECE. `McpHttpListener.url` is the HOST's view,
+ * and `127.0.0.1` inside a container is the CONTAINER. Shipping the listener's
+ * url verbatim gives the agent a bus that is silently unreachable — it looks
+ * configured and connects to nothing.
+ */
+test('🚨 the config url points at the host, never at the container own loopback', () => {
+  const { url } = busConfig().mcpServers.chat;
+
+  assert.equal(url, 'http://host.docker.internal:54321/mcp');
+  assert.ok(!url.includes('127.0.0.1'), `the container would dial itself: ${url}`);
+});
+
+test('🚨 containerBusUrl keeps the port and the path while moving only the host', () => {
+  assert.equal(containerBusUrl('http://127.0.0.1:9/mcp'), 'http://host.docker.internal:9/mcp');
+});
+
+test('🚨 the bearer token never appears in the docker argv', () => {
+  const { args } = dockerBusPlan();
+
+  for (const arg of args) {
+    assert.ok(!arg.includes(BUS.token), `the bus token reached the argv as ${arg}`);
+  }
+
+  assert.ok(args.includes(CONTAINER_MCP_CONFIG_ENV), 'the config is not passed by name');
+});
+
+/**
+ * The control for the prelude: the CLI's own arguments must survive it as
+ * separate argv entries. `sh -c 'script' name args…` puts them in `"$@"`, so
+ * nothing is re-quoted or re-split.
+ */
+test('🚨 the command is wrapped so the config is written INSIDE the container', () => {
+  const { args } = dockerBusPlan();
+  const sh = args.indexOf('sh');
+
+  assert.ok(sh > 0, 'no sh prelude');
+  assert.equal(args[sh + 1], '-c');
+  assert.ok(args[sh + 2]?.includes(containerMcpConfigPath(claudeSpawn)), 'writes the wrong path');
+  assert.ok(args[sh + 2]?.includes('exec "$@"'), 'never execs the real CLI');
+  assert.equal(args[sh + 3], 'sh', 'no $0 placeholder, so the first CLI arg is eaten');
+  assert.equal(args[sh + 4], 'claude');
+  assert.ok(args.includes('--allow-dangerously-skip-permissions'), 'CLI flags did not survive');
+});
+
+test('🚨 a containerized spawn with no bus endpoint refuses rather than starting blind', () => {
+  setToken('sk-ant-oat-x');
+
+  assert.throws(
+    () =>
+      dockerRunPlanFor({
+        cwd: PROJECT_DIR,
+        supervisorHandle: 'claude1',
+        grant: { handle: 'claude1-agent', configPath: '/unused.json', tools: [] },
+      }),
+    /bus/i,
   );
 });

@@ -1,19 +1,24 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import type { AgentChild, SpawnOptions } from '../child.js';
+import type { AgentChild, BusEndpoint, SpawnOptions } from '../child.js';
 import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
 import { mountsFor, containerPathFor } from '../mounts.js';
 import { readToken } from '../auth.js';
 import { assertProjectDirOutsideState, checkedMountPath } from '../containment.js';
-import {
-  ensureMcpConfigDir,
-  mcpConfigPathFor,
-  stateDir,
-  writePrivateFileSync,
-} from '../../util/paths.js';
+import { stateDir } from '../../util/paths.js';
 
 export const CONTAINER_PROJECT_DIR = '/work';
-const CONTAINER_CHAT_MCP_ENTRY = '/opt/chat-mcp/dist/index.js';
+
+/** Carries the whole MCP config, token included, so none of it is in argv. */
+export const CONTAINER_MCP_CONFIG_ENV = 'CHAT_MCP_MCP_CONFIG';
+
+/**
+ * 🛑 HOW A CONTAINER REACHES THE HOST, AND `127.0.0.1` IS NOT IT. The host's
+ * loopback is the CONTAINER's loopback from in there, so the listener's own
+ * `url` describes a bus the agent cannot reach. It would look configured and
+ * connect to nothing.
+ */
+const HOST_FROM_CONTAINER = 'host.docker.internal';
 
 /**
  * Seconds between `docker stop`'s SIGTERM and SIGKILL. Not a measured figure
@@ -30,29 +35,59 @@ export function containerStateDir(vendor: VendorSpawn): string {
   return `${vendor.containerHome}/.chat-mcp`;
 }
 
+/** Where the prelude writes the config, inside the container only. */
+export function containerMcpConfigPath(vendor: VendorSpawn): string {
+  return `${vendor.containerHome}/.chat-mcp-mcp.json`;
+}
+
+/** The listener's host-side url, as the container must dial it. */
+export function containerBusUrl(hostUrl: string): string {
+  const url = new URL(hostUrl);
+
+  url.hostname = HOST_FROM_CONTAINER;
+
+  return url.toString();
+}
+
 /**
- * Overwrite this handle's MCP config with CONTAINER-side command/args.
+ * The container's MCP config: an HTTP client of the host's listener.
  *
- * Every vendor's container image bundles chat-mcp at the same fixed path, so
- * this is generic plumbing, not vendor-specific — the vendor only decides
- * WHETHER its CLI is pointed at this file for a given mode (`mcpConfigFor`).
- *
- * The file itself is written to the HOST path (`mcpConfigPathFor`), which
- * lives under `stateDir()` and is therefore already bind-mounted into the
- * container — so the content just needs to point at paths that exist
- * INSIDE the container, not at this host process's own node binary.
+ * 🛑 NOT A COMMAND ANY MORE. This used to launch a stdio shim INSIDE the
+ * container, which called `openDb()` and read `chat.db` across the mounted
+ * state dir — so the container was a second process on the host's database
+ * rather than a client of the host (#162). The bearer token is now the whole
+ * boundary.
  */
-export function writeContainerMcpConfig(childHandle: string, vendor: VendorSpawn): string {
-  ensureMcpConfigDir();
-  const hostPath = mcpConfigPathFor(childHandle);
+export function buildContainerMcpConfig(bus: BusEndpoint): string {
   const config = {
     mcpServers: {
-      chat: { command: 'node', args: [CONTAINER_CHAT_MCP_ENTRY, '--handle', childHandle] },
+      chat: {
+        type: 'http',
+        url: containerBusUrl(bus.url),
+        headers: { Authorization: `Bearer ${bus.token}` },
+      },
     },
   };
-  writePrivateFileSync(hostPath, `${JSON.stringify(config, null, 2)}\n`);
 
-  return `${containerStateDir(vendor)}/mcp/${childHandle}.json`;
+  return JSON.stringify(config);
+}
+
+/**
+ * The shell prelude that materialises the config inside the container.
+ *
+ * 🛑 `exec "$@"` AND A `$0` PLACEHOLDER, NOT AN INTERPOLATED COMMAND. `sh -c
+ * 'script' name args…` leaves every CLI argument a separate argv entry, so
+ * nothing here re-quotes or re-splits them. Building one command string would
+ * put the agent's own flags through a shell parse.
+ *
+ * `exec` also matters on its own: the supervisor drives the child over stdin,
+ * and a forked `sh` sitting in the middle would own the pipe instead.
+ */
+function mcpConfigPrelude(vendor: VendorSpawn): string {
+  const path = containerMcpConfigPath(vendor);
+
+  // umask, because the file holds a bearer token for the whole bus.
+  return `(umask 077; printf "%s" "$${CONTAINER_MCP_CONFIG_ENV}" > ${path}) && exec "$@"`;
 }
 
 /**
@@ -145,14 +180,34 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
     args.push('-v', `${hostDir}:${containerPathFor(key)}`);
   }
 
-  args.push('-w', CONTAINER_PROJECT_DIR, vendor.image);
-  args.push(opts.binary ?? vendor.binary, ...vendor.argsFor(opts, 'docker'));
+  const env: NodeJS.ProcessEnv = { ...process.env, [vendor.authEnvVar]: token };
 
-  if (opts.grant) {
-    args.push('--mcp-config', vendor.mcpConfigFor(opts.grant, 'docker'), '--strict-mcp-config');
+  if (opts.grant) args.push('-e', CONTAINER_MCP_CONFIG_ENV);
+
+  args.push('-w', CONTAINER_PROJECT_DIR, vendor.image);
+
+  const cli = [opts.binary ?? vendor.binary, ...vendor.argsFor(opts, 'docker')];
+
+  if (!opts.grant) {
+    args.push(...cli);
+
+    return { args, env };
   }
 
-  return { args, env: { ...process.env, [vendor.authEnvVar]: token } };
+  // 🛑 REFUSE RATHER THAN START BLIND. A granted child with no bus endpoint
+  // would come up with an MCP config pointing nowhere, and the only symptom is
+  // an agent that answers nothing.
+  if (!opts.bus) {
+    throw new Error('a containerized spawn with a grant needs opts.bus to reach the host bus');
+  }
+
+  cli.push('--mcp-config', vendor.mcpConfigFor(opts.grant, 'docker'), '--strict-mcp-config');
+
+  env[CONTAINER_MCP_CONFIG_ENV] = buildContainerMcpConfig(opts.bus);
+
+  args.push('sh', '-c', mcpConfigPrelude(vendor), 'sh', ...cli);
+
+  return { args, env };
 }
 
 /**
