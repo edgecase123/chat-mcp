@@ -4,7 +4,7 @@ import { createLineParser } from '../child.js';
 import type { RateLimitSnapshot } from '../rate-limit.js';
 import type { ContextSnapshot } from '../context-gauge.js';
 import type { Denial } from '../denial.js';
-import type { EventRouter } from '../vendor.js';
+import type { VendorSpawn } from '../vendor.js';
 
 /**
  * Turn a spawned process into an `AgentChild`.
@@ -17,12 +17,13 @@ import type { EventRouter } from '../vendor.js';
  */
 export function wireAgentChild(
   child: ChildProcessWithoutNullStreams,
-  vendor: {
-    routeEvent: EventRouter;
-    encodeInput: (text: string) => string;
-    reportsUsage: boolean;
-    reportsContext: boolean;
-  },
+  // 🛑 DERIVED FROM `VendorSpawn`, NOT RESTATED. Spelling these four fields
+  // out again is how the next capability flag reproduces #219: add it to
+  // `VendorSpawn`, forget it here, and the pass-through silently drops it
+  // while `tsc` stays green, because a narrow structural type is satisfied by
+  // a wider argument. Still a PROJECTION, so a test fake owes four fields
+  // rather than the whole vendor. Raised by the dry-solid reviewer.
+  vendor: Pick<VendorSpawn, 'routeEvent' | 'encodeInput' | 'reportsUsage' | 'reportsContext'>,
   opts: {
     /**
      * Overrides how `kill()` ends the process.

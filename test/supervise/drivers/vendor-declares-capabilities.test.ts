@@ -81,3 +81,61 @@ test('the Claude Code vendor declares that it reports both readings', () => {
   assert.equal(claudeSpawn.reportsUsage, true);
   assert.equal(claudeSpawn.reportsContext, true);
 });
+
+/**
+ * 🛑 THE `true` SIDE IS A PROMISE AND IT NEEDS PROVING TOO.
+ *
+ * Asserting `claudeSpawn.reportsContext === true` only echoes the literal
+ * back. Delete `on.context(context)` from `routeClaudeEvent` and that
+ * assertion still passes, while the operator is told a reading is coming
+ * from a router that no longer sends one — #219's failure mode, inside the
+ * one vendor that declares `true`. Raised by the dry-solid reviewer.
+ *
+ * So this drives the vendor's OWN router and compares each declaration
+ * against whether its sink actually fired.
+ */
+
+/** The live `rate_limit_event` payload, as `rate-limit.test.ts` records it. */
+const USAGE_EVENT = {
+  type: 'rate_limit_event',
+  rate_limit_info: {
+    status: 'allowed',
+    resetsAt: 1792192800,
+    rateLimitType: 'five_hour',
+    unifiedWindows: {
+      five_hour: { utilization: 0.52, resetsAt: 1792192800 },
+      seven_day: { utilization: 0.33, resetsAt: 1792458000 },
+    },
+  },
+};
+
+/** An `assistant` turn carries the context-window figure. */
+const CONTEXT_EVENT = {
+  type: 'assistant',
+  parent_tool_use_id: null,
+  message: { model: 'claude-opus-5', usage: { input_tokens: 40_000 } },
+};
+
+test('🛑 the Claude Code vendor ROUTES both readings it declares, not just declares them', () => {
+  let usage = false;
+  let context = false;
+
+  for (const event of [USAGE_EVENT, CONTEXT_EVENT]) {
+    claudeSpawn.routeEvent(event as never, {
+      turnEnd: () => undefined,
+      usage: () => {
+        usage = true;
+      },
+      context: () => {
+        context = true;
+      },
+    });
+  }
+
+  assert.equal(usage, claudeSpawn.reportsUsage, 'reportsUsage does not match what the router does');
+  assert.equal(
+    context,
+    claudeSpawn.reportsContext,
+    'reportsContext does not match what the router does',
+  );
+});
