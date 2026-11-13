@@ -237,11 +237,18 @@ export interface ClaudeUsage {
 /**
  * How full the context window is, from one turn's usage.
  *
- * 🛑 `output_tokens` IS NOT IN THE SUM AND MUST NOT BE ADDED. Measured on a
- * live Opus 5 session: this sum gave 118,783 against `/context`'s own 118.8k,
- * while adding output gave 119,360 and would have printed 119.4k. Output
- * reaches the window only as the next turn's input, where this sum already
- * counts it. #213 proposed adding it; `claude-context.test.ts` pins it out.
+ * 🛑 `output_tokens` IS NOT IN THE SUM, AND #213 ASKS FOR IT TO BE. Output
+ * reaches the window as the NEXT turn's input, where this sum already counts
+ * it, so the cost of leaving it out is that the gauge lags by one reply — not
+ * that it drifts.
+ *
+ * ⚠️ THE EVIDENCE IS ONE READING, AND `/context` IS NOT AN INDEPENDENT
+ * INSTRUMENT. On a live Opus 5 session this sum gave 118,783 against
+ * `/context`'s 118.8k, while adding output gave 119,360 and would have printed
+ * 119.4k. `/context` most likely computes from these same fields, so a match
+ * may only show it uses this formula. claude2's stronger test, not yet run:
+ * across two consecutive calls, `next.prompt_total - prev.prompt_total` should
+ * be at least `prev.output_tokens`.
  */
 export function usedFromUsage(usage: ClaudeUsage): number {
   return (
