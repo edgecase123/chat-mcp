@@ -1,6 +1,6 @@
 import { openSync, readSync, fstatSync, closeSync } from 'node:fs';
 // `adapters/` may import from `supervise/`; the reverse is the banned edge.
-import { usedFromUsage, type ClaudeUsage } from '../supervise/drivers/claude-events.js';
+import { usedFromUsage, claudeContextUsage } from '../supervise/drivers/claude-events.js';
 
 /**
  * How many tokens an agent's context window actually holds, read from the
@@ -44,7 +44,11 @@ export function newestUsedInLines(lines: string[]): number | null {
       continue;
     }
 
-    const usage = (parsed as { message?: { usage?: ClaudeUsage } })?.message?.usage;
+    // 🛑 THE SAME PREDICATE THE SUPERVISOR USES. This used to test only that
+    // `message.usage` existed, so the two gauges selected entries by different
+    // rules and agreed only because every usage-bearing entry happens to be an
+    // `assistant` one.
+    const usage = claudeContextUsage(parsed);
     if (!usage) continue;
 
     const used = usedFromUsage(usage);

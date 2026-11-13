@@ -255,18 +255,35 @@ export function usedFromUsage(usage: ClaudeUsage): number {
  * The live context size this event reports, or null if it reports none.
  *
  * 🛑 `assistant` ONLY, THOUGH `result` CARRIES `usage` TOO. The gauge is
- * last-write-wins, so reading both is redundant rather than double-counted —
- * but `assistant` is the entry the host hook reads out of the transcript, so
- * restricting to it is what makes host and container agree by construction.
+ * last-write-wins, so reading both is redundant rather than double-counted.
+ * The selection rule itself is `claudeContextUsage`, which the host hook now
+ * calls too — the claim that the two agree is pinned by
+ * `claude-context.test.ts`, which feeds one entry through both paths.
  */
 export function parseClaudeContextUsed(event: Record<string, unknown>): number | null {
-  if (event.type !== 'assistant') return null;
+  const usage = claudeContextUsage(event);
 
-  const usage = (event.message as { usage?: ClaudeUsage } | undefined)?.usage;
+  return usage === null ? null : usedFromUsage(usage);
+}
 
-  if (!usage || typeof usage !== 'object') return null;
+/**
+ * The usage block on an entry that counts toward the window, or null.
+ *
+ * 🛑 ONE PREDICATE FOR BOTH PATHS. The supervisor reads a live event and the
+ * host hook reads a transcript line, and they MUST select the same entries or
+ * the two gauges diverge on shape rather than arithmetic. The host path used
+ * to test only that `message.usage` existed, with no `type` check — measured
+ * on a live transcript, 250 of 250 usage-bearing entries were `assistant`, so
+ * the two agreed by luck and not by construction.
+ */
+export function claudeContextUsage(entry: unknown): ClaudeUsage | null {
+  const e = entry as { type?: unknown; message?: { usage?: ClaudeUsage } } | null | undefined;
 
-  return usedFromUsage(usage);
+  if (!e || e.type !== 'assistant') return null;
+
+  const usage = e.message?.usage;
+
+  return usage && typeof usage === 'object' ? usage : null;
 }
 
 /**
@@ -298,7 +315,7 @@ export const FALLBACK_CONTEXT_WINDOW = 1_000_000;
  * unmapped id indistinguishable from a mapped megatoken one — so nothing would
  * ever be logged and a wrong denominator would never surface.
  */
-const CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
+export const CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
   'claude-fable-5-1': 1_000_000,
   'claude-fable-5': 1_000_000,
   'claude-mythos-5-1': 1_000_000,
@@ -316,15 +333,20 @@ export function contextWindowForModel(model: string): number | null {
 }
 
 /**
- * The model the CURRENT child session runs, remembered across its events.
+ * The model last seen, and the session it was seen for.
  *
- * ⚠️ MODULE STATE, LIKE `pendingCalls`, AND BOUNDED THE SAME WAY — one value,
- * overwritten. A replacement child emits its own `init` before any turn of
- * its own, so it cannot read its predecessor's window. A child that emits no
- * `init` at all leaves this null, which reports as a declared fallback rather
- * than as a wrong number.
+ * 🛑 KEYED BY SESSION, NOT A BARE SLOT. A bare slot's correctness rested on
+ * "a replacement child emits its own `init` first", which nothing proves — and
+ * if it were ever false, a new child's turn would be divided by the PREVIOUS
+ * child's window, with `totalIsFallback` false and nothing logged. That is a
+ * confidently wrong percentage, which is worse than the blank gauge #213
+ * opened on. Keying on `session_id` makes inheriting another session's window
+ * impossible rather than unlikely. Raised by the dry-solid reviewer.
+ *
+ * ⚠️ MODULE STATE, LIKE `pendingCalls`, AND BOUNDED THE SAME WAY — one entry,
+ * overwritten.
  */
-let currentModel: string | null = null;
+let lastModel: { session: string | null; model: string | null } = { session: null, model: null };
 
 /**
  * The context reading in this event, or null if it carries none.
@@ -338,8 +360,10 @@ export function claudeContextSnapshot(event: Record<string, unknown>): ContextSn
   // missing would otherwise leave the PREVIOUS session's window in place, and
   // the next child would be measured against a denominator from the last one
   // — a silently wrong percentage rather than a declared fallback.
+  const session = typeof event.session_id === 'string' ? event.session_id : null;
+
   if (event.type === 'system' && event.subtype === 'init') {
-    currentModel = parseClaudeModel(event);
+    lastModel = { session, model: parseClaudeModel(event) };
 
     // An `init` opens the session and reports no turn of its own.
     return null;
@@ -349,17 +373,15 @@ export function claudeContextSnapshot(event: Record<string, unknown>): ContextSn
 
   if (used === null) return null;
 
-  const mapped = currentModel === null ? null : contextWindowForModel(currentModel);
+  // A reading from a session we never saw an `init` for names no model, so it
+  // reports a declared fallback instead of borrowing another session's window.
+  const model = session !== null && session === lastModel.session ? lastModel.model : null;
+  const mapped = model === null ? null : contextWindowForModel(model);
 
   return {
     used,
     total: mapped ?? FALLBACK_CONTEXT_WINDOW,
-    model: currentModel,
+    model,
     totalIsFallback: mapped === null,
   };
-}
-
-/** Forget the remembered model. For tests that need a clean session. */
-export function resetClaudeContextModel(): void {
-  currentModel = null;
 }

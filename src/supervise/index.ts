@@ -454,6 +454,13 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * train them to skip it, which is how a real warning stops being read.
    */
   const warnedFallbackWindows = new Set<string>();
+
+  /**
+   * ⚠️ RESET PER CHILD, INSIDE `wireChild`. A process-lifetime latch went
+   * silent when a REPLACEMENT child was also unregistered, so the operator
+   * kept reading the previous child's last fill as if it were live. Raised by
+   * the dry-solid reviewer.
+   */
   let warnedUnregisteredGauge = false;
 
   /**
@@ -472,6 +479,9 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // looked idle rather than broken. The approval path is the only caller,
     // so it was the FIRST approval, not an edge case. Found by claude1.
     const generation = ++childGeneration;
+
+    // See the declaration: this notice is once per child, not once per process.
+    warnedUnregisteredGauge = false;
 
     /**
      * 🛑 EVERY CALLBACK GOES THROUGH THIS, NOT JUST THE ONE THAT BIT.
@@ -554,42 +564,55 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
      */
     child.onContext(
       ifCurrent('onContext', (snapshot: ContextSnapshot) => {
-        const childHandle = currentGrant?.handle ?? childHandleFor(opts.handle);
+        // 🛑 THE WHOLE BODY IS GUARDED, NOT JUST THE WRITE. The gauge touches
+        // the database three times — the existence read, the row write, and a
+        // notify per room member — and the driver's line parser swallows a
+        // throw as if it were a non-JSON line, which would silently cost the
+        // tool-call recorder a later denial depends on. `onDenial` below
+        // already had this shape; this one did not until the dry-solid
+        // reviewer said so, and a first cut guarded only the write — the test
+        // caught the read escaping.
+        try {
+          const childHandle = currentGrant?.handle ?? childHandleFor(opts.handle);
 
-        // 🛑 AN UPDATE AGAINST A MISSING ROW IS A SILENT NO-OP, which is the
-        // exact failure class this ticket exists to end. The row is written
-        // by the SHIM when the child registers, so a reading can arrive first.
-        if (!dao.getAgent(approvalsDb, childHandle)) {
-          if (!warnedUnregisteredGauge) {
-            warnedUnregisteredGauge = true;
-            log(`context gauge: ${childHandle} has not registered on the bus yet; not reporting`);
+          // 🛑 AN UPDATE AGAINST A MISSING ROW IS A SILENT NO-OP, which is the
+          // exact failure class this ticket exists to end. The row is written
+          // by the SHIM when the child registers, so a reading can arrive
+          // first.
+          if (!dao.getAgent(approvalsDb, childHandle)) {
+            if (!warnedUnregisteredGauge) {
+              warnedUnregisteredGauge = true;
+              log(`context gauge: ${childHandle} has not registered on the bus yet; not reporting`);
+            }
+
+            return;
           }
 
-          return;
-        }
+          if (snapshot.totalIsFallback && !warnedFallbackWindows.has(snapshot.model ?? '')) {
+            warnedFallbackWindows.add(snapshot.model ?? '');
+            log(
+              `context gauge: no window size known for model "${snapshot.model ?? 'unreported'}"; ` +
+                `using ${snapshot.total} — the percentage is only as right as that guess`,
+            );
+          }
 
-        if (snapshot.totalIsFallback && !warnedFallbackWindows.has(snapshot.model ?? '')) {
-          warnedFallbackWindows.add(snapshot.model ?? '');
-          log(
-            `context gauge: no window size known for model "${snapshot.model ?? 'unreported'}"; ` +
-              `using ${snapshot.total} — the percentage is only as right as that guess`,
+          // Clamp rather than refuse: a real window larger than the mapped one
+          // means the map is stale, and a gauge pinned at 100% still says full.
+          applyContextReport(
+            approvalsDb,
+            childHandle,
+            Math.min(snapshot.used, snapshot.total),
+            snapshot.total,
           );
+        } catch (err) {
+          log(`FAILED to record the context gauge: ${String(err)}`);
         }
-
-        // Clamp rather than refuse: a real window larger than the mapped one
-        // means the map is stale, and a gauge pinned at 100% still says full.
-        applyContextReport(
-          approvalsDb,
-          childHandle,
-          Math.min(snapshot.used, snapshot.total),
-          snapshot.total,
-        );
       }),
     );
 
     child.onDenial(
       ifCurrent('onDenial', (denial) => {
-      const grantHandle = currentGrant?.handle ?? `${opts.handle}-agent`;
+      const grantHandle = currentGrant?.handle ?? childHandleFor(opts.handle);
 
       try {
         const approvalId = dao.insertApproval(approvalsDb, {

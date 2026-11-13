@@ -1,13 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { newestUsedInLines } from '../../../src/adapters/transcript-usage.js';
 import {
   usedFromUsage,
+  claudeContextUsage,
   parseClaudeContextUsed,
   parseClaudeModel,
   contextWindowForModel,
   FALLBACK_CONTEXT_WINDOW,
   type ClaudeUsage,
+  CONTEXT_WINDOWS,
 } from '../../../src/supervise/drivers/claude-events.js';
 
 /**
@@ -105,4 +108,69 @@ test('an unmapped model id is null, not a guess', () => {
   assert.equal(contextWindowForModel('claude-sonnet-5-5'), null);
   assert.equal(contextWindowForModel(''), null);
   assert.equal(FALLBACK_CONTEXT_WINDOW, 1_000_000);
+});
+
+/**
+ * 🛑 THE TWO GAUGES MUST SELECT THE SAME ENTRIES, NOT JUST SUM THEM THE SAME.
+ * The host hook reads a transcript line and the supervisor reads a live event.
+ * The host path used to test only that `message.usage` existed, with no `type`
+ * check, so the two agreed because every usage-bearing entry happens to be an
+ * `assistant` one — measured 250 of 250 on a live transcript. That is luck,
+ * not construction, and a comment in the diff claimed construction. Raised by
+ * the dry-solid reviewer.
+ */
+test('the host path and the supervisor path agree on every entry shape', () => {
+  const entries: { entry: Record<string, unknown>; expect: number | null }[] = [
+    { entry: { type: 'assistant', message: { usage: { input_tokens: 10, cache_read_input_tokens: 5 } } }, expect: 15 },
+    { entry: { type: 'result', message: { usage: { input_tokens: 999 } } }, expect: null },
+    { entry: { type: 'user', message: { usage: { input_tokens: 42 } } }, expect: null },
+    { entry: { type: 'assistant', message: {} }, expect: null },
+    { entry: { type: 'system', subtype: 'init', model: 'claude-opus-5' }, expect: null },
+  ];
+
+  for (const { entry, expect } of entries) {
+    const supervisor = parseClaudeContextUsed(entry);
+    const host = newestUsedInLines([JSON.stringify(entry)]);
+
+    assert.equal(
+      supervisor,
+      expect,
+      `supervisor path disagreed on ${JSON.stringify(entry)}`,
+    );
+    // `newestUsedInLines` reports null for a zero sum too, so compare on the
+    // selection decision rather than on the number.
+    assert.equal(
+      host === null,
+      expect === null,
+      `the host path selected differently from the supervisor on ${JSON.stringify(entry)}`,
+    );
+    if (expect !== null) assert.equal(host, expect);
+  }
+});
+
+test('the shared predicate is what both paths call', () => {
+  assert.equal(claudeContextUsage({ type: 'result', message: { usage: { input_tokens: 1 } } }), null);
+  assert.deepEqual(claudeContextUsage({ type: 'assistant', message: { usage: { input_tokens: 1 } } }), {
+    input_tokens: 1,
+  });
+  assert.equal(claudeContextUsage(null), null);
+  assert.equal(claudeContextUsage('not an object'), null);
+});
+
+/**
+ * ⚠️ THE COMMENT ON `FALLBACK_CONTEXT_WINDOW` SAYS "EVERY CURRENT MODEL BUT
+ * HAIKU IS A MEGATOKEN". Asserting haiku's own value does not prove that — a
+ * future haiku-class entry typo'd to 1,000,000 would pass. This iterates the
+ * map, so the claim is the test. Raised by the dry-solid reviewer.
+ */
+test('the map says what its comment says: haiku alone is not a megatoken', () => {
+  const nonMega = Object.entries(CONTEXT_WINDOWS).filter(([, size]) => size !== FALLBACK_CONTEXT_WINDOW);
+
+  assert.deepEqual(
+    nonMega.map(([id]) => id).sort(),
+    ['claude-haiku-4-5'],
+    'the map no longer matches the comment on FALLBACK_CONTEXT_WINDOW — update one of them',
+  );
+
+  assert.ok(Object.keys(CONTEXT_WINDOWS).length >= 8, 'the map shrank; check nothing was dropped');
 });

@@ -228,13 +228,6 @@ export function routeClaudeEvent(
 
   if (usage) on.usage(usage);
 
-  // ⚠️ A DIFFERENT WINDOW FROM `usage` ABOVE. That one is the subscription
-  // rate limit and gates dispatch; this one is the context window and only
-  // feeds the gauge. The raw stream calls both "usage".
-  const context = claudeContextSnapshot(event);
-
-  if (context && on.context) on.context(context);
-
   // 🛑 THE PRODUCER FOR THE APPROVAL PATH. Without this the detector was
   // imported and never called, `insertApproval` had no caller, and the whole
   // relay started one step after the break — which is exactly how the live
@@ -250,6 +243,20 @@ export function routeClaudeEvent(
   // grant resumable instead of a restart.
   const id = event.session_id;
   if (typeof id === 'string' && on.session) on.session(id);
+
+  // ⚠️ A DIFFERENT WINDOW FROM `usage` AT THE TOP. That one is the
+  // subscription rate limit and gates dispatch; this one is the context window
+  // and only feeds the gauge. The raw stream calls both "usage".
+  //
+  // 🛑 LAST ON PURPOSE. The gauge handler does real I/O — a row write plus a
+  // notify per room member — and a throw here would abort the whole event,
+  // taking `rememberClaudeToolUse` with it. A later denial could then not name
+  // the invocation, which is the bug the ordering note above exists to stop.
+  // Nothing load-bearing may sit downstream of it. Raised by the dry-solid
+  // reviewer.
+  const context = claudeContextSnapshot(event);
+
+  if (context && on.context) on.context(context);
 
   // `result` is Claude Code's terminal event. An `assistant` event with no
   // following `result` is a turn still in flight.

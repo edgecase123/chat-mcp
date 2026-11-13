@@ -3,6 +3,15 @@ import * as dao from '../storage/dao.js';
 import { notifyPeer } from '../notify/bus.js';
 import { nextGaugeState, warningBody, deliveryFor, type Threshold } from './gauge.js';
 
+export interface ContextReport {
+  used: number;
+  total: number;
+  percent: number;
+  warned: Threshold | null;
+  fired: Threshold | null;
+  notified: { dm: number; rooms: string[] };
+}
+
 /**
  * Record one context reading and deliver whatever band it just crossed.
  *
@@ -17,15 +26,6 @@ import { nextGaugeState, warningBody, deliveryFor, type Threshold } from './gaug
  * `used > total` so the agent is told, and the supervisor clamps. Pulling any
  * of that in here would force one policy on all three.
  */
-export interface ContextReport {
-  used: number;
-  total: number;
-  percent: number;
-  warned: Threshold | null;
-  fired: Threshold | null;
-  notified: { dm: number; rooms: string[] };
-}
-
 export function applyContextReport(
   db: DatabaseSync,
   handle: string,
