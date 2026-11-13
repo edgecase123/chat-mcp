@@ -209,7 +209,6 @@ export interface SpawnOptions {
   readonly shutdownGraceSeconds?: number;
 }
 
-/** Split a byte stream into whole JSON lines. Partial lines are held back. */
 /**
  * Every capability on a child is SAID, in a boolean, or the spawn fails.
  *
@@ -241,6 +240,7 @@ export function assertDeclaresCapabilities(child: AgentChild): AgentChild {
   return child;
 }
 
+/** Split a byte stream into whole JSON lines. Partial lines are held back. */
 export function createLineParser(
   onLine: (parsed: Record<string, unknown>) => void,
 ): (chunk: string) => void {

@@ -262,7 +262,27 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   // 🛑 WRAPPED ONCE, NOT ASSERTED AT EACH CALL SITE. The child is spawned in
   // three places — first start, restart, replace — and a guard repeated three
   // times is a guard that will be two next time someone adds a fourth.
-  const spawnFn = (o: SpawnOptions): AgentChild => assertDeclaresCapabilities(spawnRaw(o));
+  const spawnFn = (o: SpawnOptions): AgentChild => {
+    const spawned = spawnRaw(o);
+
+    try {
+      return assertDeclaresCapabilities(spawned);
+    } catch (err) {
+      // 🛑 THE PROCESS ALREADY EXISTS BY THE TIME WE CAN CHECK IT. The guard
+      // reads a property of the returned child, so a real driver that omits a
+      // field has already spawned a process or a container when it throws —
+      // and nobody holds a reference to it. Raised by claude2 on PR 218.
+      try {
+        spawned.kill();
+      } catch (killErr) {
+        // Swallowed on purpose: `err` is the reason the operator needs, and a
+        // failing kill must not replace it. Logged so it is not invisible.
+        log(`could not kill the child of an undeclared driver: ${String(killErr)}`);
+      }
+
+      throw err;
+    }
+  };
 
   /**
    * 🛑 `initialGrant`, NOT `grant`. It is the set at SPAWN and it never

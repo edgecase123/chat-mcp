@@ -486,10 +486,81 @@ test('a driver that DOES report context says so at startup, and does not claim t
  * about a driver that never said anything. That is the exact "inferred from
  * silence" failure the flag exists to end, arriving through the back door.
  */
-test('a driver that OMITS a capability fails fast, instead of being read as false', async () => {
+test('a driver that OMITS a capability fails fast, naming the field it omitted', async () => {
+  // 🛑 TABLE-DRIVEN BECAUSE THE FIRST CUT WAS VACUOUS, and claude2 said so on
+  // PR 218. It omitted BOTH fields and asserted /reportsUsage|reportsContext/,
+  // so a guard checking only ONE of them passed. Each case below omits or
+  // corrupts exactly one field, and asserts the message names THAT field and
+  // NOT the other.
+  const OTHER = { reportsUsage: 'reportsContext', reportsContext: 'reportsUsage' } as const;
+  // ⚠️ HANDLES STAY SHORT. The handle becomes a unix socket path, and macOS
+  // caps that at 104 bytes — a descriptive name threw `listen EINVAL` BEFORE
+  // the guard ran, so the rejection assertion passed on the wrong error.
+  let caseNo = 0;
+  const BAD: readonly [string, unknown][] = [
+    ['absent', undefined],
+    ['null', null],
+    ['a string', 'yes'],
+    ['a number', 1],
+  ];
+
+  for (const field of ['reportsUsage', 'reportsContext'] as const) {
+    for (const [label, value] of BAD) {
+      const declared: Record<string, unknown> = { reportsUsage: true, reportsContext: true };
+
+      if (value === undefined) delete declared[field];
+      else declared[field] = value;
+
+      const bare = () =>
+        ({
+          ...declared,
+          send: () => undefined,
+          onTurnEnd: () => undefined,
+          onContext: () => undefined,
+          onUsage: () => undefined,
+          onDenial: () => undefined,
+          onSession: () => undefined,
+          onEvent: () => undefined,
+          onExit: () => undefined,
+          kill: () => undefined,
+        }) as unknown as AgentChild;
+
+      // ⚠️ THE `finally` IS NOT DECORATION. Before the guard existed this call
+      // RESOLVED, leaving a live supervisor holding a socket, and the test
+      // file hung with no failure line rather than failing. A rejection
+      // assertion on something that allocates must still release it.
+      let started: Awaited<ReturnType<typeof startSupervisor>> | undefined;
+      const handle = `undecl${caseNo++}`;
+
+      try {
+        await assert.rejects(
+          async () => {
+            started = await startSupervisor(
+              supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle, spawnChild: bare }),
+            );
+          },
+          (err: Error) => {
+            assert.match(err.message, new RegExp(field), `${field} ${label}: the message must name the offending field`);
+            assert.doesNotMatch(
+              err.message,
+              new RegExp(OTHER[field]),
+              `${field} ${label}: naming the OTHER field means the guard did not check this one`,
+            );
+            return true;
+          },
+        );
+      } finally {
+        await started?.stop();
+      }
+    }
+  }
+});
+
+test('a failed start releases the socket, so one bad spawn is not a permanent one', async () => {
+  // claude2, PR 218: the listener is bound BEFORE the child is spawned, so a
+  // guard that throws at spawn must not leave the handle held.
   const bare = () =>
     ({
-      // reportsUsage and reportsContext deliberately absent.
       send: () => undefined,
       onTurnEnd: () => undefined,
       onContext: () => undefined,
@@ -501,25 +572,16 @@ test('a driver that OMITS a capability fails fast, instead of being read as fals
       kill: () => undefined,
     }) as unknown as AgentChild;
 
-  // ⚠️ THE `finally` IS NOT DECORATION. Before the guard existed this call
-  // RESOLVED, leaving a live supervisor holding a socket, and the test file
-  // hung with no failure line rather than failing. A rejection assertion on
-  // something that allocates must still release it.
-  let started: Awaited<ReturnType<typeof startSupervisor>> | undefined;
+  const opts = supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'releasesock', spawnChild: bare });
+  await assert.rejects(() => startSupervisor(opts));
 
-  try {
-    await assert.rejects(
-      async () => {
-        started = await startSupervisor(
-          supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'undeclared', spawnChild: bare }),
-        );
-      },
-      /reportsUsage|reportsContext/,
-      'an undeclared capability must name itself, not be silently read as false',
-    );
-  } finally {
-    await started?.stop();
-  }
+  // The proof is that a GOOD driver can take the handle afterwards. A missing
+  // socket file would also pass if the path were simply never created.
+  const f = fakeChild();
+  const s = await startSupervisor(
+    supervisorOptions({ extraDirs: SUPERVISOR_TEST_DIRS, handle: 'releasesock', spawnChild: () => f.child }),
+  );
+  await s.stop();
 });
 
 test('a driver that DECLARES false is legal and still starts', async () => {
