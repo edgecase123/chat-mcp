@@ -13,6 +13,7 @@ import { dirsFor } from './projects.js';
 import { allowlistWith, resolveCwd } from './allowlist.js';
 import { commandFromGrant, grantFor, grantVariants } from './denial.js';
 import { writeClaudeMcpConfig } from './drivers/claude.js';
+import { describeChildOutput, excerptForLog } from './drivers/claude-events.js';
 import { openHostBus, type HostBus } from './host-bus.js';
 
 /**
@@ -396,7 +397,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
   const queue = new TurnQueue({
     send: (prompt) => {
-      log(`→ child: ${prompt.text.slice(0, 80).replace(/\n/g, ' ')}`);
+      log(`→ child: ${excerptForLog(prompt.text)}`);
       child.send(prompt.text);
       for (const cb of sendListeners) cb(prompt);
     },
@@ -489,6 +490,20 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       };
     };
 
+
+    /**
+     * 🛑 THE ONLY WINDOW ONTO WHAT THE AGENT ACTUALLY DID. Without it a
+     * child that ran a turn and answered nothing logs exactly what a child
+     * that answered perfectly logs, and the difference is only visible in
+     * the database afterwards.
+     */
+    child.onEvent(
+      ifCurrent('onEvent', (event) => {
+        const said = describeChildOutput(event);
+
+        if (said) log(`← child: ${said}`);
+      }),
+    );
 
     child.onTurnEnd(
       ifCurrent('onTurnEnd', () => {

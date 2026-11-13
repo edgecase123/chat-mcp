@@ -140,3 +140,60 @@ export function denialFromClaude(event: Record<string, unknown> | null | undefin
 
   return null;
 }
+
+/**
+ * How long a logged line of child output may be before it is cut.
+ *
+ * 🛑 NOT 80. The `→ child:` side cut at 80 with newlines stripped, and an
+ * alert banner plus `[chat-mcp] <from>:` is longer than that on its own — so
+ * a reviewer read a present message body as missing and diagnosed the wrong
+ * half of the arc for a session.
+ */
+export const LOG_EXCERPT_LIMIT = 200;
+
+/** One line of `text`, safe to put in a log, with any cut declared. */
+export function excerptForLog(text: string): string {
+  const flat = text.replace(/\s*\n+\s*/g, ' ⏎ ').trim();
+
+  if (flat.length <= LOG_EXCERPT_LIMIT) return flat;
+
+  return `${flat.slice(0, LOG_EXCERPT_LIMIT)}… (${text.length} chars)`;
+}
+
+/**
+ * What the child produced on this event, as one log line, or `undefined` for
+ * an event that carries no output.
+ *
+ * 🛑 THE SUPERVISOR WAS DEAF TO ITS OWN CHILD. It logged every prompt in and
+ * nothing back, so "the agent answered somewhere we cannot see" and "the
+ * agent said nothing at all" produced identical logs. `AgentChild.onEvent`
+ * already existed and `index.ts` never called it.
+ *
+ * ⚠️ TOOL CALLS ARE NAMED BUT THEIR INPUT IS NOT LOGGED. A `mcp__chat__send`
+ * input is the message body, and a `Bash` input is a command line — neither
+ * belongs in a log that an operator pastes into a room.
+ */
+export function describeChildOutput(event: Record<string, unknown>): string | undefined {
+  if (event.type !== 'assistant') return undefined;
+
+  const message = event.message as { content?: unknown } | undefined;
+  const content = message?.content;
+
+  if (!Array.isArray(content)) return undefined;
+
+  const parts: string[] = [];
+
+  for (const block of content) {
+    const b = block as { type?: unknown; text?: unknown; name?: unknown };
+
+    if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
+      parts.push(excerptForLog(b.text));
+    } else if (b.type === 'tool_use' && typeof b.name === 'string') {
+      parts.push(`[tool] ${b.name}`);
+    }
+  }
+
+  if (parts.length === 0) return undefined;
+
+  return parts.join(' | ');
+}
