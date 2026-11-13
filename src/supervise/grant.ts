@@ -110,5 +110,27 @@ export function availableBuiltins(allowed: readonly string[]): string[] {
  * forgetting a flag.
  */
 export function childHandleFor(supervisorHandle: string): string {
-  return `${supervisorHandle}-agent`;
+  return `${supervisorHandle}${CHILD_SUFFIX}`;
+}
+
+/** The suffix `childHandleFor` appends, and the only thing its inverse reads. */
+const CHILD_SUFFIX = '-agent';
+
+/**
+ * The inverse of `childHandleFor`: the supervisor that owns a child handle, or
+ * `null` for a handle that is not one.
+ *
+ * 🛑 PAIRED WITH `childHandleFor` ON PURPOSE. The two must agree on the
+ * suffix, and a second copy of `'-agent'` anywhere else is how they drift.
+ *
+ * ⚠️ A HANDLE A HUMAN CHOSE ENDING IN `-agent` LOOKS LIKE A CHILD HERE. That
+ * only matters when a supervisor by the shorter name is also listening, and
+ * the caller treats the answer as a hint rather than an identity.
+ */
+export function supervisorHandleFor(childHandle: string): string | null {
+  if (!childHandle.endsWith(CHILD_SUFFIX)) return null;
+
+  const owner = childHandle.slice(0, -CHILD_SUFFIX.length);
+
+  return owner.length === 0 ? null : owner;
 }

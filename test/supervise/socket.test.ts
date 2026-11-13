@@ -284,3 +284,44 @@ test('a socket dir that already exists wide open is tightened, not left alone', 
   ensureSocketDir();
   assert.equal(modeOf(socketDir()), SOCKET_DIR_MODE);
 });
+
+/**
+ * 🚨 THE ARC GAP. A supervised child is registered on the bus as
+ * `<handle>-agent` and the supervisor binds `<handle>`, deliberately — a child
+ * sharing the supervisor's handle eats the deliveries meant for it (#35). On
+ * the HOST that is fine, because the child's own shim watches
+ * `notify/<handle>-agent`.
+ *
+ * 🛑 A CONTAINERIZED CHILD WATCHES NO NOTIFY FILE. The state dir is not
+ * mounted, so the supervisor socket is its ONLY wake path — and every message
+ * is addressed to the child handle, which had no socket. `deliverToSupervisor`
+ * returned null and the message was dropped with no error anywhere.
+ *
+ * Measured against a live container: the supervisor log never moved.
+ */
+test('🚨 a message addressed to the CHILD handle reaches its supervisor', async () => {
+  const seen: unknown[] = [];
+  const l = await WakeListener.bind('boxed', (e) => {
+    seen.push(e);
+
+    return { ok: true, queued: 'sent' };
+  });
+
+  try {
+    const ack = await deliverToSupervisor('boxed-agent', env(7, 'for the child'));
+
+    assert.deepEqual(ack, { ok: true, queued: 'sent' }, 'the child handle reached no supervisor');
+    assert.equal((seen[0] as { body: string }).body, 'for the child');
+  } finally {
+    await l.close();
+  }
+});
+
+/**
+ * 🛑 THE PAIRED CONTROL. The fallback must not invent a supervisor: a child
+ * handle whose supervisor is not listening still falls back to the notify
+ * file, exactly as an unknown handle does.
+ */
+test('🚨 a child handle with NO supervisor listening still returns null', async () => {
+  assert.equal(await deliverToSupervisor('unsupervised-agent', env(8)), null);
+});
