@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { Socket } from 'node:net';
 import { BIND_ADDRESS, listenOnLoopback } from './loopback.js';
 import { McpHttpService, refuse, type McpHttpOptions } from './mcp-http.js';
 
@@ -8,11 +9,22 @@ const MCP_PATH = '/mcp';
 /**
  * 🛑 PRE-AUTH SOCKETS ARE A HOST-WIDE RESOURCE. `host.docker.internal` reaches
  * this from EVERY container on the machine, not only ours, and the supervisor
- * holds every handle's session and its SQLite handle. Node's own
- * `keepAliveTimeout` and `headersTimeout` cover slowloris; nothing caps the
- * count, which is the half `CommandBroker` also caps.
+ * holds every handle's session and its SQLite handle. `CommandBroker` caps the
+ * same two halves, count and idle time.
  */
 const DEFAULT_MAX_CONNECTIONS = 8;
+
+/**
+ * 🛑 A CAP WITHOUT A RECLAIM IS A LOCKOUT PRIMITIVE. A container opens every
+ * slot, sends NOTHING, and the real agent is refused.
+ *
+ * 🛑 NODE'S OWN HTTP TIMEOUTS DO NOT CLOSE THIS. Measured on node 23: a socket
+ * that connects and sends nothing survives `headersTimeout` AND `requestTimeout`
+ * past 2s with both at 150/300 ms and the sweep at 75 ms. They time a REQUEST,
+ * and a silent socket has not begun one. `socket.setTimeout` closed the same
+ * socket in 155 ms.
+ */
+const DEFAULT_IDLE_TIMEOUT_MS = 10_000;
 
 /**
  * The host-side socket `McpHttpService` deliberately does not own.
@@ -26,12 +38,12 @@ const DEFAULT_MAX_CONNECTIONS = 8;
  * built from the bound port would refuse the one caller this transport exists
  * for. The bearer token is the whole boundary.
  *
- * ⚠️ NO CONNECTION OR IDLE LIMITS YET, where `CommandBroker` has both. Same
- * threat model, so this is a gap rather than a decision.
  */
 export interface McpListenerOptions extends McpHttpOptions {
   /** Test seam, and an operator escape hatch. See `DEFAULT_MAX_CONNECTIONS`. */
   readonly maxConnections?: number;
+  /** Idle reclaim, armed only between requests. `0` disables it. */
+  readonly idleTimeoutMs?: number;
 }
 
 export class McpHttpListener {
@@ -54,6 +66,7 @@ export class McpHttpListener {
     const listener = new McpHttpListener(server, McpHttpService.create(options));
 
     server.maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
+    reclaimIdleSockets(server, options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS);
 
     server.on('request', (req, res) => {
       void listener.serve(req, res);
@@ -115,6 +128,61 @@ export class McpHttpListener {
       else res.end();
     }
   }
+}
+
+/**
+ * Close a socket that holds a slot without using it.
+ *
+ * 🛑 ARMED ONLY WHILE NOTHING IS IN FLIGHT, THE SAME SHAPE AS `broker.ts`. The
+ * transport answers over SSE, so a legitimate response is silent for as long as
+ * the agent is thinking — a plain idle timeout would cut the stream it is
+ * waiting on. Both halves have a test.
+ */
+function reclaimIdleSockets(server: Server, idleMs: number): void {
+  if (idleMs <= 0) return;
+
+  const inFlight = new WeakMap<Socket, number>();
+
+  const arm = (socket: Socket): void => {
+    if (socket.destroyed) return;
+
+    socket.setTimeout((inFlight.get(socket) ?? 0) === 0 ? idleMs : 0);
+  };
+
+  server.on('connection', (socket) => {
+    socket.on('timeout', () => socket.destroy());
+    arm(socket);
+  });
+
+  server.on('request', (req, res) => {
+    const { socket } = req;
+
+    // 🛑 WHEN THE REQUEST IS FULLY RECEIVED, NOT WHEN ITS HEADERS ARE. Headers
+    // arriving does not make it the server's turn — a declared body that never
+    // arrives is still the caller holding the slot.
+    //
+    // 🛑 FROM THE HEADERS, BECAUSE `end` NEVER FIRES ON A STREAM NOBODY READS.
+    // The standing SSE stream is a bodyless GET whose handler never reads it,
+    // so waiting for `end` would cut it. `req.complete` is still false here —
+    // the request event is emitted before the message completes. Tested both
+    // ways.
+    const hold = (): void => {
+      inFlight.set(socket, (inFlight.get(socket) ?? 0) + 1);
+      arm(socket);
+    };
+
+    if (declaresBody(req)) req.on('end', hold);
+    else hold();
+
+    res.on('close', () => {
+      inFlight.set(socket, Math.max(0, (inFlight.get(socket) ?? 1) - 1));
+      arm(socket);
+    });
+  });
+}
+
+function declaresBody(req: IncomingMessage): boolean {
+  return req.headers['content-length'] !== undefined || req.headers['transfer-encoding'] !== undefined;
 }
 
 function pathOf(req: IncomingMessage): string {

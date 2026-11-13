@@ -4,9 +4,10 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { connect } from 'node:net';
+import { connect, type Socket } from 'node:net';
 
 import type { ShimContext } from '../../src/shim/index.js';
+import type { McpListenerOptions } from '../../src/supervise/mcp-listener.js';
 
 // 🛑 BEFORE any import that resolves a state path.
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-mcp-listener-'));
@@ -28,11 +29,11 @@ const PROTOCOL = '2025-06-18';
  * file rather than a rewrite of that harness.
  */
 
-async function listener(t: TestContextLike, maxConnections?: number) {
+async function listener(t: TestContextLike, overrides: Partial<McpListenerOptions> = {}) {
   const open: ShimContext[] = [];
 
   const l = await McpHttpListener.bind({
-    maxConnections,
+    ...overrides,
     authenticate: authenticateToken,
     serverFor: (handle: string) => {
       const ctx: ShimContext = {
@@ -179,7 +180,7 @@ test('🚨 a path other than /mcp opens no session, even with a valid token', as
  * supervisor's descriptors before presenting a token.
  */
 test('🚨 connections past the cap are dropped, before any token is presented', async (t) => {
-  const l = await listener(t, 1);
+  const l = await listener(t, { maxConnections: 1 });
 
   const held = connect({ host: '127.0.0.1', port: l.port });
   t.after(() => held.destroy());
@@ -200,4 +201,113 @@ test('🚨 connections past the cap are dropped, before any token is presented',
   });
 
   assert.equal(held.destroyed, false, 'the cap killed the connection it should have kept');
+});
+
+/** Resolve when the socket closes, or reject at the deadline. */
+async function closedWithin(socket: Socket, ms: number, why: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(why)), ms);
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+
+    socket.once('close', done);
+    socket.once('error', done);
+  });
+}
+
+/**
+ * 🚨 A CAP WITHOUT A RECLAIM IS A LOCKOUT PRIMITIVE, NOT A DEFENCE. A container
+ * opens `maxConnections` sockets and sends NOTHING; the real agent is refused
+ * until Node reclaims them, and the only thing that does so is `headersTimeout`
+ * — and NEITHER `headersTimeout` NOR `requestTimeout` does so, measured. So the
+ * cap converts a resource attack into an indefinite outage.
+ */
+test('🚨 a connection that never sends headers is reclaimed on the configured timeout', async (t) => {
+  const l = await listener(t, { maxConnections: 1, idleTimeoutMs: 150 });
+
+  const silent = connect({ host: '127.0.0.1', port: l.port });
+  t.after(() => silent.destroy());
+  await new Promise<void>((resolve, reject) => {
+    silent.once('connect', () => resolve());
+    silent.once('error', reject);
+  });
+
+  await closedWithin(silent, 2000, 'a silent pre-header socket held the slot');
+});
+
+/**
+ * 🛑 A SECOND DOOR INTO THE SAME SLOT. Headers that declare a body and a body
+ * that never arrives is not the same state as a silent socket, and Node's
+ * `requestTimeout` did not reclaim either one — measured at 300 ms, still open
+ * at 2s.
+ */
+test('🚨 a request that declares a body and never sends it is reclaimed too', async (t) => {
+  const l = await listener(t, { maxConnections: 1, idleTimeoutMs: 150 });
+
+  const slow = connect({ host: '127.0.0.1', port: l.port });
+  t.after(() => slow.destroy());
+  await new Promise<void>((resolve, reject) => {
+    slow.once('connect', () => resolve());
+    slow.once('error', reject);
+  });
+
+  // 🛑 `resume()` OR THIS NEVER SEES THE CLOSE. The refusal is written before
+  // the socket is destroyed, and a paused socket never drains past that data to
+  // reach the FIN behind it.
+  slow.resume();
+  slow.write(
+    'POST /mcp HTTP/1.1\r\n' +
+      'host: 127.0.0.1\r\n' +
+      'content-type: application/json\r\n' +
+      'content-length: 4096\r\n\r\n',
+  );
+
+  await closedWithin(slow, 3000, 'a half-sent body held the slot');
+});
+
+/**
+ * 🛑 THE PAIRED CONTROL FOR BOTH RECLAIMS, AND THE REASON THE TIMER IS ARMED
+ * ONLY BETWEEN REQUESTS. The transport answers over SSE and a standing stream
+ * is SILENT for as long as the agent is thinking, so a plain idle timeout would
+ * cut the stream the caller is waiting on — the outage the cap was supposed to
+ * prevent, from the other side.
+ */
+test('🚨 a standing SSE stream OUTLIVES the idle timeout', async (t) => {
+  const l = await listener(t, { idleTimeoutMs: 150 });
+  const token = mintToken('alice');
+
+  const opened = await post(l.url, initialize(), token);
+  const session = opened.headers.get('mcp-session-id');
+  assert.ok(session, 'no session id came back');
+  await opened.text();
+
+  const controller = new AbortController();
+  t.after(() => controller.abort());
+
+  const stream = await fetch(l.url, {
+    headers: {
+      accept: 'text/event-stream',
+      authorization: `Bearer ${token}`,
+      'mcp-session-id': session,
+    },
+    signal: controller.signal,
+  });
+
+  assert.equal(stream.status, 200);
+
+  const reader = (stream.body as ReadableStream<Uint8Array>).getReader();
+  const read = reader.read().then(
+    () => 'ended',
+    () => 'errored',
+  );
+
+  // Four times the idle timeout, with nothing on the wire in either direction.
+  const verdict = await Promise.race([
+    read,
+    new Promise<string>((resolve) => setTimeout(() => resolve('still open'), 600)),
+  ]);
+
+  assert.equal(verdict, 'still open', 'the idle reclaim cut a live SSE stream');
 });
