@@ -31,6 +31,24 @@ const DEFAULT_MAX_CONNECTIONS = 8;
 const DEFAULT_RECEIVE_TIMEOUT_MS = 10_000;
 
 /**
+ * 🛑 A REFUSAL BUDGET, BECAUSE A DEADLINE ALONE CANNOT BOUND A CALLER THAT
+ * KEEPS TALKING. `res.on('close')` re-arms from zero after every response, so
+ * the deadline measures time since the last response rather than time on the
+ * socket — and a 30-byte unauthenticated request re-sent before each deadline
+ * held a slot indefinitely, measured at 2 of 2 slots at 6000ms against a 200ms
+ * deadline. A longer deadline cannot fix it, because the attacker re-sends
+ * before whatever the deadline is.
+ *
+ * 🛑 COUNTED ONLY WHERE NO VALID CREDENTIAL WAS PRESENTED — a 401, or a path
+ * this listener does not serve. A real agent is refused too: a stale session id
+ * answers 404 with a perfectly good token, and an earlier version of this
+ * scoped the budget on "this socket has never had a response under 400"
+ * instead. That cut a real agent on a FRESH socket after four stale sessions,
+ * measured `[404,404,404,404]` then destroyed. Found by claude2.
+ */
+const DEFAULT_MAX_UNAUTHENTICATED_REFUSALS = 3;
+
+/**
  * The host-side socket `McpHttpService` deliberately does not own.
  *
  * 🛑 DO NOT MOVE THIS BIND INTO `mcp-http.ts`. That file's own 🛑 says it binds
@@ -47,6 +65,11 @@ export interface McpListenerOptions extends McpHttpOptions {
   readonly maxConnections?: number;
   /** How long a caller may take to deliver a request. `0` disables it. */
   readonly receiveTimeoutMs?: number;
+  /**
+   * Credential-less refusals a socket may collect. `0` disables it. See
+   * `DEFAULT_MAX_UNAUTHENTICATED_REFUSALS`.
+   */
+  readonly maxUnauthenticatedRefusals?: number;
 }
 
 export class McpHttpListener {
@@ -70,6 +93,10 @@ export class McpHttpListener {
 
     server.maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
     reclaimIdleSockets(server, options.receiveTimeoutMs ?? DEFAULT_RECEIVE_TIMEOUT_MS);
+    budgetUnauthenticatedRefusals(
+      server,
+      options.maxUnauthenticatedRefusals ?? DEFAULT_MAX_UNAUTHENTICATED_REFUSALS,
+    );
 
     server.on('request', (req, res) => {
       void listener.serve(req, res);
@@ -146,6 +173,12 @@ function reclaimIdleSockets(server: Server, receiveMs: number): void {
   if (receiveMs <= 0) return;
 
   const deadlines = new WeakMap<Socket, NodeJS.Timeout>();
+  /**
+   * 🛑 THE DEADLINE IS KEYED ON THE REQUEST, THOUGH `arm`/`disarm` ARE PER
+   * SOCKET. Only the request still owed bytes may disarm, so a refusal that
+   * re-armed cannot be undone by the `end` arriving behind it.
+   */
+  const owed = new WeakSet<IncomingMessage>();
 
   const arm = (socket: Socket): void => {
     if (socket.destroyed) return;
@@ -176,10 +209,59 @@ function reclaimIdleSockets(server: Server, receiveMs: number): void {
     // 🛑 `end` NEVER FIRES ON A STREAM NOBODY READS, so a bodyless request is
     // recognised from its headers. The standing SSE stream is a GET whose
     // handler never reads it, and waiting for `end` would cut it.
-    if (declaresBody(req)) req.on('end', () => disarm(socket));
-    else disarm(socket);
+    if (declaresBody(req)) {
+      owed.add(req);
+      req.on('end', () => {
+        if (owed.delete(req)) disarm(socket);
+      });
+    } else {
+      disarm(socket);
+    }
 
-    res.on('close', () => arm(socket));
+    res.on('close', () => {
+      // 🛑 THE DROP IS WHAT MAKES THE RE-ARM STICK. A refusal answers while the
+      // caller still owes a body, and the `end` arriving on a later tick would
+      // otherwise disarm what this re-armed.
+      owed.delete(req);
+      arm(socket);
+    });
+  });
+}
+
+/**
+ * Close a socket that keeps asking and keeps being refused.
+ *
+ * 🛑 SEPARATE FROM THE DEADLINE ON PURPOSE. That one bounds how long a caller
+ * may take to DELIVER a request; this one bounds how many it may be refused.
+ * The surviving lockout needed both, and folding them together would make the
+ * reason either exists unreadable.
+ *
+ * 🛑 `headersSent` IS WHAT MAKES A SUCCESS REAL. `statusCode` is 200 on a
+ * response that was never written, so a socket destroyed mid-request would
+ * otherwise be recorded as having authenticated.
+ */
+function budgetUnauthenticatedRefusals(server: Server, limit: number): void {
+  if (limit <= 0) return;
+
+  const refusals = new WeakMap<Socket, number>();
+
+  server.on('request', (req, res) => {
+    const { socket } = req;
+    const offPath = pathOf(req) !== MCP_PATH;
+
+    res.on('close', () => {
+      // 🛑 `headersSent` IS WHAT MAKES A REFUSAL REAL. `statusCode` reads 200 on
+      // a response that was never written, so a socket destroyed mid-request
+      // would otherwise be scored as though it had been answered.
+      if (!res.headersSent) return;
+      if (!offPath && res.statusCode !== 401) return;
+
+      const spent = (refusals.get(socket) ?? 0) + 1;
+
+      refusals.set(socket, spent);
+
+      if (spent > limit) socket.destroy();
+    });
   });
 }
 
