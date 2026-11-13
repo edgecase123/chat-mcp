@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { execFileSync as realExecFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
@@ -55,8 +55,44 @@ export function dockerfilePath(): string {
   throw new Error(`cannot locate Dockerfile next to ${import.meta.url}`);
 }
 
-function dockerfileHash(): string {
-  return createHash('sha256').update(readFileSync(dockerfilePath())).digest('hex');
+/**
+ * The build context the Dockerfile copies in. `docker build` is handed
+ * `dirname(dockerfilePath())`, so `dist` is resolved against the same root.
+ */
+function distPath(): string {
+  return join(dirname(dockerfilePath()), 'dist');
+}
+
+/**
+ * 🛑 THE DOCKERFILE ALONE IS NOT WHAT THE IMAGE CONTAINS. It says
+ * `COPY dist ./dist`, so the image is mostly BUILT CODE that the Dockerfile's
+ * own bytes never change. Hashing only the Dockerfile reported an image built
+ * before three merges as current, and the container then ran a `dist` with no
+ * HTTP bus in it at all — `agents start` came up and answered nothing.
+ *
+ * 🛑 CONTENT, NOT MTIME. A rebuild that writes identical bytes must not force
+ * a docker build, and a stale `dist` restored with a fresh mtime must not pass.
+ */
+export function buildInputsHash(root: string = distPath()): string {
+  const hash = createHash('sha256');
+
+  hash.update(readFileSync(dockerfilePath()));
+
+  if (!existsSync(root)) {
+    // A distinct value, so "no dist" can never collide with a built state.
+    return hash.update('\0no-dist').digest('hex');
+  }
+
+  const files = readdirSync(root, { recursive: true, encoding: 'utf8' })
+    .filter((rel) => statSync(join(root, rel)).isFile())
+    .sort();
+
+  for (const rel of files) {
+    hash.update(`\0${rel}\0`);
+    hash.update(readFileSync(join(root, rel)));
+  }
+
+  return hash.digest('hex');
 }
 
 type Runner = (cmd: string, args: readonly string[]) => Buffer;
@@ -64,7 +100,7 @@ type Runner = (cmd: string, args: readonly string[]) => Buffer;
 export function imageNeedsBuild(run: Runner = realExecFileSync): boolean {
   const state = readContainerState();
 
-  if (state.builtHash !== dockerfileHash()) return true;
+  if (state.builtHash !== buildInputsHash()) return true;
 
   try {
     run('docker', ['image', 'inspect', IMAGE_TAG]);
@@ -77,7 +113,7 @@ export function imageNeedsBuild(run: Runner = realExecFileSync): boolean {
 export function buildImage(run: Runner = realExecFileSync): void {
   run('docker', ['build', '-t', IMAGE_TAG, '-f', dockerfilePath(), dirname(dockerfilePath())]);
 
-  writeContainerState({ ...readContainerState(), builtHash: dockerfileHash() });
+  writeContainerState({ ...readContainerState(), builtHash: buildInputsHash() });
 }
 
 export function isConfirmed(handle: string): boolean {
