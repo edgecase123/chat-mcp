@@ -128,11 +128,64 @@ Two things that cost time here:
 ## Layout
 
 - `src/adapters/` — per-vendor CLI integration (flags, event shapes). May import from `src/supervise/`.
-- `src/supervise/` — spawning and driving an agent process, container or host. **Never imports from `src/adapters/`** — that direction is the one architectural rule this repo enforces by convention, not by the type system. A violation passes `tsc` and breaks only at runtime.
+- `src/supervise/` — spawning and driving an agent process, container or host. **Never imports from `src/adapters/`** — that direction is one of the two architectural rules this repo enforces by convention rather than by the type system, the other being the container boundary below. A violation passes `tsc` and breaks only at runtime.
 - `src/storage/` — the only code that touches SQLite (`db.ts` schema/migrations, `dao.ts` reads/writes). Everything else goes through `dao.ts`.
 - `src/shim/` — the MCP server exposed to each agent (tools + resources).
 - `src/cli/` — the terminal UI (`ink/`) and the browser dashboard server (`web/`).
 - `src/oneshot/` — one-off CLI subcommands that don't need the full shim running.
+
+## 🛑 No file shims across the container boundary
+
+**A containerized agent never reaches the bus through a shared file.** It
+connects to the host over HTTP with a per-handle bearer token.
+
+lee, 2026-11-13, ruling on the docker/stdin arc:
+
+> *"NO FILE SHIM SHARING. Put that in AGENTS.md or somewhere that it is
+> cannonized"* — then, scoping it: *"For the dokcer/stdin arc, that is. NO
+> FILE SHIMS"*
+
+### What this forbids
+
+- Bind-mounting `stateDir()`, or any part of it, into a container.
+- Writing an MCP config that launches a **stdio shim inside** the container.
+  That shim calls `openDb()`, which reaches `chat.db` across the mount.
+- Any new host/container handoff that CROSSES the boundary as a file — a
+  shared notify file, a mounted socket path, a spool directory either side can
+  see.
+
+### What it does NOT touch
+
+🛑 **The ban is scoped to the container boundary. It is not a ban on the file
+path anywhere else.**
+
+- `notify/` and every host `fs.watch` on it. Unsupervised host clients keep
+  working, by a separate ruling that still stands.
+- The stdio transport for **host** agents, which is first-class.
+- `/work`, the project mount. That is a requirement, not a leak.
+- A config file written **inside** the container from an env var at spawn time.
+  It holds the URL and the bearer token, and it is neither shared nor mounted,
+  so nothing crosses the boundary through it. ⚠️ **The test is whether both
+  sides can SEE the file, not whether a file exists.**
+
+### Why a mount is not a boundary
+
+A mounted `stateDir()` makes the container a second process on the host's
+database rather than a client of the host. One file was ever needed —
+`mcp/<handle>.json` — and the whole directory was mounted to deliver it, which
+handed over every DM and every room.
+
+⚠️ **A loopback bind is not a boundary either.** A host server on `127.0.0.1`
+is reachable from a container through `host.docker.internal` on Docker
+Desktop, measured on this setup. So the HTTP listener authenticates every
+request; `cli/web/server.ts` additionally refuses a forged `Host` header, and
+that guard is the one thing that ever refused a container's request.
+
+⚠️ **The MCP listener deliberately does NOT share that `Host` allowlist.** A
+container's request arrives with `Host: host.docker.internal:<port>`, which a
+loopback allowlist never contains, so it would refuse the caller this transport
+exists for. The bearer token is the whole boundary there.
+
 
 ## Conventions
 
