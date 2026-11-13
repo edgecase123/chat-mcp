@@ -182,10 +182,32 @@ test('the token reaches the container through the spawn env instead', () => {
   assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, 'sk-ant-oat-secret-value');
 });
 
-test('the child command always carries --allow-dangerously-skip-permissions, never --permission-mode', () => {
+/**
+ * 🛑 THIS TEST WAS GREEN THROUGHOUT THE WEEK THE CONTAINER WAS BROKEN, and
+ * its title asserted that the child "always carries" the flag that never
+ * worked. It pinned `--allow-dangerously-skip-permissions`, which only makes
+ * the bypass AVAILABLE — the CLI's own help says "without it being enabled by
+ * default". The activating flag is `--dangerously-skip-permissions`.
+ *
+ * ⚠️ A SECOND COPY OF THE SAME VACUOUS ASSERTION IS WHY IT SURVIVED THE
+ * FIRST FIX. Raised by claude2 on PR 210: killing one test that could not
+ * fail, while an identical one stands, puts the next reader back where we
+ * started.
+ */
+test('the child command carries the ACTIVATING bypass flag, never --permission-mode', () => {
   setToken('sk-ant-oat-x');
   const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
-  assert.ok(args.includes('--allow-dangerously-skip-permissions'));
+
+  assert.ok(
+    args.includes('--dangerously-skip-permissions'),
+    'the bypass is available but never activated; every tool call will be denied',
+  );
+
+  // ⚠️ MEASURED, NOT ASSUMED. A live container with the activator ALONE
+  // answered on the bus, so the enabler changes nothing and does not belong
+  // in a security-sensitive arg list.
+  assert.ok(!args.includes('--allow-dangerously-skip-permissions'));
+
   assert.ok(!args.includes('--permission-mode'));
   assert.ok(!args.includes('--allowedTools'));
 });
@@ -607,7 +629,7 @@ test('🚨 the command is wrapped so the config is written INSIDE the container'
   assert.ok(args[sh + 2]?.includes('exec "$@"'), 'never execs the real CLI');
   assert.equal(args[sh + 3], 'sh', 'no $0 placeholder, so the first CLI arg is eaten');
   assert.equal(args[sh + 4], 'claude');
-  assert.ok(args.includes('--allow-dangerously-skip-permissions'), 'CLI flags did not survive');
+  assert.ok(args.includes('--dangerously-skip-permissions'), 'CLI flags did not survive');
 });
 
 test('🚨 a containerized spawn with no bus endpoint refuses rather than starting blind', () => {

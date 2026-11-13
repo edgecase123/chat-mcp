@@ -39,8 +39,13 @@ export type EventRouter = (
  *
  * 🛑 `argsFor` TAKES THE MODE because the two flag sets are mutually
  * exclusive. The host path passes `--permission-mode` and `--allowedTools`;
- * the container path passes `--allow-dangerously-skip-permissions` and
- * neither of those, because the container boundary is the gate. A vendor owns
+ * the container path passes `--dangerously-skip-permissions` and neither of
+ * those, because the container boundary is the gate.
+ *
+ * ⚠️ THE FLAG NAME IS THE LOAD-BEARING PART. The near-identical
+ * `--allow-dangerously-skip-permissions` only makes the bypass AVAILABLE; it
+ * does not turn it on. The container passed that one alone for a week and
+ * every agent in it was denied the bus tool it existed to call. A vendor owns
  * both sets, so no generic spawner has to know either.
  */
 export interface VendorSpawn {

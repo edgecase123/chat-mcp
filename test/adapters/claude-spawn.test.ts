@@ -35,7 +35,9 @@ test('🛑 docker mode ENABLES the bypass AND TURNS IT ON', () => {
     args.includes('--dangerously-skip-permissions'),
     'the bypass is available but never activated; every tool call will be denied',
   );
-  assert.ok(args.includes('--allow-dangerously-skip-permissions'));
+  // ⚠️ MEASURED. A live container with the activator ALONE answered on the
+  // bus, so the enabler is redundant and is not passed.
+  assert.ok(!args.includes('--allow-dangerously-skip-permissions'));
   // Decision 4: the two sets are mutually exclusive. A container child that
   // also got --permission-mode would be gated twice and stall.
   assert.ok(!args.includes('--permission-mode'));
