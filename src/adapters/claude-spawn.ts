@@ -22,7 +22,20 @@ function containerArgs(opts: SpawnOptions): string[] {
     'stream-json',
     '--input-format',
     'stream-json',
+    // 🛑 BOTH, AND THEY ARE NOT SYNONYMS. The CLI's own help:
+    //
+    //   --allow-dangerously-skip-permissions
+    //       "Enable bypassing all permission checks AS AN OPTION, without it
+    //        being enabled by default."
+    //   --dangerously-skip-permissions
+    //       "Bypass all permission checks."
+    //
+    // The enabler alone was passed for a week. Permission checks still ran,
+    // nothing in a container answers a prompt, and so every containerized
+    // agent was DENIED the bus tool it was spawned to use. It is the whole
+    // reason a woken agent never replied.
     '--allow-dangerously-skip-permissions',
+    '--dangerously-skip-permissions',
   ];
 
   if (opts.model) args.push('--model', opts.model);
