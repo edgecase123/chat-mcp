@@ -58,10 +58,32 @@ export class McpHttpService {
       return;
     }
 
-    const body = await readJsonBody(req);
+    let body: unknown;
+
+    try {
+      body = await readJsonBody(req);
+    } catch (err) {
+      if (!(err instanceof BodyTooLarge)) throw err;
+
+      // 🛑 DRAIN, DO NOT DESTROY. Destroying the socket here reached the caller
+      // as ECONNRESET rather than as the 413, so the refusal it is meant to
+      // read never arrived. Nothing is buffered past the cap either way.
+      req.resume();
+      refuse(res, 413, 'request body too large', { connection: 'close' });
+      return;
+    }
+
     const sessionId = headerOf(req, 'mcp-session-id');
 
     if (sessionId === null) {
+      // 🛑 REFUSE BEFORE BUILDING. `serverFor` opens a database handle and a
+      // NotifyBus, so building one for a request that cannot open a session
+      // let an authenticated caller spend the host's descriptors at will.
+      if (!isInitialize(body)) {
+        refuse(res, 400, 'no session, and this is not an initialize request');
+        return;
+      }
+
       await this.openSession(handle, req, res, body);
       return;
     }
@@ -93,6 +115,17 @@ export class McpHttpService {
     }
   }
 
+  /**
+   * 🛑 A SERVER THAT OPENED NO SESSION IS CLOSED BEFORE THIS RETURNS. Only an
+   * `initialize` reaches `onsessioninitialized`, so every other request left an
+   * `McpServer` connected to a transport and absent from `sessions` — and
+   * `close()` iterates `sessions`, so it never reached them. An authenticated
+   * caller exhausted the host's file descriptors without opening a session.
+   *
+   * The `finally` covers the throwing path too, where `handleRequest` raises
+   * after `connect` succeeded. Pinned by `🛑 a request that opens NO session
+   * leaves NO server behind`.
+   */
   private async openSession(
     handle: string,
     req: IncomingMessage,
@@ -100,9 +133,12 @@ export class McpHttpService {
     body: unknown,
   ): Promise<void> {
     const server = this.opts.serverFor(handle);
+    const opened: string[] = [];
+
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => {
+        opened.push(id);
         this.sessions.set(id, { handle, transport, server });
       },
       onsessionclosed: (id) => {
@@ -111,7 +147,12 @@ export class McpHttpService {
     });
 
     await server.connect(transport);
-    await transport.handleRequest(req, res, body);
+
+    try {
+      await transport.handleRequest(req, res, body);
+    } finally {
+      if (opened.length === 0) await server.close();
+    }
   }
 
   private authenticatedHandle(req: IncomingMessage): string | null {
@@ -127,6 +168,17 @@ export class McpHttpService {
   }
 }
 
+/**
+ * Whether this body would open a session. A batch counts if any member does,
+ * matching the transport, which initializes on the first `initialize` it sees.
+ */
+function isInitialize(body: unknown): boolean {
+  const one = (m: unknown): boolean =>
+    typeof m === 'object' && m !== null && (m as { method?: unknown }).method === 'initialize';
+
+  return Array.isArray(body) ? body.some(one) : one(body);
+}
+
 function headerOf(req: IncomingMessage, name: string): string | null {
   const value = req.headers[name];
 
@@ -137,15 +189,54 @@ function headerOf(req: IncomingMessage, name: string): string | null {
 }
 
 /**
+ * 🛑 THE BODY IS CAPPED, BECAUSE IT IS BUFFERED WHOLE BEFORE ANYTHING READS IT.
+ * The container is the untrusted party in this transport, and an uncapped read
+ * meant a junk body was held in memory in full and only then refused.
+ * Pinned by `🛑 a body over the cap is refused 413`.
+ */
+const MAX_BODY_BYTES = 4 * 1024 * 1024;
+
+/** Thrown past the cap, so the caller answers 413 rather than buffering on. */
+class BodyTooLarge extends Error {}
+
+/**
+ * 🛑 THE DECLARED LENGTH IS CHECKED BEFORE A BYTE IS READ, AND THAT IS WHAT
+ * MAKES THE 413 DETERMINISTIC. Refusing part-way through the upload raced the
+ * client, which read ECONNRESET instead of the 413 about one run in two. A
+ * chunked body declares no length, so the streaming cap below still backs this
+ * up — and a reset is the honest answer there.
+ */
+function declaredLengthOver(req: IncomingMessage, cap: number): boolean {
+  const header = headerOf(req, 'content-length');
+
+  if (header === null) return false;
+
+  const declared = Number(header);
+
+  return Number.isFinite(declared) && declared > cap;
+}
+
+/**
  * `undefined` for anything without a body, because the transport reads the
  * stream itself when nothing is passed and would then find it drained.
  */
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   if (req.method !== 'POST') return undefined;
 
-  const chunks: Buffer[] = [];
+  if (declaredLengthOver(req, MAX_BODY_BYTES)) {
+    throw new BodyTooLarge(`content-length exceeds ${MAX_BODY_BYTES} bytes`);
+  }
 
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+
+  for await (const chunk of req) {
+    bytes += (chunk as Buffer).length;
+
+    if (bytes > MAX_BODY_BYTES) throw new BodyTooLarge(`body exceeds ${MAX_BODY_BYTES} bytes`);
+
+    chunks.push(chunk as Buffer);
+  }
 
   const raw = Buffer.concat(chunks).toString('utf8');
 

@@ -89,15 +89,34 @@ export function revokeToken(handle: string): void {
  * decodes to a zero-length buffer, so the length guard skipped it and that
  * handle stopped authenticating forever with no signal — indistinguishable
  * from an attacker presenting a forged token. Found by claude2.
+ *
+ * 🛑 THE BLAST RADIUS IS EVERY HANDLE, NOT THE OWNING ONE.
+ * `authenticateToken` scans the whole directory, so one corrupt file is a
+ * total outage and the 500 it causes should be read that way. Throwing is
+ * still the right call, because the alternative is the silent death above.
+ * Pinned by `🛑 a corrupt token file stops EVERY handle authenticating`.
  */
 function digestIn(path: string): Buffer {
-  const parsed = JSON.parse(readFileSync(path, 'utf8')) as TokenFile;
+  const parsed = parseTokenFile(path);
 
   if (typeof parsed?.digest !== 'string' || !HEX_DIGEST.test(parsed.digest)) {
     throw new Error(`${path} does not hold a ${DIGEST} hex digest`);
   }
 
   return Buffer.from(parsed.digest, 'hex');
+}
+
+/**
+ * 🛑 NAMES THE FILE. A bare `JSON.parse` raised a `SyntaxError` carrying only
+ * the offending text, so the one file an operator has to delete was the one
+ * thing the total outage did not say.
+ */
+function parseTokenFile(path: string): TokenFile {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8')) as TokenFile;
+  } catch (err) {
+    throw new Error(`${path} does not hold readable JSON`, { cause: err });
+  }
 }
 
 /**

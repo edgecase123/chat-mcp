@@ -23,6 +23,9 @@ const PROTOCOL = '2025-06-18';
 interface Harness {
   readonly url: string;
   readonly close: () => Promise<void>;
+
+  /** How many servers `serverFor` has been asked for. */
+  readonly built: () => number;
 }
 
 /**
@@ -60,6 +63,7 @@ async function harness(): Promise<Harness> {
 
   return {
     url: `http://127.0.0.1:${port}/mcp`,
+    built: () => open.length,
     close: async () => {
       await service.close();
       await new Promise<void>((resolve) => http.close(() => resolve()));
@@ -116,6 +120,19 @@ async function post(
   };
 }
 
+/** `post`'s sibling for the methods that carry no body. */
+async function bare(url: string, token: string, method: 'GET' | 'DELETE'): Promise<Reply> {
+  const res = await fetch(url, {
+    method,
+    headers: {
+      authorization: `Bearer ${token}`,
+      accept: 'application/json, text/event-stream',
+    },
+  });
+
+  return { status: res.status, text: await res.text(), sessionId: null };
+}
+
 /** Open a session and return its id, so a later request can try to reuse it. */
 async function openSession(url: string, token: string): Promise<string> {
   const res = await post(url, token, INITIALIZE);
@@ -124,6 +141,48 @@ async function openSession(url: string, token: string): Promise<string> {
   assert.ok(res.sessionId, 'the transport issued no mcp-session-id');
 
   return res.sessionId;
+}
+
+/** Mirrors `MAX_BODY_BYTES` in `mcp-http.ts`. */
+const MAX_BODY = 4 * 1024 * 1024;
+
+/**
+ * POST nine bytes while DECLARING `length`, and answer with the status.
+ *
+ * 🛑 `fetch` SETS `content-length` ITSELF and will not let a test lie about it,
+ * hence `node:http`. The request is deliberately never ended: a service that
+ * honours the declared length answers before the body arrives, and one that
+ * does not waits for bytes that never come — so a regression fails on the
+ * timeout rather than hanging the suite.
+ */
+async function declaring(url: string, token: string, length: number): Promise<number> {
+  const { request } = await import('node:http');
+
+  return new Promise<number>((resolve, reject) => {
+    const req = request(
+      url,
+      {
+        method: 'POST',
+        timeout: 5000,
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          'content-length': String(length),
+        },
+      },
+      (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      },
+    );
+
+    req.on('timeout', () => {
+      req.destroy(new Error(`no answer in 5s for a declared length of ${length}`));
+    });
+    req.on('error', reject);
+    req.write('{"a":"b"}');
+  });
 }
 
 /**
@@ -216,4 +275,63 @@ test('🛑 two tokens get servers for their OWN handles, not for whoever connect
   assert.doesNotMatch(a, /http-bob/);
   assert.match(b, /http-bob/);
   assert.doesNotMatch(b, /http-alice/);
+});
+
+/**
+ * 🛑 A REQUEST THAT OPENS NO SESSION MUST BUILD NO SERVER. `openSession` ran on
+ * every request without a session id, and only an `initialize` ever reaches
+ * `onsessioninitialized` — so a bare `GET` left an `McpServer` connected to a
+ * transport and absent from `sessions`. `close()` iterates `sessions`, so it
+ * never reached them.
+ *
+ * claude2 measured 200 bare `GET`s as 200 abandoned servers and +806 file
+ * descriptors, about four each. The container is the untrusted party here, so
+ * it reaches the default 256-fd limit in under 65 requests without ever
+ * opening a session.
+ */
+test('🛑 a request that opens NO session leaves NO server behind, so it cannot exhaust the descriptors', async (t) => {
+  const h = await harness();
+
+  t.after(h.close);
+
+  const token = mintToken('http-noleak');
+
+  // Every shape that reaches `openSession` without initializing.
+  assert.equal((await post(h.url, token, rpc('tools/list', {}, 2))).status, 400);
+  assert.equal((await post(h.url, token, JSON.stringify([rpc('tools/list', {}, 3)]))).status, 400);
+  assert.equal((await bare(h.url, token, 'GET')).status, 400);
+  assert.equal((await bare(h.url, token, 'DELETE')).status, 400);
+
+  assert.equal(h.built(), 0, 'a request that opened no session still left a server behind');
+
+  // 🛑 THE CONTROL. Without it this passes for a service that never builds a
+  // server at all, and `built()` would be proving nothing.
+  assert.equal((await post(h.url, token, INITIALIZE)).status, 200);
+  assert.equal(h.built(), 1);
+});
+
+/**
+ * 🛑 THE BODY IS BUFFERED WHOLE BEFORE ANYTHING REFUSES IT, so the cap is the
+ * only thing between an authenticated container and the supervisor's memory.
+ * Raised by claude2, who read the absence of the cap rather than measuring a
+ * cost — and said so.
+ *
+ * 🛑 IT ASSERTS ON THE DECLARED LENGTH, NOT ON A REAL BIG UPLOAD. An earlier
+ * version posted 5 MB and was refused part-way through, which raced the client:
+ * it read ECONNRESET instead of the 413 in 3 of 10 runs. Checking
+ * `content-length` answers before a byte is read, so this sends nine bytes and
+ * is deterministic.
+ */
+test('🛑 a body DECLARING more than the cap is refused 413 before it is read', async (t) => {
+  const h = await harness();
+
+  t.after(h.close);
+
+  const token = mintToken('http-bigbody');
+
+  assert.equal(await declaring(h.url, token, MAX_BODY + 1), 413);
+
+  // 🛑 THE CONTROL. A legal request on the same service is not refused, so the
+  // 413 above was the declared length and not the service rejecting everything.
+  assert.equal((await post(h.url, token, INITIALIZE)).status, 200);
 });

@@ -213,3 +213,36 @@ test('🛑 CONCURRENT mints of DISTINCT handles all keep working, so no token is
     assert.equal(authenticateToken(tokens[i] as string), handle, `${handle}'s token is dead`);
   }
 });
+
+/**
+ * 🛑 ONE CORRUPT FILE STOPS EVERY HANDLE, NOT JUST ITS OWN. `authenticateToken`
+ * scans the whole directory, so the throw that makes a malformed digest visible
+ * is a total outage rather than a one-handle one. claude2 raised that the
+ * docblock claimed the narrower consequence.
+ *
+ * 🛑 THROWING IS STILL THE RIGHT CALL. The alternative is the silent death this
+ * guard was added to end. The point of this test is that the blast radius is
+ * recorded rather than discovered during an incident.
+ */
+test('🛑 a corrupt token file stops EVERY handle authenticating, which is the cost of the throw', () => {
+  const healthy = mintToken('tok-healthy');
+
+  assert.equal(authenticateToken(healthy), 'tok-healthy');
+
+  // A sibling file nothing minted. Both shapes reach the same outage.
+  for (const junk of ['{"digest":"not-hex"}', 'this is not json at all']) {
+    writeFileSync(handleTokenPathFor('tok-broken'), junk);
+
+    assert.throws(
+      () => authenticateToken(healthy),
+      /tok-broken\.json/,
+      `a file holding ${JSON.stringify(junk)} did not name itself in the error`,
+    );
+  }
+
+  // THE CONTROL. Removing the one bad file restores every other handle, so the
+  // outage above was that file and not a store that had broken for good.
+  revokeToken('tok-broken');
+
+  assert.equal(authenticateToken(healthy), 'tok-healthy');
+});
