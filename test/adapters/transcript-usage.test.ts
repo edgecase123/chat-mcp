@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  newestUsedInLines,
-  usedFromTranscript,
-  usedFromUsage,
-} from '../../src/adapters/transcript-usage.js';
+import { newestUsedInLines, usedFromTranscript } from '../../src/adapters/transcript-usage.js';
 
 /**
+ * The sum itself is tested beside the function, in
+ * `test/supervise/drivers/claude-context.test.ts`. This file covers reading it
+ * back out of a transcript FILE.
+ *
  * #103 — the gauge used to be `wc -c` on the transcript divided by 3.5.
  * Measured on a live session 2026-11-04: 2,130,804 estimated against 732,973
  * actual, clamped to a 1,000,000 ceiling, so it reported 100% on a window at
@@ -26,27 +26,6 @@ function tmpTranscript(lines: string[]): string {
   writeFileSync(path, lines.join('\n'));
   return path;
 }
-
-test('used is what the model was SENT, summing the three input fields', () => {
-  assert.equal(
-    usedFromUsage({ input_tokens: 2, cache_read_input_tokens: 730686, cache_creation_input_tokens: 1130 }),
-    731818,
-  );
-});
-
-/**
- * 🛑 OUTPUT TOKENS ARE NOT CONTEXT. They are what the model produced; they
- * enter the window only on the next turn, where the cache read already counts
- * them. Adding them here would double-count every turn.
- */
-test('output tokens are excluded', () => {
-  assert.equal(usedFromUsage({ input_tokens: 100, output_tokens: 9999 } as Record<string, number>), 100);
-});
-
-test('a missing field counts as zero rather than NaN', () => {
-  assert.equal(usedFromUsage({ cache_read_input_tokens: 50 }), 50);
-  assert.equal(usedFromUsage({}), 0);
-});
 
 test('the NEWEST usage wins, not the first or the largest', () => {
   const lines = [

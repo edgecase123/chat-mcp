@@ -223,3 +223,93 @@ export function describeTurnResult(event: Record<string, unknown>): string | und
 
   return `subtype=${subtype} is_error=${failed}`;
 }
+
+/**
+ * The token fields Claude Code reports per turn. Everything else is ignored.
+ */
+export interface ClaudeUsage {
+  input_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
+/**
+ * How full the context window is, from one turn's usage.
+ *
+ * 🛑 `output_tokens` IS NOT IN THE SUM AND MUST NOT BE ADDED. Measured on a
+ * live Opus 5 session: this sum gave 118,783 against `/context`'s own 118.8k,
+ * while adding output gave 119,360 and would have printed 119.4k. Output
+ * reaches the window only as the next turn's input, where this sum already
+ * counts it. #213 proposed adding it; `claude-context.test.ts` pins it out.
+ */
+export function usedFromUsage(usage: ClaudeUsage): number {
+  return (
+    (usage.input_tokens ?? 0) +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0)
+  );
+}
+
+/**
+ * The live context size this event reports, or null if it reports none.
+ *
+ * 🛑 `assistant` ONLY, THOUGH `result` CARRIES `usage` TOO. The gauge is
+ * last-write-wins, so reading both is redundant rather than double-counted —
+ * but `assistant` is the entry the host hook reads out of the transcript, so
+ * restricting to it is what makes host and container agree by construction.
+ */
+export function parseClaudeContextUsed(event: Record<string, unknown>): number | null {
+  if (event.type !== 'assistant') return null;
+
+  const usage = (event.message as { usage?: ClaudeUsage } | undefined)?.usage;
+
+  if (!usage || typeof usage !== 'object') return null;
+
+  return usedFromUsage(usage);
+}
+
+/**
+ * The model this session runs, from the session-opening event, or null.
+ *
+ * ⚠️ THE EVENT IS `type: "system"` WITH `subtype: "init"`. Everyone calls it
+ * "the init event", and `type: "init"` does not exist — a parser written from
+ * the name alone matches nothing and the gauge silently never gets a window.
+ */
+export function parseClaudeModel(event: Record<string, unknown>): string | null {
+  if (event.type !== 'system' || event.subtype !== 'init') return null;
+
+  return typeof event.model === 'string' && event.model.length > 0 ? event.model : null;
+}
+
+/**
+ * What a supervisor uses as the window when the model id is not mapped.
+ *
+ * ⚠️ EVERY CURRENT MODEL BUT HAIKU IS A MEGATOKEN, so this is the sane guess —
+ * and it is still a guess, which is why the caller logs the id it fell back on.
+ */
+export const FALLBACK_CONTEXT_WINDOW = 1_000_000;
+
+/**
+ * Context-window size per model id, or null when the id is not mapped.
+ *
+ * 🛑 EXACT MATCH, AND null RATHER THAN A FALLBACK. A prefix rule would quietly
+ * absorb the next model family, and returning the fallback here would make an
+ * unmapped id indistinguishable from a mapped megatoken one — so nothing would
+ * ever be logged and a wrong denominator would never surface.
+ */
+const CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
+  'claude-fable-5-1': 1_000_000,
+  'claude-fable-5': 1_000_000,
+  'claude-mythos-5-1': 1_000_000,
+  'claude-opus-5': 1_000_000,
+  'claude-opus-4-8': 1_000_000,
+  'claude-opus-4-7': 1_000_000,
+  'claude-opus-4-6': 1_000_000,
+  'claude-sonnet-5': 1_000_000,
+  'claude-sonnet-4-6': 1_000_000,
+  'claude-haiku-4-5': 200_000,
+};
+
+export function contextWindowForModel(model: string): number | null {
+  return CONTEXT_WINDOWS[model] ?? null;
+}
