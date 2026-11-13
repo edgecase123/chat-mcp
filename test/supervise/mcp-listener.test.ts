@@ -225,7 +225,7 @@ async function closedWithin(socket: Socket, ms: number, why: string): Promise<vo
  * cap converts a resource attack into an indefinite outage.
  */
 test('🚨 a connection that never sends headers is reclaimed on the configured timeout', async (t) => {
-  const l = await listener(t, { maxConnections: 1, idleTimeoutMs: 150 });
+  const l = await listener(t, { maxConnections: 1, receiveTimeoutMs: 150 });
 
   const silent = connect({ host: '127.0.0.1', port: l.port });
   t.after(() => silent.destroy());
@@ -244,7 +244,7 @@ test('🚨 a connection that never sends headers is reclaimed on the configured 
  * at 2s.
  */
 test('🚨 a request that declares a body and never sends it is reclaimed too', async (t) => {
-  const l = await listener(t, { maxConnections: 1, idleTimeoutMs: 150 });
+  const l = await listener(t, { maxConnections: 1, receiveTimeoutMs: 150 });
 
   const slow = connect({ host: '127.0.0.1', port: l.port });
   t.after(() => slow.destroy());
@@ -268,14 +268,14 @@ test('🚨 a request that declares a body and never sends it is reclaimed too', 
 });
 
 /**
- * 🛑 THE PAIRED CONTROL FOR BOTH RECLAIMS, AND THE REASON THE TIMER IS ARMED
- * ONLY BETWEEN REQUESTS. The transport answers over SSE and a standing stream
+ * 🛑 THE PAIRED CONTROL FOR EVERY RECLAIM, AND THE REASON THE DEADLINE IS
+ * DISARMED ON A FULLY RECEIVED REQUEST. The transport answers over SSE and a standing stream
  * is SILENT for as long as the agent is thinking, so a plain idle timeout would
  * cut the stream the caller is waiting on — the outage the cap was supposed to
  * prevent, from the other side.
  */
-test('🚨 a standing SSE stream OUTLIVES the idle timeout', async (t) => {
-  const l = await listener(t, { idleTimeoutMs: 150 });
+test('🚨 a standing SSE stream OUTLIVES the receive deadline', async (t) => {
+  const l = await listener(t, { receiveTimeoutMs: 150 });
   const token = mintToken('alice');
 
   const opened = await post(l.url, initialize(), token);
@@ -309,5 +309,39 @@ test('🚨 a standing SSE stream OUTLIVES the idle timeout', async (t) => {
     new Promise<string>((resolve) => setTimeout(() => resolve('still open'), 600)),
   ]);
 
-  assert.equal(verdict, 'still open', 'the idle reclaim cut a live SSE stream');
+  assert.equal(verdict, 'still open', 'the receive deadline cut a live SSE stream');
+});
+
+/**
+ * 🛑 THE DRIBBLE. An INACTIVITY timer cannot bound this: one byte resets it, so
+ * a caller holds a slot forever at a byte every fraction of the timeout. The
+ * reclaim has to be an ABSOLUTE deadline on an incomplete request.
+ *
+ * Found by claude2 reviewing `282a6e6`, which shipped the inactivity timer and
+ * a comment claiming this was closed.
+ */
+test('🚨 a body dribbled one byte at a time does NOT hold the slot', async (t) => {
+  const l = await listener(t, { maxConnections: 1, receiveTimeoutMs: 300 });
+
+  const slow = connect({ host: '127.0.0.1', port: l.port });
+  t.after(() => slow.destroy());
+  await new Promise<void>((resolve, reject) => {
+    slow.once('connect', () => resolve());
+    slow.once('error', reject);
+  });
+
+  slow.resume();
+  slow.write(
+    'POST /mcp HTTP/1.1\r\n' +
+      'host: 127.0.0.1\r\n' +
+      'content-type: application/json\r\n' +
+      'content-length: 4096\r\n\r\n',
+  );
+
+  const dribble = setInterval(() => {
+    if (!slow.destroyed) slow.write('x');
+  }, 50);
+  t.after(() => clearInterval(dribble));
+
+  await closedWithin(slow, 3000, 'a dribbled body held the slot past 10x the deadline');
 });

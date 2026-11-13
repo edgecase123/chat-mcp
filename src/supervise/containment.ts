@@ -154,6 +154,11 @@ function assertDisjoint(projectDir: string, sensitive: string, noun: string, why
   }
 }
 
+/**
+ * 🛑 CALL THIS BEFORE normalize(). A NUL makes `scripts/gate.sh\0../../bin/sh`
+ * normalise to the innocent-looking `scripts/bin/sh`, and a newline or a
+ * control character only surfaces as an ERR_INVALID_ARG_VALUE at spawn time.
+ */
 export function assertNoControlChars(raw: string, noun: string): void {
   if (/[\u0000-\u001f\u007f]/.test(raw)) {
     throw new Error(`${noun} has a control character in it: "${raw}"`);

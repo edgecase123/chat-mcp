@@ -16,15 +16,19 @@ const DEFAULT_MAX_CONNECTIONS = 8;
 
 /**
  * 🛑 A CAP WITHOUT A RECLAIM IS A LOCKOUT PRIMITIVE. A container opens every
- * slot, sends NOTHING, and the real agent is refused.
+ * slot and the real agent is refused.
  *
- * 🛑 NODE'S OWN HTTP TIMEOUTS DO NOT CLOSE THIS. Measured on node 23: a socket
- * that connects and sends nothing survives `headersTimeout` AND `requestTimeout`
- * past 2s with both at 150/300 ms and the sweep at 75 ms. They time a REQUEST,
- * and a silent socket has not begun one. `socket.setTimeout` closed the same
- * socket in 155 ms.
+ * 🛑 AN ABSOLUTE DEADLINE, NOT AN IDLE ONE, AND THE DIFFERENCE IS THE WHOLE
+ * GUARD. An inactivity timer is reset by one byte, so a caller dribbling a
+ * declared body holds a slot forever — measured at a byte every 50 ms against
+ * a 300 ms timer, alive past 3s. This bounds the time from connect to a FULLY
+ * RECEIVED request instead, so a trickle cannot extend it.
+ *
+ * 🛑 NODE'S OWN HTTP TIMEOUTS DO NOT CLOSE ANY OF IT. Measured on node 23: a
+ * socket that connects and sends nothing survives `headersTimeout` AND
+ * `requestTimeout` past 2s with both at 150/300 ms and the sweep at 75 ms.
  */
-const DEFAULT_IDLE_TIMEOUT_MS = 10_000;
+const DEFAULT_RECEIVE_TIMEOUT_MS = 10_000;
 
 /**
  * The host-side socket `McpHttpService` deliberately does not own.
@@ -37,13 +41,12 @@ const DEFAULT_IDLE_TIMEOUT_MS = 10_000;
  * request arrives with `Host: host.docker.internal:<port>`, so an allowlist
  * built from the bound port would refuse the one caller this transport exists
  * for. The bearer token is the whole boundary.
- *
  */
 export interface McpListenerOptions extends McpHttpOptions {
   /** Test seam, and an operator escape hatch. See `DEFAULT_MAX_CONNECTIONS`. */
   readonly maxConnections?: number;
-  /** Idle reclaim, armed only between requests. `0` disables it. */
-  readonly idleTimeoutMs?: number;
+  /** How long a caller may take to deliver a request. `0` disables it. */
+  readonly receiveTimeoutMs?: number;
 }
 
 export class McpHttpListener {
@@ -66,7 +69,7 @@ export class McpHttpListener {
     const listener = new McpHttpListener(server, McpHttpService.create(options));
 
     server.maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
-    reclaimIdleSockets(server, options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS);
+    reclaimIdleSockets(server, options.receiveTimeoutMs ?? DEFAULT_RECEIVE_TIMEOUT_MS);
 
     server.on('request', (req, res) => {
       void listener.serve(req, res);
@@ -131,53 +134,52 @@ export class McpHttpListener {
 }
 
 /**
- * Close a socket that holds a slot without using it.
+ * Close a socket that holds a slot without delivering a request.
  *
- * 🛑 ARMED ONLY WHILE NOTHING IS IN FLIGHT, THE SAME SHAPE AS `broker.ts`. The
- * transport answers over SSE, so a legitimate response is silent for as long as
- * the agent is thinking — a plain idle timeout would cut the stream it is
- * waiting on. Both halves have a test.
+ * 🛑 ARMED WHILE THE CALLER OWES US BYTES, AND ONLY THEN. The transport answers
+ * over SSE, so a response is silent for as long as the agent is thinking — a
+ * deadline that kept running would cut the stream the caller is waiting on.
+ * Disarming on a FULLY RECEIVED request is what separates the two. Both halves
+ * have a test.
  */
-function reclaimIdleSockets(server: Server, idleMs: number): void {
-  if (idleMs <= 0) return;
+function reclaimIdleSockets(server: Server, receiveMs: number): void {
+  if (receiveMs <= 0) return;
 
-  const inFlight = new WeakMap<Socket, number>();
+  const deadlines = new WeakMap<Socket, NodeJS.Timeout>();
 
   const arm = (socket: Socket): void => {
     if (socket.destroyed) return;
 
-    socket.setTimeout((inFlight.get(socket) ?? 0) === 0 ? idleMs : 0);
+    clearTimeout(deadlines.get(socket));
+    deadlines.set(
+      socket,
+      setTimeout(() => socket.destroy(), receiveMs).unref(),
+    );
+  };
+
+  const disarm = (socket: Socket): void => {
+    clearTimeout(deadlines.get(socket));
+    deadlines.delete(socket);
   };
 
   server.on('connection', (socket) => {
-    socket.on('timeout', () => socket.destroy());
+    socket.on('close', () => disarm(socket));
     arm(socket);
   });
 
   server.on('request', (req, res) => {
     const { socket } = req;
 
-    // 🛑 WHEN THE REQUEST IS FULLY RECEIVED, NOT WHEN ITS HEADERS ARE. Headers
-    // arriving does not make it the server's turn — a declared body that never
-    // arrives is still the caller holding the slot.
+    // 🛑 NOT RE-ARMED HERE. The clock runs from the connection, or from the end
+    // of the last response, so headers arriving buys the caller no extra time.
     //
-    // 🛑 FROM THE HEADERS, BECAUSE `end` NEVER FIRES ON A STREAM NOBODY READS.
-    // The standing SSE stream is a bodyless GET whose handler never reads it,
-    // so waiting for `end` would cut it. `req.complete` is still false here —
-    // the request event is emitted before the message completes. Tested both
-    // ways.
-    const hold = (): void => {
-      inFlight.set(socket, (inFlight.get(socket) ?? 0) + 1);
-      arm(socket);
-    };
+    // 🛑 `end` NEVER FIRES ON A STREAM NOBODY READS, so a bodyless request is
+    // recognised from its headers. The standing SSE stream is a GET whose
+    // handler never reads it, and waiting for `end` would cut it.
+    if (declaresBody(req)) req.on('end', () => disarm(socket));
+    else disarm(socket);
 
-    if (declaresBody(req)) req.on('end', hold);
-    else hold();
-
-    res.on('close', () => {
-      inFlight.set(socket, Math.max(0, (inFlight.get(socket) ?? 1) - 1));
-      arm(socket);
-    });
+    res.on('close', () => arm(socket));
   });
 }
 

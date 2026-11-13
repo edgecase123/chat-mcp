@@ -186,3 +186,18 @@ test('🛑 a project directory INSIDE the manifest directory is refused', async 
 
   assert.throws(() => assertProjectDirOutsideState(inside), /manifest directory/);
 });
+
+/**
+ * 🛑 THE ORDERING THE `assertNoControlChars` DOCBLOCK ASSERTS, AS A TEST. A NUL
+ * before a `..` normalises to an innocent-looking `scripts/bin/sh`, so a
+ * control-char check that ran AFTER `normalize` would pass this. The existing
+ * control-char cases have no `..` and stay green under either order.
+ */
+test('🛑 a NUL hiding a traversal is refused, which pins the check BEFORE normalize', async () => {
+  const { containedRelative } = await import('../../src/supervise/containment.js');
+
+  assert.throws(
+    () => containedRelative('scripts/gate.sh\u0000../../bin/sh', 'command script'),
+    /control character/,
+  );
+});
