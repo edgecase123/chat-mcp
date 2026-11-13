@@ -9,7 +9,7 @@ import { join } from 'node:path';
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-broker-'));
 
 const { CommandBroker } = await import('../../src/supervise/broker.js');
-const { registerProject } = await import('../../src/supervise/projects.js');
+const { dirsFor, registerProject } = await import('../../src/supervise/projects.js');
 const { ensureManifestDir, manifestPathFor } = await import('../../src/util/paths.js');
 
 type Broker = Awaited<ReturnType<typeof CommandBroker.bind>>;
@@ -331,17 +331,21 @@ test('close() settles while a connection is still open', async () => {
  * directory every container mounts READ-WRITE, so the agent can rewrite it.
  * Before this slice that moved the directory its own commands ran in.
  *
- * The control is that `decoy` holds a DIFFERENT, runnable script under the same
- * command name. A broker that honoured the registration would answer `decoy`,
- * so this fails loudly rather than vacuously.
+ * 🛑 THE REGISTRATION HOLDS ONLY THE DECOY, NEVER BOTH. `registerProject`
+ * APPENDS, so registering real-then-decoy leaves real at index 0 and a
+ * first-wins implementation still passes. That shape is a decoy test.
  */
 test('rewriting the registration does not move where a command runs', async (t) => {
   const handle = `h12-${process.pid}`;
   const real = project(ECHO, { 'gate.sh': '#!/bin/sh\necho real\n' });
   const decoy = project(ECHO, { 'gate.sh': '#!/bin/sh\necho decoy\n' });
 
-  registerWith(handle, real);
+  installManifest(handle, real);
   registerProject(handle, decoy);
+
+  // POSITIVE CONTROL. Without it a `registerProject` that silently no-opped
+  // would leave this test green while proving nothing.
+  assert.deepEqual(dirsFor(handle), [decoy]);
 
   const broker = await CommandBroker.bind({
     authenticate: (tkn) => (tkn === 'tok-secret' ? handle : null),
