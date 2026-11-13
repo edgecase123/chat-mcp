@@ -93,7 +93,38 @@ test('haiku 4.5 is the one current model that is not a megatoken', () => {
 test('an unmapped model id is null, not a guess', () => {
   assert.equal(contextWindowForModel('claude-sonnet-5-5'), null);
   assert.equal(contextWindowForModel(''), null);
-  assert.equal(FALLBACK_CONTEXT_WINDOW, 1_000_000);
+});
+
+/**
+ * 🛑 THE FALLBACK IS THE SMALLEST KNOWN WINDOW, AND THE DIRECTION IS THE POINT.
+ * Too large reads LOW — a 200k model at 150k shows 15% and no band fires, so
+ * the gauge is quiet exactly when the agent is full. Too small reads HIGH,
+ * which warns early. lee ruled 200k on 2026-11-13, reversing 1,000,000.
+ */
+test('the fallback is the SMALLEST mapped window, so being wrong warns early', () => {
+  assert.equal(FALLBACK_CONTEXT_WINDOW, 200_000);
+  assert.equal(
+    FALLBACK_CONTEXT_WINDOW,
+    Math.min(...Object.values(CONTEXT_WINDOWS)),
+    'the fallback drifted from the map it is supposed to be derived from',
+  );
+  assert.ok(
+    FALLBACK_CONTEXT_WINDOW < Math.max(...Object.values(CONTEXT_WINDOWS)),
+    'the fallback is the largest window, which is the unsafe direction',
+  );
+});
+
+test('an unmapped model reads HIGH, not low, against the fallback', () => {
+  const snap = claudeContextSnapshot({
+    type: 'assistant',
+    parent_tool_use_id: null,
+    message: { model: 'claude-sonnet-5-5', usage: { input_tokens: 150_000 } },
+  });
+
+  // 75% against the 200k fallback fires the 70 band. Against a 1M fallback it
+  // would have read 15% and fired nothing.
+  assert.equal(snap?.total, 200_000);
+  assert.equal(snap?.totalIsFallback, true);
 });
 
 /**
@@ -150,7 +181,8 @@ test('the shared predicate is what both paths call', () => {
  * map, so the claim is the test. Raised by the dry-solid reviewer.
  */
 test('the map says what its comment says: haiku alone is not a megatoken', () => {
-  const nonMega = Object.entries(CONTEXT_WINDOWS).filter(([, size]) => size !== FALLBACK_CONTEXT_WINDOW);
+  const MEGATOKEN = 1_000_000;
+  const nonMega = Object.entries(CONTEXT_WINDOWS).filter(([, size]) => size !== MEGATOKEN);
 
   assert.deepEqual(
     nonMega.map(([id]) => id).sort(),

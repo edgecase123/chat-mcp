@@ -319,20 +319,12 @@ export function claudeContextUsage(entry: unknown): ClaudeUsage | null {
 }
 
 /**
- * What a supervisor uses as the window when the model id is not mapped.
- *
- * ⚠️ EVERY CURRENT MODEL BUT HAIKU IS A MEGATOKEN, so this is the sane guess —
- * and it is still a guess, which is why the caller logs the id it fell back on.
- */
-export const FALLBACK_CONTEXT_WINDOW = 1_000_000;
-
-/**
  * Context-window size per model id, or null when the id is not mapped.
  *
  * 🛑 EXACT MATCH, AND null RATHER THAN A FALLBACK. A prefix rule would quietly
  * absorb the next model family, and returning the fallback here would make an
- * unmapped id indistinguishable from a mapped megatoken one — so nothing would
- * ever be logged and a wrong denominator would never surface.
+ * unmapped id indistinguishable from a mapped one — so nothing would ever be
+ * logged and a wrong denominator would never surface.
  */
 export const CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
   'claude-fable-5-1': 1_000_000,
@@ -350,6 +342,21 @@ export const CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
 export function contextWindowForModel(model: string): number | null {
   return CONTEXT_WINDOWS[model] ?? null;
 }
+
+/**
+ * The window a supervisor measures against when the model id is not mapped.
+ *
+ * 🛑 THE SMALLEST KNOWN WINDOW, NOT THE LARGEST, AND THE DIRECTION IS THE
+ * WHOLE POINT. A too-large fallback reads LOW: a 200k model really at 150k
+ * shows 15%, so no band ever fires and the gauge goes quiet exactly when the
+ * agent is full. Too-small reads HIGH, which warns early and can pin at 100%.
+ * Only one of those is safe to be wrong in. lee ruled 200k on 2026-11-13,
+ * reversing an earlier ruling of 1,000,000; claude2 raised the direction.
+ *
+ * ⚠️ DERIVED FROM THE MAP so the two cannot drift. Adding a smaller model
+ * moves the fallback with it, which is the intended behaviour.
+ */
+export const FALLBACK_CONTEXT_WINDOW = Math.min(...Object.values(CONTEXT_WINDOWS));
 
 /**
  * The context reading in this event, or null if it carries none.
