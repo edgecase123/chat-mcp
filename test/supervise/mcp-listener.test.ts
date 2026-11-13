@@ -28,10 +28,11 @@ const PROTOCOL = '2025-06-18';
  * file rather than a rewrite of that harness.
  */
 
-async function listener(t: TestContextLike) {
+async function listener(t: TestContextLike, maxConnections?: number) {
   const open: ShimContext[] = [];
 
   const l = await McpHttpListener.bind({
+    maxConnections,
     authenticate: authenticateToken,
     serverFor: (handle: string) => {
       const ctx: ShimContext = {
@@ -168,4 +169,35 @@ test('🚨 a path other than /mcp opens no session, even with a valid token', as
 
   assert.equal(res.status, 404);
   assert.equal(res.headers.get('mcp-session-id'), null, 'a session opened off /mcp');
+});
+
+
+/**
+ * 🚨 Pre-auth sockets are a host-wide resource: `host.docker.internal` reaches
+ * this listener from EVERY container on the machine, and the supervisor holds
+ * every handle's session. Without a cap, one container exhausts the
+ * supervisor's descriptors before presenting a token.
+ */
+test('🚨 connections past the cap are dropped, before any token is presented', async (t) => {
+  const l = await listener(t, 1);
+
+  const held = connect({ host: '127.0.0.1', port: l.port });
+  t.after(() => held.destroy());
+  await new Promise<void>((resolve, reject) => {
+    held.once('connect', () => resolve());
+    held.once('error', reject);
+  });
+
+  const extra = connect({ host: '127.0.0.1', port: l.port });
+  t.after(() => extra.destroy());
+
+  // The control is that `held` is still usable: the cap drops the EXTRA
+  // socket, it does not take the listener down.
+  await new Promise<void>((resolve, reject) => {
+    extra.once('close', () => resolve());
+    extra.once('error', () => resolve());
+    setTimeout(() => reject(new Error('the socket past the cap was kept open')), 2000);
+  });
+
+  assert.equal(held.destroyed, false, 'the cap killed the connection it should have kept');
 });

@@ -150,9 +150,14 @@ test('🛑 nothing yields between the bind and the handler install', () => {
   //
   // Pinned rather than asserted empty: a NEW yield here fails this test, which
   // is the alarm. Found by the detector itself, not by reading the diff.
+  //
+  // The second entry is `hostBus?.close()`, added when the containerized child
+  // gained an HTTP bus. It sits in the SAME spawn-failure catch as the first,
+  // on the same throwing path, so it widens that teardown window and never the
+  // success path. A yield OUTSIDE that catch would be the real alarm.
   assert.deepEqual(
     topLevelYields(lines.slice(wrapperEnd + 1, installAt)),
-    ['await listener.close();'],
+    ['await listener.close();', 'await hostBus?.close();'],
     'a NEW top-level await here puts the success path in the gap; add it only with the refusal in mind',
   );
 });

@@ -1,7 +1,7 @@
-import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
+import { createServer, type Server, type Socket } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
 import { isRecord, type ListedCommand } from './commands.js';
-import { BIND_ADDRESS } from './loopback.js';
+import { BIND_ADDRESS, listenOnLoopback } from './loopback.js';
 import {
   DEFAULT_MAX_BUFFER,
   DEFAULT_TIMEOUT_MS,
@@ -81,15 +81,7 @@ export class CommandBroker {
     server.maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
     server.on('connection', (socket) => broker.accept(socket));
 
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, BIND_ADDRESS, () => {
-        server.removeListener('error', reject);
-        resolve();
-      });
-    });
-
-    broker.boundPort = (server.address() as AddressInfo).port;
+    broker.boundPort = await listenOnLoopback(server);
 
     return broker;
   }

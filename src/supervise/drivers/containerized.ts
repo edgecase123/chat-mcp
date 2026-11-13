@@ -5,7 +5,6 @@ import { wireAgentChild } from './wiring.js';
 import { mountsFor, containerPathFor } from '../mounts.js';
 import { readToken } from '../auth.js';
 import { assertProjectDirOutsideState, checkedMountPath } from '../containment.js';
-import { stateDir } from '../../util/paths.js';
 
 export const CONTAINER_PROJECT_DIR = '/work';
 
@@ -30,11 +29,6 @@ export const DEFAULT_SHUTDOWN_GRACE_SECONDS = 60;
 
 export { containerPathFor };
 
-/** Where the bus's state dir lands inside the container, for this vendor. */
-export function containerStateDir(vendor: VendorSpawn): string {
-  return `${vendor.containerHome}/.chat-mcp`;
-}
-
 /** Where the prelude writes the config, inside the container only. */
 export function containerMcpConfigPath(vendor: VendorSpawn): string {
   return `${vendor.containerHome}/.chat-mcp-mcp.json`;
@@ -55,8 +49,14 @@ export function containerBusUrl(hostUrl: string): string {
  * 🛑 NOT A COMMAND ANY MORE. This used to launch a stdio shim INSIDE the
  * container, which called `openDb()` and read `chat.db` across the mounted
  * state dir — so the container was a second process on the host's database
- * rather than a client of the host (#162). The bearer token is now the whole
- * boundary.
+ * rather than a client of the host (#162).
+ *
+ * 🛑 THE TOKEN ONLY BECAME THE BOUNDARY WHEN THE MOUNT WENT WITH IT. While
+ * `stateDir()` was mounted, `tokens/<handle>.json` was writable from inside,
+ * and `authenticateToken` trusts the digest on disk — so a container could
+ * forge ANY handle and reach the command broker as it. Deleting the transport
+ * without deleting the mount would have left that live under a comment saying
+ * it was closed.
  */
 export function buildContainerMcpConfig(bus: BusEndpoint): string {
   const config = {
@@ -87,7 +87,7 @@ function mcpConfigPrelude(vendor: VendorSpawn): string {
   const path = containerMcpConfigPath(vendor);
 
   // umask, because the file holds a bearer token for the whole bus.
-  return `(umask 077; printf "%s" "$${CONTAINER_MCP_CONFIG_ENV}" > ${path}) && exec "$@"`;
+  return `(umask 077; printf "%s" "$${CONTAINER_MCP_CONFIG_ENV}" > '${path}') && exec "$@"`;
 }
 
 /**
@@ -157,8 +157,6 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
     vendor.authEnvVar,
     '-v',
     `${projectDir}:${CONTAINER_PROJECT_DIR}`,
-    '-v',
-    `${stateDir()}:${containerStateDir(vendor)}`,
   ];
 
   // 🛑 BOTH SIDES COME FROM ONE CHECKED VALUE. A host side built from the
@@ -289,6 +287,13 @@ export function dockerTeardownFor(
 export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {}): AgentChild {
   const name = containerNameFor(requireSupervisorHandle(opts));
 
+  // 🛑 BUILD THE PLAN BEFORE THE REMOVAL BELOW, BECAUSE THE REMOVAL IS
+  // DESTRUCTIVE AND THIS THROWS. A missing token, an unresolved cwd, a
+  // containment violation or a missing bus endpoint all raise here — and
+  // running `docker rm -f` first meant a spawn that could never succeed
+  // SIGKILLed the live agent on its way to the error. `dockerRunPlan` is pure.
+  const plan = dockerRunPlan(vendor, opts);
+
   // 🛑 CLEAR THE NAME FIRST, SYNCHRONOUSLY. The name is fixed per handle, and
   // `kill()` no longer waits for the teardown — so restarting a handle inside
   // the grace window meets `Conflict. The container name is already in use`
@@ -306,8 +311,6 @@ export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {})
     // Nothing by that name — the normal case, and not distinguishable from a
     // missing docker without a logger at this layer.
   }
-
-  const plan = dockerRunPlan(vendor, opts);
 
   const child: ChildProcessWithoutNullStreams = spawn('docker', plan.args, {
     stdio: ['pipe', 'pipe', 'pipe'],

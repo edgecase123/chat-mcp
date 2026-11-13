@@ -459,12 +459,11 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
             (k) => `/mnt/${k}`,
           );
           const { spawnFor } = await import('./adapters/index.js');
-          const { containerStateDir } = await import('./supervise/drivers/containerized.js');
           const { resolveDriver } = await import('./supervise/drivers/index.js');
           const vendor = spawnFor(resolveDriver({ driver: o.driver, container: true }).vendor);
           console.log(
             describePlan({
-              mountPaths: ['/work', containerStateDir(vendor), ...extra],
+              mountPaths: ['/work', ...extra],
               envVarNames: [vendor.authEnvVar],
               binary: vendor.binary,
               networkMode: 'bridge (default, full outbound — narrowing is #134)',

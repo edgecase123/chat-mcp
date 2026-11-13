@@ -249,7 +249,11 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-function refuse(
+/**
+ * The JSON-RPC refusal envelope. Exported because `mcp-listener.ts` serves the
+ * same protocol on the same socket and must not invent a second wire shape.
+ */
+export function refuse(
   res: ServerResponse,
   status: number,
   message: string,

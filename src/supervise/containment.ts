@@ -102,10 +102,13 @@ function containsWhenCreated(dir: string, target: string): boolean {
 /**
  * Refuse a project directory that CONTAINS the sandbox's own state, or throw.
  *
- * 🛑 THE MANIFEST CHECK IS THE HALF THAT CLOSES A HOLE. `manifestDir()` is
- * bind-mounted nowhere, so a project tree above it is the only way in, and the
- * broker executes from it. `stateDir()` is mounted read-write regardless (#188),
- * so refusing an ancestor of THAT is defence in depth, not the barrier.
+ * 🛑 BOTH CHECKS ARE NOW BARRIERS, AND THE STATE-DIR HALF ONLY BECAME ONE
+ * RECENTLY. It used to be defence in depth: `stateDir()` was bind-mounted
+ * read-write on every containerized spawn (#188), so refusing an ancestor of
+ * it changed nothing the container could already reach. That mount is gone, so
+ * the project mount is the only remaining route in — and this check is what
+ * closes it. `manifestDir()` was always the live half, because it is
+ * bind-mounted nowhere and the broker executes from it.
  *
  * 🛑 BOTH CHECKS ARE STILL NEEDED, AND A SYMLINK IS WHAT SEPARATES THEM.
  * `manifestDir()` is `${stateDir()}-manifests`, a sibling, so an ancestor of

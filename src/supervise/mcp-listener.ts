@@ -1,11 +1,18 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import type { AddressInfo } from 'node:net';
-
-import { BIND_ADDRESS } from './loopback.js';
-import { McpHttpService, type McpHttpOptions } from './mcp-http.js';
+import { BIND_ADDRESS, listenOnLoopback } from './loopback.js';
+import { McpHttpService, refuse, type McpHttpOptions } from './mcp-http.js';
 
 /** The only path served. A token is a credential for this path, not for the socket. */
 const MCP_PATH = '/mcp';
+
+/**
+ * 🛑 PRE-AUTH SOCKETS ARE A HOST-WIDE RESOURCE. `host.docker.internal` reaches
+ * this from EVERY container on the machine, not only ours, and the supervisor
+ * holds every handle's session and its SQLite handle. Node's own
+ * `keepAliveTimeout` and `headersTimeout` cover slowloris; nothing caps the
+ * count, which is the half `CommandBroker` also caps.
+ */
+const DEFAULT_MAX_CONNECTIONS = 8;
 
 /**
  * The host-side socket `McpHttpService` deliberately does not own.
@@ -22,6 +29,11 @@ const MCP_PATH = '/mcp';
  * ⚠️ NO CONNECTION OR IDLE LIMITS YET, where `CommandBroker` has both. Same
  * threat model, so this is a gap rather than a decision.
  */
+export interface McpListenerOptions extends McpHttpOptions {
+  /** Test seam, and an operator escape hatch. See `DEFAULT_MAX_CONNECTIONS`. */
+  readonly maxConnections?: number;
+}
+
 export class McpHttpListener {
   readonly address = BIND_ADDRESS;
 
@@ -37,23 +49,17 @@ export class McpHttpListener {
     private readonly service: McpHttpService,
   ) {}
 
-  static async bind(options: McpHttpOptions): Promise<McpHttpListener> {
+  static async bind(options: McpListenerOptions): Promise<McpHttpListener> {
     const server = createServer();
     const listener = new McpHttpListener(server, McpHttpService.create(options));
+
+    server.maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
 
     server.on('request', (req, res) => {
       void listener.serve(req, res);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, BIND_ADDRESS, () => {
-        server.removeListener('error', reject);
-        resolve();
-      });
-    });
-
-    listener.boundPort = (server.address() as AddressInfo).port;
+    listener.boundPort = await listenOnLoopback(server);
 
     return listener;
   }
@@ -113,9 +119,4 @@ export class McpHttpListener {
 
 function pathOf(req: IncomingMessage): string {
   return new URL(req.url ?? '/', 'http://localhost').pathname;
-}
-
-function refuse(res: ServerResponse, status: number, message: string): void {
-  res.writeHead(status, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message }, id: null }));
 }
