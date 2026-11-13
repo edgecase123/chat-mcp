@@ -122,25 +122,21 @@ export interface ShimContext {
   adapterStatus: AdapterStatus;
 }
 
-export async function runShim(opts: ShimOptions): Promise<void> {
-  const db = openDb();
-  const notify = new NotifyBus(opts.handle);
-  const session_id = randomUUID();
-
-  dao.upsertAgent(db, {
-    handle: opts.handle,
-    pid: process.pid,
-    session_id,
-    display_name: opts.handle,
-    metadata: { kind: 'agent' },
-    force: opts.force,
-  });
-
-  const adapterStatus = checkWakeAdapter(opts.handle);
-  const ctx: ShimContext = { handle: opts.handle, session_id, db, notify, adapterStatus };
+/**
+ * One `McpServer` carrying every tool, for ONE session.
+ *
+ * 🛑 A FRESH INSTANCE PER CALL, NOT A SHARED ONE. Connecting a single
+ * `McpServer` to a second transport throws `Already connected to a transport`
+ * and takes the process with it, so a server-per-session is a requirement of
+ * the SDK rather than a style choice.
+ *
+ * Pinned by `two contexts get INDEPENDENT servers, which is what per-session
+ * HTTP needs`.
+ */
+export function buildServer(ctx: ShimContext): McpServer {
   const server = new McpServer(
     { name: 'chat-mcp', version: packageVersion() },
-    { instructions: prependAdapterWarning(buildInstructions(opts.handle), adapterStatus) },
+    { instructions: prependAdapterWarning(buildInstructions(ctx.handle), ctx.adapterStatus) },
   );
 
   installWhoami(server, ctx);
@@ -164,6 +160,27 @@ export async function runShim(opts: ShimOptions): Promise<void> {
   installSearch(server, ctx);
   installHealth(server, ctx);
   installInboxResource(server, ctx);
+
+  return server;
+}
+
+export async function runShim(opts: ShimOptions): Promise<void> {
+  const db = openDb();
+  const notify = new NotifyBus(opts.handle);
+  const session_id = randomUUID();
+
+  dao.upsertAgent(db, {
+    handle: opts.handle,
+    pid: process.pid,
+    session_id,
+    display_name: opts.handle,
+    metadata: { kind: 'agent' },
+    force: opts.force,
+  });
+
+  const adapterStatus = checkWakeAdapter(opts.handle);
+  const ctx: ShimContext = { handle: opts.handle, session_id, db, notify, adapterStatus };
+  const server = buildServer(ctx);
 
   const transport = new StdioServerTransport();
 
