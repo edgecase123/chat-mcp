@@ -277,26 +277,38 @@ export function parseClaudeContextUsed(event: Record<string, unknown>): number |
  * the two agreed by luck and not by construction.
  */
 export function claudeContextUsage(entry: unknown): ClaudeUsage | null {
-  const e = entry as { type?: unknown; message?: { usage?: ClaudeUsage } } | null | undefined;
+  const e = entry as
+    | {
+        type?: unknown;
+        parent_tool_use_id?: unknown;
+        isSidechain?: unknown;
+        message?: { usage?: ClaudeUsage };
+      }
+    | null
+    | undefined;
 
   if (!e || e.type !== 'assistant') return null;
 
+  // 🛑 A SUBAGENT'S TURN IS NOT THE PARENT'S WINDOW. A Task child emits its own
+  // `assistant` events on the same stream, carrying ITS small window. The gauge
+  // is last-write-wins, so one subagent turn would drop a 60% parent to 8% —
+  // and because the bands are hysteretic, that drop CLEARS the warned state and
+  // re-fires 70/85/95 on the way back up. The stream names the relationship in
+  // `parent_tool_use_id` (present and null on every main-session event,
+  // measured); a transcript spells it `isSidechain`. Raised by claude2.
+  if (e.parent_tool_use_id != null) return null;
+  if (e.isSidechain === true) return null;
+
   const usage = e.message?.usage;
 
-  return usage && typeof usage === 'object' ? usage : null;
-}
+  if (!usage || typeof usage !== 'object') return null;
 
-/**
- * The model this session runs, from the session-opening event, or null.
- *
- * ⚠️ THE EVENT IS `type: "system"` WITH `subtype: "init"`. Everyone calls it
- * "the init event", and `type: "init"` does not exist — a parser written from
- * the name alone matches nothing and the gauge silently never gets a window.
- */
-export function parseClaudeModel(event: Record<string, unknown>): string | null {
-  if (event.type !== 'system' || event.subtype !== 'init') return null;
-
-  return typeof event.model === 'string' && event.model.length > 0 ? event.model : null;
+  // ⚠️ AN ALL-ZERO USAGE IS NOT A WINDOW OF ZERO. Claude Code emits synthetic
+  // assistant entries — API errors, interrupts — whose usage sums to nothing.
+  // Writing 0% would also clear the hysteresis and re-fire every band on the
+  // next real turn. Not observed in 285 live entries; cheap to refuse. Raised
+  // by claude2.
+  return usedFromUsage(usage) > 0 ? usage : null;
 }
 
 /**
@@ -333,55 +345,35 @@ export function contextWindowForModel(model: string): number | null {
 }
 
 /**
- * The model last seen, and the session it was seen for.
- *
- * 🛑 KEYED BY SESSION, NOT A BARE SLOT. A bare slot's correctness rested on
- * "a replacement child emits its own `init` first", which nothing proves — and
- * if it were ever false, a new child's turn would be divided by the PREVIOUS
- * child's window, with `totalIsFallback` false and nothing logged. That is a
- * confidently wrong percentage, which is worse than the blank gauge #213
- * opened on. Keying on `session_id` makes inheriting another session's window
- * impossible rather than unlikely. Raised by the dry-solid reviewer.
- *
- * ⚠️ MODULE STATE, LIKE `pendingCalls`, AND BOUNDED THE SAME WAY — one entry,
- * overwritten.
- */
-let lastModel: { session: string | null; model: string | null } = { session: null, model: null };
-
-/**
  * The context reading in this event, or null if it carries none.
  *
+ * 🛑 THE MODEL COMES OFF THE TURN, NOT OFF A REMEMBERED `init`. Two earlier
+ * cuts kept the init model in module state — first a bare slot, then one keyed
+ * by `session_id`. Both measured the numerator against a denominator learned
+ * somewhere else, so a mid-session model change (`/model`, a fallback switch)
+ * emits no new `init` and leaves a confidently wrong percentage with
+ * `totalIsFallback` FALSE. `message.model` is on every assistant event —
+ * 285 of 285 on one host transcript, 28 of 28 on a live container stream — so
+ * the denominator now tracks the very turn that produced the numerator, and
+ * there is no state to go stale. Raised by claude2.
+ *
  * 🛑 THE WINDOW IS RESOLVED HERE, BEHIND THE SEAM. The id-to-size map is as
- * vendor-specific as the event shape it came from, so the supervisor is
- * handed a finished snapshot and never learns a model name.
+ * vendor-specific as the event shape it came from, so the supervisor is handed
+ * a finished snapshot and never learns a model name.
  */
 export function claudeContextSnapshot(event: Record<string, unknown>): ContextSnapshot | null {
-  // 🛑 RESET ON THE EVENT, NOT ON A PARSED MODEL. An `init` whose `model` is
-  // missing would otherwise leave the PREVIOUS session's window in place, and
-  // the next child would be measured against a denominator from the last one
-  // — a silently wrong percentage rather than a declared fallback.
-  const session = typeof event.session_id === 'string' ? event.session_id : null;
+  const usage = claudeContextUsage(event);
 
-  if (event.type === 'system' && event.subtype === 'init') {
-    lastModel = { session, model: parseClaudeModel(event) };
+  if (usage === null) return null;
 
-    // An `init` opens the session and reports no turn of its own.
-    return null;
-  }
-
-  const used = parseClaudeContextUsed(event);
-
-  if (used === null) return null;
-
-  // A reading from a session we never saw an `init` for names no model, so it
-  // reports a declared fallback instead of borrowing another session's window.
-  const model = session !== null && session === lastModel.session ? lastModel.model : null;
-  const mapped = model === null ? null : contextWindowForModel(model);
+  const model = (event.message as { model?: unknown } | undefined)?.model;
+  const id = typeof model === 'string' && model.length > 0 ? model : null;
+  const mapped = id === null ? null : contextWindowForModel(id);
 
   return {
-    used,
+    used: usedFromUsage(usage),
     total: mapped ?? FALLBACK_CONTEXT_WINDOW,
-    model,
+    model: id,
     totalIsFallback: mapped === null,
   };
 }

@@ -6,11 +6,11 @@ import {
   usedFromUsage,
   claudeContextUsage,
   parseClaudeContextUsed,
-  parseClaudeModel,
   contextWindowForModel,
   FALLBACK_CONTEXT_WINDOW,
   type ClaudeUsage,
   CONTEXT_WINDOWS,
+  claudeContextSnapshot,
 } from '../../../src/supervise/drivers/claude-events.js';
 
 /**
@@ -74,20 +74,6 @@ test('a result event reports nothing even though it carries usage', () => {
 
 test('an assistant event with no usage reports nothing', () => {
   assert.equal(parseClaudeContextUsed({ type: 'assistant', message: {} }), null);
-});
-
-/**
- * ⚠️ THE EVENT IS `type: "system"`, `subtype: "init"` — NOT `type: "init"`.
- * #213 calls it "the init event", which is the shape a reader would write.
- */
-test('the model id comes off the system init event', () => {
-  const event = { type: 'system', subtype: 'init', model: 'claude-sonnet-5-5' };
-
-  assert.equal(parseClaudeModel(event), 'claude-sonnet-5-5');
-});
-
-test('a bare init type is not the init event and yields no model', () => {
-  assert.equal(parseClaudeModel({ type: 'init', model: 'claude-opus-5' }), null);
 });
 
 test('opus 5 maps to the window /context reported for it', () => {
@@ -173,4 +159,78 @@ test('the map says what its comment says: haiku alone is not a megatoken', () =>
   );
 
   assert.ok(Object.keys(CONTEXT_WINDOWS).length >= 8, 'the map shrank; check nothing was dropped');
+});
+
+/**
+ * 🛑 A SUBAGENT'S TURN IS NOT THE PARENT'S WINDOW. A Task child emits its own
+ * `assistant` events on the same stream with ITS small window. Last-write-wins
+ * would drop a 60% parent to 8%, and because the bands are hysteretic that
+ * drop CLEARS the warned state and re-fires 70/85/95 on the climb back.
+ * `parent_tool_use_id` is present and null on every main-session event — 38 of
+ * 38 measured on a live container stream. Raised by claude2.
+ */
+test('a subagent turn is not a reading for the parent', () => {
+  const parent = { type: 'assistant', parent_tool_use_id: null, message: { usage: { input_tokens: 600_000 } } };
+  const child = { type: 'assistant', parent_tool_use_id: 'toolu_abc', message: { usage: { input_tokens: 8_000 } } };
+
+  assert.equal(parseClaudeContextUsed(parent), 600_000, 'a main-session turn must still report');
+  assert.equal(parseClaudeContextUsed(child), null, "a subagent turn overwrote the parent's gauge");
+});
+
+test('a transcript spells the same thing isSidechain, and it is rejected too', () => {
+  const entry = { type: 'assistant', isSidechain: true, message: { usage: { input_tokens: 8_000 } } };
+
+  assert.equal(parseClaudeContextUsed(entry), null);
+});
+
+/**
+ * ⚠️ AN ALL-ZERO USAGE IS NOT A WINDOW OF ZERO. Claude Code emits synthetic
+ * assistant entries for API errors and interrupts. Writing 0% would also clear
+ * the hysteresis, so every band re-fires on the next real turn. Raised by
+ * claude2; not observed in 285 live entries, and cheap to refuse.
+ */
+test('an all-zero usage is no reading, not a reading of zero', () => {
+  assert.equal(parseClaudeContextUsed({ type: 'assistant', message: { usage: { input_tokens: 0 } } }), null);
+  assert.equal(
+    parseClaudeContextUsed({ type: 'assistant', message: { model: '<synthetic>', usage: {} } }),
+    null,
+  );
+});
+
+/**
+ * 🛑 THE DENOMINATOR COMES OFF THE SAME TURN AS THE NUMERATOR. Two earlier cuts
+ * remembered the `init` model in module state. A mid-session model change —
+ * `/model`, a fallback switch — emits no new `init`, so the window stayed the
+ * old model's and the percentage was confidently wrong with `totalIsFallback`
+ * FALSE. `message.model` is on every assistant event: 285 of 285 on a host
+ * transcript, 28 of 28 on a live container stream. Raised by claude2.
+ */
+test('the window is resolved from the turn own model, with no remembered state', () => {
+  const haiku = {
+    type: 'assistant',
+    parent_tool_use_id: null,
+    message: { model: 'claude-haiku-4-5', usage: { input_tokens: 100_000 } },
+  };
+  const opus = {
+    type: 'assistant',
+    parent_tool_use_id: null,
+    message: { model: 'claude-opus-5', usage: { input_tokens: 100_000 } },
+  };
+
+  assert.equal(claudeContextSnapshot(haiku)?.total, 200_000);
+  // Immediately after, with no init between them — the old design would have
+  // kept haiku's window here.
+  assert.equal(claudeContextSnapshot(opus)?.total, 1_000_000);
+  assert.equal(claudeContextSnapshot(opus)?.model, 'claude-opus-5');
+});
+
+test('a turn naming no model declares the fallback rather than guessing quietly', () => {
+  const snap = claudeContextSnapshot({
+    type: 'assistant',
+    parent_tool_use_id: null,
+    message: { usage: { input_tokens: 7 } },
+  });
+
+  assert.equal(snap?.model, null);
+  assert.equal(snap?.totalIsFallback, true);
 });

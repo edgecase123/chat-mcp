@@ -22,6 +22,10 @@ import { supervisorOptions } from '../support/supervisor-options.js';
  * #213 — a containerized agent showed a blank gauge, because the figure is
  * pushed by a host Claude Code hook and a container has no hooks. The
  * supervisor already receives every `usage` block in the child's stream.
+ *
+ * The DRIVER's own reading is covered in `drivers/claude-context.test.ts`.
+ * What this file pins is the SUPERVISOR half: which row it lands on, what gets
+ * logged, and that a failure cannot escape into the event loop.
  */
 
 /** Only the callbacks a context test needs; the rest are no-ops. */
@@ -39,57 +43,15 @@ function routed(events: Record<string, unknown>[]): ContextSnapshot[] {
   return seen;
 }
 
-const INIT_OPUS = { type: 'system', subtype: 'init', model: 'claude-opus-5', session_id: 's1' };
-const TURN = (used: number, session = 's1') => ({
+const TURN = (used: number, model: string | null = 'claude-opus-5') => ({
   type: 'assistant',
-  session_id: session,
-  message: { usage: { input_tokens: used } },
+  parent_tool_use_id: null,
+  message: { ...(model ? { model } : {}), usage: { input_tokens: used } },
 });
 
-test('a turn after init reports the live size against that model window', () => {
-  const seen = routed([INIT_OPUS, TURN(118_783)]);
 
-  assert.equal(seen.length, 1, 'the init event itself must not report a reading');
-  assert.deepEqual(seen[0], {
-    used: 118_783,
-    total: 1_000_000,
-    model: 'claude-opus-5',
-    totalIsFallback: false,
-  });
-});
 
-/**
- * 🛑 THE FALLBACK MUST BE DECLARED, NOT SILENT. `claude-sonnet-5-5` is the id
- * the running container reports and it is not in the published window table.
- * A wrong denominator that says so can be found; one that does not cannot.
- */
-test('an unmapped model falls back to a megatoken and SAYS it fell back', () => {
-  const seen = routed([{ ...INIT_OPUS, model: 'claude-sonnet-5-5' }, TURN(50_000)]);
 
-  assert.equal(seen[0]?.total, 1_000_000);
-  assert.equal(seen[0]?.totalIsFallback, true);
-  assert.equal(seen[0]?.model, 'claude-sonnet-5-5');
-});
-
-test('a turn before any init still reports, with no model to name', () => {
-  // A session the module never saw an init for.
-  const seen = routed([TURN(7, 'never-initialised')]);
-
-  assert.equal(seen[0]?.used, 7);
-  assert.equal(seen[0]?.model, null);
-  assert.equal(seen[0]?.totalIsFallback, true);
-});
-
-/**
- * ⚠️ A `result` EVENT CARRIES `usage` TOO. Reporting it as well is redundant
- * rather than double-counted, but only `assistant` matches the transcript
- * entry the host hook reads.
- */
-test('a result event reports nothing, so host and container read the same event', () => {
-  const seen = routed([INIT_OPUS, { type: 'result', message: { usage: { input_tokens: 999 } } }]);
-
-  assert.deepEqual(seen, []);
-});
 
 function harness() {
   let context: ((snapshot: ContextSnapshot) => void) | undefined;
@@ -219,44 +181,7 @@ test('a reading before the child has registered says so rather than vanishing', 
   }
 });
 
-/**
- * 🛑 AN `init` WITH NO MODEL MUST CLEAR THE LAST SESSION'S WINDOW. Keeping it
- * would measure a new child against the previous child's denominator and
- * report a confident, wrong percentage instead of a declared fallback.
- */
-test('a replacement session whose init names no model does not inherit the old window', () => {
-  routed([{ type: 'system', subtype: 'init', model: 'claude-haiku-4-5', session_id: 'a' }]);
 
-  const seen = routed([{ type: 'system', subtype: 'init', session_id: 'b' }, TURN(1_000, 'b')]);
-
-  assert.equal(seen[0]?.model, null, 'the haiku window survived into the next session');
-  assert.equal(seen[0]?.totalIsFallback, true);
-  assert.equal(seen[0]?.total, 1_000_000);
-});
-
-/**
- * 🛑 A NEW SESSION MUST NOT INHERIT THE OLD SESSION'S WINDOW, EVEN IF ITS OWN
- * `init` NEVER ARRIVES. The first design remembered one bare model and relied
- * on "a replacement child emits its init first", which nothing proves. If that
- * were ever false, the new child's turn would be divided by the previous
- * child's window with `totalIsFallback` FALSE and nothing logged — a
- * confidently wrong percentage. Raised by the dry-solid reviewer.
- */
-test('a turn from an unseen session cannot borrow the last session window', () => {
-  // Haiku is the one mapped non-megatoken, so borrowing it would be visible.
-  const mine = routed([
-    { type: 'system', subtype: 'init', model: 'claude-haiku-4-5', session_id: 'mine' },
-    TURN(100_000, 'mine'),
-  ]);
-
-  assert.equal(mine[0]?.total, 200_000, 'the premise failed: haiku is not mapped at 200k');
-
-  const theirs = routed([TURN(100_000, 'someone-else')]);
-
-  assert.equal(theirs[0]?.model, null, "it borrowed the other session's model");
-  assert.equal(theirs[0]?.total, 1_000_000, "it borrowed the other session's window");
-  assert.equal(theirs[0]?.totalIsFallback, true);
-});
 
 /**
  * 🛑 THE GAUGE MUST NOT TAKE THE TURN DOWN WITH IT. It writes a row and
@@ -298,4 +223,23 @@ test('a gauge write that throws is logged, not swallowed, and does not escape', 
   } finally {
     await sup.stop().catch(() => undefined);
   }
+});
+
+/**
+ * The driver's own reading is covered in `drivers/claude-context.test.ts`.
+ * What this file still pins is the SUPERVISOR half: which row, what gets
+ * logged, and that a failure cannot escape into the event loop.
+ */
+test('the router hands the supervisor a reading built from the turn own model', () => {
+  const seen = routed([TURN(118_783)]);
+
+  assert.deepEqual(seen, [
+    { used: 118_783, total: 1_000_000, model: 'claude-opus-5', totalIsFallback: false },
+  ]);
+});
+
+test('a subagent turn never reaches the supervisor at all', () => {
+  const seen = routed([{ ...TURN(8_000), parent_tool_use_id: 'toolu_abc' }]);
+
+  assert.deepEqual(seen, []);
 });
