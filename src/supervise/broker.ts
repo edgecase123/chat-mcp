@@ -1,16 +1,14 @@
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
-import { manifestPathFor } from '../util/paths.js';
+import { isRecord, type ListedCommand } from './commands.js';
 import {
-  isRecord,
-  listCommands,
-  readManifest,
-  resolveArgv,
-  type CommandManifest,
-  type ListedCommand,
-} from './commands.js';
-import { checkedScriptPath } from './containment.js';
-import { runScript, type ScriptResult, type ScriptRunner } from './run-script.js';
+  DEFAULT_MAX_BUFFER,
+  DEFAULT_TIMEOUT_MS,
+  Refusal,
+  listCommandsFor,
+  runCommandFor,
+} from './run-command-service.js';
+import { type ScriptResult, type ScriptRunner } from './run-script.js';
 
 /**
  * 🛑 LOOPBACK IS NOT THE BOUNDARY. A container reaches a host `127.0.0.1` bind
@@ -19,8 +17,6 @@ import { runScript, type ScriptResult, type ScriptRunner } from './run-script.js
  */
 const BIND_ADDRESS = '127.0.0.1';
 
-const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
-const DEFAULT_MAX_BUFFER = 8 * 1024 * 1024;
 const DEFAULT_MAX_IN_FLIGHT = 4;
 const DEFAULT_MAX_CONNECTIONS = 8;
 const DEFAULT_IDLE_TIMEOUT_MS = 60 * 1000;
@@ -57,25 +53,6 @@ export interface BrokerOptions {
 }
 
 /**
- * A refusal with two faces: what the caller is told, and what the operator can
- * read in the host's log.
- *
- * 🛑 THE CALLER NEVER SEES A HOST PATH. A collaborator's message names absolute
- * directories and says whether a path exists and what it resolved to — and the
- * caller writes the manifest, so forwarding that turns the broker into an
- * arbitrary-path existence and realpath oracle for the whole host.
- */
-class Refusal extends Error {
-  readonly detail: string;
-
-  constructor(publicMessage: string, cause?: unknown) {
-    super(publicMessage);
-    this.name = 'Refusal';
-    this.detail = cause instanceof Error ? cause.message : String(cause ?? publicMessage);
-  }
-}
-
-/**
  * The host-side listener a containerized agent asks to run a project command.
  *
  * 🛑 A SEPARATE CLASS FROM `WakeListener`, DELIBERATELY. Merging them would put
@@ -86,8 +63,7 @@ class Refusal extends Error {
  * A containerized agent holds it read-write, so it can rewrite a manifest
  * script's CONTENT and the broker runs that content on the host. Measured, with
  * no symlink and no race. `checkedScriptPath` stops the manifest NAMING a path
- * outside the tree; it cannot make an in-tree script safe. Whether a project
- * script may be trusted at all is the open decision that blocks slice 3.
+ * outside the tree; it cannot make an in-tree script safe.
  */
 export class CommandBroker {
   readonly address = BIND_ADDRESS;
@@ -276,7 +252,7 @@ export class CommandBroker {
     envelope: Record<string, unknown>,
   ): Promise<{ commands: ListedCommand[] } | ScriptResult> {
     if (envelope.op === 'list-commands') {
-      return { commands: listCommands(this.manifestFor(handle).manifest) };
+      return listCommandsFor(handle);
     }
 
     if (envelope.op === 'run-command') {
@@ -287,25 +263,9 @@ export class CommandBroker {
   }
 
   /**
-   * 🛑 THE MANIFEST IS THE ONLY SOURCE OF THE DIRECTORY. `projects.json` sits
-   * in the state directory every container mounts READ-WRITE, so an agent that
-   * rewrote it would pick the tree its own commands run in. See the test that
-   * rewrites it and asserts the directory does not move.
-   *
-   * One manifest per handle gives one directory, so no candidate can conflict.
+   * Check the WIRE SHAPE, then hand off. Everything past this point is policy
+   * and belongs to no transport.
    */
-  private manifestFor(handle: string): { dir: string; manifest: CommandManifest } {
-    let manifest: CommandManifest;
-
-    try {
-      manifest = readManifest(manifestPathFor(handle));
-    } catch (err) {
-      throw new Refusal('this agent has no usable command manifest', err);
-    }
-
-    return { dir: manifest.projectDir, manifest };
-  }
-
   private async runCommand(
     handle: string,
     envelope: Record<string, unknown>,
@@ -320,39 +280,11 @@ export class CommandBroker {
       throw new Refusal('run-command "params" must be an object');
     }
 
-    const { dir, manifest } = this.manifestFor(handle);
-
-    // The caller named this command and supplied these values, so this message
-    // discloses only what it already knows.
-    let resolved;
-
-    try {
-      resolved = resolveArgv(manifest, envelope.name, params as Record<string, string>);
-    } catch (err) {
-      throw new Refusal(err instanceof Error ? err.message : 'the command was refused', err);
-    }
-
-    // 🛑 THE ONLY WAY TO A PATH. `resolved.script` is an object, so reaching the
-    // runner without this call is a compile error rather than a missing symlink
-    // check.
-    let script: string;
-
-    try {
-      script = checkedScriptPath(dir, resolved.script);
-    } catch (err) {
-      throw new Refusal('the command script is not inside the project directory', err);
-    }
-
-    try {
-      return await runScript(
-        script,
-        resolved.argv,
-        { cwd: dir, timeout: this.timeoutMs, maxBuffer: this.maxBuffer },
-        this.options.run,
-      );
-    } catch (err) {
-      throw new Refusal(err instanceof Error ? err.message : 'the command failed to run', err);
-    }
+    return runCommandFor(handle, envelope.name, params as Record<string, string>, {
+      timeoutMs: this.timeoutMs,
+      maxBuffer: this.maxBuffer,
+      run: this.options.run,
+    });
   }
 
   private reply(socket: Socket, payload: Record<string, unknown>): void {
