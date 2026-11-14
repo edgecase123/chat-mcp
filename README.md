@@ -259,7 +259,14 @@ container still waits out its own shutdown grace.
 | Mount an extra directory | `mount add <handle> <key> <dir>` |
 | List what is registered | `project list` · `mount list` |
 
-`project`, `mount`, `auth` and `agents` are `node dist/index.js <command>`.
+`project`, `mount` and `auth` are `node dist/index.js <command>`. So is
+`agents`, which controls a supervisor directly and is what `./scripts/agent`
+wraps:
+
+```bash
+node dist/index.js agents restart <handle>
+node dist/index.js agents stop <handle>
+```
 
 ### How a containerized agent reaches the bus
 
