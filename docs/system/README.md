@@ -26,6 +26,11 @@ listed here will not be found. Add the row in the same commit as the page.
 |---|---|
 | [state-directory.md](03-infrastructure/state-directory.md) | Every entry under `~/.chat-mcp`, who owns it, what is safe to delete |
 
+### [05 — Supervision](05-supervision/)
+| File | What it covers |
+|---|---|
+| [agent-liveness.md](05-supervision/agent-liveness.md) | How `online` is computed, why a containerized child's row holds the supervisor's pid, and what the exit handler clears |
+
 ### [07 — Operations](07-operations/)
 | File | What it covers |
 |---|---|
@@ -35,12 +40,12 @@ listed here will not be found. Add the row in the same commit as the page.
 
 ## Not written yet
 
-Each folder exists and is empty. Ranked by what would help most on arrival.
+Ranked by what would help most on arrival.
 
 | Section | What belongs there |
 |---|---|
 | `01-overview` | What the bus is, how the pieces fit, a glossary. Today that lives in `README.md` and `DESIGN.md` at the repo root |
-| `05-supervision` | Supervisors, drivers, the container boundary, the host/container split. Today partly in `AGENTS.md` |
+| `05-supervision` | Still needed: drivers, the container boundary, the host/container split. Today partly in `AGENTS.md`. Liveness is now covered |
 | `02-setup` | The three clones, `CHAT_MCP_HOME` isolation, wiring an MCP client. Today in `AGENTS.md` and `README.md` |
 | `04-messaging` | DMs, rooms, read watermarks, claims, the notify wake path |
 | `06-interfaces` | The MCP shim's tools, the web UI, the ink CLI, the one-shot subcommands |

@@ -259,25 +259,23 @@ exists for. The bearer token is the whole boundary there.
 
 ## 🛑 A dockerized sibling is presumed DEAD until a round trip comes back
 
-**Liveness belongs to the CHILD, and every cheap signal reports the
-SUPERVISOR.** The container, the socket, the pidfile and `list_agents`' own
-`online` flag all outlive a child that has exited, so not one of them answers
-"is anyone there".
+**Liveness belongs to the CHILD, and the container, the socket and the pidfile
+all report the SUPERVISOR.** All three outlive a child that has exited, so not
+one of them answers "is anyone there". `./scripts/agent status` prints exactly
+those three.
 
-- 🛑 **`list_agents`' `online` DOES NOT READ THE CHILD.** It is
-  `isProcessAlive(row.pid)`, and for a containerized child that row is written
-  by `shimContextFor` running inside the host bus, so the pid is the
-  SUPERVISOR's. An exited dockerized child reads `online: true` until its
-  supervisor dies. `src/supervise/host-bus.ts` says so in its own words, at the
-  `force: true` comment.
-- **Read `last_seen_at` instead.** 17 of the 20 shim tools move it for the
-  calling handle, and a containerized child's calls arrive through the host
-  bus, so the field tracks the child and goes stale when it dies. A handle
-  absent from `list_agents` altogether still has nobody behind it.
-- ⚠️ **`claims`, `health` and `search` move nothing**, so a child working
-  through those alone reads stale while alive. **That error direction is the
-  safe one** — it over-reports dead, which costs a ping rather than a phantom
-  hand-off. Do not "fix" it by trusting `online` again.
+- ✅ **`list_agents`' `online` IS the check, since the supervisor started
+  clearing a dead child's pid.** `child.onExit` calls `dao.clearAgentPid`, and
+  `isProcessAlive(null)` is `false`. **Call it before any hand-off.**
+- 🛑 **BEFORE that fix it read the SUPERVISOR, and the reason is worth knowing.**
+  A containerized child's row is written by `shimContextFor` running inside the
+  host bus, so `row.pid` was the supervisor's and an exited child read
+  `online: true`. Full mechanism:
+  `docs/system/05-supervision/agent-liveness.md`.
+- **`last_seen_at` is the second opinion**, and the one to read when `online`
+  is true but the agent is unresponsive. 17 of the 20 shim tools move it;
+  `claims`, `health` and `search` move nothing, so it over-reports dead — the
+  safe direction.
 - 🛑 **`room_send`'s `notified` is a MEMBERSHIP count, not a delivery count.**
   `notified: 4` in a room with one live reader is the normal case, not a fault.
   Reading it as four readers is how a review request goes to a dead agent and
@@ -285,11 +283,12 @@ SUPERVISOR.** The container, the socket, the pidfile and `list_agents`' own
 - **Silence is not a review, and it is not "no findings".** A dockerized
   sibling that has not answered has not started. Never record its silence as
   either, and never merge on it.
-- **Ask for an acknowledgement, not only for the work.** The round trip IS the
-  liveness check. There is no cheaper one today.
+- **Ask for an acknowledgement, not only for the work.** A round trip is the
+  one signal that proves the agent is reading, rather than merely running.
 
-⚠️ **This is the process half of #229, which is the product half.** Until #229
-lands, this rule is the only thing between a phantom review and a merge.
+⚠️ **This is the process half of #229. `notified` is still the product half and
+is NOT fixed** — only the dead-child half is. So `online` now tells you whether
+anybody is there, and `notified` still will not tell you whether they read it.
 
 ## Review order: self, then sibling
 

@@ -937,6 +937,31 @@ export function deleteAgent(db: Db, handle: string): boolean {
 }
 
 /**
+ * Mark a handle's process gone, keeping the row.
+ *
+ * 🛑 `online` IS `isProcessAlive(row.pid)`, AND A CONTAINERIZED CHILD'S ROW
+ * HOLDS THE SUPERVISOR'S PID — the host bus registers on the child's behalf.
+ * So an exited dockerized child read `online: true` until its supervisor died.
+ * Nulling the pid is the whole repair, because `isProcessAlive(null)` is
+ * already `false` and no consumer of `online` has to change.
+ *
+ * Deliberately NOT `deleteAgent`: the handle must stay visible to
+ * `listAgents(db, true)` as offline, rather than vanishing. And deliberately
+ * not a `last_seen_at` touch — the child is gone, so its last activity is the
+ * honest value.
+ *
+ * A restart needs no `force`. `refuseLiveRival` returns early on a null
+ * incumbent pid, and the claim guard is `WHERE agents.pid IS @expected_pid`
+ * against the row's own value.
+ *
+ * Returns false if the handle isn't registered.
+ */
+export function clearAgentPid(db: Db, handle: string): boolean {
+  const info = db.prepare('UPDATE agents SET pid = NULL WHERE handle = ?').run(handle);
+  return Number(info.changes) > 0;
+}
+
+/**
  * Delete all messages between two peers (both directions). Returns the
  * number of rows deleted.
  */

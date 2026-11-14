@@ -382,6 +382,14 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   let currentGrant = initialGrant;
   let currentModel = opts.model;
 
+  /**
+   * The handle the CHILD holds on the bus, which is never `opts.handle`.
+   *
+   * 🛑 READ IT, DO NOT CACHE IT. `currentGrant` is reassigned on a replace, so
+   * a value captured at wiring time names the previous grant's handle.
+   */
+  const childBusHandle = () => currentGrant?.handle ?? childHandleFor(opts.handle);
+
   // 🛑 SAID OUT LOUD, both ways. A doorbell that cannot answer and a child
   // holding a bus identity are both things an operator must be able to see in
   // the log rather than deduce from a flag they did not pass.
@@ -600,7 +608,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
         // reviewer said so, and a first cut guarded only the write — the test
         // caught the read escaping.
         try {
-          const childHandle = currentGrant?.handle ?? childHandleFor(opts.handle);
+          const childHandle = childBusHandle();
 
           // 🛑 AN UPDATE AGAINST A MISSING ROW IS A SILENT NO-OP, which is the
           // exact failure class this ticket exists to end. The row is written
@@ -639,7 +647,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
     child.onDenial(
       ifCurrent('onDenial', (denial) => {
-      const grantHandle = currentGrant?.handle ?? childHandleFor(opts.handle);
+      const grantHandle = childBusHandle();
 
       try {
         const approvalId = dao.insertApproval(approvalsDb, {
@@ -721,6 +729,22 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
         log(`child exited code=${code} signal=${signal}; ${unsent.length} prompt(s) never sent`);
 
         for (const p of unsent) log(`  UNSENT ids=[${p.messageIds.join(',')}]`);
+
+        // 🛑 THE BUS LEARNS THE CHILD IS GONE HERE, OR IT NEVER DOES. A
+        // containerized child's row carries the SUPERVISOR's pid, because the
+        // host bus registers on its behalf — so `online` stayed true and a
+        // sibling handed a review to nothing.
+        //
+        // ⚠️ Nulling the pid, never deleting the row: the handle must remain
+        // visible as offline. Guarded because a child can die before its shim
+        // ever registered, and a throw here would lose the report above.
+        try {
+          if (!dao.clearAgentPid(approvalsDb, childBusHandle())) {
+            log(`child ${childBusHandle()} had no bus row to take offline`);
+          }
+        } catch (err) {
+          log(`FAILED to take ${childBusHandle()} offline on the bus: ${String(err)}`);
+        }
       }),
     );
 
@@ -756,6 +780,30 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
     log(`replacing child (${reason}); ${unsent.length} prompt(s) carried over`);
     child.kill();
+
+    // 🛑 HERE, NOT IN `onExit`. `kill()` returns immediately — a containerized
+    // child spawns `docker stop` detached — so the exit lands after
+    // `wireChild()` has bumped the generation and `ifCurrent` drops it as
+    // stale. The handler below would never run, and `online` stayed true for a
+    // child that no longer existed, forever if the respawn then failed.
+    //
+    // ⚠️ Moving the `onExit` clear outside `ifCurrent` is NOT the alternative:
+    // that clears a LIVE child's pid on every stale signal. The replacement
+    // re-registers its own pid moments later, so a brief offline window here
+    // is the honest reading.
+    //
+    // ⚠️ BEFORE `spawnFn`, deliberately. A spawn that throws then leaves
+    // `pid = NULL` and the bus honest rather than advertising a child that
+    // never started.
+    try {
+      if (!dao.clearAgentPid(approvalsDb, childBusHandle())) {
+        // More surprising here than on an exit: a replace means the child has
+        // been running, so its shim should long since have registered.
+        log(`replacing ${childBusHandle()}, which has no bus row to take offline`);
+      }
+    } catch (err) {
+      log(`FAILED to take ${childBusHandle()} offline across a replace: ${String(err)}`);
+    }
 
     if (change.model) currentModel = change.model;
 
