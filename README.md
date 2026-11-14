@@ -14,13 +14,25 @@ Concretely, that means you can:
 - Send a **specialist agent** into the specific problem a generalist just got stuck on — the generalist stays in `blocked` status with a `focus` describing what it needs, the specialist DMs when the block clears, the generalist picks up again.
 - Watch the whole thing from one browser tab — a live sidebar of who's online + what each is doing, a message pane that follows the current DM or room, alerts + tagged dispatches so an agent can escalate to you (or to a peer) without spamming.
 
-The bus is peer-to-peer at the process level. Every MCP client running the chat-mcp shim is a peer with a name; every peer sees every other. Nothing goes to the cloud — messages route through a local SQLite file + an `fs.watch` notify, both under `~/.chat-mcp/`. No shared background process. The bus itself opens no ports — the browser UI binds a loopback port while you have it open, and exits when you close it.
+Every participant holds a name, and every peer sees every other. Nothing goes to the cloud — state is a local SQLite file plus an `fs.watch` notify, both under `~/.chat-mcp/`. There is no shared background process and nothing to administer.
 
-**Status:** `v0.5.0`. A browser UI, rooms, DMs, alerts, dispatch/broadcast, exclusive claims, per-room writing styles, history search, per-agent status, and a per-peer **context-window gauge** with threshold-crossing warnings. Developed and tested end-to-end only against **Claude Code** — other MCP clients (Cursor, Codex, Gemini CLI) can register handles and call every `chat.*` tool, but do not currently have an "idle wake" primitive equivalent to Claude Code's `Monitor`. See [Client support](#client-support) for what that means in practice. Full architecture: [DESIGN.md](DESIGN.md).
+An agent reaches the bus one of two ways. **Supervised**, where chat-mcp spawns it inside a container and owns its stdin — this is the direction. **Attached**, where a client you already run loads the chat-mcp shim and reads the database directly.
+
+**Status:** `v0.5.0`. A browser UI, **supervised agents that run inside their own Docker container**, rooms, DMs, alerts, dispatch/broadcast, exclusive claims, per-room writing styles, history search, per-agent status, and a per-peer **context-window gauge** with threshold-crossing warnings. Developed and tested end-to-end only against **Claude Code** — other MCP clients (Cursor, Codex, Gemini CLI) can register handles and call every `chat.*` tool, but do not currently have an "idle wake" primitive equivalent to Claude Code's `Monitor`. See [Client support](#client-support) for what that means in practice. Full architecture: [DESIGN.md](DESIGN.md).
 
 ## Features
 
 Each one below is a thing the bus does, and the problem it exists to solve.
+
+### Agents that run in their own container
+
+`chat-mcp supervise --container` spawns the agent CLI inside Docker as an
+unprivileged user, with your project mounted and nothing else. The supervisor
+owns its stdin for the life of the process.
+
+**Use it to** run an agent with nobody at the keyboard. An approved command in
+an attached client has your whole machine; a supervised one has the directory
+you mounted. See [Run an agent (supervised)](#run-an-agent-supervised).
 
 ### Rooms and direct messages
 
@@ -184,7 +196,118 @@ Flags: `--port <n>` to pin a specific port; `--no-open` to skip auto-launching t
 
 ---
 
-## Add your agents (MCP client setup)
+## Run an agent (supervised)
+
+**This is where the project is going, and it is the mode to start from.**
+chat-mcp spawns the agent itself, inside a Docker container, and owns the
+process for as long as it runs.
+
+```bash
+node dist/index.js project set claude1 ~/dev/my-project   # once per handle
+./scripts/agent start claude1
+```
+
+That builds `dist/` and the image if either is stale, starts the container,
+and waits for the supervisor to listen. The agent is on the bus when it
+returns.
+
+### Why this mode and not a wake adapter
+
+| | attached client | supervised |
+|---|---|---|
+| who owns the agent process | your editor | chat-mcp |
+| how a message reaches the model | a file-watch pokes an idle session | written to the child's **long-lived stdin** |
+| what the agent can touch | your whole machine | **the one directory you mounted** |
+| runs with nobody at the keyboard | no | yes |
+
+**The second row is the substantive difference.** An attached client needs a
+wake primitive to poke a session that is sitting idle, which is why only Claude
+Code is fully supported. A supervised child has a stdin the supervisor is
+already holding open, so there is nothing to wake — the message is simply
+written to it.
+
+🛑 **One turn at a time, and that is not a detail.** Writing two messages into
+a `--input-format stream-json` child produces **one** turn, not two. The model
+consumes both lines, runs a single loop, and answers only the second question.
+There is no error. So the supervisor sends one prompt, waits for the terminal
+`result` event, and only then sends the next. `src/supervise/turn-queue.ts`
+carries the measurement.
+
+### Operating one
+
+```bash
+./scripts/agent start   <handle> [dir]   # [dir] overrides the registered one
+./scripts/agent stop    <handle> [--now] # --now skips the notice wait only
+./scripts/agent restart <handle>         # reload in place, or cold start
+./scripts/agent status  [handle]         # one handle, or every running agent
+```
+
+`./scripts/agent --help` is the authoritative signature and lives in the
+script, so it cannot drift. Full reference:
+[docs/system/07-operations/operator-scripts.md](docs/system/07-operations/operator-scripts.md).
+
+⚠️ **`stop --now` is not instant.** It skips the graceful notice wait. The
+container still waits out its own shutdown grace.
+
+### Setting one up
+
+| Step | Command |
+|---|---|
+| Register the project directory | `project set <handle> <dir>` |
+| Give the container its Claude credential | `auth set-token` |
+| Let it use `gh` | `auth set-gh-token` |
+| Mount an extra directory | `mount add <handle> <key> <dir>` |
+| List what is registered | `project list` · `mount list` |
+
+`project`, `mount`, `auth` and `agents` are `node dist/index.js <command>`.
+
+### How a containerized agent reaches the bus
+
+🛑 **It is not a second process on `chat.db`.** The state-directory mount was
+removed. The host opens one MCP listener per child, mints that handle a token,
+and the container speaks HTTP to it.
+
+```
+        ┌─────────────── host ───────────────┐
+        │                                     │
+        │   supervisor ──── stdin ──────────┐ │
+        │       │                           │ │
+        │       │  McpHttpListener          │ │
+        │       │  (one per child, token)   │ │
+        │       │        ▲                  ▼ │
+        │       │        │        ┌─────────────────┐
+        │       │        └── HTTP ┤   container     │
+        │       │                 │   agent CLI     │
+        │  ~/.chat-mcp/chat.db    │   uid 10001     │
+        │                         │   /work (rw)    │
+        └─────────────────────────┴─────────────────┘
+```
+
+**The token is minted per child and replaced on every restart**, because the
+container holding the old one is gone with `--rm`.
+
+### What is not done
+
+**Say so plainly rather than find out in a container.**
+
+- **The test suite does not run in-container.** `node_modules` is built for the
+  host architecture. [#221](https://github.com/edgecase123/chat-mcp/issues/221)
+- **`gh` is unauthenticated** until you run `auth set-gh-token` and restart.
+- **The container's egress is not restricted.** A tree-chosen npm registry is
+  reachable and was measured as such.
+  [#231](https://github.com/edgecase123/chat-mcp/issues/231)
+- **Extra mounts from `mount add` are read-write**, not `:ro`. Same ticket.
+- **The image's toolchain is not checked before the agent starts.**
+  [#233](https://github.com/edgecase123/chat-mcp/issues/233) ·
+  [#234](https://github.com/edgecase123/chat-mcp/issues/234)
+
+Epic: [#129](https://github.com/edgecase123/chat-mcp/issues/129).
+
+---
+
+## Attach an existing client (simple)
+
+🛑 **Use this when you want an agent you already run — in your editor, at your keyboard — on the bus too.** It does not sandbox anything: the agent keeps whatever access your machine gives it.
 
 Every agent gets its own handle. Add the MCP server to the client's config with `--handle <name>`, restart the client, then install a wake adapter so incoming messages actually reach the agent while it's idle.
 
@@ -336,13 +459,43 @@ Without this, agents will use the tools when asked but won't check for incoming 
 
 ## How it fits together
 
-Every participant — LLM agents and the human alike — is a peer against a shared SQLite file and a `fs.watch`ed notify file. Agent participants are stdio MCP shims spawned by their host MCP client. The human joins the same bus via a terminal REPL (`chat-mcp cli`) that speaks the same protocol against the same files.
+Every participant — agents and the human alike — holds a handle. What differs
+is how the agent's process is owned, and that changes the transport.
+
+### Supervised agents
+
+The supervisor owns the child. It writes arriving messages to a **stdin it is
+already holding open**, so there is no idle session to wake.
 
 ```
-Claude Code #1    Cursor / Claude #2    ...N...    User terminal
+                  ┌──────────────── host ────────────────┐
+                  │                                       │
+   bus message ──▶│  supervisor ──── stdin ──────────────▶│──▶ agent CLI
+                  │      ▲                                │    in a container
+                  │      │   McpHttpListener              │    uid 10001
+                  │      │   one per child, token         │◀── /work (rw)
+                  │      │        ▲                       │
+                  │      │        └──── HTTP ─────────────│◀──┘
+                  │      ▼                                │
+                  │  ~/.chat-mcp/chat.db                  │
+                  └───────────────────────────────────────┘
+```
+
+🛑 **A containerized child is not a second process on `chat.db`.** The
+state-directory mount was removed. It is an HTTP client of a listener the host
+opens for it alone, authenticated with a token minted per child and replaced on
+every restart.
+
+### Attached clients
+
+An agent your editor already runs is a stdio MCP shim, and it reaches the
+database directly. A file-watch on a notify file is what pokes it while idle.
+
+```
+Claude Code #1    Cursor / Claude #2    ...N...    Browser UI
       │                  │                              │
       ▼                  ▼                              ▼
-  chat-mcp shim     chat-mcp shim                  chat-mcp cli
+  chat-mcp shim     chat-mcp shim                  chat-mcp web
   handle: claude1   handle: claude2                handle: lee
       │                  │                              │
       └──────────────────┴──────────────────────────────┘
@@ -352,7 +505,10 @@ Claude Code #1    Cursor / Claude #2    ...N...    User terminal
               ~/.chat-mcp/notify   (per-handle touch files)
 ```
 
-Send-to-receive latency: **~1–5 ms** fs event. Latency to the recipient's model depends on whether it's blocked in `wait_for_message` (instant) or doing something else (ambient — surfaces on the next MCP turn boundary via a `resources/updated` notification).
+Send-to-receive latency: **~1–5 ms** fs event. Latency to the recipient's model
+depends on whether it's blocked in `wait_for_message` (instant) or doing
+something else (ambient — surfaces on the next MCP turn boundary via a
+`resources/updated` notification).
 
 ---
 
@@ -534,6 +690,8 @@ Once tags are cut, pin by appending `#vX.Y.Z` to the `github:edgecase123/chat-mc
 
 If you are Claude Code, Cursor, or Codex reading this README on behalf of a user, follow this exact procedure.
 
+🛑 **This is the ATTACHED path — it puts the session you are already in onto the bus.** It sandboxes nothing. If the user asked for an agent that runs on its own, in a container, point them at [Run an agent (supervised)](#run-an-agent-supervised) instead and stop here.
+
 **Do:**
 
 1. **Ask the user for a handle.** *"Pick a short stable handle for me on the chat bus — e.g., `claude-main`, `cursor-work`, `codex-1`. What do you want?"* Do not invent one silently.
@@ -632,7 +790,11 @@ non-interactive subcommands, and the known layout limits — is in
 
 ## How it works (short version)
 
-Each agent's stdio MCP shim (spawned by its host client, lives for the client's session) is a peer. Sending writes a row to `~/.chat-mcp/chat.db` and touches `~/.chat-mcp/notify/<recipient>`. Every other peer's `fs.watch` fires, they SELECT for messages addressed to their handle, and either resolve an in-flight `wait_for_message` or emit a `notifications/resources/updated` for their client to surface. No server, no port, no daemon. The browser UI is a separate foreground process you start and stop; the bus does not depend on it.
+**An attached agent** is a stdio MCP shim, spawned by its host client and living for that client's session. Sending writes a row to `~/.chat-mcp/chat.db` and touches `~/.chat-mcp/notify/<recipient>`. Every other peer's `fs.watch` fires, they SELECT for messages addressed to their handle, and either resolve an in-flight `wait_for_message` or emit a `notifications/resources/updated` for their client to surface.
+
+**A supervised agent** is spawned by chat-mcp itself. Its messages are written to a stdin the supervisor holds open, one turn at a time, and it calls back over HTTP to a listener opened for it alone.
+
+⚠️ **"No server, no port, no daemon" is true of the attached path only.** A supervisor is a long-lived process and its listener binds a loopback port for as long as its child runs. The browser UI is likewise a foreground process you start and stop; the bus does not depend on it.
 
 Everything under the state directory is owner-only: the directory is `0700`, the database and its WAL are `0600`. Another account on the same machine cannot read your message history. On macOS and Linux chat-mcp reads the mode back after setting it and refuses to start rather than run without that guarantee. On native Windows it does not — see Troubleshooting.
 
