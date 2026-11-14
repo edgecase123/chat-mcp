@@ -162,6 +162,17 @@ export function containerCredentialEnvVars(vendor: VendorSpawn): readonly string
  * not describe it as anything more until the install runs in its own
  * credential-free container.
  *
+ * 🛑 `--ignore-scripts`, BECAUSE `npm ci` RUNS THIS PROJECT'S OWN `prepare`.
+ * That script is `npm run build`, so the install ran `tsc` against the host
+ * checkout `/work` binds read-write — 14 files into `dist/`, measured. Worse,
+ * a failing `tsc` exits 1 and the `&&` below means no agent starts at all, on
+ * any branch carrying a type error.
+ *
+ * ⚠️ IT DOES NOT COST esbuild ITS BINARY. `@esbuild/<platform>` ships the
+ * binary as an optional dependency, so nothing here needs a build step. A
+ * dependency that genuinely needs one — a node-gyp addon — would, and this
+ * lockfile has none.
+ *
  * ⚠️ `containerWorkDir`, NOT the host's project dir. `dockerRunPlan` holds a
  * host `projectDir` that reads as the natural argument and would emit a host
  * path into a script running inside the container. The parameter exists so the
@@ -181,7 +192,7 @@ export function nodeModulesInstallStep(
     `if [ ! -f '${lock}' ]; then :; else ` +
     `want=$(shasum -a 256 '${lock}' | cut -d' ' -f1); ` +
     `if [ -n "$want" ] && [ "$want" = "$(cat '${stamp}' 2>/dev/null)" ]; then :; else ` +
-    `env ${scrubbed} npm ci && printf '%s' "$want" > '${stamp}'; fi; fi`
+    `env ${scrubbed} npm ci --ignore-scripts && printf '%s' "$want" > '${stamp}'; fi; fi`
   );
 }
 
@@ -230,9 +241,14 @@ export function containerNameFor(supervisorHandle: string): string {
  * ⚠️ `realpathSync`, so a symlinked checkout is the same tree and not a second
  * volume with a second install.
  *
- * ⚠️ Named rather than anonymous so it survives the `--rm`. Drop a stale one
- * with `docker volume rm $(chat-mcp` ... `)` — the name this function returns,
- * never a hand-spelled copy of the prefix.
+ * ⚠️ Named rather than anonymous so it survives the `--rm`. No CLI surfaces
+ * the name, so an operator drops one by prefix:
+ * `docker volume ls -q --filter name=chat-mcp-node-modules-`.
+ *
+ * ⚠️ NOTHING PRUNES THESE. Each holds a full `node_modules`, the key space is
+ * one per handle × tree, and `resolveCwd` accepts any directory CONTAINED by
+ * an allowed one — so the space is wider than one per checkout. Filed as a
+ * question rather than guessed at a policy.
  */
 export function nodeModulesVolumeFor(supervisorHandle: string, projectDir: string): string {
   // 12 hex chars of sha256. Long enough that a collision is not a practical

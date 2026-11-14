@@ -1000,8 +1000,12 @@ interface InstallRig {
  * A project dir with a fake `npm` first on PATH, recording its argv and the
  * environment it was handed. The recording IS the instrument for B4: a
  * credential that reaches a lifecycle script reaches this log.
+ *
+ * ⚠️ `npmExit` EXISTS BECAUSE THE DEFAULT CAN ONLY PIN HALF THE `&&` CHAIN. A
+ * fake npm that always succeeds leaves the branch where the install FAILS
+ * asserted nowhere, and that is the branch which stops the agent starting.
  */
-function installRig(lock?: string): InstallRig {
+function installRig(lock?: string, npmExit = 0): InstallRig {
   const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-install-'));
   const bin = join(dir, 'bin');
   const log = join(dir, 'npm.log');
@@ -1009,12 +1013,21 @@ function installRig(lock?: string): InstallRig {
   mkdirSync(bin);
   // The volume's mount point exists from the moment docker creates it.
   mkdirSync(join(dir, 'node_modules'));
-  writeFileSync(join(bin, 'npm'), `#!/bin/sh\necho "NPM $*" >> '${log}'\nenv >> '${log}'\n`, {
-    mode: 0o755,
-  });
+  writeFileSync(
+    join(bin, 'npm'),
+    `#!/bin/sh\necho "NPM $*" >> '${log}'\nenv >> '${log}'\nexit ${npmExit}\n`,
+    { mode: 0o755 },
+  );
   if (lock !== undefined) writeFileSync(join(dir, 'package-lock.json'), lock);
 
   return { dir, log, bin };
+}
+
+/** The install guard's stamp, or undefined when the install never wrote one. */
+function stampFor(rig: InstallRig): string | undefined {
+  const stamp = join(rig.dir, 'node_modules', '.lock-sha');
+
+  return existsSync(stamp) ? readFileSync(stamp, 'utf8') : undefined;
 }
 
 function runInstallStep(rig: InstallRig, extraEnv: NodeJS.ProcessEnv = {}) {
@@ -1131,6 +1144,86 @@ test('⚠️ control — the install still has the ordinary environment it needs
 
   assert.match(seen, /^PATH=/m, 'the install lost PATH, so npm itself is unreachable');
   assert.match(seen, /^HOME=\/tmp\/chat-mcp-rig-home$/m, 'the install lost HOME, where npm caches');
+});
+
+/**
+ * 🚨 B5. `npm ci` ALWAYS RUNS THIS PROJECT'S OWN `prepare`, which is
+ * `npm run build`. So the install did not only install — it ran `tsc` against
+ * the host checkout, which `/work` binds read-write.
+ *
+ * Two consequences, and the second is the one that stops an agent:
+ *
+ * 1. It WRITES THE HOST TREE. Measured in a container on a clean `git archive`
+ *    with a fresh volume: `dist/` went 0 files to 14. `dist/` is what the host
+ *    supervisor runs from, and `imageNeedsBuild()` is built around who last
+ *    rebuilt it.
+ * 2. A FAILING `tsc` MEANS NO AGENT STARTS. `npm ci` exits 1, the `&&` chain
+ *    holds, `exec "$@"` is never reached — on any branch carrying a type
+ *    error, which is the ordinary mid-work state and exactly when someone
+ *    spawns an agent to help fix it.
+ *
+ * ⚠️ `--ignore-scripts`, AND THE RECORDED REASON FOR REJECTING IT WAS WRONG.
+ * #221 argued esbuild's postinstall must run. It need not: `@esbuild/<platform>`
+ * ships its binary as an optional dependency. Measured in-container with a
+ * fresh volume — `@esbuild/linux-arm64` present, `tsx` loading, a real suite
+ * file passing 4/4, and 0 files written to the tree.
+ *
+ * 🛑 WHAT THIS ASSERTS IS THE ARGV, BECAUSE THE RIG'S npm IS A FAKE. A fake
+ * cannot honour the flag, so the consequence above is measured in a real
+ * container and only the flag's PRESENCE is pinned here. It is still the guard
+ * that matters: the flag is what a future edit would drop.
+ *
+ * ⚠️ IT DOES NOT NARROW #231. The credentials still reach PID 1, so a
+ * lifecycle script that did run would recover them from `/proc/1/environ`.
+ */
+test('🚨 the install cannot run a lifecycle script, including this project\'s own prepare', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+  const ran = runInstallStep(rig);
+
+  assert.match(
+    readFileSync(rig.log, 'utf8'),
+    /^NPM .*--ignore-scripts/m,
+    "npm ci may run this project's prepare, so the install writes dist/ in the host tree",
+  );
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+});
+
+/**
+ * 🛑 THE FAILING-INSTALL BRANCH, AND IT WAS ASSERTED NOWHERE. The rig's npm
+ * always exited 0, so the load-bearing half of `npm ci && printf … > stamp`
+ * had no test at all — neither the `&&` nor the `exec` it gates.
+ *
+ * Both halves are pinned at once, because each alone is passable by a wrong
+ * step:
+ *
+ * - NO AGENT STARTS. An install that half-finished and then started the agent
+ *   anyway produces the false-green suite this ticket exists to stop.
+ * - NO STAMP IS WRITTEN, so the next spawn RETRIES. A stamp written beside a
+ *   failed install makes every later spawn skip the install and run against an
+ *   empty volume, which is worse than the failure it recorded.
+ */
+test('🛑 a FAILING install starts no agent and leaves no stamp, so the next spawn retries', () => {
+  const rig = installRig('{"lockfileVersion":3}', 1);
+  const ran = runInstallStep(rig);
+
+  assert.equal(npmCalls(rig), 1, 'the install never ran, so this proves nothing about failing');
+  assert.equal(ran.stdout.trim(), '', `the agent started on a failed install; stderr: ${ran.stderr}`);
+  assert.equal(stampFor(rig), undefined, 'a failed install stamped the lockfile as installed');
+  assert.notEqual(ran.status, 0, 'the prelude reported success after a failed install');
+});
+
+/**
+ * ⚠️ THE PAIRED CONTROL, AND IT IS WHAT SEPARATES THE `&&` FROM A STEP THAT
+ * NEVER STAMPS. A step that dropped the `printf` entirely would pass the test
+ * above and reinstall on every single spawn.
+ */
+test('⚠️ control — a SUCCEEDING install writes the stamp and starts the agent', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+  const ran = runInstallStep(rig);
+
+  assert.match(String(stampFor(rig)), /^[0-9a-f]{64}$/, 'a successful install wrote no stamp');
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+  assert.equal(ran.status, 0);
 });
 
 /**
