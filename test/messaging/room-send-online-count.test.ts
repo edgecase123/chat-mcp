@@ -36,7 +36,19 @@ const { sendToRoom } = await import('../../src/messaging/room-send.js');
  * file has its own.
  */
 
-/** A pid that is certainly not running. 2^22 is above every default pid_max. */
+/**
+ * A pid that is almost certainly not running.
+ *
+ * ⚠️ IT IS NOT ABOVE EVERY CEILING, AND AN EARLIER COMMENT HERE CLAIMED IT WAS.
+ * `4194303` is `2^22 - 1`, and 64-bit Linux commonly sets
+ * `kernel.pid_max = 4194304` — so this pid is allocatable there. Raised by
+ * claude2 on PR 237, and labelled a hypothesis by them because darwin does not
+ * expose the Linux default.
+ *
+ * 🛑 THE FIXTURE IS WHAT MAKES IT SAFE, NOT THE NUMBER. `roomWith` asserts
+ * each handle's `online` immediately after the upsert, so a pid that turns out
+ * to be live fails loudly in setup rather than greening a wrong count.
+ */
 const DEAD_PID = 4194303;
 
 /** `null`, which is what a dead child's row holds after PR 235's clear. */
@@ -79,7 +91,7 @@ test('the online count excludes members whose row is not live', () => {
 
   const r = send(db, 'gate');
 
-  assert.equal(r.onlineMembers, 1, 'only claude1 is live and not the sender');
+  assert.equal(r.online_members, 1, 'only claude1 is live and not the sender');
   db.close();
 });
 
@@ -103,7 +115,7 @@ test('🚨 every other member dead reports notified above zero and online zero',
   const r = send(db, 'gate');
 
   assert.equal(r.notified, 2);
-  assert.equal(r.onlineMembers, 0);
+  assert.equal(r.online_members, 0);
   db.close();
 });
 
@@ -114,7 +126,7 @@ test('a member whose pid was CLEARED on child exit is not counted online', () =>
   const r = send(db, 'gate');
 
   assert.equal(r.notified, 1);
-  assert.equal(r.onlineMembers, 0);
+  assert.equal(r.online_members, 0);
   db.close();
 });
 
@@ -128,7 +140,7 @@ test('the sender is excluded from the online count even though it is live', () =
   const r = send(db, 'gate');
 
   assert.equal(r.notified, 0, 'nobody but the sender');
-  assert.equal(r.onlineMembers, 0, 'the sender must not count itself');
+  assert.equal(r.online_members, 0, 'the sender must not count itself');
   db.close();
 });
 
@@ -139,6 +151,6 @@ test('with every member live the two counts agree', () => {
   const r = send(db, 'gate');
 
   assert.equal(r.notified, 2);
-  assert.equal(r.onlineMembers, 2);
+  assert.equal(r.online_members, 2);
   db.close();
 });

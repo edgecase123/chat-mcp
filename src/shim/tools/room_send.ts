@@ -50,7 +50,7 @@ export function installRoomSend(server: McpServer, ctx: ShimContext): void {
               // caller that reads only `notified` gets the member count, which
               // is what it has always meant. `online_members` is the one that
               // answers "is anyone there to read this".
-              online_members: result.onlineMembers,
+              online_members: result.online_members,
             }),
           },
         ],

@@ -70,7 +70,7 @@ export interface SendToRoomResult {
    * message until they next poll. Zero here with `notified` above zero means
    * the send succeeded and nobody is listening.
    */
-  onlineMembers: number;
+  online_members: number;
 }
 
 /**
@@ -96,7 +96,7 @@ export function sendToRoom(db: Db, input: SendToRoomInput): SendToRoomResult {
   if (advanceOwnRead) dao.advanceRoomRead(db, room, from, sent.id);
 
   let notified = 0;
-  let onlineMembers = 0;
+  let online_members = 0;
   for (const member of dao.roomMembers(db, room)) {
     if (member === from) continue;
     const unread = dao.totalUnreadFor(db, member);
@@ -104,8 +104,8 @@ export function sendToRoom(db: Db, input: SendToRoomInput): SendToRoomResult {
     notified += 1;
     // Counted inside the SAME loop, so the two figures can never be taken
     // over different member sets.
-    if (dao.getAgent(db, member)?.online === true) onlineMembers += 1;
+    if (dao.getAgent(db, member)?.online === true) online_members += 1;
   }
 
-  return { id: sent.id, sent_at: sent.sent_at, notified, onlineMembers };
+  return { id: sent.id, sent_at: sent.sent_at, notified, online_members };
 }
