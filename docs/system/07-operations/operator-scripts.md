@@ -113,16 +113,22 @@ accept the call and keep the old mode. `src/util/paths.ts` carries
 a credential world-readable while this page claimed `0600`. Point
 `CHAT_MCP_HOME` at a real unix filesystem or the scripts refuse to start.
 
-⚠️ **KNOWN GAP: the token is at rest in the log.** `src/cli/web/credential.ts`
-lines 3-9 state the invariant that the token is *never* written under
-`stateDir()`, on the grounds that the whole state dir is bind-mounted into every
-container. `containerized.ts:166-205` now mounts only the project dir plus
-registered mounts, and `assertProjectDirOutsideState` refuses any that overlap
-the state dir — so that premise looks stale. **It has not been re-measured from
-inside a running container, so the invariant stands and this log is a known
-violation of it.** The fix is for the server to write the handshake url through
-`writePrivateFileSync` and for this script to read that file instead of scraping
-a banner. Not done yet.
+✅ **The token is no longer scraped from the log.** `src/cli/web/credential.ts`
+states the invariant that the token is never written under `stateDir()`, because
+#162 measured the whole state dir bind-mounted into every container. **That was
+re-measured on 2026-11-14 and is no longer true** — with the real mount set
+(`/work` and `/mnt/local-context`) the state dir is not present in the container
+at all, `/work/..` is the container root, and `assertProjectDirOutsideState`
+refuses any registered mount overlapping it.
+
+So the server now writes `~/.chat-mcp/web-handshake` through
+`writePrivateFileSync` (0600) and unlinks it on shutdown, this script reads that
+file, and the url is redacted out of the log. `web-url` stays plain, because
+that is the well-known file external readers expect.
+
+⚠️ **The redaction is a truncate-and-rewrite**, so a log line written in the
+same sub-second window can be lost. Losing a log line is acceptable; leaving a
+credential is not.
 
 ## What they refuse to do
 

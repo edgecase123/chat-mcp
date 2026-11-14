@@ -14,7 +14,7 @@ import { parseSearch, snippet } from '../../search/query.js';
 import { gaugeFreshness } from '../../shim/gauge-freshness.js';
 import type { MessageKind } from '../../storage/dao.js';
 import { assertRoomName, isRoomName } from '../../util/naming.js';
-import { ensureStateDir, stateDir } from '../../util/paths.js';
+import { ensureStateDir, stateDir, webHandshakeFile, writePrivateFileSync } from '../../util/paths.js';
 import { renderBodyToHtml } from './render.js';
 import {
   ALL_CAPABILITIES,
@@ -177,6 +177,10 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   try {
     ensureStateDir();
     await writeFile(webUrlFile(), url + '\n');
+    // 🛑 THE CREDENTIAL-BEARING TWIN, 0600. `scripts/web` reads this instead of
+    // scraping the startup banner out of a log — a log that `pc_log_tail`
+    // reprints into a terminal transcript on any startup failure.
+    writePrivateFileSync(webHandshakeFile(), handshakeUrl + '\n');
   } catch { /* best-effort */ }
 
   if (opts.open !== false) {
@@ -270,6 +274,7 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
     void notify.close();
     try { db.close(); } catch { /* best-effort */ }
     void unlink(webUrlFile()).catch(() => { /* already gone */ });
+    void unlink(webHandshakeFile()).catch(() => { /* already gone */ });
     process.exit(code);
   };
   process.on('SIGINT', () => shutdown(130));

@@ -34,6 +34,9 @@ PORT="${CHAT_MCP_WEB_PORT:-3737}"
 
 PROC_NAME='web'
 URL_FILE="$CHAT_MCP_HOME/web-url"
+# The credential-bearing twin of URL_FILE, written 0600 by the server and
+# unlinked on its shutdown. See src/util/paths.ts `webHandshakeFile`.
+HANDSHAKE_FILE="$CHAT_MCP_HOME/web-handshake"
 START_TIMEOUT_SECONDS="${WEB_START_TIMEOUT:-60}"
 
 # The pid listening on PORT, whoever started it. Empty if nothing is bound.
@@ -42,11 +45,32 @@ port_pid() {
     | tr -s '[:space:]' '\n' | sed '/^$/d' | sort -u | head -n 1
 }
 
-# The handshake url from the banner, which carries this session's credential.
+# The handshake url, which carries this session's credential.
+#
+# 🛑 READ FROM THE PRIVATE FILE, NOT SCRAPED FROM THE LOG. Scraping was the
+# original route and it put an admin-capability credential at rest in a log that
+# `pc_log_tail` reprints into a terminal transcript. The server now writes
+# `web-handshake` 0600 and unlinks it on shutdown.
 handshake_url() {
-  local log; log="$(pc_logfile "$PROC_NAME")"
+  [ -f "$HANDSHAKE_FILE" ] || return 0
+  head -n 1 "$HANDSHAKE_FILE" 2>/dev/null || true
+}
+
+# Replace the url in the captured banner with a pointer. The server's stdout is
+# the only other place it lands, and the script does not need it there.
+#
+# ⚠️ A TRUNCATE-AND-REWRITE, so there is a sub-second window in which the server
+# could append. Losing a log line is acceptable; leaving a credential is not.
+redact_log() {
+  local log tmp; log="$(pc_logfile "$PROC_NAME")"
   [ -f "$log" ] || return 0
-  { sed -n 's/^[[:space:]]*open:[[:space:]]*//p' "$log" 2>/dev/null || true; } | tail -n 1
+  grep -q 'open:.*http' "$log" 2>/dev/null || return 0
+  tmp="$(pc_logfile "$PROC_NAME").redacting"
+  ( umask 077
+    sed 's#\(open:[[:space:]]*\)http[^[:space:]]*#\1<redacted - read $CHAT_MCP_HOME/web-handshake>#' \
+      "$log" > "$tmp" ) || { rm -f "$tmp"; return 0; }
+  cat "$tmp" > "$log"
+  rm -f "$tmp"
 }
 
 print_url() {
@@ -97,7 +121,7 @@ do_start() {
       rm -f "$(pc_pidfile "$PROC_NAME")"
       exit 1
     fi
-    [ -n "$(handshake_url)" ]
+    [ -n "$(handshake_url || true)" ]
   }
 
   if ! pc_wait_until "$START_TIMEOUT_SECONDS" "the web ui to bind port $PORT" _ready; then
@@ -106,6 +130,7 @@ do_start() {
     exit 1
   fi
 
+  redact_log
   pc_ok "web ui is up as '$HANDLE' (pid $pid)"
   print_url || true
 
@@ -152,10 +177,15 @@ do_stop() {
 
   # The server unlinks its url file on shutdown, so a lingering one means the
   # teardown did not complete.
-  if [ -e "$URL_FILE" ]; then
-    pc_warn "pid $pid is gone but $URL_FILE was left behind — removing it"
-    rm -f "$URL_FILE"
-  fi
+  local leftover=0
+  for f in "$URL_FILE" "$HANDSHAKE_FILE"; do
+    if [ -e "$f" ]; then
+      leftover=1
+      rm -f "$f"
+    fi
+  done
+  [ "$leftover" -eq 1 ] && pc_warn "the server left its url files behind — removed them"
+  return 0
 
   pc_ok 'web ui stopped'
 }
@@ -182,6 +212,7 @@ do_status() {
     printf '  port %-6s free\n' "$PORT"
   fi
   printf '  url file    %s\n' "$(cat "$URL_FILE" 2>/dev/null || echo absent)"
+  printf '  handshake   %s\n' "$([ -f "$HANDSHAKE_FILE" ] && echo "present (0600)" || echo absent)"
   printf '  log         %s\n' "$(pc_logfile "$PROC_NAME")"
   [ -n "$pid" ] && print_url || true
 }
