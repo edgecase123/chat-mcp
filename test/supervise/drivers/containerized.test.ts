@@ -1,9 +1,17 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { spawn as realSpawn } from 'node:child_process';
+import { spawn as realSpawn, spawnSync } from 'node:child_process';
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-driver-'));
 
@@ -13,6 +21,10 @@ const { registerMount, mountsPath } = await import('../../../src/supervise/mount
 const { claudeSpawn } = await import('../../../src/adapters/claude-spawn.js');
 const {
   dockerRunPlan,
+  nodeModulesVolumeFor,
+  nodeModulesInstallStep,
+  prelude,
+  CONTAINER_GH_TOKEN_ENV,
   CONTAINER_PROJECT_DIR,
   CONTAINER_MCP_CONFIG_ENV,
   containerPathFor,
@@ -139,6 +151,224 @@ test('🚨 the project mount survives the state-dir removal', () => {
   const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
 
   assert.ok(args.includes(`${PROJECT_DIR}:${CONTAINER_PROJECT_DIR}`));
+});
+
+/**
+ * 🛑 `/work` CARRIES THE HOST'S `node_modules`, INSTALLED ON macOS. The
+ * container is Linux on the same chip, so `tsx` loads `esbuild`, `esbuild`
+ * resolves `@esbuild/darwin-arm64`, and the suite dies before the first test.
+ * A review from inside the container then proves typecheck only.
+ *
+ * A volume at the same path hides the host's copy from the container without
+ * touching it, so each side keeps its own platform build.
+ *
+ * ⚠️ NAMED, NOT ANONYMOUS, so it survives the `--rm` and the install below
+ * runs on a handle's first container rather than on every one. A source side
+ * that is a bare name, not an absolute path, is what makes it a volume.
+ */
+test('🛑 a NAMED volume covers /work/node_modules, so the host platform build stays out', () => {
+  setToken('sk-ant-oat-x');
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  const spec = args.find((a) => a.endsWith(`:${CONTAINER_PROJECT_DIR}/node_modules`));
+
+  assert.ok(spec, `no node_modules overlay in ${args.join(' ')}`);
+  assert.ok(
+    !spec.startsWith('/'),
+    `the source side is an absolute path, so this is a host bind, not a volume: ${spec}`,
+  );
+});
+
+/**
+ * 🚨 KEYED ON THE HANDLE **AND** THE PROJECT DIR. `ProjectConfig.agents` is
+ * `Record<string, string[]>` — "the directories that agent may work in" — and
+ * `resolveCwd` accepts any directory contained by any of them. So ONE handle
+ * legitimately spawns against several trees.
+ *
+ * Keyed on the handle alone, the first tree to install wins: the install guard
+ * finds a populated marker and every later tree silently imports the first
+ * one's dependencies, across `--rm`, indefinitely. That is the "dependency
+ * tree nobody declared" symptom reached from the other side.
+ */
+test('🚨 one handle working in TWO project dirs gets two different volumes', () => {
+  const other = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-second-'));
+
+  assert.notEqual(
+    nodeModulesVolumeFor('claude1', PROJECT_DIR),
+    nodeModulesVolumeFor('claude1', other),
+  );
+});
+
+/**
+ * The paired control. Two handles on one tree must also differ, and a key
+ * built from the project dir ALONE would pass the test above and fail this.
+ */
+test('🛑 two handles in ONE project dir also get two different volumes', () => {
+  assert.notEqual(
+    nodeModulesVolumeFor('claude1', PROJECT_DIR),
+    nodeModulesVolumeFor('claude2', PROJECT_DIR),
+  );
+});
+
+/**
+ * 🛑 THE SAME INPUTS MUST GIVE THE SAME NAME, or the volume is anonymous in
+ * all but spelling and the install runs on every spawn after all.
+ */
+test('🛑 the volume name is STABLE across calls for one handle and dir', () => {
+  assert.equal(
+    nodeModulesVolumeFor('claude1', PROJECT_DIR),
+    nodeModulesVolumeFor('claude1', PROJECT_DIR),
+  );
+});
+
+/**
+ * 🚨 A SYMLINKED PROJECT DIR IS THE SAME TREE, so it must not earn a second
+ * volume and a second install. `realpathSync` collapses them, which is how
+ * every other mount in this file is already resolved.
+ */
+test('🚨 a project dir reached through a SYMLINK keys the SAME volume', () => {
+  const real = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-real-'));
+  const link = join(mkdtempSync(join(tmpdir(), 'chat-mcp-docker-link-')), 'alias');
+  symlinkSync(real, link);
+
+  assert.equal(nodeModulesVolumeFor('claude1', link), nodeModulesVolumeFor('claude1', real));
+});
+
+/**
+ * 🛑 DOCKER'S OWN NAME RULE IS `[a-zA-Z0-9][a-zA-Z0-9_.-]*`. `assertHandle`
+ * already keeps the handle narrower than that, but the digest is new, so the
+ * COMPOSED name is what has to be checked.
+ */
+test('🛑 the composed volume name is a legal docker volume name', () => {
+  assert.match(nodeModulesVolumeFor('claude1', PROJECT_DIR), /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/);
+});
+
+/**
+ * 🛑 THE VOLUME STARTS EMPTY, so the overlay alone takes the container from a
+ * WRONG-platform `node_modules` to NO `node_modules`. The suite still cannot
+ * run, for a different reason. Something has to populate it, and `/work`
+ * carries the lockfile to do it from.
+ */
+test('🛑 the container installs its own node_modules when the volume is empty', () => {
+  setToken('sk-ant-oat-x');
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  const prelude = args.find((a) => a.includes('npm ci'));
+
+  assert.ok(prelude, `no install step in ${args.join(' ')}`);
+  // Only that the argv CARRIES a guarded install. What the guard decides is
+  // measured in a real `sh` further down, not read off this string.
+  assert.match(
+    prelude,
+    new RegExp(`${CONTAINER_PROJECT_DIR}/package-lock\\.json`),
+    'the install is unconditional, so it reruns on every warm start',
+  );
+  assert.match(prelude, /node_modules\/\.lock-sha/, 'no lockfile-hash stamp to compare against');
+});
+
+/**
+ * The paired control. A granted spawn has always been wrapped in `sh -c` to
+ * write its MCP config, so an install step added only to that branch would
+ * look right in every granted test and be absent from every plain one.
+ */
+test('🛑 the install step is there on a NON-granted spawn too', () => {
+  setToken('sk-ant-oat-x');
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+
+  assert.ok(!args.includes('--mcp-config'), 'this fixture was supposed to be ungranted');
+  assert.ok(args.some((a) => a.includes('npm ci')));
+});
+
+/**
+ * 🚨 MEASURED IN A REAL `sh`, NOT READ OFF THE STRING. `&&` and `||` have
+ * EQUAL precedence and bind left to right, so `cfg && [ -e m ] || install`
+ * groups as `((cfg && [ -e m ]) || install)` — and a FAILED config write then
+ * reaches `exec` anyway, because the install's success rescues the whole
+ * group. The agent starts with no MCP config, which is the exact case the
+ * original `&& exec "$@"` existed to prevent.
+ *
+ * Every step `prelude` joins must therefore be atomic on its own.
+ */
+test('🚨 a FAILED step stops the chain even when a later step contains ||', () => {
+  const script = prelude(['false', '[ -e /nonexistent-marker ] || true']);
+  const ran = spawnSync('sh', ['-c', script, 'sh', 'echo', 'AGENT_RAN'], {
+    encoding: 'utf8',
+  });
+
+  assert.equal(
+    ran.stdout.trim(),
+    '',
+    `the agent ran despite a failed first step; script was: ${script}`,
+  );
+});
+
+/**
+ * The paired control. A `prelude` that never reached `exec` would pass the
+ * test above and start nothing at all.
+ */
+test('🚨 an all-passing chain DOES reach the agent', () => {
+  const script = prelude(['true', '[ -e /nonexistent-marker ] || true']);
+  const ran = spawnSync('sh', ['-c', script, 'sh', 'echo', 'AGENT_RAN'], {
+    encoding: 'utf8',
+  });
+
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+});
+
+/**
+ * 🚨 THE HANDLE IS NOW A MOUNT-SPEC FIELD, SO ITS SHAPE IS LOAD-BEARING. It
+ * used to reach the argv only through `--name`, where the daemon rejects a bad
+ * value itself. In a `-v` spec a colon separates source from destination, so an
+ * unvalidated handle is a way to write a mount nobody declared.
+ *
+ * `requireSupervisorHandle` only ever checked truthiness, despite its docblock
+ * calling itself the one place that validates the field.
+ */
+test('🚨 a supervisor handle that could forge a mount spec REFUSES the plan', () => {
+  setToken('sk-ant-oat-x');
+
+  for (const bad of ['claude1:/etc', 'claude1:/work/node_modules:ro', '../claude1', 'Claude1']) {
+    assert.throws(
+      () => dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: bad }),
+      /handle/i,
+      `the plan accepted the handle ${bad}`,
+    );
+  }
+});
+
+/**
+ * The paired control. A `requireSupervisorHandle` that threw on everything
+ * would pass the test above and spawn nothing at all.
+ */
+test('🚨 a normal handle still builds a plan', () => {
+  setToken('sk-ant-oat-x');
+
+  assert.ok(dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' }).length > 0);
+});
+
+/**
+ * 🚨 THE OVERLAY MUST NAME NO HOST PATH AT ALL. A `host:/work/node_modules`
+ * spec is a second door onto a host directory, and it also collides with the
+ * volume on one destination, which the daemon refuses at spawn time.
+ *
+ * ⚠️ MEASURED, NOT ASSUMED: `readOnlyPaths: ['node_modules']` passes every
+ * containment check and emitted exactly that spec. The `:ro` suffix is why an
+ * `endsWith` check could not see it. `dockerRunPlan` must refuse instead.
+ */
+test('🚨 a read-only path that collides with the node_modules volume REFUSES the spawn', () => {
+  setToken('sk-ant-oat-x');
+  // The declared path has to EXIST or `checkedProjectPath` refuses first, for
+  // a reason that has nothing to do with the collision.
+  const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-nm-'));
+  mkdirSync(join(dir, 'node_modules'));
+
+  assert.throws(
+    () =>
+      dockerArgsFor({
+        cwd: dir,
+        supervisorHandle: 'claude1',
+        readOnlyPaths: ['node_modules'],
+      }),
+    /node_modules/,
+  );
 });
 
 test('a registered extra mount appears at /mnt/<key>', () => {
@@ -743,4 +973,296 @@ test('the driver env var name IS the storage key, with no second literal to drif
   );
 
   assert.equal(CONTAINER_GH_TOKEN_ENV, GH_TOKEN_KEY);
+});
+
+/**
+ * #221 B2/B3/B4. The install step runs on every cold spawn, so its guard and
+ * its environment are both load-bearing, and all three failures are silent:
+ * a project with no lockfile never starts its agent at all, a changed lockfile
+ * runs the suite against the old tree, and dependency lifecycle scripts see
+ * every credential the container was given.
+ *
+ * 🛑 RUN IN A REAL `sh`, NOT MATCHED AGAINST THE STRING. A string assertion
+ * cannot tell a guard that skips from a guard that installs, and the `&&`
+ * precedence bug already shipped once on a step that read correctly.
+ *
+ * ⚠️ `shasum -a 256`, NOT `sha256sum`. Both the Debian image and this macOS
+ * host carry `shasum`; only the image carries `sha256sum`, so choosing it
+ * would put this step beyond the reach of the suite.
+ */
+interface InstallRig {
+  readonly dir: string;
+  readonly log: string;
+  readonly bin: string;
+}
+
+/**
+ * A project dir with a fake `npm` first on PATH, recording its argv and the
+ * environment it was handed. The recording IS the instrument for B4: a
+ * credential that reaches a lifecycle script reaches this log.
+ *
+ * ⚠️ `npmExit` EXISTS BECAUSE THE DEFAULT CAN ONLY PIN HALF THE `&&` CHAIN. A
+ * fake npm that always succeeds leaves the branch where the install FAILS
+ * asserted nowhere, and that is the branch which stops the agent starting.
+ */
+function installRig(lock?: string, npmExit = 0): InstallRig {
+  const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-install-'));
+  const bin = join(dir, 'bin');
+  const log = join(dir, 'npm.log');
+
+  mkdirSync(bin);
+  // The volume's mount point exists from the moment docker creates it.
+  mkdirSync(join(dir, 'node_modules'));
+  writeFileSync(
+    join(bin, 'npm'),
+    `#!/bin/sh\necho "NPM $*" >> '${log}'\nenv >> '${log}'\nexit ${npmExit}\n`,
+    { mode: 0o755 },
+  );
+  if (lock !== undefined) writeFileSync(join(dir, 'package-lock.json'), lock);
+
+  return { dir, log, bin };
+}
+
+/** The install guard's stamp, or undefined when the install never wrote one. */
+function stampFor(rig: InstallRig): string | undefined {
+  const stamp = join(rig.dir, 'node_modules', '.lock-sha');
+
+  return existsSync(stamp) ? readFileSync(stamp, 'utf8') : undefined;
+}
+
+function runInstallStep(rig: InstallRig, extraEnv: NodeJS.ProcessEnv = {}) {
+  const script = prelude([nodeModulesInstallStep(claudeSpawn, rig.dir)]);
+
+  return spawnSync('sh', ['-c', script, 'sh', 'echo', 'AGENT_RAN'], {
+    encoding: 'utf8',
+    env: { PATH: `${rig.bin}:${process.env.PATH}`, ...extraEnv },
+  });
+}
+
+/** How many times the fake npm was invoked, 0 when it never was. */
+function npmCalls(rig: InstallRig): number {
+  if (!existsSync(rig.log)) return 0;
+
+  return readFileSync(rig.log, 'utf8')
+    .split('\n')
+    .filter((l) => l.startsWith('NPM ')).length;
+}
+
+/**
+ * 🛑 B2. Wrapping the ungranted branch in `sh -c` made the install
+ * unconditional, so a project with no `package-lock.json` — a Python repo, say
+ * — fails the install, and the `&&` chain means `exec "$@"` is never reached.
+ * The agent does not start at all. Every dir configured on 2026-11-13 had a
+ * lockfile, so this was latent, one config edit from live.
+ */
+test('🛑 a project with no lockfile skips the install and STILL starts its agent', () => {
+  const rig = installRig();
+  const ran = runInstallStep(rig);
+
+  assert.equal(npmCalls(rig), 0, 'npm ci ran with no lockfile to install from');
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN', `the agent never started; stderr: ${ran.stderr}`);
+});
+
+/**
+ * ⚠️ THE PAIRED CONTROL, AND IT IS THE ONE THAT CATCHES A GUARD THAT NEVER
+ * INSTALLS. A step that skipped unconditionally would pass the test above and
+ * leave the volume empty, which is the false-green suite this ticket exists
+ * to stop.
+ */
+test('⚠️ control — a project WITH a lockfile does install', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+  const ran = runInstallStep(rig);
+
+  assert.equal(npmCalls(rig), 1, 'npm ci did not run despite a lockfile');
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+});
+
+/**
+ * 🛑 B3. The old guard was npm's own marker, so once the volume was populated
+ * the install never ran again. After the host's `package-lock.json` changes,
+ * the container runs the suite against the OLD dependency tree and reports a
+ * pass — the exact false green the `&&` chain exists to prevent.
+ */
+test('🛑 a CHANGED lockfile reinstalls, because the volume outlives the --rm', () => {
+  const rig = installRig('{"lockfileVersion":3,"v":1}');
+
+  runInstallStep(rig);
+  writeFileSync(join(rig.dir, 'package-lock.json'), '{"lockfileVersion":3,"v":2}');
+  const ran = runInstallStep(rig);
+
+  assert.equal(npmCalls(rig), 2, 'the second spawn reused dependencies from the old lockfile');
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+});
+
+/**
+ * ⚠️ THE PAIRED CONTROL. A guard that reinstalled every spawn would pass the
+ * test above and add a full `npm ci` to every warm start.
+ */
+test('⚠️ control — an UNCHANGED lockfile does not reinstall', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+
+  runInstallStep(rig);
+  const ran = runInstallStep(rig);
+
+  assert.equal(npmCalls(rig), 1, 'the install reran against an unchanged lockfile');
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+});
+
+/**
+ * 🚨 B4. `npm ci` fires every dependency's lifecycle scripts, and they inherit
+ * this shell's environment — which holds the bus bearer token, the GitHub
+ * token and the vendor auth key. Scrubbed rather than `--ignore-scripts`, so
+ * esbuild's postinstall still resolves its platform binary.
+ */
+test('🚨 the install cannot see the bus token, the GitHub token or the vendor key', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+  const secrets = {
+    [claudeSpawn.authEnvVar]: 'sk-ant-oat-SENTINEL',
+    [CONTAINER_GH_TOKEN_ENV]: 'ghp-SENTINEL',
+    [CONTAINER_MCP_CONFIG_ENV]: '{"SENTINEL":true}',
+  };
+
+  runInstallStep(rig, secrets);
+  const seen = readFileSync(rig.log, 'utf8');
+
+  for (const [name, value] of Object.entries(secrets)) {
+    assert.ok(!seen.includes(value), `${name}'s VALUE reached a dependency install script`);
+    assert.doesNotMatch(seen, new RegExp(`^${name}=`, 'm'), `${name} was still in scope`);
+  }
+});
+
+/**
+ * ⚠️ THE PAIRED CONTROL, AND IT IS WHAT SEPARATES SCRUBBING FROM AN EMPTY
+ * ENVIRONMENT. `env -i` would pass the test above and break the install, which
+ * needs PATH and HOME.
+ */
+test('⚠️ control — the install still has the ordinary environment it needs', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+
+  runInstallStep(rig, { HOME: '/tmp/chat-mcp-rig-home' });
+  const seen = readFileSync(rig.log, 'utf8');
+
+  assert.match(seen, /^PATH=/m, 'the install lost PATH, so npm itself is unreachable');
+  assert.match(seen, /^HOME=\/tmp\/chat-mcp-rig-home$/m, 'the install lost HOME, where npm caches');
+});
+
+/**
+ * 🚨 B5. `npm ci` ALWAYS RUNS THIS PROJECT'S OWN `prepare`, which is
+ * `npm run build`. So the install did not only install — it ran `tsc` against
+ * the host checkout, which `/work` binds read-write.
+ *
+ * Two consequences, and the second is the one that stops an agent:
+ *
+ * 1. It WRITES THE HOST TREE. Measured in a container on a clean `git archive`
+ *    with a fresh volume: `dist/` went 0 files to 14. `dist/` is what the host
+ *    supervisor runs from, and `imageNeedsBuild()` is built around who last
+ *    rebuilt it.
+ * 2. A FAILING `tsc` MEANS NO AGENT STARTS. `npm ci` exits 1, the `&&` chain
+ *    holds, `exec "$@"` is never reached — on any branch carrying a type
+ *    error, which is the ordinary mid-work state and exactly when someone
+ *    spawns an agent to help fix it.
+ *
+ * ⚠️ `--ignore-scripts`, AND THE RECORDED REASON FOR REJECTING IT WAS WRONG.
+ * #221 argued esbuild's postinstall must run. It need not: `@esbuild/<platform>`
+ * ships its binary as an optional dependency. Measured in-container with a
+ * fresh volume — `@esbuild/linux-arm64` present, `tsx` loading, a real suite
+ * file passing 4/4, and 0 files written to the tree.
+ *
+ * 🛑 WHAT THIS ASSERTS IS THE ARGV, BECAUSE THE RIG'S npm IS A FAKE. A fake
+ * cannot honour the flag, so the consequence above is measured in a real
+ * container and only the flag's PRESENCE is pinned here. It is still the guard
+ * that matters: the flag is what a future edit would drop.
+ *
+ * ⚠️ IT DOES NOT NARROW #231. The credentials still reach PID 1, so a
+ * lifecycle script that did run would recover them from `/proc/1/environ`.
+ */
+test('🚨 the install cannot run a lifecycle script, including this project\'s own prepare', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+  const ran = runInstallStep(rig);
+
+  assert.match(
+    readFileSync(rig.log, 'utf8'),
+    /^NPM .*--ignore-scripts/m,
+    "npm ci may run this project's prepare, so the install writes dist/ in the host tree",
+  );
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+});
+
+/**
+ * 🛑 THE FAILING-INSTALL BRANCH, AND IT WAS ASSERTED NOWHERE. The rig's npm
+ * always exited 0, so the load-bearing half of `npm ci && printf … > stamp`
+ * had no test at all — neither the `&&` nor the `exec` it gates.
+ *
+ * Both halves are pinned at once, because each alone is passable by a wrong
+ * step:
+ *
+ * - NO AGENT STARTS. An install that half-finished and then started the agent
+ *   anyway produces the false-green suite this ticket exists to stop.
+ * - NO STAMP IS WRITTEN, so the next spawn RETRIES. A stamp written beside a
+ *   failed install makes every later spawn skip the install and run against an
+ *   empty volume, which is worse than the failure it recorded.
+ */
+test('🛑 a FAILING install starts no agent and leaves no stamp, so the next spawn retries', () => {
+  const rig = installRig('{"lockfileVersion":3}', 1);
+  const ran = runInstallStep(rig);
+
+  assert.equal(npmCalls(rig), 1, 'the install never ran, so this proves nothing about failing');
+  assert.equal(ran.stdout.trim(), '', `the agent started on a failed install; stderr: ${ran.stderr}`);
+  assert.equal(stampFor(rig), undefined, 'a failed install stamped the lockfile as installed');
+  assert.notEqual(ran.status, 0, 'the prelude reported success after a failed install');
+});
+
+/**
+ * ⚠️ THE PAIRED CONTROL, AND IT IS WHAT SEPARATES THE `&&` FROM A STEP THAT
+ * NEVER STAMPS. A step that dropped the `printf` entirely would pass the test
+ * above and reinstall on every single spawn.
+ */
+test('⚠️ control — a SUCCEEDING install writes the stamp and starts the agent', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+  const ran = runInstallStep(rig);
+
+  assert.match(String(stampFor(rig)), /^[0-9a-f]{64}$/, 'a successful install wrote no stamp');
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+  assert.equal(ran.status, 0);
+});
+
+/**
+ * 🛑 THE GUARD THAT WAS MISSING, AND ITS ABSENCE IS WHY THIS EXISTS. The scrub
+ * list and the `-e` pushes were two hand-kept enumerations that happened to
+ * coincide. A FOURTH credential added to the argv would have been in scope for
+ * every dependency's lifecycle script and no test would have failed.
+ *
+ * This derives the expectation from the argv rather than restating the three
+ * names, so it fails on a credential nobody remembered to scrub.
+ *
+ * ⚠️ IT GUARDS THE DRIFT, NOT THE BOUNDARY. #231 is the boundary: the
+ * credentials reach PID 1 regardless, so a lifecycle script recovers them from
+ * `/proc/1/environ` whatever this asserts.
+ */
+test('🛑 the install scrubs EVERY credential the plan names with -e', () => {
+  setToken('sk-ant-oat-x');
+  setGhToken('ghp-x');
+
+  const args = dockerArgsFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: 'claude1',
+    bus: BUS,
+    grant: { handle: 'claude1-agent', configPath: '/unused.json', tools: [] },
+  });
+  const named = args.filter((_, i) => args[i - 1] === '-e');
+  const step = args.find((a) => a.includes('npm ci'));
+
+  assert.ok(step, `no install step in ${args.join(' ')}`);
+  assert.ok(
+    named.length >= 3,
+    `expected the granted plan to name every credential; got ${named.join(', ')}`,
+  );
+  for (const name of named) {
+    assert.ok(
+      step.includes(`-u '${name}'`),
+      `${name} is handed to the container and NOT scrubbed from the install`,
+    );
+  }
+
+  clearGhToken();
 });

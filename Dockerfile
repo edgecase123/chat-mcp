@@ -12,8 +12,13 @@ FROM node:22-slim
 #
 # wget is here to fetch the gh keyring in the next layer, and that fetch is
 # itself https — so it has to follow ca-certificates, not accompany it.
+#
+# ⚠️ perl IS NAMED FOR `shasum`, WHICH THE INSTALL GUARD RUNS. It arrived only
+# as a dependency of git, and the failure if it stopped arriving is silent: the
+# hash comes back empty, the guard installs by design, and every cold spawn
+# pays a full `npm ci` with nothing saying why.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates git wget \
+  && apt-get install -y --no-install-recommends ca-certificates git perl wget \
   && rm -rf /var/lib/apt/lists/*
 
 # 🛑 GitHub's OWN apt SOURCE, NOT `apt-get install gh`. `gh` is not in Debian's
@@ -90,6 +95,17 @@ RUN npm ci --omit=dev --ignore-scripts
 # buildImage(), which runs `npm run build` first. This image never runs tsc.
 COPY dist ./dist
 RUN chown -R agent:agent /opt/chat-mcp
+
+# 🛑 MUST STAY ABOVE `USER agent`, AND THE OWNERSHIP IS THE POINT. The driver
+# mounts a container-owned `node_modules` as a NAMED VOLUME here, and docker
+# seeds a new volume's contents and ownership from the image's directory at the
+# destination. With nothing at this path the volume root is root:root, `npm ci`
+# fails EACCES as agent, and the prelude's `&&` chain means no agent starts.
+# Pinned by dockerfile-node-modules-ownership.test.ts, which asserts the order.
+#
+# Rejected: chowning from the prelude at runtime. The prelude already runs as
+# agent, so it cannot, and running it as root would undo the non-root guarantee.
+RUN mkdir -p /work/node_modules && chown -R agent:agent /work
 
 ENV HOME=/root
 USER agent

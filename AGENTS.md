@@ -179,6 +179,41 @@ path anywhere else.**
   working, by a separate ruling that still stands.
 - The stdio transport for **host** agents, which is first-class.
 - `/work`, the project mount. That is a requirement, not a leak.
+- The per-handle named volume at `/work/node_modules`. It names no host path,
+  so there is no source side to leak. It exists to hide the host's macOS
+  `node_modules` from a Linux container, not to carry anything across, and the
+  container installs its own into it on first start. ⚠️ **A declared
+  `readOnlyPaths` entry of `node_modules` now REFUSES the spawn**, because it
+  would put a host bind on the same destination.
+- 🛑 **The install runs `npm ci --ignore-scripts`, and dropping that flag
+  breaks two things at once.** Without it `npm ci` runs THIS project's own
+  `prepare`, which is `npm run build` — so the install ran `tsc` against the
+  host checkout that `/work` binds read-write, writing 14 files into `dist/`.
+  **`dist/` is what the host supervisor runs from.** And a failing `tsc` exits
+  1, the prelude chains on `&&`, so **no agent starts at all** on any branch
+  carrying a type error. Both measured in a built image.
+- ⚠️ **The flag costs esbuild nothing.** `@esbuild/<platform>` ships its binary
+  as an optional dependency, so no dependency in this lockfile needs a build
+  step. A node-gyp addon would, and adding one means revisiting this.
+- 🚨 **The install still runs code this project did not write, and it is INSIDE
+  the boundary.** `--ignore-scripts` removes the lifecycle-script route, not the
+  credentials: the config file at `$HOME` is `0600` owned by the same `agent`
+  uid, and `/proc/1/environ` holds all three because docker hands them to PID 1.
+  **Both routes measured in a built image.** The `env -u` scrub is NOT a
+  boundary. **#231 is the boundary** — the install moving to its own
+  credential-free container.
+- ⚠️ **The volume is writable, executable code that outlives `--rm`.** One
+  hostile install persists, because the lockfile-hash guard then skips the
+  reinstall. `docker volume rm` is the only reset. **No CLI prints the name**,
+  so list them by prefix:
+  `docker volume ls -q --filter name=chat-mcp-node-modules-`.
+- ⚠️ **Nothing prunes those volumes.** One per handle × tree, and `resolveCwd`
+  accepts any directory contained by an allowed one, so the key space is wider
+  than one per checkout.
+- The install is guarded on the **lockfile's sha256**, stamped into the volume.
+  The volume outlives the `--rm`, so a presence-only guard would run every
+  later suite against the dependency tree of a lockfile the host had since
+  changed. A project with **no** lockfile skips the install and still starts.
 - A config file written **inside** the container from an env var at spawn time.
   It holds the URL and the bearer token, and it is neither shared nor mounted,
   so nothing crosses the boundary through it. ⚠️ **The test is whether both
