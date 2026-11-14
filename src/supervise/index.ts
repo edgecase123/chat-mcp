@@ -791,8 +791,16 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // that clears a LIVE child's pid on every stale signal. The replacement
     // re-registers its own pid moments later, so a brief offline window here
     // is the honest reading.
+    //
+    // ⚠️ BEFORE `spawnFn`, deliberately. A spawn that throws then leaves
+    // `pid = NULL` and the bus honest rather than advertising a child that
+    // never started.
     try {
-      dao.clearAgentPid(approvalsDb, childBusHandle());
+      if (!dao.clearAgentPid(approvalsDb, childBusHandle())) {
+        // More surprising here than on an exit: a replace means the child has
+        // been running, so its shim should long since have registered.
+        log(`replacing ${childBusHandle()}, which has no bus row to take offline`);
+      }
     } catch (err) {
       log(`FAILED to take ${childBusHandle()} offline across a replace: ${String(err)}`);
     }
