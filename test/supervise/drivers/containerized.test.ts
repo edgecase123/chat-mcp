@@ -1,6 +1,14 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawn as realSpawn, spawnSync } from 'node:child_process';
@@ -14,7 +22,9 @@ const { claudeSpawn } = await import('../../../src/adapters/claude-spawn.js');
 const {
   dockerRunPlan,
   nodeModulesVolumeFor,
+  nodeModulesInstallStep,
   prelude,
+  CONTAINER_GH_TOKEN_ENV,
   CONTAINER_PROJECT_DIR,
   CONTAINER_MCP_CONFIG_ENV,
   containerPathFor,
@@ -244,11 +254,14 @@ test('🛑 the container installs its own node_modules when the volume is empty'
   const prelude = args.find((a) => a.includes('npm ci'));
 
   assert.ok(prelude, `no install step in ${args.join(' ')}`);
+  // Only that the argv CARRIES a guarded install. What the guard decides is
+  // measured in a real `sh` further down, not read off this string.
   assert.match(
     prelude,
-    /node_modules\/\.package-lock\.json' \] \|\| npm ci/,
-    'the install is unconditional, so it reruns on an already-populated volume',
+    new RegExp(`${CONTAINER_PROJECT_DIR}/package-lock\\.json`),
+    'the install is unconditional, so it reruns on every warm start',
   );
+  assert.match(prelude, /node_modules\/\.lock-sha/, 'no lockfile-hash stamp to compare against');
 });
 
 /**
@@ -960,4 +973,162 @@ test('the driver env var name IS the storage key, with no second literal to drif
   );
 
   assert.equal(CONTAINER_GH_TOKEN_ENV, GH_TOKEN_KEY);
+});
+
+/**
+ * #221 B2/B3/B4. The install step runs on every cold spawn, so its guard and
+ * its environment are both load-bearing, and all three failures are silent:
+ * a project with no lockfile never starts its agent at all, a changed lockfile
+ * runs the suite against the old tree, and dependency lifecycle scripts see
+ * every credential the container was given.
+ *
+ * 🛑 RUN IN A REAL `sh`, NOT MATCHED AGAINST THE STRING. A string assertion
+ * cannot tell a guard that skips from a guard that installs, and the `&&`
+ * precedence bug already shipped once on a step that read correctly.
+ *
+ * ⚠️ `shasum -a 256`, NOT `sha256sum`. Both the Debian image and this macOS
+ * host carry `shasum`; only the image carries `sha256sum`, so choosing it
+ * would put this step beyond the reach of the suite.
+ */
+interface InstallRig {
+  readonly dir: string;
+  readonly log: string;
+  readonly bin: string;
+}
+
+/**
+ * A project dir with a fake `npm` first on PATH, recording its argv and the
+ * environment it was handed. The recording IS the instrument for B4: a
+ * credential that reaches a lifecycle script reaches this log.
+ */
+function installRig(lock?: string): InstallRig {
+  const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-install-'));
+  const bin = join(dir, 'bin');
+  const log = join(dir, 'npm.log');
+
+  mkdirSync(bin);
+  // The volume's mount point exists from the moment docker creates it.
+  mkdirSync(join(dir, 'node_modules'));
+  writeFileSync(join(bin, 'npm'), `#!/bin/sh\necho "NPM $*" >> '${log}'\nenv >> '${log}'\n`, {
+    mode: 0o755,
+  });
+  if (lock !== undefined) writeFileSync(join(dir, 'package-lock.json'), lock);
+
+  return { dir, log, bin };
+}
+
+function runInstallStep(rig: InstallRig, extraEnv: NodeJS.ProcessEnv = {}) {
+  const script = prelude([nodeModulesInstallStep(claudeSpawn, rig.dir)]);
+
+  return spawnSync('sh', ['-c', script, 'sh', 'echo', 'AGENT_RAN'], {
+    encoding: 'utf8',
+    env: { PATH: `${rig.bin}:${process.env.PATH}`, ...extraEnv },
+  });
+}
+
+/** How many times the fake npm was invoked, 0 when it never was. */
+function npmCalls(rig: InstallRig): number {
+  if (!existsSync(rig.log)) return 0;
+
+  return readFileSync(rig.log, 'utf8')
+    .split('\n')
+    .filter((l) => l.startsWith('NPM ')).length;
+}
+
+/**
+ * 🛑 B2. Wrapping the ungranted branch in `sh -c` made the install
+ * unconditional, so a project with no `package-lock.json` — a Python repo, say
+ * — fails the install, and the `&&` chain means `exec "$@"` is never reached.
+ * The agent does not start at all. Every dir configured on 2026-11-13 had a
+ * lockfile, so this was latent, one config edit from live.
+ */
+test('🛑 a project with no lockfile skips the install and STILL starts its agent', () => {
+  const rig = installRig();
+  const ran = runInstallStep(rig);
+
+  assert.equal(npmCalls(rig), 0, 'npm ci ran with no lockfile to install from');
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN', `the agent never started; stderr: ${ran.stderr}`);
+});
+
+/**
+ * ⚠️ THE PAIRED CONTROL, AND IT IS THE ONE THAT CATCHES A GUARD THAT NEVER
+ * INSTALLS. A step that skipped unconditionally would pass the test above and
+ * leave the volume empty, which is the false-green suite this ticket exists
+ * to stop.
+ */
+test('⚠️ control — a project WITH a lockfile does install', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+  const ran = runInstallStep(rig);
+
+  assert.equal(npmCalls(rig), 1, 'npm ci did not run despite a lockfile');
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+});
+
+/**
+ * 🛑 B3. The old guard was npm's own marker, so once the volume was populated
+ * the install never ran again. After the host's `package-lock.json` changes,
+ * the container runs the suite against the OLD dependency tree and reports a
+ * pass — the exact false green the `&&` chain exists to prevent.
+ */
+test('🛑 a CHANGED lockfile reinstalls, because the volume outlives the --rm', () => {
+  const rig = installRig('{"lockfileVersion":3,"v":1}');
+
+  runInstallStep(rig);
+  writeFileSync(join(rig.dir, 'package-lock.json'), '{"lockfileVersion":3,"v":2}');
+  const ran = runInstallStep(rig);
+
+  assert.equal(npmCalls(rig), 2, 'the second spawn reused dependencies from the old lockfile');
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+});
+
+/**
+ * ⚠️ THE PAIRED CONTROL. A guard that reinstalled every spawn would pass the
+ * test above and add a full `npm ci` to every warm start.
+ */
+test('⚠️ control — an UNCHANGED lockfile does not reinstall', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+
+  runInstallStep(rig);
+  const ran = runInstallStep(rig);
+
+  assert.equal(npmCalls(rig), 1, 'the install reran against an unchanged lockfile');
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+});
+
+/**
+ * 🚨 B4. `npm ci` fires every dependency's lifecycle scripts, and they inherit
+ * this shell's environment — which holds the bus bearer token, the GitHub
+ * token and the vendor auth key. Scrubbed rather than `--ignore-scripts`, so
+ * esbuild's postinstall still resolves its platform binary.
+ */
+test('🚨 the install cannot see the bus token, the GitHub token or the vendor key', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+  const secrets = {
+    [claudeSpawn.authEnvVar]: 'sk-ant-oat-SENTINEL',
+    [CONTAINER_GH_TOKEN_ENV]: 'ghp-SENTINEL',
+    [CONTAINER_MCP_CONFIG_ENV]: '{"SENTINEL":true}',
+  };
+
+  runInstallStep(rig, secrets);
+  const seen = readFileSync(rig.log, 'utf8');
+
+  for (const [name, value] of Object.entries(secrets)) {
+    assert.ok(!seen.includes(value), `${name}'s VALUE reached a dependency install script`);
+    assert.doesNotMatch(seen, new RegExp(`^${name}=`, 'm'), `${name} was still in scope`);
+  }
+});
+
+/**
+ * ⚠️ THE PAIRED CONTROL, AND IT IS WHAT SEPARATES SCRUBBING FROM AN EMPTY
+ * ENVIRONMENT. `env -i` would pass the test above and break the install, which
+ * needs PATH and HOME.
+ */
+test('⚠️ control — the install still has the ordinary environment it needs', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+
+  runInstallStep(rig, { HOME: '/tmp/chat-mcp-rig-home' });
+  const seen = readFileSync(rig.log, 'utf8');
+
+  assert.match(seen, /^PATH=/m, 'the install lost PATH, so npm itself is unreachable');
+  assert.match(seen, /^HOME=\/tmp\/chat-mcp-rig-home$/m, 'the install lost HOME, where npm caches');
 });

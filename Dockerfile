@@ -91,5 +91,16 @@ RUN npm ci --omit=dev --ignore-scripts
 COPY dist ./dist
 RUN chown -R agent:agent /opt/chat-mcp
 
+# 🛑 MUST STAY ABOVE `USER agent`, AND THE OWNERSHIP IS THE POINT. The driver
+# mounts a container-owned `node_modules` as a NAMED VOLUME here, and docker
+# seeds a new volume's contents and ownership from the image's directory at the
+# destination. With nothing at this path the volume root is root:root, `npm ci`
+# fails EACCES as agent, and the prelude's `&&` chain means no agent starts.
+# Pinned by dockerfile-node-modules-ownership.test.ts, which asserts the order.
+#
+# Rejected: chowning from the prelude at runtime. The prelude already runs as
+# agent, so it cannot, and running it as root would undo the non-root guarantee.
+RUN mkdir -p /work/node_modules && chown -R agent:agent /work
+
 ENV HOME=/root
 USER agent

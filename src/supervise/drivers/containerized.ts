@@ -110,18 +110,60 @@ function mcpConfigStep(vendor: VendorSpawn): string {
 }
 
 /**
+ * The credentials in scope when the install runs, and therefore in scope for
+ * every dependency's lifecycle scripts. `npm ci` fires those regardless of
+ * `--omit`, so the install is the one step in the prelude that executes code
+ * this project did not write.
+ *
+ * 🛑 SCRUBBED, NOT `--ignore-scripts`. esbuild resolves its platform binary
+ * from a postinstall, and that resolution is the entire reason this volume
+ * exists — disabling scripts would leave the suite unrunnable for a new
+ * reason.
+ */
+function installScrubbedEnvVars(vendor: VendorSpawn): readonly string[] {
+  return [vendor.authEnvVar, CONTAINER_GH_TOKEN_ENV, CONTAINER_MCP_CONFIG_ENV];
+}
+
+/**
  * 🛑 THE VOLUME COMES UP EMPTY, so without this the overlay only trades a
  * WRONG-platform `node_modules` for NO `node_modules`. The image has nothing
  * at `/work`, and docker seeds a volume from the image layer, never from the
  * bind under it — so there is no copy of the host's tree to inherit, which is
  * the whole point and also why something must install.
  *
- * ⚠️ GUARDED ON npm's OWN MARKER, not on the directory existing. The volume's
- * mount point exists from the moment docker creates it, so `[ -d ]` would read
- * every empty volume as populated and never install.
+ * 🛑 NO LOCKFILE MEANS SKIP, NOT FAIL. A configured project need not be a node
+ * project, and the prelude chains on `&&` — so a failed install is an agent
+ * that never starts, not an agent that starts without dependencies.
+ *
+ * 🛑 GUARDED ON THE LOCKFILE'S HASH, NOT ON npm's OWN MARKER. The volume
+ * outlives the `--rm`, so a marker-only guard installs once and then runs
+ * every later suite against the dependency tree of a lockfile the host has
+ * since changed — a pass that proves nothing, which is this ticket's own
+ * failure mode arriving by a second route.
+ *
+ * ⚠️ AN UNREADABLE HASH INSTALLS. `want` empty would otherwise equal an absent
+ * stamp and skip, so the cheap failure is a reinstall rather than a false
+ * green.
+ *
+ * ⚠️ `shasum -a 256`, NOT `sha256sum`. Both the image and a macOS host carry
+ * `shasum`; only the image carries `sha256sum`, and the suite runs on the host.
  */
-function nodeModulesInstallStep(): string {
-  return `[ -e '${CONTAINER_PROJECT_DIR}/node_modules/.package-lock.json' ] || npm ci`;
+export function nodeModulesInstallStep(
+  vendor: VendorSpawn,
+  projectDir: string = CONTAINER_PROJECT_DIR,
+): string {
+  const lock = `${projectDir}/package-lock.json`;
+  const stamp = `${projectDir}/node_modules/.lock-sha`;
+  const scrubbed = installScrubbedEnvVars(vendor)
+    .map((name) => `-u '${name}'`)
+    .join(' ');
+
+  return (
+    `if [ ! -f '${lock}' ]; then :; else ` +
+    `want=$(shasum -a 256 '${lock}' | cut -d' ' -f1); ` +
+    `if [ -n "$want" ] && [ "$want" = "$(cat '${stamp}' 2>/dev/null)" ]; then :; else ` +
+    `env ${scrubbed} npm ci && printf '%s' "$want" > '${stamp}'; fi; fi`
+  );
 }
 
 /**
@@ -324,7 +366,7 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
   // to need a shell at all, so an install added to that branch alone would be
   // present in every granted test and missing from every plain one.
   if (!opts.grant) {
-    args.push('sh', '-c', prelude([nodeModulesInstallStep()]), 'sh', ...cli);
+    args.push('sh', '-c', prelude([nodeModulesInstallStep(vendor)]), 'sh', ...cli);
 
     return { args, env };
   }
@@ -342,7 +384,7 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
 
   // Config first, because it is instant and the install is not. A spawn that
   // dies in `npm ci` then still leaves the config written for the retry.
-  args.push('sh', '-c', prelude([mcpConfigStep(vendor), nodeModulesInstallStep()]), 'sh', ...cli);
+  args.push('sh', '-c', prelude([mcpConfigStep(vendor), nodeModulesInstallStep(vendor)]), 'sh', ...cli);
 
   return { args, env };
 }

@@ -185,6 +185,16 @@ path anywhere else.**
   container installs its own into it on first start. ⚠️ **A declared
   `readOnlyPaths` entry of `node_modules` now REFUSES the spawn**, because it
   would put a host bind on the same destination.
+- 🛑 **The install is the one prelude step that runs code this project did not
+  write.** `npm ci` fires every dependency's lifecycle scripts, so the vendor
+  auth key, `GH_TOKEN` and the MCP-config var are `env -u`'d out of scope for
+  it — scrubbed rather than `--ignore-scripts`, which esbuild's postinstall
+  needs. Proven in a built image against a `preinstall` that dumps its own
+  environment, with the unscrubbed control printing both tokens.
+- The install is guarded on the **lockfile's sha256**, stamped into the volume.
+  The volume outlives the `--rm`, so a presence-only guard would run every
+  later suite against the dependency tree of a lockfile the host had since
+  changed. A project with **no** lockfile skips the install and still starts.
 - A config file written **inside** the container from an env var at spawn time.
   It holds the URL and the bearer token, and it is neither shared nor mounted,
   so nothing crosses the boundary through it. ⚠️ **The test is whether both
