@@ -3,13 +3,21 @@ import type { AgentChild, BusEndpoint, SpawnOptions } from '../child.js';
 import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
 import { mountsFor, containerPathFor } from '../mounts.js';
-import { readToken } from '../auth.js';
+import { readGhToken, readToken } from '../auth.js';
 import { assertProjectDirOutsideState, checkedMountPath } from '../containment.js';
 
 export const CONTAINER_PROJECT_DIR = '/work';
 
 /** Carries the whole MCP config, token included, so none of it is in argv. */
 export const CONTAINER_MCP_CONFIG_ENV = 'CHAT_MCP_MCP_CONFIG';
+
+/**
+ * What `gh` and `git` read to authenticate, so an agent can file a ticket,
+ * open a PR or push (#214). `gh` picks this up with no `gh auth login`, which
+ * is what makes it usable in a container — that flow wants a browser or a
+ * device code, the same constraint as the Claude token.
+ */
+export const CONTAINER_GH_TOKEN_ENV = 'GH_TOKEN';
 
 /**
  * 🛑 HOW A CONTAINER REACHES THE HOST, AND `127.0.0.1` IS NOT IT. The host's
@@ -125,6 +133,9 @@ export interface DockerRunPlan {
 
 export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRunPlan {
   const token = readToken();
+  // Optional, unlike the Claude token. Most handles need no GitHub access, and
+  // one that does not must still be able to start.
+  const ghToken = readGhToken();
   if (!token) {
     throw new Error(
       'no Claude OAuth token on file; run `claude setup-token` on the host, then ' +
@@ -159,6 +170,13 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
     `${projectDir}:${CONTAINER_PROJECT_DIR}`,
   ];
 
+  // 🛑 NAMED ONLY WHEN THERE IS ONE, because `-e NAME` with no `=` copies
+  // whatever this process has — including nothing. An empty `GH_TOKEN` inside
+  // the container reads to `gh` as a BAD credential rather than as no
+  // credential, so the agent gets an auth error in place of the clear
+  // "run `chat-mcp auth set-gh-token`" it should get.
+  if (ghToken) args.push('-e', CONTAINER_GH_TOKEN_ENV);
+
   // 🛑 BOTH SIDES COME FROM ONE CHECKED VALUE. A host side built from the
   // realpath and a container side built from the raw declared string let a
   // symlink put one directory at two container paths, only one read-only.
@@ -179,6 +197,15 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
   }
 
   const env: NodeJS.ProcessEnv = { ...process.env, [vendor.authEnvVar]: token };
+
+  // 🛑 DELETED, NOT MERELY LEFT UNSET. This inherits `process.env`, so a
+  // `GH_TOKEN` exported in the supervisor's own shell would sit in the docker
+  // CLIENT's environment while the argv above declines to name it. Nothing
+  // reaches the container either way, but the plan would then describe a
+  // credential the file never granted, and whether a spawn carried one would
+  // depend on the operator's shell.
+  if (ghToken) env[CONTAINER_GH_TOKEN_ENV] = ghToken;
+  else delete env[CONTAINER_GH_TOKEN_ENV];
 
   if (opts.grant) args.push('-e', CONTAINER_MCP_CONFIG_ENV);
 

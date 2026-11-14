@@ -6,7 +6,9 @@ import { join } from 'node:path';
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-auth-'));
 
-const { setToken, readToken, secretsEnvPath } = await import('../../src/supervise/auth.js');
+const { setToken, readToken, setGhToken, readGhToken, secretsEnvPath } = await import(
+  '../../src/supervise/auth.js'
+);
 
 test('no token on file reads as null, not a throw', () => {
   assert.equal(readToken(), null);
@@ -35,4 +37,87 @@ test('setting a new token replaces the old one, not appends', () => {
   setToken('sk-ant-oat-first');
   setToken('sk-ant-oat-second');
   assert.equal(readToken(), 'sk-ant-oat-second');
+});
+
+/**
+ * #214's GitHub half. lee ruled on 2026-11-13: ONE shared `GH_TOKEN`, in one
+ * shared file, not one per handle. These mirror the Claude-token tests above
+ * because the storage is deliberately the same shape.
+ */
+
+test('no gh token on file reads as null, not a throw', () => {
+  assert.equal(readGhToken(), null);
+});
+
+test('a stored gh token round-trips', () => {
+  setGhToken('ghp-example');
+  assert.equal(readGhToken(), 'ghp-example');
+});
+
+test('storing a gh token leaves the file owner-only (0600)', () => {
+  setGhToken('ghp-example');
+  assert.equal(statSync(secretsEnvPath()).mode & 0o777, 0o600);
+});
+
+test('leading/trailing whitespace on the gh token is trimmed before storing', () => {
+  setGhToken('  ghp-ws  \n');
+  assert.equal(readGhToken(), 'ghp-ws');
+});
+
+test('an empty gh token is refused rather than stored', () => {
+  assert.throws(() => setGhToken('   '), /empty/);
+});
+
+test('setting a new gh token replaces the old one, not appends', () => {
+  setGhToken('ghp-first');
+  setGhToken('ghp-second');
+  assert.equal(readGhToken(), 'ghp-second');
+});
+
+/**
+ * 🛑 THE HAZARD OF ONE SHARED FILE, AND THE REASON `setToken` CANNOT JUST
+ * OVERWRITE IT. Both tokens live in `secrets.env` because lee chose shared
+ * storage. A writer that rewrites the whole file silently drops the other
+ * credential, and the only symptom is an agent that cannot reach GitHub —
+ * or cannot reach Claude — some arbitrary time later.
+ *
+ * Both directions, because one writer fixed and the other not is the same
+ * bug with half the blast radius.
+ */
+test('setting the gh token does not wipe the Claude token', () => {
+  setToken('sk-ant-oat-keepme');
+  setGhToken('ghp-added-after');
+
+  assert.equal(readToken(), 'sk-ant-oat-keepme');
+  assert.equal(readGhToken(), 'ghp-added-after');
+});
+
+test('setting the Claude token does not wipe the gh token', () => {
+  setGhToken('ghp-keepme');
+  setToken('sk-ant-oat-added-after');
+
+  assert.equal(readGhToken(), 'ghp-keepme');
+  assert.equal(readToken(), 'sk-ant-oat-added-after');
+});
+
+/**
+ * The guard that keeps one line per credential true. Without it the tail of a
+ * pasted multi-line token lands on its own line, where it either parses as
+ * another key or vanishes — and the next read returns a TRUNCATED credential
+ * rather than failing. Both tokens go through the same writer, so one test
+ * covers both.
+ */
+test('a token containing a newline is refused rather than splitting the file', () => {
+  assert.throws(() => setGhToken('ghp-head\nghp-tail'), /newline/);
+  assert.throws(() => setToken('sk-ant-oat-head\nsk-ant-oat-tail'), /newline/);
+});
+
+/**
+ * The paired control for the writer's trim. A token pasted with a trailing
+ * newline is the NORMAL case — `pbpaste` and a heredoc both add one — so the
+ * guard above must not reject it.
+ */
+test('a single trailing newline is trimmed, not treated as an embedded one', () => {
+  setGhToken('ghp-trailing\n');
+  assert.equal(readGhToken(), 'ghp-trailing');
 });

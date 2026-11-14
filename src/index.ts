@@ -311,9 +311,11 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
 
   program
     .command('auth <action> [token]')
-    .description('Manage the shared Claude OAuth token for containerized agents: set-token')
+    .description(
+      'Manage the shared credentials for containerized agents: set-token, set-gh-token',
+    )
     .action(async (action: string, token?: string) => {
-      const { setToken } = await import('./supervise/auth.js');
+      const { setToken, setGhToken } = await import('./supervise/auth.js');
 
       if (action === 'set-token') {
         if (!token) {
@@ -330,7 +332,42 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         return;
       }
 
-      console.error(`Error: unknown action "${action}". Use set-token.`);
+      if (action === 'set-gh-token') {
+        // 🛑 ON STDIN, NEVER AS AN ARGUMENT. A secret in argv is readable
+        // through `ps` for the life of the process, which AGENTS.md forbids in
+        // those words. Refusing the argument is the whole point, so an
+        // operator who passes one is told why rather than quietly obliged.
+        if (token) {
+          console.error(
+            'Error: refusing a token in argv — it is readable via `ps`. ' +
+              'Pipe it instead: `pbpaste | chat-mcp auth set-gh-token`',
+          );
+          process.exit(1);
+        }
+
+        // Without this an interactive run blocks on an empty terminal with no
+        // indication that it is waiting for anything.
+        if (process.stdin.isTTY) {
+          console.error(
+            'Error: chat-mcp auth set-gh-token reads the token on stdin, ' +
+              'e.g. `pbpaste | chat-mcp auth set-gh-token`',
+          );
+          process.exit(1);
+        }
+
+        try {
+          const { readFileSync } = await import('node:fs');
+
+          setGhToken(readFileSync(0, 'utf8'));
+          console.log('gh token stored (chmod 600)');
+        } catch (err) {
+          console.error(`chat-mcp: ${err instanceof Error ? err.message : String(err)}`);
+          process.exit(1);
+        }
+        return;
+      }
+
+      console.error(`Error: unknown action "${action}". Use set-token | set-gh-token.`);
       process.exit(1);
     });
 
@@ -461,10 +498,19 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
           const { spawnFor } = await import('./adapters/index.js');
           const { resolveDriver } = await import('./supervise/drivers/index.js');
           const vendor = spawnFor(resolveDriver({ driver: o.driver, container: true }).vendor);
+          const { readGhToken } = await import('./supervise/auth.js');
+          const { CONTAINER_GH_TOKEN_ENV } = await import(
+            './supervise/drivers/containerized.js'
+          );
+          // Listed only when one is on file, because that is exactly when
+          // `dockerRunPlan` passes it. A banner naming a credential the
+          // container will not receive is the misleading-operator class #136
+          // was about.
+          const ghEnvVar = readGhToken() ? [CONTAINER_GH_TOKEN_ENV] : [];
           console.log(
             describePlan({
               mountPaths: ['/work', ...extra],
-              envVarNames: [vendor.authEnvVar],
+              envVarNames: [vendor.authEnvVar, ...ghEnvVar],
               binary: vendor.binary,
               networkMode: 'bridge (default, full outbound — narrowing is #134)',
             }),
