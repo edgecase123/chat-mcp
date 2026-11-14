@@ -28,3 +28,7 @@ measurements/
 /.mcp.json
 /.claude/settings.json
 /.claude/settings.local.json
+
+# Created by the Claude Code Agent tool at runtime. It is scratch, and a
+# `git add -A` once swept a skill for an UNRELATED codebase into a merged PR.
+.agents/
