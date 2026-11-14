@@ -5,6 +5,9 @@ import { wireAgentChild } from './wiring.js';
 import { mountsFor, containerPathFor } from '../mounts.js';
 import { GH_TOKEN_KEY, readGhToken, readToken } from '../auth.js';
 import { assertProjectDirOutsideState, checkedMountPath } from '../containment.js';
+import { assertHandle } from '../../util/naming.js';
+import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 
 export const CONTAINER_PROJECT_DIR = '/work';
 
@@ -99,11 +102,48 @@ export function buildContainerMcpConfig(bus: BusEndpoint): string {
  * `exec` also matters on its own: the supervisor drives the child over stdin,
  * and a forked `sh` sitting in the middle would own the pipe instead.
  */
-function mcpConfigPrelude(vendor: VendorSpawn): string {
+function mcpConfigStep(vendor: VendorSpawn): string {
   const path = containerMcpConfigPath(vendor);
 
   // umask, because the file holds a bearer token for the whole bus.
-  return `(umask 077; printf "%s" "$${CONTAINER_MCP_CONFIG_ENV}" > '${path}') && exec "$@"`;
+  return `(umask 077; printf "%s" "$${CONTAINER_MCP_CONFIG_ENV}" > '${path}')`;
+}
+
+/**
+ * 🛑 THE VOLUME COMES UP EMPTY, so without this the overlay only trades a
+ * WRONG-platform `node_modules` for NO `node_modules`. The image has nothing
+ * at `/work`, and docker seeds a volume from the image layer, never from the
+ * bind under it — so there is no copy of the host's tree to inherit, which is
+ * the whole point and also why something must install.
+ *
+ * ⚠️ GUARDED ON npm's OWN MARKER, not on the directory existing. The volume's
+ * mount point exists from the moment docker creates it, so `[ -d ]` would read
+ * every empty volume as populated and never install.
+ */
+function nodeModulesInstallStep(): string {
+  return `[ -e '${CONTAINER_PROJECT_DIR}/node_modules/.package-lock.json' ] || npm ci`;
+}
+
+/**
+ * The steps joined, then `exec "$@"` so the agent replaces this shell rather
+ * than running under it.
+ *
+ * 🛑 `&&`, SO A FAILED STEP STOPS THE CHAIN. An install that half-finished and
+ * then started the agent anyway is the case that produces a review claiming a
+ * green suite it never ran.
+ *
+ * 🛑 EACH STEP IS PARENTHESISED, BECAUSE `&&` AND `||` BIND EQUALLY AND LEFT
+ * TO RIGHT. Joined bare, `cfg && [ -e m ] || install` groups as
+ * `((cfg && [ -e m ]) || install)` — so a FAILED `cfg` still reaches `exec`
+ * whenever `install` succeeds, and the agent starts with no MCP config. The
+ * group makes a step atomic whatever operators it contains.
+ *
+ * `exec "$@"` stays OUTSIDE a group: a subshell `exec` replaces the subshell
+ * and leaves the real shell waiting on it, owning the stdin pipe the
+ * supervisor drives the agent over.
+ */
+export function prelude(steps: string[]): string {
+  return [...steps.map((step) => `( ${step} )`), 'exec "$@"'].join(' && ');
 }
 
 /**
@@ -115,11 +155,43 @@ export function containerNameFor(supervisorHandle: string): string {
   return `chat-mcp-${supervisorHandle}`;
 }
 
+/**
+ * The named volume carrying one handle's container-side `node_modules` for one
+ * project tree.
+ *
+ * 🛑 KEYED ON BOTH, BECAUSE NEITHER ALONE IDENTIFIES A DEPENDENCY TREE.
+ * `ProjectConfig.agents` maps a handle to a LIST of directories it may work
+ * in, and `resolveCwd` accepts anything contained by one of them — so a handle
+ * spans several trees, and a tree is reachable by several handles. Keyed on the
+ * handle alone, the first tree to install wins and every later one imports its
+ * dependencies forever, because the install guard sees a populated marker.
+ *
+ * ⚠️ `realpathSync`, so a symlinked checkout is the same tree and not a second
+ * volume with a second install.
+ *
+ * ⚠️ Named rather than anonymous so it survives the `--rm`. Drop a stale one
+ * with `docker volume rm $(chat-mcp` ... `)` — the name this function returns,
+ * never a hand-spelled copy of the prefix.
+ */
+export function nodeModulesVolumeFor(supervisorHandle: string, projectDir: string): string {
+  // 12 hex chars of sha256. Long enough that a collision is not a practical
+  // concern, short enough that `docker volume ls` stays readable.
+  const digest = createHash('sha256').update(realpathSync(projectDir)).digest('hex').slice(0, 12);
+
+  return `chat-mcp-node-modules-${supervisorHandle}-${digest}`;
+}
+
 /** The one place that validates the field both `dockerRunPlan` and `spawnContainerized` need. */
 function requireSupervisorHandle(opts: SpawnOptions): string {
   if (!opts.supervisorHandle) {
     throw new Error('a containerized spawn needs opts.supervisorHandle to find its mounts');
   }
+
+  // 🛑 SHAPE, NOT JUST PRESENCE. The handle reaches the argv inside a `-v`
+  // mount spec, where a colon separates source from destination — so an
+  // unchecked one is a way to write a mount nobody declared. `--name` used to
+  // be its only argv home, and the daemon vetted that itself.
+  assertHandle(opts.supervisorHandle);
 
   return opts.supervisorHandle;
 }
@@ -176,6 +248,16 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
     vendor.authEnvVar,
     '-v',
     `${projectDir}:${CONTAINER_PROJECT_DIR}`,
+    // 🛑 A DOCKER VOLUME, SO NO HOST DIRECTORY IS BOUND HERE. `/work` carries
+    // the host's macOS `node_modules`, and `esbuild` resolves a
+    // platform-specific binary package, so a Linux container loading it dies
+    // before the first test runs. The volume hides the host's copy from the
+    // container without writing to it.
+    //
+    // Its argv position is incidental, per the measured note below: the daemon
+    // sorts mount destinations, so this does not rely on being emitted here.
+    '-v',
+    `${nodeModulesVolumeFor(supervisorHandle, projectDir)}:${CONTAINER_PROJECT_DIR}/node_modules`,
   ];
 
   // 🛑 NAMED ONLY WHEN THERE IS ONE, because `-e NAME` with no `=` copies
@@ -193,6 +275,23 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
   // destinations. ⚠️ Docker 24.0.7 / macOS, UNRUN ON LINUX.
   for (const entry of opts.readOnlyPaths ?? []) {
     const { host, inner } = checkedMountPath(projectDir, entry, 'read-only path');
+
+    // 🛑 REFUSE RATHER THAN EMIT TWO SPECS FOR ONE DESTINATION. A declared
+    // `node_modules` passes every containment check — it is relative,
+    // colon-free, and inside the project — and then lands on the same
+    // destination as the volume above. Docker refuses a duplicate destination,
+    // so the symptom without this is a spawn that dies in the daemon with no
+    // line connecting it to the manifest that caused it.
+    const segment = inner.toLowerCase();
+
+    if (segment === 'node_modules' || segment.startsWith('node_modules/')) {
+      throw new Error(
+        `read-only path '${entry}' collides with the container-owned node_modules volume ` +
+          `at ${CONTAINER_PROJECT_DIR}/node_modules; the container installs its own, so it ` +
+          'cannot also be mounted from the host',
+      );
+    }
+
     args.push('-v', `${host}:${CONTAINER_PROJECT_DIR}/${inner}:ro`);
   }
 
@@ -221,8 +320,11 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
 
   const cli = [opts.binary ?? vendor.binary, ...vendor.argsFor(opts, 'docker')];
 
+  // 🛑 ON BOTH BRANCHES, NOT JUST THE GRANTED ONE. Only a granted spawn used
+  // to need a shell at all, so an install added to that branch alone would be
+  // present in every granted test and missing from every plain one.
   if (!opts.grant) {
-    args.push(...cli);
+    args.push('sh', '-c', prelude([nodeModulesInstallStep()]), 'sh', ...cli);
 
     return { args, env };
   }
@@ -238,7 +340,9 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
 
   env[CONTAINER_MCP_CONFIG_ENV] = buildContainerMcpConfig(opts.bus);
 
-  args.push('sh', '-c', mcpConfigPrelude(vendor), 'sh', ...cli);
+  // Config first, because it is instant and the install is not. A spawn that
+  // dies in `npm ci` then still leaves the config written for the retry.
+  args.push('sh', '-c', prelude([mcpConfigStep(vendor), nodeModulesInstallStep()]), 'sh', ...cli);
 
   return { args, env };
 }

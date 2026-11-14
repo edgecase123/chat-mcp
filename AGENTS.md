@@ -179,6 +179,12 @@ path anywhere else.**
   working, by a separate ruling that still stands.
 - The stdio transport for **host** agents, which is first-class.
 - `/work`, the project mount. That is a requirement, not a leak.
+- The per-handle named volume at `/work/node_modules`. It names no host path,
+  so there is no source side to leak. It exists to hide the host's macOS
+  `node_modules` from a Linux container, not to carry anything across, and the
+  container installs its own into it on first start. ⚠️ **A declared
+  `readOnlyPaths` entry of `node_modules` now REFUSES the spawn**, because it
+  would put a host bind on the same destination.
 - A config file written **inside** the container from an env var at spawn time.
   It holds the URL and the bearer token, and it is neither shared nor mounted,
   so nothing crosses the boundary through it. ⚠️ **The test is whether both

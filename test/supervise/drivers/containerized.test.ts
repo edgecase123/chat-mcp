@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { spawn as realSpawn } from 'node:child_process';
+import { spawn as realSpawn, spawnSync } from 'node:child_process';
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-driver-'));
 
@@ -13,6 +13,8 @@ const { registerMount, mountsPath } = await import('../../../src/supervise/mount
 const { claudeSpawn } = await import('../../../src/adapters/claude-spawn.js');
 const {
   dockerRunPlan,
+  nodeModulesVolumeFor,
+  prelude,
   CONTAINER_PROJECT_DIR,
   CONTAINER_MCP_CONFIG_ENV,
   containerPathFor,
@@ -139,6 +141,221 @@ test('🚨 the project mount survives the state-dir removal', () => {
   const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
 
   assert.ok(args.includes(`${PROJECT_DIR}:${CONTAINER_PROJECT_DIR}`));
+});
+
+/**
+ * 🛑 `/work` CARRIES THE HOST'S `node_modules`, INSTALLED ON macOS. The
+ * container is Linux on the same chip, so `tsx` loads `esbuild`, `esbuild`
+ * resolves `@esbuild/darwin-arm64`, and the suite dies before the first test.
+ * A review from inside the container then proves typecheck only.
+ *
+ * A volume at the same path hides the host's copy from the container without
+ * touching it, so each side keeps its own platform build.
+ *
+ * ⚠️ NAMED, NOT ANONYMOUS, so it survives the `--rm` and the install below
+ * runs on a handle's first container rather than on every one. A source side
+ * that is a bare name, not an absolute path, is what makes it a volume.
+ */
+test('🛑 a NAMED volume covers /work/node_modules, so the host platform build stays out', () => {
+  setToken('sk-ant-oat-x');
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  const spec = args.find((a) => a.endsWith(`:${CONTAINER_PROJECT_DIR}/node_modules`));
+
+  assert.ok(spec, `no node_modules overlay in ${args.join(' ')}`);
+  assert.ok(
+    !spec.startsWith('/'),
+    `the source side is an absolute path, so this is a host bind, not a volume: ${spec}`,
+  );
+});
+
+/**
+ * 🚨 KEYED ON THE HANDLE **AND** THE PROJECT DIR. `ProjectConfig.agents` is
+ * `Record<string, string[]>` — "the directories that agent may work in" — and
+ * `resolveCwd` accepts any directory contained by any of them. So ONE handle
+ * legitimately spawns against several trees.
+ *
+ * Keyed on the handle alone, the first tree to install wins: the install guard
+ * finds a populated marker and every later tree silently imports the first
+ * one's dependencies, across `--rm`, indefinitely. That is the "dependency
+ * tree nobody declared" symptom reached from the other side.
+ */
+test('🚨 one handle working in TWO project dirs gets two different volumes', () => {
+  const other = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-second-'));
+
+  assert.notEqual(
+    nodeModulesVolumeFor('claude1', PROJECT_DIR),
+    nodeModulesVolumeFor('claude1', other),
+  );
+});
+
+/**
+ * The paired control. Two handles on one tree must also differ, and a key
+ * built from the project dir ALONE would pass the test above and fail this.
+ */
+test('🛑 two handles in ONE project dir also get two different volumes', () => {
+  assert.notEqual(
+    nodeModulesVolumeFor('claude1', PROJECT_DIR),
+    nodeModulesVolumeFor('claude2', PROJECT_DIR),
+  );
+});
+
+/**
+ * 🛑 THE SAME INPUTS MUST GIVE THE SAME NAME, or the volume is anonymous in
+ * all but spelling and the install runs on every spawn after all.
+ */
+test('🛑 the volume name is STABLE across calls for one handle and dir', () => {
+  assert.equal(
+    nodeModulesVolumeFor('claude1', PROJECT_DIR),
+    nodeModulesVolumeFor('claude1', PROJECT_DIR),
+  );
+});
+
+/**
+ * 🚨 A SYMLINKED PROJECT DIR IS THE SAME TREE, so it must not earn a second
+ * volume and a second install. `realpathSync` collapses them, which is how
+ * every other mount in this file is already resolved.
+ */
+test('🚨 a project dir reached through a SYMLINK keys the SAME volume', () => {
+  const real = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-real-'));
+  const link = join(mkdtempSync(join(tmpdir(), 'chat-mcp-docker-link-')), 'alias');
+  symlinkSync(real, link);
+
+  assert.equal(nodeModulesVolumeFor('claude1', link), nodeModulesVolumeFor('claude1', real));
+});
+
+/**
+ * 🛑 DOCKER'S OWN NAME RULE IS `[a-zA-Z0-9][a-zA-Z0-9_.-]*`. `assertHandle`
+ * already keeps the handle narrower than that, but the digest is new, so the
+ * COMPOSED name is what has to be checked.
+ */
+test('🛑 the composed volume name is a legal docker volume name', () => {
+  assert.match(nodeModulesVolumeFor('claude1', PROJECT_DIR), /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/);
+});
+
+/**
+ * 🛑 THE VOLUME STARTS EMPTY, so the overlay alone takes the container from a
+ * WRONG-platform `node_modules` to NO `node_modules`. The suite still cannot
+ * run, for a different reason. Something has to populate it, and `/work`
+ * carries the lockfile to do it from.
+ */
+test('🛑 the container installs its own node_modules when the volume is empty', () => {
+  setToken('sk-ant-oat-x');
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  const prelude = args.find((a) => a.includes('npm ci'));
+
+  assert.ok(prelude, `no install step in ${args.join(' ')}`);
+  assert.match(
+    prelude,
+    /node_modules\/\.package-lock\.json' \] \|\| npm ci/,
+    'the install is unconditional, so it reruns on an already-populated volume',
+  );
+});
+
+/**
+ * The paired control. A granted spawn has always been wrapped in `sh -c` to
+ * write its MCP config, so an install step added only to that branch would
+ * look right in every granted test and be absent from every plain one.
+ */
+test('🛑 the install step is there on a NON-granted spawn too', () => {
+  setToken('sk-ant-oat-x');
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+
+  assert.ok(!args.includes('--mcp-config'), 'this fixture was supposed to be ungranted');
+  assert.ok(args.some((a) => a.includes('npm ci')));
+});
+
+/**
+ * 🚨 MEASURED IN A REAL `sh`, NOT READ OFF THE STRING. `&&` and `||` have
+ * EQUAL precedence and bind left to right, so `cfg && [ -e m ] || install`
+ * groups as `((cfg && [ -e m ]) || install)` — and a FAILED config write then
+ * reaches `exec` anyway, because the install's success rescues the whole
+ * group. The agent starts with no MCP config, which is the exact case the
+ * original `&& exec "$@"` existed to prevent.
+ *
+ * Every step `prelude` joins must therefore be atomic on its own.
+ */
+test('🚨 a FAILED step stops the chain even when a later step contains ||', () => {
+  const script = prelude(['false', '[ -e /nonexistent-marker ] || true']);
+  const ran = spawnSync('sh', ['-c', script, 'sh', 'echo', 'AGENT_RAN'], {
+    encoding: 'utf8',
+  });
+
+  assert.equal(
+    ran.stdout.trim(),
+    '',
+    `the agent ran despite a failed first step; script was: ${script}`,
+  );
+});
+
+/**
+ * The paired control. A `prelude` that never reached `exec` would pass the
+ * test above and start nothing at all.
+ */
+test('🚨 an all-passing chain DOES reach the agent', () => {
+  const script = prelude(['true', '[ -e /nonexistent-marker ] || true']);
+  const ran = spawnSync('sh', ['-c', script, 'sh', 'echo', 'AGENT_RAN'], {
+    encoding: 'utf8',
+  });
+
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+});
+
+/**
+ * 🚨 THE HANDLE IS NOW A MOUNT-SPEC FIELD, SO ITS SHAPE IS LOAD-BEARING. It
+ * used to reach the argv only through `--name`, where the daemon rejects a bad
+ * value itself. In a `-v` spec a colon separates source from destination, so an
+ * unvalidated handle is a way to write a mount nobody declared.
+ *
+ * `requireSupervisorHandle` only ever checked truthiness, despite its docblock
+ * calling itself the one place that validates the field.
+ */
+test('🚨 a supervisor handle that could forge a mount spec REFUSES the plan', () => {
+  setToken('sk-ant-oat-x');
+
+  for (const bad of ['claude1:/etc', 'claude1:/work/node_modules:ro', '../claude1', 'Claude1']) {
+    assert.throws(
+      () => dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: bad }),
+      /handle/i,
+      `the plan accepted the handle ${bad}`,
+    );
+  }
+});
+
+/**
+ * The paired control. A `requireSupervisorHandle` that threw on everything
+ * would pass the test above and spawn nothing at all.
+ */
+test('🚨 a normal handle still builds a plan', () => {
+  setToken('sk-ant-oat-x');
+
+  assert.ok(dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' }).length > 0);
+});
+
+/**
+ * 🚨 THE OVERLAY MUST NAME NO HOST PATH AT ALL. A `host:/work/node_modules`
+ * spec is a second door onto a host directory, and it also collides with the
+ * volume on one destination, which the daemon refuses at spawn time.
+ *
+ * ⚠️ MEASURED, NOT ASSUMED: `readOnlyPaths: ['node_modules']` passes every
+ * containment check and emitted exactly that spec. The `:ro` suffix is why an
+ * `endsWith` check could not see it. `dockerRunPlan` must refuse instead.
+ */
+test('🚨 a read-only path that collides with the node_modules volume REFUSES the spawn', () => {
+  setToken('sk-ant-oat-x');
+  // The declared path has to EXIST or `checkedProjectPath` refuses first, for
+  // a reason that has nothing to do with the collision.
+  const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-nm-'));
+  mkdirSync(join(dir, 'node_modules'));
+
+  assert.throws(
+    () =>
+      dockerArgsFor({
+        cwd: dir,
+        supervisorHandle: 'claude1',
+        readOnlyPaths: ['node_modules'],
+      }),
+    /node_modules/,
+  );
 });
 
 test('a registered extra mount appears at /mnt/<key>', () => {
