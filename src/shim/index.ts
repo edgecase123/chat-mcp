@@ -25,6 +25,7 @@ import { installSetStyle } from './tools/set_style.js';
 import { installClaims } from './tools/claims.js';
 import { installSearch } from './tools/search.js';
 import { installHealth } from './tools/health.js';
+import { installRunCommand } from './tools/run_command.js';
 import { installInboxResource } from './resources/inbox.js';
 import { checkWakeAdapter, prependAdapterWarning, type AdapterStatus } from './adapter-check.js';
 import { dbPath, notifyPathFor } from '../util/paths.js';
@@ -159,6 +160,10 @@ export function buildServer(ctx: ShimContext): McpServer {
   installClaims(server, ctx);
   installSearch(server, ctx);
   installHealth(server, ctx);
+
+  // Registers nothing unless this session has a command broker, so an ordinary
+  // session does not advertise two tools that could only refuse.
+  installRunCommand(server);
   installInboxResource(server, ctx);
 
   return server;
