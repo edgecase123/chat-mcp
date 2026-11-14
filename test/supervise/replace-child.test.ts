@@ -81,6 +81,7 @@ function recordingChild(children: FakeChild[]) {
       },
       onSession: (cb) => cb('sess-from-fake'),
       onEvent: () => undefined,
+      onStderr: () => undefined,
       onExit: (cb) => {
         onExit = cb;
       },
@@ -481,7 +482,11 @@ test('EVERY child callback registration goes through the generation guard', () =
   // an unguarded reading would overwrite the LIVE child's gauge with the dead
   // session's number — a confidently wrong gauge, which is worse than the
   // blank one #213 opened on.
-  const REQUIRED = ['onTurnEnd', 'onSession', 'onDenial', 'onUsage', 'onContext', 'onExit', 'onEvent'];
+  // ⚠️ `onStderr` JOINED ON THE SAME GROUNDS AS `onEvent`. A first cut left it
+  // unguarded, arguing a dying child's stderr is the most useful kind. It is —
+  // but a stale child keeps writing, and an unguarded line reads as the LIVE
+  // child's error. `ifCurrent` reports the drop, so nothing goes silent.
+  const REQUIRED = ['onTurnEnd', 'onSession', 'onDenial', 'onUsage', 'onContext', 'onExit', 'onEvent', 'onStderr'];
   const present = registrations.map(([, name]) => name);
 
   assert.deepEqual(

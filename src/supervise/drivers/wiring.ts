@@ -52,6 +52,7 @@ export function wireAgentChild(
   const contextCbs: ((s: ContextSnapshot) => void)[] = [];
   const denialCbs: ((d: Denial) => void)[] = [];
   const sessionCbs: ((id: string) => void)[] = [];
+  const stderrCbs: ((chunk: string) => void)[] = [];
   let lastSession: string | null = null;
 
   const feed = createLineParser((parsed) => {
@@ -82,6 +83,53 @@ export function wireAgentChild(
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', feed);
 
+  // 🛑 ATTACHED HERE, NOT PER DRIVER, so no driver can ship without it. A
+  // containerized child died with its reason on this stream and nothing was
+  // listening — the prelude chains on `&&` and `npm` writes its errors here,
+  // so a failed install meant no agent started and no line said why.
+  //
+  // ⚠️ Buffered to a line break, because a chunk is not a line. `npm` emits
+  // partial writes, and logging raw chunks splits one error across entries.
+  child.stderr.setEncoding('utf8');
+  let errBuffer = '';
+
+  const emitErrLine = (raw: string): void => {
+    const line = raw.trim();
+    // An empty line carries nothing a reader needs, and a flush of pure
+    // whitespace would otherwise spam one entry per write.
+    if (line.length === 0) return;
+
+    for (const cb of stderrCbs) cb(line);
+  };
+
+  // ⚠️ `\r` COUNTS AS A BREAK, NOT JUST `\n`. `npm` and `docker pull` draw
+  // progress by returning the carriage without ever sending a newline, so a
+  // `\n`-only split buffered the whole run and delivered it as one entry
+  // thousands of characters long. Measured by claude2 on #229.
+  const BREAK = /\r\n|[\n\r]/;
+
+  child.stderr.on('data', (chunk: string) => {
+    errBuffer += chunk;
+    for (;;) {
+      const at = errBuffer.search(BREAK);
+      if (at < 0) break;
+
+      const [sep] = BREAK.exec(errBuffer.slice(at)) ?? ['\n'];
+      emitErrLine(errBuffer.slice(0, at));
+      errBuffer = errBuffer.slice(at + sep.length);
+    }
+  });
+
+  // 🔴 THE CASE THIS EXISTS FOR. A process that dies mid-line never sends the
+  // closing break, so draining only on a break dropped the ONE line naming why
+  // the container died. `end` is the only signal that no further break is
+  // coming. Raised by claude2 on PR 238 with a failing repro.
+  child.stderr.on('end', () => {
+    const residue = errBuffer;
+    errBuffer = '';
+    emitErrLine(residue);
+  });
+
   return {
     // The VENDOR's declaration, passed through. A hard-coded `true` here
     // promised a reading for a router that may never call either sink. #219.
@@ -106,6 +154,9 @@ export function wireAgentChild(
       sessionCbs.push(cb);
       // A late subscriber must not miss an id that already arrived.
       if (lastSession) cb(lastSession);
+    },
+    onStderr(cb): void {
+      stderrCbs.push(cb);
     },
     onEvent(cb): void {
       eventCbs.push(cb);

@@ -72,6 +72,7 @@ function deferredExitChild(spawned: Spawned[]) {
       onDenial: () => undefined,
       onSession: (cb) => cb('sess-from-fake'),
       onEvent: () => undefined,
+      onStderr: () => undefined,
       onExit: (cb) => {
         onExit = cb;
       },

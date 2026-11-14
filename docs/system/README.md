@@ -30,6 +30,7 @@ listed here will not be found. Add the row in the same commit as the page.
 | File | What it covers |
 |---|---|
 | [agent-liveness.md](05-supervision/agent-liveness.md) | How `online` is computed, why a containerized child's row holds the supervisor's pid, and what the exit handler clears |
+| [child-output.md](05-supervision/child-output.md) | The three streams a child writes to, which reach the log, and why stderr went unread |
 
 ### [07 — Operations](07-operations/)
 | File | What it covers |

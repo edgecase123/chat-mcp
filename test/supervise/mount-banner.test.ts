@@ -32,6 +32,7 @@ function fakeChild(sent: string[]) {
     onDenial: () => undefined,
     onSession: (cb: (id: string) => void) => cb('sess-1'),
     onEvent: () => undefined,
+    onStderr: () => undefined,
     onExit: () => undefined,
     kill: () => undefined,
     finishTurn: () => endTurn?.(),
