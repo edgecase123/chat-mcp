@@ -81,7 +81,12 @@ test('no GitHub credential is baked into the image', () => {
   // Anywhere on the directive, not just first, and no `=` required: all of
   // `ARG GH_TOKEN`, `ENV GH_TOKEN value` and `ENV FOO=1 GH_TOKEN=x` baked a
   // credential in and passed an earlier cut of this assertion.
-  assert.doesNotMatch(LOGICAL_LINES, /^\s*(ENV|ARG)\b[^\n]*\b(GH|GITHUB)_TOKEN\b/m);
+  // 🛑 `i`, BECAUSE DOCKERFILE DIRECTIVES ARE CASE-INSENSITIVE. `env GH_TOKEN=x`
+  // builds and bakes the credential in exactly as `ENV` does.
+  // The flag also loosens the variable name, which Linux treats as
+  // case-sensitive. That direction is deliberate: it can only fail loudly on a
+  // name `gh` would not read, never pass one it would.
+  assert.doesNotMatch(LOGICAL_LINES, /^\s*(ENV|ARG)\b[^\n]*\b(GH|GITHUB)_TOKEN\b/im);
   assert.doesNotMatch(INSTALLS, /gh\s+auth\s+login/);
 });
 
