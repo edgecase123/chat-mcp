@@ -20,6 +20,14 @@ const INSTALLS = DOCKERFILE.split('\n')
   .join('\n');
 
 /**
+ * 🛑 `\`-CONTINUED LINES ARE JOINED HERE, AND THAT IS WHAT THE CREDENTIAL
+ * GUARD READS. A `^ENV` anchor only ever saw the FIRST variable on a line, so
+ * `ENV FOO=1 GH_TOKEN=x` slipped past it, and a continuation could put the
+ * variable on a line beginning with neither `ENV` nor `ARG`. Both measured.
+ */
+const LOGICAL_LINES = INSTALLS.replace(/\\\n\s*/g, ' ');
+
+/**
  * #214: a containerized agent could not reach GitHub by ANY route.
  *
  * ⚠️ WHAT THESE PROVE AND DO NOT PROVE. They read the Dockerfile, so they
@@ -68,9 +76,12 @@ test('the gh install writes GitHub own apt source to the list apt reads', () => 
  * one would put the credential in every layer and in `docker history`.
  */
 test('no GitHub credential is baked into the image', () => {
-  // No `=`: `ARG GH_TOKEN` fed by --build-arg, and `ENV GH_TOKEN value`,
-  // both bake the credential in and both passed the `=` form.
-  assert.doesNotMatch(INSTALLS, /^\s*(ENV|ARG)\s+GH_TOKEN\b/m);
+  // 🛑 BOTH NAMES. `gh` reads GITHUB_TOKEN as well as GH_TOKEN, and nothing
+  // guarded the second one at all.
+  // Anywhere on the directive, not just first, and no `=` required: all of
+  // `ARG GH_TOKEN`, `ENV GH_TOKEN value` and `ENV FOO=1 GH_TOKEN=x` baked a
+  // credential in and passed an earlier cut of this assertion.
+  assert.doesNotMatch(LOGICAL_LINES, /^\s*(ENV|ARG)\b[^\n]*\b(GH|GITHUB)_TOKEN\b/m);
   assert.doesNotMatch(INSTALLS, /gh\s+auth\s+login/);
 });
 
