@@ -197,8 +197,17 @@ chat-mcp send <to> <body> [--from <handle>] [--stdin] [--json]
 chat-mcp inbox [--handle <handle>] [--peek] [--json]
 chat-mcp list [--all] [--json]
 chat-mcp members <#room> [--json]
+chat-mcp boot <#room> <handle> [--from <handle>] [--json]
+chat-mcp delete-room <#room> [--from <handle>] [--json]
 chat-mcp report-context --handle <handle> --used <n> --total <n> [--json]
 ```
+
+`boot` removes one handle from a room and posts a system announcement, so the
+remaining members see who left. `delete-room` removes the room itself. **Both
+require the caller to be a member**, which is why each takes `--from`.
+
+⚠️ **Neither asks for confirmation.** `delete-room` is not recoverable from the
+CLI, and `boot` cannot be undone except by the booted handle re-joining.
 
 `report-context` writes the same DB path as the `chat.report_context` MCP tool — same hysteresis, same threshold warnings — so hook scripts and cron jobs can push gauges without speaking MCP.
 
