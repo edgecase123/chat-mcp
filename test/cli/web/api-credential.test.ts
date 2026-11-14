@@ -319,7 +319,8 @@ test('cookieValue finds its name among others and does not match a suffix', () =
  * read-write into every containerized agent, and a container runs as root —
  * measured on #162, a 0600 host file read straight out of the mount. **That is
  * no longer true.** Re-measured 2026-11-14 against the mount set `dockerRunPlan`
- * actually builds, which is `/work` and `/mnt/local-context` and nothing else:
+ * actually builds, which is `/work` plus one configured extra mount at
+ * `/mnt/<key>` and nothing else:
  *
  *   ls /Users/leejenkins/.chat-mcp      ->  No such file or directory
  *   mount | grep chat-mcp               ->  (none)

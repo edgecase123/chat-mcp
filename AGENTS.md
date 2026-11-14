@@ -256,7 +256,6 @@ exists for. The bearer token is the whole boundary there.
 
 - `.claude/agents/dry-solid-reviewer.md` — DRY/SOLID review against this codebase's own patterns.
 - `.claude/agents/security-scanner.md` — scans for this repo's actual attack surface (command injection, secret handling, path traversal, SQL interpolation).
-- `.claude/skills/local-context/` — per-task working-memory skill (`/local-context`).
 
 ## Review order: self, then sibling
 

@@ -169,7 +169,7 @@ a credential world-readable while this page claimed `0600`. Point
 states the invariant that the token is never written under `stateDir()`, because
 #162 measured the whole state dir bind-mounted into every container. **That was
 re-measured on 2026-11-14 and is no longer true** — with the real mount set
-(`/work` and `/mnt/local-context`) the state dir is not present in the container
+(`/work` plus one configured extra mount at `/mnt/<key>`) the state dir is not present in the container
 at all, `/work/..` is the container root, and `assertProjectDirOutsideState`
 refuses any registered mount overlapping it.
 
