@@ -23,11 +23,21 @@ measurements/
 # clones the same handle, and the shim refuses the second one outright.
 #
 # ⚠️ NOT a blanket `.claude/*` ignore, unlike `leagues`. This repo TRACKS
-# `.claude/agents/` and `.claude/skills/local-context/` on purpose. Only the
-# per-machine permission files are ignored.
+# `.claude/agents/` on purpose — those reviewers are about THIS codebase.
+# Per-machine permission files and one person's workflow skill are ignored.
 /.mcp.json
 /.claude/settings.json
 /.claude/settings.local.json
+
+# 🛑 ONE PERSON'S WORKFLOW, NOT THIS PROJECT'S. `local-context` is a per-task
+# working-memory skill keyed to one operator's habits, and its mount key showed
+# up in the docs as if `/mnt/local-context` were a standard container path. The
+# MOUNT mechanism is already generic — `mountsFor` reads whatever keys
+# `mounts.json` holds and `src/` never names this one.
+#
+# ⚠️ AN IGNORED FILE IS STILL DESTROYED BY `git clean -xfd`, so the canonical
+# copy lives OUTSIDE every checkout, at `~/.claude/skills/local-context/`.
+/.claude/skills/local-context/
 
 # Created by the Claude Code Agent tool at runtime. It is scratch, and a
 # `git add -A` once swept a skill for an UNRELATED codebase into a merged PR.
