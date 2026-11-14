@@ -51,6 +51,22 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
 RUN git config --system credential."https://github.com".helper '!gh auth git-credential' \
   && git config --system credential."https://gist.github.com".helper '!gh auth git-credential'
 
+# 🛑 WITHOUT THIS, EVERY GIT COMMAND IN A MOUNTED TREE FAILS (#212). A bind
+# mount appears inside the container as `uid=0` while this process is
+# `uid=10001`, so git refuses the repository as dubiously owned — status, log,
+# commit and push alike. Reading and writing the same files works; only git
+# refuses, which is why it stayed invisible until an agent said what it did.
+#
+# 🛑 `*`, NOT A LIST, AND lee RULED THAT ON 2026-11-14. An enumerated list
+# cannot work from here: extra mounts come from `mounts.json` at RUN time, so
+# build time does not know their `/mnt/<key>` paths and any fixed list is
+# incomplete by construction. The check it widens guards one user against a repo
+# ANOTHER user planted, and this container has a single tenant.
+#
+# 🛑 MUST STAY ABOVE `USER agent`. `--system` writes /etc/gitconfig and needs
+# root. Pinned by dockerfile-safe-directory.test.ts, which asserts the order.
+RUN git config --system --add safe.directory '*'
+
 RUN npm install -g @anthropic-ai/claude-code
 
 # 🛑 NON-ROOT, NOT OPTIONAL. `claude --allow-dangerously-skip-permissions`
