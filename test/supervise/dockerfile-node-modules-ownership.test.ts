@@ -87,3 +87,55 @@ test('⚠️ control — the path the image pre-creates is the path the driver m
     `the driver mounts the volume at ${CONTAINER_PROJECT_DIR}/node_modules; the image must pre-create THAT path`,
   );
 });
+
+/**
+ * 🔴 #242, AND IT IS THE SAME CLASS AS THE ORDERING TEST ABOVE. The `useradd`
+ * chowns `/root`, and a later `npm ci` runs as ROOT with `HOME=/root` — so it
+ * repopulates `/root/.npm/_cacache` AFTER that chown. 1073 paths were left
+ * root-owned in a cache the agent then has to write, a cold `npm ci` as `agent`
+ * died `EACCES: mkdir /root/.npm/_cacache/...`, the prelude's `&&` held, and NO
+ * AGENT STARTED.
+ *
+ * 🛑 THIS RUNS IN CI AND THE IMAGE TEST DOES NOT. `container-toolchain.test.ts`
+ * reads the BUILT image, which is stronger — and it is docker-lane-only, so
+ * `ci.yml`'s plain `npm test` skips it. Nothing would stop the ordering
+ * regressing on `main`. Raised by claude2 on PR 243.
+ *
+ * ⚠️ THE TWO ARE NOT REDUNDANT. This proves the instruction is in the right
+ * PLACE; the image test proves the built result. A Dockerfile can be correct
+ * and the published image stale, and a build can be correct while a future
+ * root-run layer lands below this chown.
+ */
+test('🔴 /root is chowned to agent AFTER the last root-run npm, or a cold npm ci dies EACCES', () => {
+  const userAt = LINES.findIndex((l) => /^\s*USER\s+agent\b/.test(l));
+  const isRootNpm = (l: string) => /^\s*RUN\b.*\bnpm\s+(ci|install)\b/.test(l);
+  const chownsRoot = (l: string) => /chown\s+(-R\s+)?agent:agent\b[^\n]*\s\/root\b/.test(l);
+
+  assert.notEqual(userAt, -1, 'no `USER agent` line — has the image stopped dropping root?');
+
+  const rootNpmLines = LINES.map((l, i) => (isRootNpm(l) && i < userAt ? i : -1)).filter(
+    (i) => i !== -1,
+  );
+  const chownRootLines = LINES.map((l, i) => (chownsRoot(l) ? i : -1)).filter((i) => i !== -1);
+
+  assert.ok(rootNpmLines.length > 0, 'no root-run `npm ci`/`npm install` found before USER agent');
+  assert.ok(
+    chownRootLines.length > 0,
+    'nothing chowns /root to agent at all; the npm cache lives at /root/.npm (#242)',
+  );
+
+  const lastNpm = Math.max(...rootNpmLines);
+  const lastChown = Math.max(...chownRootLines);
+
+  assert.ok(
+    lastChown > lastNpm,
+    `the last root-run npm is at line ${lastNpm + 1} and the last chown of /root at ` +
+      `${lastChown + 1}. That npm repopulates /root/.npm as root, so a cold \`npm ci\` as ` +
+      `agent dies EACCES and no agent starts (#242).`,
+  );
+  assert.ok(
+    lastChown < userAt,
+    `the chown of /root is at line ${lastChown + 1}, after \`USER agent\` at ${userAt + 1}; ` +
+      'chowning /root needs root, so the build would fail',
+  );
+});

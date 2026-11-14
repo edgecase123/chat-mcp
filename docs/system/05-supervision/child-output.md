@@ -111,10 +111,15 @@ not.
 
 Guarded two ways, because one fails on the cause and one on the consequence:
 
-| test | fails on |
-|---|---|
-| `nothing under /root … is owned by anyone but agent` | the CAUSE, read off the built image |
-| `the node_modules the install step builds can … TRANSFORM TypeScript` | the CONSEQUENCE |
+| test | fails on | runs in CI? |
+|---|---|---|
+| `/root is chowned to agent AFTER the last root-run npm` | the ORDERING, read off the `Dockerfile` | **yes** |
+| `nothing under /root … is owned by anyone but agent` | the CAUSE, read off the built image | no — docker lane |
+| `the node_modules the install step builds can … TRANSFORM TypeScript` | the CONSEQUENCE | no — docker lane |
+
+🛑 **THE CI COLUMN IS THE POINT.** `ci.yml` runs plain `npm test`, which skips
+the docker lane. Without the first row nothing stops the ordering regressing on
+`main`.
 
 ## 🛑 Why `onStderr` goes through the generation guard
 

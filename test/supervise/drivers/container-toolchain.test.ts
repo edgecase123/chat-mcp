@@ -214,6 +214,12 @@ test(
  * about a future root-run layer added below the fix. This reads the built
  * image, which is the only thing a spawn actually uses.
  *
+ * 🛑 AND IT IS NOT THE ONLY GUARD, BECAUSE THIS ONE SKIPS IN CI. `ci.yml` runs
+ * plain `npm test`, which `dockerLaneSkip` refuses without `DOCKER_TESTS` — so
+ * on `main` this proves nothing. `dockerfile-node-modules-ownership.test.ts`
+ * carries a CI-safe ordering assertion for the same defect. Raised by claude2
+ * on PR 243: a guard that only runs locally does not protect the branch.
+ *
  * ⚠️ IT IS NOT A SUBSTITUTE FOR THE INSTALL TEST ABOVE. This fails on the
  * CAUSE; that one fails on the CONSEQUENCE. Ownership could be correct and the
  * toolchain still unusable for an unrelated reason.
