@@ -1,14 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-auth-'));
 
-const { setToken, readToken, setGhToken, readGhToken, secretsEnvPath } = await import(
-  '../../src/supervise/auth.js'
-);
+const {
+  setToken,
+  readToken,
+  setGhToken,
+  readGhToken,
+  clearGhToken,
+  hasGhToken,
+  secretsEnvPath,
+} = await import('../../src/supervise/auth.js');
 
 test('no token on file reads as null, not a throw', () => {
   assert.equal(readToken(), null);
@@ -120,4 +126,71 @@ test('a token containing a newline is refused rather than splitting the file', (
 test('a single trailing newline is trimmed, not treated as an embedded one', () => {
   setGhToken('ghp-trailing\n');
   assert.equal(readGhToken(), 'ghp-trailing');
+});
+
+test('hasGhToken answers presence without the caller ever holding the value', () => {
+  clearGhToken();
+  assert.equal(hasGhToken(), false);
+
+  setGhToken('ghp-present');
+  assert.equal(hasGhToken(), true);
+});
+
+/**
+ * The write is atomic, so the temp file must not survive it. A lingering
+ * `secrets.env.tmp` would be a second copy of both credentials at `0600`,
+ * which is a credential sitting somewhere nobody looks.
+ */
+test('the atomic write leaves no temp file behind', () => {
+  setGhToken('ghp-atomic');
+
+  assert.equal(existsSync(`${secretsEnvPath()}.tmp`), false);
+  assert.equal(readGhToken(), 'ghp-atomic');
+});
+
+/**
+ * 🛑 THE DROP IS ANNOUNCED, AND THE ANNOUNCEMENT HOLDS NO SECRET. The next
+ * write rebuilds the file from what parsed, so an unparseable line is gone for
+ * good — and a credential that vanished with no error at the moment of loss is
+ * the failure this module is shaped to avoid.
+ */
+test('an unparseable line is reported by LINE NUMBER, never by content', () => {
+  setGhToken('ghp-keep');
+
+  writeFileSync(secretsEnvPath(), `export GH_TOKEN=ghp-secret-in-a-bad-line\nGH_TOKEN=ghp-keep\n`);
+
+  const errors: string[] = [];
+  const real = console.error;
+  console.error = (msg: unknown) => void errors.push(String(msg));
+
+  try {
+    readGhToken();
+  } finally {
+    console.error = real;
+  }
+
+  assert.equal(errors.length, 1, 'the dropped line was not reported');
+  assert.match(errors[0] ?? '', /line 1/);
+  assert.doesNotMatch(errors[0] ?? '', /ghp-secret-in-a-bad-line/);
+});
+
+/**
+ * The paired control. A reader that logged every line would pass the test
+ * above on its first assertion and flood an operator's terminal with one
+ * complaint per blank line.
+ */
+test('a blank line is not reported as unparseable', () => {
+  writeFileSync(secretsEnvPath(), `GH_TOKEN=ghp-blanks\n\n\n`);
+
+  const errors: string[] = [];
+  const real = console.error;
+  console.error = (msg: unknown) => void errors.push(String(msg));
+
+  try {
+    assert.equal(readGhToken(), 'ghp-blanks');
+  } finally {
+    console.error = real;
+  }
+
+  assert.deepEqual(errors, []);
 });

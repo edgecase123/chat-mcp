@@ -3,7 +3,7 @@ import type { AgentChild, BusEndpoint, SpawnOptions } from '../child.js';
 import type { VendorSpawn } from '../vendor.js';
 import { wireAgentChild } from './wiring.js';
 import { mountsFor, containerPathFor } from '../mounts.js';
-import { readGhToken, readToken } from '../auth.js';
+import { GH_TOKEN_KEY, readGhToken, readToken } from '../auth.js';
 import { assertProjectDirOutsideState, checkedMountPath } from '../containment.js';
 
 export const CONTAINER_PROJECT_DIR = '/work';
@@ -12,12 +12,20 @@ export const CONTAINER_PROJECT_DIR = '/work';
 export const CONTAINER_MCP_CONFIG_ENV = 'CHAT_MCP_MCP_CONFIG';
 
 /**
- * What `gh` and `git` read to authenticate, so an agent can file a ticket,
- * open a PR or push (#214). `gh` picks this up with no `gh auth login`, which
- * is what makes it usable in a container — that flow wants a browser or a
- * device code, the same constraint as the Claude token.
+ * What `gh` reads to authenticate, so an agent can file a ticket or open a PR
+ * (#214). `gh` picks this up with no `gh auth login`, which is what makes it
+ * usable in a container — that flow wants a browser or a device code, the
+ * same constraint as the Claude token.
+ *
+ * ⚠️ `git push` NEEDS MORE THAN THIS VAR. Plain git does not read `GH_TOKEN`;
+ * it needs the credential helper that `gh auth setup-git` installs, and the
+ * image configures that helper at build time. Raised in review, where this
+ * comment claimed push worked on the var alone.
+ *
+ * 🛑 RE-EXPORTED, NOT REDECLARED. The storage key IS the env var name, and
+ * `auth.ts` owns the file format.
  */
-export const CONTAINER_GH_TOKEN_ENV = 'GH_TOKEN';
+export const CONTAINER_GH_TOKEN_ENV = GH_TOKEN_KEY;
 
 /**
  * 🛑 HOW A CONTAINER REACHES THE HOST, AND `127.0.0.1` IS NOT IT. The host's
@@ -139,7 +147,7 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
   if (!token) {
     throw new Error(
       'no Claude OAuth token on file; run `claude setup-token` on the host, then ' +
-        '`chat-mcp auth set-token <token>`',
+        '`pbpaste | chat-mcp auth set-token` (stdin, never argv)',
     );
   }
 

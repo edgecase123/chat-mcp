@@ -728,3 +728,19 @@ test('no gh token on file means no -e GH_TOKEN, and the spawn still succeeds', (
   assert.ok(!args.includes('GH_TOKEN'), 'GH_TOKEN was named with no token on file');
   assert.equal(env.GH_TOKEN, undefined);
 });
+
+/**
+ * 🛑 ONE STRING, NOT TWO THAT HAPPEN TO MATCH. The storage key IS the injected
+ * env var name. Two independent literals would let a rename inject
+ * `-e <newname>` for a var `auth.ts` never stores, and the container would get
+ * an UNSET `GH_TOKEN` — which `gh` reports as a bad credential rather than as
+ * no credential at all. Caught in review before merge; this is the guard.
+ */
+test('the driver env var name IS the storage key, with no second literal to drift', async () => {
+  const { GH_TOKEN_KEY } = await import('../../../src/supervise/auth.js');
+  const { CONTAINER_GH_TOKEN_ENV } = await import(
+    '../../../src/supervise/drivers/containerized.js'
+  );
+
+  assert.equal(CONTAINER_GH_TOKEN_ENV, GH_TOKEN_KEY);
+});

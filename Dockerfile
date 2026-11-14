@@ -20,15 +20,36 @@ RUN apt-get update \
 # repositories, so the bare package name resolves to nothing — and the build
 # would SUCCEED with no gh in the image. The keyring and the source list are
 # what make the package reachable at all.
+#
+# 🛑 THE KEYRING DIGEST IS PINNED, AND A ROTATION BREAKS THIS BUILD LOUDLY.
+# That is the intended direction. Without the pin this is trust-on-first-use:
+# anyone able to forge a trusted certificate for cli.github.com substitutes
+# the ROOT of trust, and every later `signed-by` check then verifies happily
+# against their key. Raised by the security reviewer on #214.
+#
+# ⚠️ WHEN THIS FAILS, DO NOT JUST REPLACE THE HASH. Fetch the keyring, verify
+# it against GitHub's published fingerprint, and only then update this line.
+# Digest observed 2026-11-13.
 RUN mkdir -p -m 755 /etc/apt/keyrings \
   && wget -nv -O /etc/apt/keyrings/githubcli-archive-keyring.gpg \
        https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  && echo "6084d5d7bd8e288441e0e94fc6275570895da18e6751f70f057485dc2d1a811b  /etc/apt/keyrings/githubcli-archive-keyring.gpg" \
+       | sha256sum -c - \
   && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
        > /etc/apt/sources.list.d/github-cli.list \
   && apt-get update \
   && apt-get install -y --no-install-recommends gh \
   && rm -rf /var/lib/apt/lists/*
+
+# 🛑 `git push` DOES NOT READ `GH_TOKEN`. Only `gh` does. Plain git needs a
+# credential helper, and this is the one `gh auth setup-git` installs — so the
+# ticket's "or push" is satisfied by this line, not by injecting the var.
+# Baked in at BUILD time because it carries no secret: it only tells git to
+# ask `gh`, which reads the token from the environment at run time.
+# --system, so it applies whatever HOME the agent user ends up with.
+RUN git config --system credential."https://github.com".helper '!gh auth git-credential' \
+  && git config --system credential."https://gist.github.com".helper '!gh auth git-credential'
 
 RUN npm install -g @anthropic-ai/claude-code
 

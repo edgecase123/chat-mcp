@@ -312,18 +312,45 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   program
     .command('auth <action> [token]')
     .description(
-      'Manage the shared credentials for containerized agents: set-token, set-gh-token',
+      'Manage the shared credentials for containerized agents: set-token, set-gh-token, clear-gh-token',
     )
     .action(async (action: string, token?: string) => {
-      const { setToken, setGhToken } = await import('./supervise/auth.js');
+      const { setToken, setGhToken, clearGhToken } = await import('./supervise/auth.js');
 
-      if (action === 'set-token') {
-        if (!token) {
-          console.error('Error: chat-mcp auth set-token <token>');
+      /**
+       * 🛑 ON STDIN, NEVER AS AN ARGUMENT. A secret in argv is readable
+       * through `ps` and `/proc/<pid>/cmdline` for the life of the process,
+       * which AGENTS.md forbids in those words.
+       *
+       * Both tokens come through here. `set-token` took the Claude token in
+       * argv until review pointed out that one command cannot refuse the
+       * exposure for one credential and accept it for the other.
+       */
+      const readSecretFromStdin = async (usage: string): Promise<string> => {
+        if (token) {
+          console.error(
+            `Error: refusing a token in argv — it is readable via \`ps\`. Pipe it instead: ${usage}`,
+          );
           process.exit(1);
         }
+
+        // Without this an interactive run blocks on an empty terminal with no
+        // indication that it is waiting for anything.
+        if (process.stdin.isTTY) {
+          console.error(`Error: this reads the token on stdin, e.g. ${usage}`);
+          process.exit(1);
+        }
+
+        const { readFileSync } = await import('node:fs');
+
+        return readFileSync(0, 'utf8');
+      };
+
+      if (action === 'set-token') {
+        const value = await readSecretFromStdin('`pbpaste | chat-mcp auth set-token`');
+
         try {
-          setToken(token);
+          setToken(value);
           console.log('token stored (chmod 600)');
         } catch (err) {
           console.error(`chat-mcp: ${err instanceof Error ? err.message : String(err)}`);
@@ -333,32 +360,10 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       }
 
       if (action === 'set-gh-token') {
-        // 🛑 ON STDIN, NEVER AS AN ARGUMENT. A secret in argv is readable
-        // through `ps` for the life of the process, which AGENTS.md forbids in
-        // those words. Refusing the argument is the whole point, so an
-        // operator who passes one is told why rather than quietly obliged.
-        if (token) {
-          console.error(
-            'Error: refusing a token in argv — it is readable via `ps`. ' +
-              'Pipe it instead: `pbpaste | chat-mcp auth set-gh-token`',
-          );
-          process.exit(1);
-        }
-
-        // Without this an interactive run blocks on an empty terminal with no
-        // indication that it is waiting for anything.
-        if (process.stdin.isTTY) {
-          console.error(
-            'Error: chat-mcp auth set-gh-token reads the token on stdin, ' +
-              'e.g. `pbpaste | chat-mcp auth set-gh-token`',
-          );
-          process.exit(1);
-        }
+        const value = await readSecretFromStdin('`pbpaste | chat-mcp auth set-gh-token`');
 
         try {
-          const { readFileSync } = await import('node:fs');
-
-          setGhToken(readFileSync(0, 'utf8'));
+          setGhToken(value);
           console.log('gh token stored (chmod 600)');
         } catch (err) {
           console.error(`chat-mcp: ${err instanceof Error ? err.message : String(err)}`);
@@ -367,7 +372,18 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         return;
       }
 
-      console.error(`Error: unknown action "${action}". Use set-token | set-gh-token.`);
+      // The operator path for withdrawing GitHub access. Under the shared
+      // token this revokes it for EVERY handle, which is the cost #214
+      // accepted — so the lever has to at least be reachable.
+      if (action === 'clear-gh-token') {
+        clearGhToken();
+        console.log('gh token cleared; the Claude token is untouched');
+        return;
+      }
+
+      console.error(
+        `Error: unknown action "${action}". Use set-token | set-gh-token | clear-gh-token.`,
+      );
       process.exit(1);
     });
 
@@ -498,7 +514,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
           const { spawnFor } = await import('./adapters/index.js');
           const { resolveDriver } = await import('./supervise/drivers/index.js');
           const vendor = spawnFor(resolveDriver({ driver: o.driver, container: true }).vendor);
-          const { readGhToken } = await import('./supervise/auth.js');
+          const { hasGhToken } = await import('./supervise/auth.js');
           const { CONTAINER_GH_TOKEN_ENV } = await import(
             './supervise/drivers/containerized.js'
           );
@@ -506,7 +522,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
           // `dockerRunPlan` passes it. A banner naming a credential the
           // container will not receive is the misleading-operator class #136
           // was about.
-          const ghEnvVar = readGhToken() ? [CONTAINER_GH_TOKEN_ENV] : [];
+          const ghEnvVar = hasGhToken() ? [CONTAINER_GH_TOKEN_ENV] : [];
           console.log(
             describePlan({
               mountPaths: ['/work', ...extra],

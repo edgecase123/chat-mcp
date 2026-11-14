@@ -6,40 +6,55 @@ import { join } from 'node:path';
 const DOCKERFILE = readFileSync(join(process.cwd(), 'Dockerfile'), 'utf8');
 
 /**
+ * 🛑 COMMENT LINES ARE STRIPPED, AND THAT IS THE WHOLE TEST. A first cut
+ * matched the file's bytes, and the comments above these very install lines
+ * NAME every string the assertions look for — so deleting both
+ * `apt-get install` lines left all of them green. Measured, not supposed:
+ * strip `ca-certificates` from one and `gh` from the other, and 4 of 4 passed.
+ * claude1's own reviewer caught it before merge.
+ *
+ * Prose naming a package is not an install, so prose is not evidence.
+ */
+const INSTALLS = DOCKERFILE.split('\n')
+  .filter((line) => !line.trimStart().startsWith('#'))
+  .join('\n');
+
+/**
  * #214: a containerized agent could not reach GitHub by ANY route.
  *
- * 🛑 WHAT THESE TESTS DO AND DO NOT PROVE. They read the Dockerfile's bytes,
- * so they prove the install lines have not been deleted. They do NOT prove the
- * built image contains the binaries — only a real `docker build` does that,
- * and it is recorded in the PR body instead of run here, because the suite
- * must not need a docker daemon.
+ * ⚠️ WHAT THESE PROVE AND DO NOT PROVE. They read the Dockerfile, so they
+ * prove the install instructions have not been deleted. They do NOT prove the
+ * BUILT IMAGE contains the binaries — only a real `docker build` does that,
+ * and it is recorded in the PR body, because the suite must not need a docker
+ * daemon.
  */
 
 /**
- * 🛑 THE PREREQUISITE, AND IT IS NOT ABOUT `gh`. `node:22-slim` installs `git`
- * with `--no-install-recommends`, which drops the `ca-certificates` package
- * `git` would otherwise pull in. So `/etc/ssl/certs/ca-certificates.crt` was
- * absent and HTTPS failed with `server certificate verification failed.
- * CAfile: none` before any credential was involved. Measured in the running
- * `chat-mcp-claude2` container on 2026-11-13.
+ * 🛑 THE PREREQUISITE, AND IT IS NOT ABOUT `gh`. `node:22-slim` installed
+ * `git` with `--no-install-recommends`, which is exactly what dropped the
+ * `ca-certificates` package `git` would otherwise have pulled in. So
+ * `/etc/ssl/certs/ca-certificates.crt` was absent and every https route out
+ * failed with `server certificate verification failed. CAfile: none`, before
+ * any credential was involved. Measured in the running `chat-mcp-claude2`
+ * container on 2026-11-13.
  */
-test('the image installs ca-certificates, without which HTTPS cannot work at all', () => {
-  assert.match(DOCKERFILE, /ca-certificates/);
+test('an apt-get install line installs ca-certificates, without which HTTPS cannot work at all', () => {
+  assert.match(INSTALLS, /apt-get install[^\n]*\bca-certificates\b/);
 });
 
-test('the image installs the gh CLI, so an agent can file a ticket or open a PR', () => {
-  assert.match(DOCKERFILE, /\bgh\b/);
+test('an apt-get install line installs the gh CLI, so an agent can file a ticket or open a PR', () => {
+  assert.match(INSTALLS, /apt-get install[^\n]*\bgh\b/);
 });
 
 /**
  * The paired control for the `gh` test above. `gh` is not in Debian's own
  * repositories, so `apt-get install gh` alone resolves to nothing and the
- * build succeeds with no `gh` in the image. The keyring and source list are
- * what make the package reachable, and their absence is exactly the silent
- * pass this asserts against.
+ * build SUCCEEDS with no `gh` in the image. The keyring and the source list
+ * are what make the package reachable, and their absence is exactly the
+ * silent pass this asserts against.
  */
 test('the gh install configures GitHub own apt source, not just the package name', () => {
-  assert.match(DOCKERFILE, /cli\.github\.com/);
+  assert.match(INSTALLS, /cli\.github\.com/);
 });
 
 /**
@@ -48,6 +63,32 @@ test('the gh install configures GitHub own apt source, not just the package name
  * one would put the credential in every layer and in `docker history`.
  */
 test('no GitHub credential is baked into the image', () => {
-  assert.doesNotMatch(DOCKERFILE, /^\s*(ENV|ARG)\s+GH_TOKEN\s*=/m);
-  assert.doesNotMatch(DOCKERFILE, /gh\s+auth\s+login/);
+  assert.doesNotMatch(INSTALLS, /^\s*(ENV|ARG)\s+GH_TOKEN\s*=/m);
+  assert.doesNotMatch(INSTALLS, /gh\s+auth\s+login/);
+});
+
+/**
+ * 🛑 `git push` DOES NOT READ `GH_TOKEN` — only `gh` does. The ticket's "or
+ * push" is satisfied by this credential helper, not by injecting the var, and
+ * without the helper a push from inside the container fails even with a valid
+ * token on file. The security reviewer caught the diff claiming otherwise.
+ *
+ * Baked in at build time because it carries no secret: it only tells git to
+ * ask `gh`, which reads the token from the environment at run time.
+ */
+test('git is configured to get GitHub credentials from gh, so push works at all', () => {
+  assert.match(INSTALLS, /git config --system credential[^\n]*gh auth git-credential/);
+});
+
+/**
+ * 🛑 PIN THE ROOT OF TRUST. Without a digest this is trust-on-first-use:
+ * anyone able to forge a trusted certificate for cli.github.com substitutes
+ * the keyring itself, and every later `signed-by` check then verifies happily
+ * against their key.
+ *
+ * ⚠️ A ROTATION BREAKS THE BUILD, LOUDLY. That is the intended direction.
+ */
+test('the gh keyring is verified against a pinned digest, not trusted on first use', () => {
+  assert.match(INSTALLS, /sha256sum -c/);
+  assert.match(INSTALLS, /\b[0-9a-f]{64}\b/);
 });

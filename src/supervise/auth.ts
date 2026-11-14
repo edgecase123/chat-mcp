@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureStateDir, stateDir, writePrivateFileSync } from '../util/paths.js';
 
@@ -19,7 +19,16 @@ export function secretsEnvPath(): string {
 }
 
 const CLAUDE_TOKEN_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
-const GH_TOKEN_KEY = 'GH_TOKEN';
+
+/**
+ * 🛑 THE STORAGE KEY AND THE INJECTED ENV VAR NAME ARE ONE STRING, NOT TWO
+ * THAT HAPPEN TO MATCH. The docker driver re-exports this as
+ * `CONTAINER_GH_TOKEN_ENV` rather than declaring its own copy. Two literals
+ * would let a rename inject `-e <newname>` for a var this file never stores,
+ * and the container would get an UNSET `GH_TOKEN` — which `gh` reports as a
+ * bad credential rather than as no credential. Raised in review before merge.
+ */
+export const GH_TOKEN_KEY = 'GH_TOKEN';
 
 /** `KEY=value`, one per line. The value may contain `=`; the key may not. */
 const ENV_LINE = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
@@ -40,21 +49,47 @@ function readSecrets(): Map<string, string> {
 
   if (!existsSync(path)) return secrets;
 
-  for (const line of readFileSync(path, 'utf8').split('\n')) {
+  const lines = readFileSync(path, 'utf8').split('\n');
+
+  for (const [index, line] of lines.entries()) {
     const match = ENV_LINE.exec(line);
 
-    if (match?.[1]) secrets.set(match[1], match[2] ?? '');
+    if (match?.[1]) {
+      secrets.set(match[1], match[2] ?? '');
+      continue;
+    }
+
+    // 🛑 SAY SO BEFORE DROPPING IT. The next `setSecret` rebuilds the file
+    // from this map, so an unparseable line is gone for good — and a
+    // credential that vanished with no error at the moment of loss is the
+    // exact failure this module is shaped to avoid. An operator hand-edit
+    // (`export KEY=v`, a quoted value) is the realistic way one gets here.
+    //
+    // ⚠️ THE LINE NUMBER, NEVER THE CONTENT. This file holds secrets.
+    if (line.trim().length > 0) {
+      console.error(`chat-mcp: ${path}: ignoring unparseable line ${index + 1}`);
+    }
   }
 
   return secrets;
 }
 
+/**
+ * 🛑 WRITE THEN RENAME, BECAUSE BOTH CREDENTIALS ARE IN THIS ONE FILE. A
+ * truncate-in-place that dies mid-write leaves the agent with NEITHER token,
+ * and the file it leaves behind is a plausible-looking partial. `renameSync`
+ * is atomic within a filesystem, and it carries the temp file's `0600` over,
+ * so the live path is never briefly wider.
+ */
 function writeSecrets(secrets: Map<string, string>): void {
   ensureStateDir();
 
   const body = [...secrets].map(([key, value]) => `${key}=${value}`).join('\n');
+  const path = secretsEnvPath();
+  const temp = `${path}.tmp`;
 
-  writePrivateFileSync(secretsEnvPath(), body.length > 0 ? `${body}\n` : '');
+  writePrivateFileSync(temp, body.length > 0 ? `${body}\n` : '');
+  renameSync(temp, path);
 }
 
 function setSecret(key: string, token: string): void {
@@ -98,6 +133,15 @@ export function setGhToken(token: string): void {
 /** `null` when nothing is on file. Unlike the Claude token, that is a supported state. */
 export function readGhToken(): string | null {
   return readSecret(GH_TOKEN_KEY);
+}
+
+/**
+ * Presence without the value, for callers that only need to know whether to
+ * mention the credential — the container confirmation banner prints env var
+ * NAMES, so it has no business holding the secret to decide that.
+ */
+export function hasGhToken(): boolean {
+  return readGhToken() !== null;
 }
 
 /** The inverse of `setGhToken`, so an agent's GitHub access can be withdrawn without clearing its Claude token. */
