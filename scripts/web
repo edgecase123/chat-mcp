@@ -25,6 +25,7 @@ VERB="${1:-}"
 # The handle the web UI joins the bus as. It is a peer like any other, so two
 # servers on the same handle collide with HandleClaimedError.
 HANDLE="${2:-${CHAT_MCP_WEB_HANDLE:-leejenkins}}"
+pc_assert_handle "$HANDLE"
 
 # 🛑 PINNED, NOT RANDOM. `chat-mcp web` falls back to an OS-assigned port when
 # its preferred 3737 is taken, which would leave `stop` and `status` with no

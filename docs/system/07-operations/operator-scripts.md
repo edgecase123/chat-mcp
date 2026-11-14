@@ -49,6 +49,25 @@ survives a `SIGKILL`, so the file proves nothing. `pc_socket_live` opens the
 socket with a 2s ceiling. Ten stale sockets from test runs on 2026-10-31 read as
 ten running agents before this was measured.
 
+## Two things the scripts secure that the CLI does not
+
+**The handle is validated before any path is built.** A handle becomes a
+filename in three places — the pidfile, the logfile and the supervisor socket —
+and all three are constructed before `node` runs. So `src/util/naming.ts`'s
+`assertHandle` is reached too late to protect them, and `agent start ../../x`
+would have written outside the state directory. `pc_assert_handle` carries a
+copy of that regex, `[a-z0-9][a-z0-9_-]{0,63}`. **Keep the two identical.**
+
+A listing *skips* a junk filename rather than aborting on it. Only a handle the
+operator typed is worth refusing.
+
+**The log holds a credential, so it is `0600` and its directory is `0700`.**
+The web banner contains the session API token and the banner goes straight into
+the log. The file is created under `umask 077` *before* anything is written, so
+the token never exists in a readable file even momentarily. The parent state dir
+is already `0700`, which makes this defence in depth — but a `CHAT_MCP_HOME`
+pointed somewhere laxer would otherwise publish the token.
+
 ## What they refuse to do
 
 - **Kill a process they did not start.** If port 3737 is bound by an unknown

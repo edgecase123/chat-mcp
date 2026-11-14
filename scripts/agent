@@ -56,6 +56,7 @@ container_state() {
 
 require_handle() {
   [ -n "$HANDLE" ] || pc_usage_die "$USAGE"
+  pc_assert_handle "$HANDLE"
 }
 
 resolve_dir() {
@@ -205,10 +206,15 @@ status_one() {
 }
 
 do_status() {
-  if [ -n "$HANDLE" ]; then status_one "$HANDLE"; return 0; fi
+  if [ -n "$HANDLE" ]; then
+    pc_assert_handle "$HANDLE"
+    status_one "$HANDLE"
+    return 0
+  fi
   local found=0 f
   for f in "$PC_SOCK_DIR"/*; do
     [ -e "$f" ] || continue
+    pc_handle_ok "$(basename "$f")" || continue
     pc_socket_live "$f" || continue
     found=1
     status_one "$(basename "$f")"
@@ -216,6 +222,7 @@ do_status() {
   for f in "$PC_RUN_DIR"/agent-*.pid; do
     [ -f "$f" ] || continue
     local h; h="$(basename "$f" .pid)"; h="${h#agent-}"
+    pc_handle_ok "$h" || continue
     pc_socket_live "$(sock_path "$h")" && continue
     found=1
     status_one "$h"

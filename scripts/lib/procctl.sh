@@ -31,7 +31,30 @@ pc_info() { printf '%s  %s%s\n' "$PC_DIM" "$*" "$PC_OFF"; }
 pc_err()  { printf '%s✘%s %s\n' "$PC_RED" "$PC_OFF" "$*" >&2; }
 pc_die()  { pc_err "$*"; exit 1; }
 
-pc_init() { mkdir -p "$PC_RUN_DIR" "$PC_LOG_DIR"; }
+# 🛑 0700 ON THE DIRS AND 0600 ON THE LOG, NOT THE DEFAULT UMASK. The web
+# server's startup banner contains its session api credential, and that banner
+# goes straight into the log. AGENTS.md's convention is that a secret-bearing
+# file is 0600 (`writePrivateFileSync`); a log that quotes a credential is one.
+# The parent state dir is already 0700, so this is defence in depth — but a
+# `CHAT_MCP_HOME` pointed somewhere laxer would otherwise publish the token.
+# 🛑 VALIDATE BEFORE BUILDING A PATH, NOT AFTER. A handle becomes a filename
+# in three places here — the pidfile, the logfile and the supervisor socket —
+# and every one of them is constructed before `node` runs, so the TypeScript
+# `assertHandle` in src/util/naming.ts is reached too late to protect them.
+# `agent start ../../x` would otherwise write outside the state directory.
+# This regex is a copy of that one: keep the two identical.
+pc_handle_ok() { [[ "${1:-}" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]]; }
+
+pc_assert_handle() {
+  if ! pc_handle_ok "${1:-}"; then
+    pc_die "invalid handle \"${1:-}\" — handles must match [a-z0-9][a-z0-9_-]{0,63} (lowercase, no # prefix)"
+  fi
+}
+
+pc_init() {
+  mkdir -p "$PC_RUN_DIR" "$PC_LOG_DIR"
+  chmod 700 "$PC_RUN_DIR" "$PC_LOG_DIR" 2>/dev/null || true
+}
 
 pc_pidfile() { printf '%s/%s.pid\n' "$PC_RUN_DIR" "$1"; }
 pc_logfile() { printf '%s/%s.log\n' "$PC_LOG_DIR" "$1"; }
@@ -86,7 +109,10 @@ pc_live_pid() {
 pc_spawn() {
   local name="$1" stdin_text="$2"; shift 2
   local log; log="$(pc_logfile "$name")"
-  : > "$log"
+  # Create it private BEFORE anything is written, so the credential never
+  # exists in a world-readable file even momentarily.
+  ( umask 077; : > "$log" )
+  chmod 600 "$log" 2>/dev/null || true
   if [ -n "$stdin_text" ]; then
     printf '%s\n' "$stdin_text" | nohup "$@" >>"$log" 2>&1 &
   else
