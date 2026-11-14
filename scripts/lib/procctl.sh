@@ -18,6 +18,14 @@ PC_SOCK_DIR="$CHAT_MCP_HOME/sock"
 PC_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PC_CLI="$PC_REPO_ROOT/dist/index.js"
 
+# 🛑 CHECKED AT SOURCE TIME, BECAUSE A MISSING `node` USED TO READ AS "THE
+# AGENT IS NOT RUNNING". `pc_socket_live` shells out to node, and it ran before
+# anything had established node exists.
+command -v node >/dev/null 2>&1 || {
+  printf 'node is not on PATH, and every check in these scripts needs it\n' >&2
+  exit 1
+}
+
 if [ -t 1 ]; then
   PC_RED=$'\033[31m'; PC_GREEN=$'\033[32m'; PC_YELLOW=$'\033[33m'
   PC_DIM=$'\033[2m';  PC_BOLD=$'\033[1m'; PC_OFF=$'\033[0m'
@@ -43,7 +51,19 @@ pc_die()  { pc_err "$*"; exit 1; }
 # `assertHandle` in src/util/naming.ts is reached too late to protect them.
 # `agent start ../../x` would otherwise write outside the state directory.
 # This regex is a copy of that one: keep the two identical.
-pc_handle_ok() { [[ "${1:-}" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]]; }
+# 🛑 THE CLASS IS ENUMERATED, NOT A RANGE, AND THAT IS THE WHOLE POINT. A bash
+# `[a-z]` uses LOCALE COLLATION: under en_US.UTF-8 it matched `álice` while the
+# TypeScript twin in src/util/naming.ts refused it. Measured on darwin — bash
+# PASS, node fail.
+#
+# ⚠️ `LC_ALL=C [[ ... ]]` DOES NOT WORK. `[[` is a shell keyword, not a command,
+# so the prefix is parsed as a command name: bash reports `[[: command not
+# found` and the function returns non-zero for EVERY handle. That reads as a
+# working guard and refuses all valid input. An enumerated class needs no
+# environment to be correct, so it cannot be weakened by one.
+pc_handle_ok() {
+  [[ "${1:-}" =~ ^[0-9abcdefghijklmnopqrstuvwxyz][0-9abcdefghijklmnopqrstuvwxyz_-]{0,63}$ ]]
+}
 
 pc_assert_handle() {
   if ! pc_handle_ok "${1:-}"; then
@@ -52,8 +72,26 @@ pc_assert_handle() {
 }
 
 pc_init() {
-  mkdir -p "$PC_RUN_DIR" "$PC_LOG_DIR"
-  chmod 700 "$PC_RUN_DIR" "$PC_LOG_DIR" 2>/dev/null || true
+  mkdir -p "$CHAT_MCP_HOME" "$PC_RUN_DIR" "$PC_LOG_DIR"
+  pc_chmod_verified 700 "$CHAT_MCP_HOME"
+  pc_chmod_verified 700 "$PC_RUN_DIR"
+  pc_chmod_verified 700 "$PC_LOG_DIR"
+}
+
+# 🛑 READ THE MODE BACK. `src/util/paths.ts` carries `chmodVerified` for the
+# same reason: a chmod CAN SUCCEED AND CHANGE NOTHING on a mode-less
+# filesystem. exFAT, SMB and WSL's DrvFs all do this, and a discarded error
+# left a credential-bearing log world-readable while the docs claimed 0600.
+pc_chmod_verified() {
+  local want="$1" path="$2" got
+  chmod "$want" "$path" 2>/dev/null || true
+  got="$(stat -f '%Lp' "$path" 2>/dev/null || stat -c '%a' "$path" 2>/dev/null || true)"
+  if [ -z "$got" ]; then
+    pc_die "cannot read the mode of $path — refusing to write a credential somewhere unverifiable"
+  fi
+  if [ "$got" != "$want" ]; then
+    pc_die "$path is mode $got and will not go to $want — this filesystem does not keep modes. Point CHAT_MCP_HOME at a real unix filesystem."
+  fi
 }
 
 pc_pidfile() { printf '%s/%s.pid\n' "$PC_RUN_DIR" "$1"; }
@@ -74,22 +112,65 @@ pc_ensure_built() {
   fi
 }
 
-pc_alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
+# 🛑 `ps -p`, NOT `kill -0`. For a pid owned by another user `kill -0` fails
+# with EPERM, which is indistinguishable from ESRCH at the shell — so another
+# user's live process read as DEAD. Measured: `kill -0 1` fails as an ordinary
+# user while pid 1 is plainly running. That direction happens to fail safe
+# here, because the caller then refuses to act, but "it is gone" was a lie and
+# the next reader would have believed it.
+pc_alive() {
+  [ -n "${1:-}" ] || return 1
+  ps -p "$1" >/dev/null 2>&1
+}
 
 # 🛑 A SOCKET FILE IS NOT A LISTENER. A supervisor killed with SIGKILL leaves
 # `~/.chat-mcp/sock/<handle>` behind, and ten such files from test runs in
 # October read as ten running agents until this was a real connect. The only
 # honest check is to open it.
+# Returns 0 = a listener answered · 1 = refused or absent · 2 = COULD NOT TELL.
+#
+# 🛑 TWO OUTCOMES MADE THIS FAIL OPEN, AND THE WORST CASE WAS SILENT. Every
+# probe failure used to read as "not listening". `agent start` would then warn
+# about a stale socket and spawn a SECOND supervisor over a live one — and
+# binding unlinks a socket that looks stale, which cuts delivery to the agent
+# that was already running. A caller must treat 2 as fatal, never as "no".
 pc_socket_live() {
   [ -e "$1" ] || return 1
-  node -e '
+  local err rc=0
+  err="$(node -e '
     const net = require("node:net");
     const sock = net.createConnection(process.argv[1]);
-    const fail = () => { sock.destroy(); process.exit(1); };
-    sock.on("connect", () => { sock.destroy(); process.exit(0); });
-    sock.on("error", fail);
-    setTimeout(fail, 2000);
-  ' "$1" 2>/dev/null
+    let done = false;
+    const finish = (code, msg) => {
+      if (done) return;
+      done = true;
+      if (msg) process.stderr.write(msg);
+      sock.destroy();
+      process.exit(code);
+    };
+    sock.on("connect", () => finish(0));
+    sock.on("error", (e) => {
+      // Only these two mean "nothing is listening". Anything else — EMFILE,
+      // EACCES, a path too long — means the probe itself failed.
+      const refused = e.code === "ECONNREFUSED" || e.code === "ENOENT";
+      finish(refused ? 1 : 2, refused ? "" : String(e.code || e.message));
+    });
+    setTimeout(() => finish(2, "timeout"), 2000);
+  ' "$1" 2>&1 >/dev/null)" || rc=$?
+  if [ "$rc" -eq 2 ]; then
+    pc_warn "could not determine whether '$1' has a listener: ${err:-unknown}" >&2
+  fi
+  return "$rc"
+}
+
+# Wraps the probe for a caller that must not proceed on an unknown answer.
+pc_require_socket_verdict() {
+  local sock="$1" rc=0
+  pc_socket_live "$sock" || rc=$?
+  if [ "$rc" -eq 2 ]; then
+    pc_die "cannot tell whether a supervisor is listening at $sock — refusing to act blind"
+  fi
+  return "$rc"
 }
 
 # Echo a live pid, or nothing. A pidfile naming a dead process is REMOVED and
@@ -99,6 +180,13 @@ pc_live_pid() {
   local file; file="$(pc_pidfile "$1")"
   [ -f "$file" ] || return 0
   local pid; pid="$(cat "$file" 2>/dev/null || true)"
+  # 🛑 A PID OF `0` SIGNALS THE WHOLE PROCESS GROUP, so a corrupt pidfile must
+  # never reach `kill`. Only a positive integer is a pid.
+  if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
+    [ -n "$pid" ] && pc_warn "clearing a corrupt pidfile for '$1' (contents: '$pid')" >&2
+    rm -f "$file"
+    return 0
+  fi
   if pc_alive "$pid"; then printf '%s\n' "$pid"; return 0; fi
   pc_warn "clearing a stale pidfile for '$1' (pid $pid is gone)" >&2
   rm -f "$file"
@@ -112,7 +200,7 @@ pc_spawn() {
   # Create it private BEFORE anything is written, so the credential never
   # exists in a world-readable file even momentarily.
   ( umask 077; : > "$log" )
-  chmod 600 "$log" 2>/dev/null || true
+  pc_chmod_verified 600 "$log"
   if [ -n "$stdin_text" ]; then
     printf '%s\n' "$stdin_text" | nohup "$@" >>"$log" 2>&1 &
   else

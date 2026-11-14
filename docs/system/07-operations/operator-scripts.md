@@ -30,6 +30,29 @@ open or a pid found by hand.
 
 With no handle, `agent status` lists every agent that is actually running.
 
+## 🛑 The web server is not a daemon, and that is deliberate
+
+`server.ts:188` arms a **60-second idle shutdown at boot**, and `server.ts:196`
+calls `shutdown(0)`. The comment there says it *"keeps us honest about the
+no-persistent-daemon design principle."* Nothing disarms that timer until a
+browser opens an SSE stream on `/api/events`.
+
+```
+web start  →  prints tokenized url        idle timer ARMED (60s)
+you paste  →  token sets an HttpOnly cookie, redirects it out of the address bar
+           →  page opens EventSource /api/events
+           →  cookie matches ctx.token → SSE connects → timer DISARMED
+```
+
+So **`web start` gives you 60 seconds to paste the url.** Miss it and the
+server exits by design. Run `web start` again.
+
+⚠️ **An already-open tab does not revive itself after a restart.** `EventSource`
+auto-reconnects, but it presents the *previous* server's cookie, the auth gate
+returns 401 before `sseClients.add` is reached, and the client only logs the
+error. A 401 therefore cannot hold the server open either. **Pasting the new
+url is the only thing that revives that tab.**
+
 ## The three things worth knowing before you change them
 
 **1. The web url you need is not the url in the state file.** Every web start
@@ -44,14 +67,29 @@ server without that step leaves the UI unreachable with no visible error.
 just errors from cold. The script probes the socket and picks the in-place
 reload or a full start. That split is why the script exists.
 
-**3. Liveness is a real connect, never a file test.** `~/.chat-mcp/sock/<handle>`
-survives a `SIGKILL`, so the file proves nothing. `pc_socket_live` opens the
-socket with a 2s ceiling. Ten stale sockets from test runs on 2026-10-31 read as
-ten running agents before this was measured.
+**3. Liveness is a real connect with THREE outcomes, never a file test.**
+`~/.chat-mcp/sock/<handle>` survives a `SIGKILL`, so the file proves nothing.
+Ten stale sockets from test runs on 2026-10-31 read as ten running agents before
+this was measured.
+
+`pc_socket_live` returns `0` for a listener, `1` for `ECONNREFUSED`/`ENOENT`,
+and **`2` for "the probe itself failed"** — a timeout, `EMFILE`, anything else.
+Two outcomes made it fail open, and the worst case was silent: a live agent read
+as absent, `agent start` warned about a stale socket and spawned a **second**
+supervisor, and binding unlinks a socket that looks stale — cutting delivery to
+the agent that was already running. Callers use `pc_require_socket_verdict`,
+which dies on `2` rather than guessing.
 
 ## Two things the scripts secure that the CLI does not
 
-**The handle is validated before any path is built.** A handle becomes a
+**The handle is validated before any path is built, with an ENUMERATED
+character class.** A bash `[a-z]` range uses locale collation: under
+`en_US.UTF-8` it matched `álice` while the TypeScript twin refused it, measured
+on darwin. `LC_ALL=C [[ ... ]]` is **not** the fix — `[[` is a shell keyword, so
+the prefix is parsed as a command name, bash reports `[[: command not found`,
+and the guard then refuses *every* handle while looking like it works.
+
+Why it is validated at all: A handle becomes a
 filename in three places — the pidfile, the logfile and the supervisor socket —
 and all three are constructed before `node` runs. So `src/util/naming.ts`'s
 `assertHandle` is reached too late to protect them, and `agent start ../../x`
@@ -61,17 +99,45 @@ copy of that regex, `[a-z0-9][a-z0-9_-]{0,63}`. **Keep the two identical.**
 A listing *skips* a junk filename rather than aborting on it. Only a handle the
 operator typed is worth refusing.
 
-**The log holds a credential, so it is `0600` and its directory is `0700`.**
-The web banner contains the session API token and the banner goes straight into
-the log. The file is created under `umask 077` *before* anything is written, so
-the token never exists in a readable file even momentarily. The parent state dir
-is already `0700`, which makes this defence in depth — but a `CHAT_MCP_HOME`
-pointed somewhere laxer would otherwise publish the token.
+**The log holds a credential, so it is `0600` and its directories are `0700`.**
+The web banner contains the session API token and goes straight into the log.
+The file is created under `umask 077` before the first write, and then
+`pc_chmod_verified` **reads the mode back and dies if it is wrong**. That
+matters because `: > "$log"` on a pre-existing `0644` file keeps `0644`, so
+creation-time umask alone would not fix an operator upgrading from an earlier
+version.
+
+🛑 **A chmod can succeed and change nothing.** exFAT, SMB and WSL's DrvFs all
+accept the call and keep the old mode. `src/util/paths.ts` carries
+`chmodVerified` for exactly this, and discarding the error here would have left
+a credential world-readable while this page claimed `0600`. Point
+`CHAT_MCP_HOME` at a real unix filesystem or the scripts refuse to start.
+
+⚠️ **KNOWN GAP: the token is at rest in the log.** `src/cli/web/credential.ts`
+lines 3-9 state the invariant that the token is *never* written under
+`stateDir()`, on the grounds that the whole state dir is bind-mounted into every
+container. `containerized.ts:166-205` now mounts only the project dir plus
+registered mounts, and `assertProjectDirOutsideState` refuses any that overlap
+the state dir — so that premise looks stale. **It has not been re-measured from
+inside a running container, so the invariant stands and this log is a known
+violation of it.** The fix is for the server to write the handshake url through
+`writePrivateFileSync` and for this script to read that file instead of scraping
+a banner. Not done yet.
 
 ## What they refuse to do
 
-- **Kill a process they did not start.** If port 3737 is bound by an unknown
-  pid, `web start` and `web stop` both report that pid and exit non-zero.
+- **Kill a process they did not start, or a pid they cannot identify.** Before
+  any signal, `web` requires the pid to equal the one bound to its port and
+  `agent` requires its command line to contain `dist/index.js … supervise`.
+  Both print what the pid actually is and exit non-zero. Verified by planting
+  pid `1` in each pidfile: both refused and named `/sbin/launchd`.
+  This matters because the idle shutdown makes a stale pidfile the **normal**
+  resting state for `web`, and the kernel recycles pids.
+- **Trust `kill -0` as an existence test.** For another user's pid it fails with
+  EPERM, indistinguishable from ESRCH at the shell, so a live process read as
+  dead. `pc_alive` uses `ps -p`.
+- **Signal a pid that is not a positive integer.** A `0` in a pidfile would
+  signal the script's whole process group.
 - **Start over a live one.** A second `start` reports the running pid and exits
   `0`, rather than racing.
 - **Treat a stale pidfile as "not running".** It is removed and reported, since

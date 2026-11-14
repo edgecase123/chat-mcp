@@ -108,6 +108,14 @@ do_start() {
 
   pc_ok "web ui is up as '$HANDLE' (pid $pid)"
   print_url || true
+
+  # 🛑 SAY THE CLOCK IS RUNNING. `chat-mcp web` is deliberately not a daemon:
+  # server.ts:188 arms a 60s idle shutdown at boot and nothing disarms it until
+  # a browser opens an SSE stream. Starting it detached and saying nothing
+  # looked identical to a crash a minute later.
+  pc_warn 'paste that url within 60 SECONDS or the server exits on its own'
+  pc_info 'it is not a daemon — it lives only while a browser tab is connected'
+  pc_info 'an old tab will NOT revive itself: its cookie is from the previous server and gets a 401'
 }
 
 do_stop() {
@@ -123,6 +131,18 @@ do_stop() {
     fi
     pc_info 'the web ui is not running'
     return 0
+  fi
+
+  # 🛑 CONFIRM IT IS STILL OUR SERVER BEFORE SIGNALLING. The server exits by
+  # itself after 60s with no client (server.ts:188), so a stale pidfile is the
+  # NORMAL resting state here, not an edge case — and the kernel recycles pids.
+  foreign="$(port_pid)"
+  if [ "$pid" != "$foreign" ]; then
+    pc_err "pid $pid is alive but is not the process bound to port $PORT — refusing to kill it"
+    pc_info "it is: $(ps -p "$pid" -o command= 2>/dev/null | head -c 120)"
+    pc_info "clearing the stale pidfile instead"
+    rm -f "$(pc_pidfile "$PROC_NAME")"
+    exit 1
   fi
 
   # 🛑 THERE IS NO `chat-mcp web stop`. The server's own banner says Ctrl-C, so
@@ -151,7 +171,11 @@ do_status() {
   foreign="$(port_pid)"
 
   printf '%sweb ui%s\n' "$PC_BOLD" "$PC_OFF"
-  printf '  server      %s\n' "${pid:-not running}"
+  if [ -z "$pid" ] && [ -z "$foreign" ]; then
+    printf '  server      not running (it exits by itself after 60s with no browser connected)\n'
+  else
+    printf '  server      %s\n' "${pid:-not running}"
+  fi
   if [ -n "$foreign" ]; then
     printf '  port %-6s bound by pid %s\n' "$PORT" "$foreign"
   else

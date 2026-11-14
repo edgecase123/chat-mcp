@@ -84,7 +84,7 @@ do_start() {
   sock="$(sock_path "$HANDLE")"
   name="$(proc_name "$HANDLE")"
 
-  if pc_socket_live "$sock"; then
+  if pc_require_socket_verdict "$sock"; then
     pc_warn "'$HANDLE' is already running — a supervisor is listening at $sock"
     pc_info "use 'restart' to reload it, or 'stop' to take it down"
     exit 0
@@ -123,7 +123,7 @@ do_start() {
       rm -f "$(pc_pidfile "$name")"
       exit 1
     fi
-    pc_socket_live "$sock"
+    pc_require_socket_verdict "$sock"
   }
 
   if ! pc_wait_until "$START_TIMEOUT_SECONDS" "'$HANDLE' to start listening" _ready; then
@@ -143,7 +143,7 @@ do_stop() {
   name="$(proc_name "$HANDLE")"
   pid="$(pc_live_pid "$name")"
 
-  if pc_socket_live "$sock"; then
+  if pc_require_socket_verdict "$sock"; then
     # The CLI's own stop is graceful and already waits out the grace period it
     # reads from the supervisor's ack. Do not reimplement that wait here.
     local args=(agents stop "$HANDLE")
@@ -159,6 +159,16 @@ do_stop() {
   fi
 
   if [ -n "$pid" ]; then
+    # 🛑 CONFIRM IT IS STILL OUR PROCESS. A pidfile outlives the process it
+    # named, and the kernel recycles pids. Without this, a stale pidfile plus a
+    # recycled pid makes `stop` kill something unrelated.
+    if ! ps -p "$pid" -o command= 2>/dev/null | grep -q 'dist/index.js.*supervise'; then
+      pc_err "pid $pid is alive but is not a chat-mcp supervisor — refusing to kill it"
+      pc_info "it is: $(ps -p "$pid" -o command= 2>/dev/null | head -c 120)"
+      pc_info "clearing the stale pidfile instead"
+      rm -f "$(pc_pidfile "$name")"
+      exit 1
+    fi
     pc_warn "no supervisor is listening for '$HANDLE', but pid $pid is alive — killing the orphan"
     pc_kill_pid "$pid"
     rm -f "$(pc_pidfile "$name")"
@@ -175,7 +185,7 @@ do_stop() {
 # error there, which is what made this script worth writing.
 do_restart() {
   require_handle
-  if pc_socket_live "$(sock_path "$HANDLE")"; then
+  if pc_require_socket_verdict "$(sock_path "$HANDLE")"; then
     node "$PC_CLI" agents restart "$HANDLE"
     pc_ok "'$HANDLE' reloaded in place"
     return 0
@@ -190,8 +200,12 @@ status_one() {
   sock="$(sock_path "$handle")"
   name="$(proc_name "$handle")"
   pid="$(pc_live_pid "$name" 2>/dev/null || true)"
-  if pc_socket_live "$sock"; then
+  local rc=0
+  pc_socket_live "$sock" || rc=$?
+  if [ "$rc" -eq 0 ]; then
     listening='yes'
+  elif [ "$rc" -eq 2 ]; then
+    listening='UNKNOWN — the liveness probe itself failed'
   elif [ -e "$sock" ]; then
     listening='no — STALE socket file, nothing is listening on it'
   else
