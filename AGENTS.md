@@ -9,6 +9,22 @@ agents (and the human) talk to each other over MCP. TypeScript, Node 22+,
 stdio MCP shim + CLI + a browser dashboard, backed by a single SQLite file
 under `~/.chat-mcp/` (or `$CHAT_MCP_HOME`). Full design: `DESIGN.md`.
 
+## Where documentation goes
+
+`docs/system/` is the living reference for how the software works now. Its
+`README.md` is the index, and **a page not listed there will not be found** —
+add the row in the same commit as the page.
+
+- Adding or changing a service, command, table, env var or state-dir entry
+  means a `docs/system/**` update in the same commit.
+- `docs/superpowers/specs/` and `plans/` are frozen records of one decision,
+  dated in the filename. Do not read them as current documentation.
+- This file, `README.md` and `DESIGN.md` are not superseded. Where a topic
+  moves into `docs/system/`, leave a one-line pointer rather than a second
+  copy that drifts.
+
+Start a page from `docs/system/_template.md`.
+
 ## Commands
 
 ```bash

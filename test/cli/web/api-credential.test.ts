@@ -311,14 +311,30 @@ test('cookieValue finds its name among others and does not match a suffix', () =
 // ── The storage rule the credential depends on ───────────────────────────
 
 /**
- * 🛑 THE WHOLE STATE DIR IS BIND-MOUNTED READ-WRITE INTO EVERY CONTAINERIZED
- * AGENT, AND A CONTAINER RUNS AS ROOT. Measured on #162: a 0600 host file read
- * straight out of the mount, and another handle's `notify/` file overwritten
- * from inside.
+ * 🛑 THIS FILE IS READ BY EXTERNAL SCRIPTS AND MUST STAY PLAIN. The guard below
+ * still holds; its ORIGINAL REASON no longer does, so do not re-derive the rule
+ * from the old one.
  *
- * `webUrlFile()` lives under `stateDir()`. So writing the handshake url there
- * — the obvious convenience, since external scripts already read that file —
- * would hand the credential to the thing it exists to refuse.
+ * ⚠️ WHAT CHANGED. The reason used to be: the whole state dir is bind-mounted
+ * read-write into every containerized agent, and a container runs as root —
+ * measured on #162, a 0600 host file read straight out of the mount. **That is
+ * no longer true.** Re-measured 2026-11-14 against the mount set `dockerRunPlan`
+ * actually builds, which is `/work` and `/mnt/local-context` and nothing else:
+ *
+ *   ls /Users/leejenkins/.chat-mcp      ->  No such file or directory
+ *   mount | grep chat-mcp               ->  (none)
+ *   ls /host_mark                       ->  No such file or directory
+ *   ls /work/..                         ->  the CONTAINER root, not the host
+ *   find / -maxdepth 6 -name .chat-mcp  ->  (nothing)
+ *
+ * `assertProjectDirOutsideState` (`containment.ts:128`) is what closed it: it
+ * refuses any project dir or registered mount overlapping the state dir.
+ *
+ * 🛑 SO THE CREDENTIAL NOW *DOES* LIVE UNDER `stateDir()`, in a SEPARATE 0600
+ * file. See `webHandshakeFile()` and `test/cli/web/handshake-file.test.ts`. The
+ * reason THIS file stays tokenless is now about its READERS, not about
+ * containers: `web-url` is the well-known plain url, and a container is still
+ * told to reach the server through it.
  *
  * Asserted against the source because the swap is a ONE-WORD edit that no
  * behavioural test of the server would notice.

@@ -677,3 +677,9 @@ The repo will spin off to its own GitHub project once the slice is stable. Track
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Documentation
+
+- `docs/system/` — how the software works now. Start at its `README.md` index.
+- `DESIGN.md` — the original design.
+- `AGENTS.md` — conventions for a coding agent working in this repo.

@@ -43,6 +43,25 @@ export function dbPath(): string {
   return join(stateDir(), 'chat.db');
 }
 
+/**
+ * Where the web server publishes its handshake url, credential included.
+ *
+ * 🛑 PRIVATE, AND SEPARATE FROM `web-url`. `web-url` is the plain, tokenless
+ * url that external readers expect; this one carries the session credential and
+ * must go through `writePrivateFileSync`. The server unlinks it on shutdown so
+ * a token never outlives the server that minted it.
+ *
+ * ⚠️ `credential.ts` says the token is never written under `stateDir()`,
+ * because #162 measured the whole state dir bind-mounted into every container.
+ * Re-measured 2026-11-14 against the real mount set: the state dir is not
+ * present in the container at all, and `assertProjectDirOutsideState` refuses
+ * any registered mount that overlaps it. See `test/cli/web/handshake-file.ts`
+ * for the commands and their output.
+ */
+export function webHandshakeFile(): string {
+  return join(stateDir(), 'web-handshake');
+}
+
 export function notifyDir(): string {
   return join(stateDir(), 'notify');
 }

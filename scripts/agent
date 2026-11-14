@@ -1,0 +1,298 @@
+#!/usr/bin/env bash
+#
+# Start, stop, restart or inspect a containerized supervised agent.
+#
+#   ./scripts/agent start   <handle> [dir]   # dir defaults to the registered project
+#   ./scripts/agent stop    <handle> [--now]
+#   ./scripts/agent restart <handle>
+#   ./scripts/agent status  [handle]
+#
+# 🛑 THE SUPERVISOR SOCKET IS THE LIVENESS SIGNAL, NOT THE PIDFILE. The
+# supervisor unlinks `~/.chat-mcp/sock/<handle>` only after its container is
+# gone, which `src/index.ts` already relies on for `agents stop`. The pidfile
+# is a fallback for an orphan that is no longer listening.
+
+set -euo pipefail
+# shellcheck source=scripts/lib/procctl.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/procctl.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/agent <verb> [handle] [dir|--now]
+
+Verbs
+  start <handle> [dir]     Start a containerized agent and wait for its
+                           supervisor to listen. Builds dist/ and the image
+                           first if either is stale. [dir] defaults to the
+                           handle's registered project directory.
+  stop <handle> [--now]    Graceful stop, via `chat-mcp agents stop`.
+  restart <handle>         Reload in place if a supervisor is listening,
+                           otherwise a cold start. One command either way.
+  status [handle]          One handle, or every RUNNING agent when omitted.
+
+Arguments
+  <handle>   Required except on status. Lowercase, matching
+             [a-z0-9][a-z0-9_-]{0,63}. It becomes a filename and a socket
+             path, so it is validated before any path is built.
+  [dir]      start only. Overrides the registered project directory and must
+             already exist. Register one instead with:
+               node dist/index.js project set <handle> <dir>
+  --now      stop only. Skips the graceful notice wait. The container still
+             waits out its own shutdown grace, so this is not instant.
+
+Environment
+  CHAT_MCP_HOME         ~/.chat-mcp   State directory. The CLI reads the same
+                                      variable, so the two cannot disagree.
+  AGENT_START_TIMEOUT   300           Seconds to wait for the supervisor.
+
+Exit codes
+  0   Done, or already in the state you asked for.
+  1   Refused, or it failed. The reason is on stderr.
+  2   Bad usage.
+
+Full reference: docs/system/07-operations/operator-scripts.md
+EOF
+}
+
+VERB="${1:-}"
+HANDLE="${2:-}"
+EXTRA="${3:-}"
+
+case "$VERB" in
+  -h|--help|help) usage; exit 0 ;;
+  '') usage; exit 2 ;;
+esac
+
+# How long a cold start may take. An image rebuild dominates this, and the
+# first build on a clean machine is minutes, not seconds.
+START_TIMEOUT_SECONDS="${AGENT_START_TIMEOUT:-300}"
+
+sock_path()      { printf '%s/%s\n' "$PC_SOCK_DIR" "$1"; }
+proc_name()      { printf 'agent-%s\n' "$1"; }
+container_name() { printf 'chat-mcp-%s\n' "$1"; }
+
+# The directory a handle's agent works in, from the registry the CLI itself
+# writes (`chat-mcp project set`). Exit codes distinguish "no registry" from
+# "handle not registered" so the error can name the fix.
+project_dir() {
+  node -e '
+    const { readFileSync } = require("node:fs");
+    const [file, handle] = process.argv.slice(1);
+    let data;
+    try { data = JSON.parse(readFileSync(file, "utf8")); } catch { process.exit(3); }
+    const dirs = data && data.agents && data.agents[handle];
+    if (!Array.isArray(dirs) || dirs.length === 0) process.exit(4);
+    process.stdout.write(dirs[0]);
+  ' "$CHAT_MCP_HOME/projects.json" "$1"
+}
+
+container_state() {
+  local state
+  state="$(docker inspect -f '{{.State.Status}}' "$(container_name "$1")" 2>/dev/null || true)"
+  state="$(printf '%s' "$state" | tr -d '[:space:]')"
+  printf '%s\n' "${state:-absent}"
+}
+
+require_handle() {
+  # 🛑 `[ ... ] || usage; exit 2` IS A BUG, NOT A STYLE CHOICE. The `;` ends the
+  # `||` list, so `exit 2` runs UNCONDITIONALLY — every verb that needs a handle
+  # exited 2 before doing anything. Use a block.
+  if [ -z "$HANDLE" ]; then
+    usage
+    exit 2
+  fi
+  pc_assert_handle "$HANDLE"
+}
+
+resolve_dir() {
+  local handle="$1" given="$2"
+  if [ -n "$given" ] && [ "${given#--}" = "$given" ]; then
+    [ -d "$given" ] || pc_die "not a directory: $given"
+    ( cd "$given" && pwd )
+    return
+  fi
+  local dir rc=0
+  dir="$(project_dir "$handle")" || rc=$?
+  case "$rc" in
+    0) ;;
+    3) pc_die "no project registry at $CHAT_MCP_HOME/projects.json — pass a directory, or run: node $PC_CLI project set $handle <dir>" ;;
+    4) pc_die "'$handle' has no registered project directory — pass one, or run: node $PC_CLI project set $handle <dir>" ;;
+    *) pc_die "could not read the project registry (exit $rc)" ;;
+  esac
+  [ -d "$dir" ] || pc_die "'$handle' is registered to a directory that does not exist: $dir"
+  printf '%s\n' "$dir"
+}
+
+do_start() {
+  require_handle
+  local sock name dir pid
+  sock="$(sock_path "$HANDLE")"
+  name="$(proc_name "$HANDLE")"
+
+  if pc_require_socket_verdict "$sock"; then
+    pc_warn "'$HANDLE' is already running — a supervisor is listening at $sock"
+    pc_info "use 'restart' to reload it, or 'stop' to take it down"
+    exit 0
+  fi
+
+  # A socket file with nothing behind it is a crash leftover. The supervisor
+  # unlinks whatever looks stale when it binds, so starting over it is safe —
+  # but say so, because it means the last run did not shut down cleanly.
+  if [ -e "$sock" ]; then
+    pc_warn "a stale socket for '$HANDLE' has no listener — the last run did not exit cleanly"
+  fi
+
+  pid="$(pc_live_pid "$name")"
+  if [ -n "$pid" ]; then
+    pc_die "pid $pid is alive for '$HANDLE' but no socket exists — it is mid-startup or wedged. Run 'stop' first."
+  fi
+
+  dir="$(resolve_dir "$HANDLE" "$EXTRA")"
+  pc_init
+  pc_ensure_built
+
+  pc_info "handle:    $HANDLE"
+  pc_info "project:   $dir"
+  pc_info "log:       $(pc_logfile "$name")"
+
+  # `y` answers the one-time container confirmation banner. It is recorded in
+  # the CLI's own state after the first accept, so later starts ignore it.
+  pid="$(pc_spawn "$name" 'y' \
+    node "$PC_CLI" supervise "$HANDLE" --container --cwd "$dir")"
+
+  _ready() {
+    if ! pc_alive "$pid"; then
+      printf '\n'
+      pc_err "the supervisor for '$HANDLE' exited during startup"
+      pc_log_tail "$name" 25
+      rm -f "$(pc_pidfile "$name")"
+      exit 1
+    fi
+    pc_require_socket_verdict "$sock"
+  }
+
+  if ! pc_wait_until "$START_TIMEOUT_SECONDS" "'$HANDLE' to start listening" _ready; then
+    pc_err "'$HANDLE' did not start listening within ${START_TIMEOUT_SECONDS}s"
+    pc_log_tail "$name" 25
+    pc_info "the process is still running as pid $pid — run 'stop' to take it down"
+    exit 1
+  fi
+
+  pc_ok "'$HANDLE' is up (supervisor pid $pid, container $(container_name "$HANDLE") $(container_state "$HANDLE"))"
+}
+
+do_stop() {
+  require_handle
+  local sock name pid
+  sock="$(sock_path "$HANDLE")"
+  name="$(proc_name "$HANDLE")"
+  pid="$(pc_live_pid "$name")"
+
+  if pc_require_socket_verdict "$sock"; then
+    # The CLI's own stop is graceful and already waits out the grace period it
+    # reads from the supervisor's ack. Do not reimplement that wait here.
+    local args=(agents stop "$HANDLE")
+    [ "${EXTRA:-}" = '--now' ] && args+=(--now)
+    if node "$PC_CLI" "${args[@]}"; then
+      rm -f "$(pc_pidfile "$name")"
+      pc_ok "'$HANDLE' stopped"
+      return 0
+    fi
+    pc_err "the graceful stop failed"
+    [ -n "$pid" ] && pc_info "pid $pid is still alive — re-run with --now, or kill it by hand"
+    exit 1
+  fi
+
+  if [ -n "$pid" ]; then
+    # 🛑 CONFIRM IT IS STILL OUR PROCESS. A pidfile outlives the process it
+    # named, and the kernel recycles pids. Without this, a stale pidfile plus a
+    # recycled pid makes `stop` kill something unrelated.
+    if ! ps -p "$pid" -o command= 2>/dev/null | grep -q 'dist/index.js.*supervise'; then
+      pc_err "pid $pid is alive but is not a chat-mcp supervisor — refusing to kill it"
+      pc_info "it is: $(ps -p "$pid" -o command= 2>/dev/null | head -c 120)"
+      pc_info "clearing the stale pidfile instead"
+      rm -f "$(pc_pidfile "$name")"
+      exit 1
+    fi
+    pc_warn "no supervisor is listening for '$HANDLE', but pid $pid is alive — killing the orphan"
+    pc_kill_pid "$pid"
+    rm -f "$(pc_pidfile "$name")"
+    pc_ok "orphan supervisor for '$HANDLE' killed"
+    return 0
+  fi
+
+  pc_info "'$HANDLE' is not running"
+}
+
+# 🛑 RESTART MEANS TWO DIFFERENT THINGS AND THE SOCKET DECIDES WHICH. A live
+# supervisor gets the CLI's in-place reload, which keeps the handle registered
+# on the bus. A cold handle gets a full start — `agents restart` would just
+# error there, which is what made this script worth writing.
+do_restart() {
+  require_handle
+  if pc_require_socket_verdict "$(sock_path "$HANDLE")"; then
+    node "$PC_CLI" agents restart "$HANDLE"
+    pc_ok "'$HANDLE' reloaded in place"
+    return 0
+  fi
+  pc_info "nothing is listening for '$HANDLE' — doing a cold start"
+  EXTRA=''
+  do_start
+}
+
+status_one() {
+  local handle="$1" sock name pid listening
+  sock="$(sock_path "$handle")"
+  name="$(proc_name "$handle")"
+  pid="$(pc_live_pid "$name" 2>/dev/null || true)"
+  local rc=0
+  pc_socket_live "$sock" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    listening='yes'
+  elif [ "$rc" -eq 2 ]; then
+    listening='UNKNOWN — the liveness probe itself failed'
+  elif [ -e "$sock" ]; then
+    listening='no — STALE socket file, nothing is listening on it'
+  else
+    listening='no'
+  fi
+
+  printf '%s%s%s\n' "$PC_BOLD" "$handle" "$PC_OFF"
+  printf '  listening   %s\n' "$listening"
+  printf '  supervisor  %s\n' "${pid:-not running}"
+  printf '  container   %s (%s)\n' "$(container_name "$handle")" "$(container_state "$handle")"
+  printf '  log         %s\n' "$(pc_logfile "$name")"
+}
+
+do_status() {
+  if [ -n "$HANDLE" ]; then
+    pc_assert_handle "$HANDLE"
+    status_one "$HANDLE"
+    return 0
+  fi
+  local found=0 f
+  for f in "$PC_SOCK_DIR"/*; do
+    [ -e "$f" ] || continue
+    pc_handle_ok "$(basename "$f")" || continue
+    pc_socket_live "$f" || continue
+    found=1
+    status_one "$(basename "$f")"
+  done
+  for f in "$PC_RUN_DIR"/agent-*.pid; do
+    [ -f "$f" ] || continue
+    local h; h="$(basename "$f" .pid)"; h="${h#agent-}"
+    pc_handle_ok "$h" || continue
+    pc_socket_live "$(sock_path "$h")" && continue
+    found=1
+    status_one "$h"
+  done
+  [ "$found" -eq 1 ] || pc_info 'no agents are running'
+}
+
+case "$VERB" in
+  start)   do_start ;;
+  stop)    do_stop ;;
+  restart) do_restart ;;
+  status)  do_status ;;
+  *)       usage; exit 2 ;;
+esac
