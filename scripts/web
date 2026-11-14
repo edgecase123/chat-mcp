@@ -17,10 +17,50 @@ set -euo pipefail
 # shellcheck source=scripts/lib/procctl.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/procctl.sh"
 
-USAGE='./scripts/web start|stop|restart|status [handle]'
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/web <verb> [handle]
+
+Verbs
+  start [handle]     Start the browser chat UI detached and PRINT ITS
+                     TOKENIZED URL. Builds dist/ first if stale.
+  stop               Stop it. Refuses if the pid is not the process bound to
+                     the port, so it cannot kill something it did not start.
+  restart [handle]   Stop then start. A restart mints a NEW token, so the
+                     printed url changes and the old one stops working.
+  status             Server pid, port, both url files, log path.
+
+Arguments
+  [handle]   The bus handle the UI joins as, like any other peer. Lowercase,
+             matching [a-z0-9][a-z0-9_-]{0,63}. Two servers on one handle
+             collide with HandleClaimedError.
+
+Environment
+  CHAT_MCP_HOME         ~/.chat-mcp   State directory. The CLI reads the same
+                                      variable, so the two cannot disagree.
+  CHAT_MCP_WEB_PORT     3737          Pinned, not random, so stop and status
+                                      have a fixed thing to check.
+  CHAT_MCP_WEB_HANDLE   leejenkins    Default for [handle].
+  WEB_START_TIMEOUT     60            Seconds to wait for a url.
+
+Exit codes
+  0   Done, or already in the state you asked for.
+  1   Refused, or it failed. The reason is on stderr.
+  2   Bad usage.
+
+You have 60 SECONDS to paste the printed url. The server is deliberately not a
+daemon: it exits once no browser has been connected for a minute. An old tab
+cannot revive itself, because its cookie is from the previous server.
+
+Full reference: docs/system/07-operations/operator-scripts.md
+EOF
+}
 
 VERB="${1:-}"
-[ -n "$VERB" ] || pc_usage_die "$USAGE"
+case "$VERB" in
+  -h|--help|help) usage; exit 0 ;;
+  '') usage; exit 2 ;;
+esac
 
 # The handle the web UI joins the bus as. It is a peer like any other, so two
 # servers on the same handle collide with HandleClaimedError.
@@ -222,5 +262,5 @@ case "$VERB" in
   stop)    do_stop ;;
   restart) do_restart ;;
   status)  do_status ;;
-  *)       pc_usage_die "$USAGE" ;;
+  *)       usage; exit 2 ;;
 esac

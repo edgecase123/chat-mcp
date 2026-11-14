@@ -246,7 +246,3 @@ pc_log_tail() {
   tail -n "$n" "$log" | sed 's/^/    /'
 }
 
-pc_usage_die() {
-  printf '%sUsage:%s %s\n' "$PC_BOLD" "$PC_OFF" "$1" >&2
-  exit 2
-}

@@ -16,13 +16,52 @@ set -euo pipefail
 # shellcheck source=scripts/lib/procctl.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/procctl.sh"
 
-USAGE='./scripts/agent start|stop|restart|status <handle> [dir|--now]'
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/agent <verb> [handle] [dir|--now]
+
+Verbs
+  start <handle> [dir]     Start a containerized agent and wait for its
+                           supervisor to listen. Builds dist/ and the image
+                           first if either is stale. [dir] defaults to the
+                           handle's registered project directory.
+  stop <handle> [--now]    Graceful stop, via `chat-mcp agents stop`.
+  restart <handle>         Reload in place if a supervisor is listening,
+                           otherwise a cold start. One command either way.
+  status [handle]          One handle, or every RUNNING agent when omitted.
+
+Arguments
+  <handle>   Required except on status. Lowercase, matching
+             [a-z0-9][a-z0-9_-]{0,63}. It becomes a filename and a socket
+             path, so it is validated before any path is built.
+  [dir]      start only. Overrides the registered project directory and must
+             already exist. Register one instead with:
+               node dist/index.js project set <handle> <dir>
+  --now      stop only. Skips the graceful notice wait. The container still
+             waits out its own shutdown grace, so this is not instant.
+
+Environment
+  CHAT_MCP_HOME         ~/.chat-mcp   State directory. The CLI reads the same
+                                      variable, so the two cannot disagree.
+  AGENT_START_TIMEOUT   300           Seconds to wait for the supervisor.
+
+Exit codes
+  0   Done, or already in the state you asked for.
+  1   Refused, or it failed. The reason is on stderr.
+  2   Bad usage.
+
+Full reference: docs/system/07-operations/operator-scripts.md
+EOF
+}
 
 VERB="${1:-}"
 HANDLE="${2:-}"
 EXTRA="${3:-}"
 
-[ -n "$VERB" ] || pc_usage_die "$USAGE"
+case "$VERB" in
+  -h|--help|help) usage; exit 0 ;;
+  '') usage; exit 2 ;;
+esac
 
 # How long a cold start may take. An image rebuild dominates this, and the
 # first build on a clean machine is minutes, not seconds.
@@ -55,7 +94,13 @@ container_state() {
 }
 
 require_handle() {
-  [ -n "$HANDLE" ] || pc_usage_die "$USAGE"
+  # 🛑 `[ ... ] || usage; exit 2` IS A BUG, NOT A STYLE CHOICE. The `;` ends the
+  # `||` list, so `exit 2` runs UNCONDITIONALLY — every verb that needs a handle
+  # exited 2 before doing anything. Use a block.
+  if [ -z "$HANDLE" ]; then
+    usage
+    exit 2
+  fi
   pc_assert_handle "$HANDLE"
 }
 
@@ -249,5 +294,5 @@ case "$VERB" in
   stop)    do_stop ;;
   restart) do_restart ;;
   status)  do_status ;;
-  *)       pc_usage_die "$USAGE" ;;
+  *)       usage; exit 2 ;;
 esac

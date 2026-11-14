@@ -17,6 +17,58 @@ open or a pid found by hand.
 ./scripts/web    start|stop|restart|status  [handle]
 ```
 
+**Both carry `--help`.** `./scripts/agent --help` is the authoritative signature
+and is kept in the script, not here, so it cannot drift from the code.
+
+---
+
+## Calling signature
+
+### `./scripts/agent <verb> [handle] [dir|--now]`
+
+| Call | Meaning |
+|---|---|
+| `agent start <handle>` | Project dir comes from `projects.json` |
+| `agent start <handle> <dir>` | `<dir>` overrides it and must already exist |
+| `agent stop <handle>` | Graceful, via `chat-mcp agents stop` |
+| `agent stop <handle> --now` | Skips the notice wait only |
+| `agent restart <handle>` | In-place reload, or cold start — the socket decides |
+| `agent status <handle>` | That one handle |
+| `agent status` | Every **running** agent; stale sockets are skipped |
+
+### `./scripts/web <verb> [handle]`
+
+| Call | Meaning |
+|---|---|
+| `web start` | Handle defaults to `$CHAT_MCP_WEB_HANDLE`, then `leejenkins` |
+| `web start <handle>` | Joins the bus as `<handle>` instead |
+| `web stop` | No handle — there is one server per port |
+| `web restart [handle]` | Stop then start. **Mints a new token** |
+| `web status` | Pid, port, both url files, log path |
+
+### Arguments
+
+| Argument | Rule |
+|---|---|
+| `<handle>` | Lowercase, `[a-z0-9][a-z0-9_-]{0,63}`. It becomes a filename and a socket path, so it is validated **before any path is built** |
+| `[dir]` | `agent start` only. Must exist. Register one instead with `node dist/index.js project set <handle> <dir>` |
+| `--now` | `agent stop` only. 🛑 **Not "immediately"** — the container still waits out its own shutdown grace |
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Done, or already in the state you asked for. A second `stop` is `0` |
+| `1` | Refused, or it failed. The reason is on stderr |
+| `2` | Bad usage. `--help` is `0`, no arguments is `2` |
+
+🛑 **This table is pinned by `test/scripts/operator-scripts.test.ts`**, which
+asserts the exit code of every documented call. It exists because
+`[ -n "$H" ] || usage; exit 2` shipped: the `;` ends the `||` list, so `exit 2`
+ran **unconditionally** and every verb needing a handle exited 2 before doing
+anything. `bash -n` passes it and shellcheck does not flag it. Only asserting
+exit codes caught it, and the mutant is re-run in that file's last test.
+
 ---
 
 ## What each verb does
@@ -184,6 +236,7 @@ OS-assigned port when its preferred one is taken, which would leave `stop` and
 | `scripts/lib/procctl.sh` | Sourced by both. Pidfiles, logs, detached spawn, liveness, the socket probe |
 | `scripts/agent` | Supervisor and container lifecycle for one handle |
 | `scripts/web` | Browser chat UI lifecycle |
+| `test/scripts/operator-scripts.test.ts` | Pins the exit-code table above. Every case is side-effect free — nothing here starts a container or binds a port |
 
 ## Related docs
 
