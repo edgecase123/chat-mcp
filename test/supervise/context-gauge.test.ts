@@ -69,6 +69,7 @@ function harness() {
     onDenial: () => undefined,
     onSession: (cb) => cb('sess'),
     onEvent: () => undefined,
+    onStderr: () => undefined,
     onExit: () => undefined,
     kill: () => undefined,
   });

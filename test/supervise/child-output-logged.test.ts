@@ -42,6 +42,7 @@ function harness() {
     onEvent: (cb) => {
       emit = cb;
     },
+    onStderr: () => undefined,
     onExit: () => undefined,
     kill: () => undefined,
   });

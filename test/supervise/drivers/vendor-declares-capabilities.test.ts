@@ -18,6 +18,10 @@ import { claudeSpawn } from '../../../src/adapters/claude-spawn.js';
 function fakeProcess() {
   return {
     stdout: new PassThrough(),
+    // `ChildProcessWithoutNullStreams` GUARANTEES this stream, and the
+    // real spawn passes `stdio: [pipe, pipe, pipe]`. Omitting it made the
+    // fake a process that cannot exist, and `wireAgentChild` now reads it.
+    stderr: new PassThrough(),
     stdin: new PassThrough(),
     on: () => undefined,
     kill: () => undefined,

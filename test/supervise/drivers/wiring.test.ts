@@ -6,11 +6,16 @@ import { routeClaudeEvent } from '../../../src/supervise/drivers/claude.js';
 
 function fakeProcess() {
   const stdout = new PassThrough();
+  // `ChildProcessWithoutNullStreams` GUARANTEES this stream, and the real
+  // spawn passes `stdio: [pipe, pipe, pipe]`. Omitting it made the fake a
+  // process that cannot exist, and `wireAgentChild` now reads it.
+  const stderr = new PassThrough();
   const stdin = new PassThrough();
   const exitCbs: ((code: number | null, signal: string | null) => void)[] = [];
 
   return {
     stdout,
+    stderr,
     stdin,
     on(event: string, cb: (code: number | null, signal: string | null) => void) {
       if (event === 'exit') exitCbs.push(cb);

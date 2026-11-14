@@ -126,6 +126,19 @@ export interface AgentChild {
   /** Raw driver events, for logging and diagnosis only. Never for control flow. */
   onEvent(cb: (event: Record<string, unknown>) => void): void;
 
+  /**
+   * Whatever the child wrote to `stderr`, as it arrives.
+   *
+   * 🛑 REQUIRED, SO A DRIVER CANNOT SILENTLY DROP IT. A containerized child
+   * died with its reason on a stream nobody had attached to: the prelude
+   * chains on `&&`, `npm` writes its errors here, and a failed install meant
+   * no agent started with nothing saying why.
+   *
+   * ⚠️ NOT A SUBSTITUTE FOR `onEvent`. This is unstructured text for a human
+   * reading a log, never for control flow — the same rule `onEvent` carries.
+   */
+  onStderr(cb: (chunk: string) => void): void;
+
   onExit(cb: (code: number | null, signal: string | null) => void): void;
   kill(): void;
 
