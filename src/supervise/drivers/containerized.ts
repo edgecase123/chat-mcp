@@ -130,13 +130,19 @@ export function containerCredentialEnvVars(vendor: VendorSpawn): readonly string
 }
 
 /**
- * What the prelude writes to stderr when `shasum` does not resolve.
+ * What the prelude writes to stderr when the lockfile hash comes back empty.
+ *
+ * 🛑 IT NAMES THE CONDITION, NOT ONE CAUSE OF IT. A first cut said "shasum is
+ * missing" and hung off `command -v shasum`, which tests RESOLUTION. The
+ * defect #234 reports is an EMPTY HASH, and a `shasum` that resolves but
+ * cannot execute produces one while passing `command -v` — so the warning was
+ * silent in a case it exists for. Found by claude2 on PR 241.
  *
  * 🛑 EXPORTED SO THE SUITE HAS NO SECOND LITERAL. A test matching its own copy
  * of this sentence passes while the prelude says something else entirely.
  */
-export const SHASUM_MISSING_WARNING =
-  'chat-mcp: shasum is missing, so every warm spawn reinstalls all dependencies';
+export const NO_LOCK_HASH_WARNING =
+  'chat-mcp: shasum produced no hash, so every warm spawn reinstalls all dependencies';
 
 /**
  * 🛑 THE VOLUME COMES UP EMPTY, so without this the overlay only trades a
@@ -160,14 +166,22 @@ export const SHASUM_MISSING_WARNING =
  * stamp and skip, so the cheap failure is a reinstall rather than a false
  * green.
  *
- * 🛑 THE `shasum` CHECK REPORTS AND LETS THE INSTALL PROCEED, #234. A bare
- * `command -v shasum` would exit non-zero, and the prelude chains on `&&` — so
- * a `perl`-less image would start no agent at all. The cheap failure above is
- * correct; what was missing was any signal that it had become the only branch.
+ * 🛑 THE WARNING HANGS OFF THAT SAME EMPTINESS, #234, so it reports every way
+ * the hash can fail — an absent binary, a broken interpreter, a future `-a
+ * 256` typo. Testing `command -v shasum` instead tested a PROXY, and a
+ * `shasum` that resolves without a working perl passed it silently.
+ *
+ * 🛑 IT REPORTS AND LETS THE INSTALL PROCEED. The prelude chains on `&&` and
+ * ends in `exec "$@"`, so a check that exited non-zero would mean no agent
+ * starts at all on a `perl`-less image.
  *
  * 🛑 STDERR, NOT STDOUT. `child.ts` drops a non-JSON stdout line on purpose,
  * so a warning written there vanishes exactly as quietly as the defect it
  * reports.
+ *
+ * ⚠️ `shasum`'s OWN stderr IS LEFT ALONE, NOT SILENCED. `sh: shasum: not
+ * found` names the cause; the line above names the consequence. Both belong on
+ * the channel that exists to carry them.
  *
  * ⚠️ `shasum -a 256`, NOT `sha256sum`. Both the image and a macOS host carry
  * `shasum`; only the image carries `sha256sum`, and the suite runs on the host.
@@ -208,9 +222,9 @@ export function nodeModulesInstallStep(
 
   return (
     `if [ ! -f '${lock}' ]; then :; else ` +
-    `command -v shasum >/dev/null 2>&1 || echo '${SHASUM_MISSING_WARNING}' >&2; ` +
     `want=$(shasum -a 256 '${lock}' | cut -d' ' -f1); ` +
     `if [ -n "$want" ] && [ "$want" = "$(cat '${stamp}' 2>/dev/null)" ]; then :; else ` +
+    `[ -n "$want" ] || echo '${NO_LOCK_HASH_WARNING}' >&2; ` +
     `env ${scrubbed} npm ci --ignore-scripts && printf '%s' "$want" > '${stamp}'; fi; fi`
   );
 }

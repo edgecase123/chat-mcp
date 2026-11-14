@@ -24,7 +24,7 @@ const {
   nodeModulesVolumeFor,
   nodeModulesInstallStep,
   prelude,
-  SHASUM_MISSING_WARNING,
+  NO_LOCK_HASH_WARNING,
   CONTAINER_GH_TOKEN_ENV,
   CONTAINER_PROJECT_DIR,
   CONTAINER_MCP_CONFIG_ENV,
@@ -1249,8 +1249,10 @@ test('⚠️ control — a SUCCEEDING install writes the stamp and starts the ag
  * is always reachable. So the rig below rebuilds PATH as one directory holding
  * only the externals the step needs, and `shasum` is in it or it is not.
  */
-function sealedBin(rig: InstallRig, withShasum: boolean): string {
-  const sealed = join(rig.dir, withShasum ? 'sealed-with' : 'sealed-without');
+type ShasumState = 'absent' | 'working' | 'broken';
+
+function sealedBin(rig: InstallRig, shasum: ShasumState): string {
+  const sealed = join(rig.dir, `sealed-${shasum}`);
 
   // Built once per rig, because a test may run the step twice.
   if (existsSync(sealed)) return sealed;
@@ -1267,7 +1269,7 @@ function sealedBin(rig: InstallRig, withShasum: boolean): string {
   // shell builtin, so `command -v echo` answers `echo` — not a path. Shimmed
   // from that answer, `exec 'echo'` re-resolves through this very directory and
   // execs the shim again, forever. It spawns processes until something dies.
-  for (const tool of ['cut', 'cat', 'env', 'echo', 'npm', ...(withShasum ? ['shasum'] : [])]) {
+  for (const tool of ['cut', 'cat', 'env', 'echo', 'npm', ...(shasum === 'working' ? ['shasum'] : [])]) {
     const found =
       tool === 'npm'
         ? join(rig.bin, 'npm')
@@ -1277,29 +1279,65 @@ function sealedBin(rig: InstallRig, withShasum: boolean): string {
     writeFileSync(join(sealed, tool), `#!/bin/sh\nexec '${found}' "$@"\n`, { mode: 0o755 });
   }
 
+  // 🛑 RESOLVES, AND CANNOT RUN. This is what dropping `perl` really leaves
+  // behind, and it is the arm `command -v shasum` passed in silence.
+  if (shasum === 'broken') {
+    writeFileSync(join(sealed, 'shasum'), '#!/nonexistent/perl\n', { mode: 0o755 });
+  }
+
   return sealed;
 }
 
-function runInstallStepSealed(rig: InstallRig, withShasum: boolean) {
+function runInstallStepSealed(rig: InstallRig, shasum: ShasumState) {
   const script = prelude([nodeModulesInstallStep(claudeSpawn, rig.dir)]);
 
   return spawnSync('/bin/sh', ['-c', script, 'sh', 'echo', 'AGENT_RAN'], {
     encoding: 'utf8',
-    env: { PATH: sealedBin(rig, withShasum) },
+    env: { PATH: sealedBin(rig, shasum) },
   });
 }
 
 test('🛑 a missing shasum SAYS SO on stderr, and the agent still starts', () => {
   const rig = installRig('{"lockfileVersion":3}');
-  const ran = runInstallStepSealed(rig, false);
+  const ran = runInstallStepSealed(rig, 'absent');
 
   assert.ok(
-    ran.stderr.includes(SHASUM_MISSING_WARNING),
+    ran.stderr.includes(NO_LOCK_HASH_WARNING),
     `a perl-less image reinstalls every spawn with nothing saying why; stderr: ${ran.stderr}`,
   );
   assert.equal(ran.stdout.trim(), 'AGENT_RAN', 'the check refused the spawn instead of reporting');
   assert.equal(ran.status, 0, 'the check broke the && chain, so no agent starts');
   assert.equal(npmCalls(rig), 1, 'the check stopped the install it is only meant to report on');
+});
+
+/**
+ * 🔴 THE ARM THE FIRST CUT PASSED IN SILENCE, found by claude2 on PR 241.
+ *
+ * That cut hung the warning off `command -v shasum`, which tests whether the
+ * name RESOLVES. The defect #234 reports is an EMPTY HASH. A `shasum` that
+ * resolves and cannot execute — a perl script with no perl, which is what
+ * dropping `perl` actually leaves — passes `command -v`, hashes to nothing,
+ * reinstalls 142 packages every spawn and says NOTHING.
+ *
+ * 🛑 SO THE WARNING HANGS OFF THE EMPTINESS ITSELF, not off one cause of it.
+ * Measured in a real `node:22-slim` container before the fix: `command -v`
+ * answered `/work/bin/shasum`, the install ran, and a grep for the warning
+ * counted 0.
+ *
+ * ⚠️ `shasum`'s own `not found` on stderr is NOT what this asserts. That line
+ * names the cause and the shell writes it either way. This asserts the line
+ * that names the CONSEQUENCE, which is the one nobody else writes.
+ */
+test('🔴 a shasum that RESOLVES but cannot run still says so, because the hash is empty', () => {
+  const rig = installRig('{"lockfileVersion":3}');
+  const ran = runInstallStepSealed(rig, 'broken');
+
+  assert.ok(
+    ran.stderr.includes(NO_LOCK_HASH_WARNING),
+    `a resolvable but unrunnable shasum reinstalls in silence; stderr: ${ran.stderr}`,
+  );
+  assert.equal(npmCalls(rig), 1, 'the empty hash did not reach the install branch');
+  assert.equal(ran.stdout.trim(), 'AGENT_RAN', 'a broken shasum stopped the agent starting');
 });
 
 /**
@@ -1309,10 +1347,10 @@ test('🛑 a missing shasum SAYS SO on stderr, and the agent still starts', () =
  */
 test('⚠️ control — shasum PRESENT warns about nothing and stamps the lockfile', () => {
   const rig = installRig('{"lockfileVersion":3}');
-  const ran = runInstallStepSealed(rig, true);
+  const ran = runInstallStepSealed(rig, 'working');
 
   assert.ok(
-    !ran.stderr.includes(SHASUM_MISSING_WARNING),
+    !ran.stderr.includes(NO_LOCK_HASH_WARNING),
     `warned about a shasum that resolves; stderr: ${ran.stderr}`,
   );
   assert.match(String(stampFor(rig)), /^[0-9a-f]{64}$/, 'the hash was unreadable WITH shasum');
@@ -1334,16 +1372,16 @@ test('⚠️ control — shasum PRESENT warns about nothing and stamps the lockf
  */
 test('🛑 the warning carries no single quote, which would break the prelude it rides in', () => {
   assert.ok(
-    !SHASUM_MISSING_WARNING.includes("'"),
-    `an apostrophe closes the shell quote: ${SHASUM_MISSING_WARNING}`,
+    !NO_LOCK_HASH_WARNING.includes("'"),
+    `an apostrophe closes the shell quote: ${NO_LOCK_HASH_WARNING}`,
   );
 });
 
 test('🛑 a missing shasum keeps REINSTALLING, which is the designed cheap failure', () => {
   const rig = installRig('{"lockfileVersion":3}');
 
-  runInstallStepSealed(rig, false);
-  const ran = runInstallStepSealed(rig, false);
+  runInstallStepSealed(rig, 'absent');
+  const ran = runInstallStepSealed(rig, 'absent');
 
   assert.equal(npmCalls(rig), 2, 'an unreadable hash skipped the install and ran on an empty tree');
   assert.equal(ran.stdout.trim(), 'AGENT_RAN');

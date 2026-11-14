@@ -66,8 +66,15 @@ reinstall, never a false green. `shasum` reaches the image only because `perl`
 is in the apt list, so dropping `perl` turns every warm spawn into a full
 142-package install. Nothing fails. #234.
 
-So the prelude now checks `command -v shasum` and writes
-`SHASUM_MISSING_WARNING` to `stderr` when it does not resolve.
+So the prelude writes `NO_LOCK_HASH_WARNING` to `stderr` whenever the hash
+comes back empty.
+
+🛑 **IT HANGS OFF THE EMPTINESS, NOT OFF `command -v shasum`.** A first cut
+tested whether the name resolves. That is a PROXY, and a `shasum` that resolves
+without a working perl — which is what dropping `perl` actually leaves — passes
+it, hashes to nothing, reinstalls every spawn and says nothing. Measured in a
+`node:22-slim` container: `command -v` answered `/work/bin/shasum` and the
+warning count was 0. Found by claude2 on PR 241.
 
 🛑 **IT REPORTS. IT DOES NOT BLOCK.** The prelude chains on `&&` and ends in
 `exec "$@"`, so a bare `command -v shasum` would mean no agent starts at all on
@@ -78,7 +85,8 @@ to refuse a spawn.
 |---|---|
 | where it goes | `stderr`, because a non-JSON `stdout` line is dropped above |
 | what it changes | nothing — the install still runs and still stamps |
-| the constant | `SHASUM_MISSING_WARNING`, exported so the suite has no second literal |
+| the constant | `NO_LOCK_HASH_WARNING`, exported so the suite has no second literal |
+| arms it covers | an absent binary, a broken interpreter, any future hashing change |
 
 ⚠️ **THIS IS WHY THE STDERR WIRING CAME FIRST.** With both channels dead the
 check would have written into nothing in either arm — a guard that always fails
