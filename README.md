@@ -1,8 +1,10 @@
 # chat-mcp
 
-**A backchannel that lets different LLM coding agents talk to each other — and lets you orchestrate the whole crew from one terminal.**
+**A backchannel that lets different LLM coding agents talk to each other — and lets you orchestrate the whole crew from one browser tab.**
 
 Modern coding agents are strong at different things. Claude Code, Cursor, and Codex each have areas where they shine and areas where a peer would do better. Running any one of them alone means you personally shuttle context, judgment, and progress between tools. chat-mcp closes that loop: **every agent gets a stable handle on a shared local bus, they message each other directly, and you conduct.**
+
+![The chat-mcp browser UI — peers, rooms and claims on the left, the open conversation on the right](docs/images/web-ui-overview.png)
 
 Concretely, that means you can:
 
@@ -10,31 +12,152 @@ Concretely, that means you can:
 - Split a large PR across two agents by track (services + PHPUnit to one, UI + Playwright to the other), have them work in parallel on the same branch, and let them reconcile in-room without you narrating every handoff.
 - Point a **reviewer agent** at an **implementer agent's** branch, have them exchange fixes over DM, and get back a PR that's already been argued down.
 - Send a **specialist agent** into the specific problem a generalist just got stuck on — the generalist stays in `blocked` status with a `focus` describing what it needs, the specialist DMs when the block clears, the generalist picks up again.
-- Watch the whole thing from one terminal — a live sidebar of who's online + what each is doing, a message pane that follows the current DM or room, alerts + tagged dispatches so an agent can escalate to you (or to a peer) without spamming.
+- Watch the whole thing from one browser tab — a live sidebar of who's online + what each is doing, a message pane that follows the current DM or room, alerts + tagged dispatches so an agent can escalate to you (or to a peer) without spamming.
 
-The bus is peer-to-peer at the process level. Every MCP client running the chat-mcp shim is a peer with a name; every peer sees every other. Nothing goes to the cloud — messages route through a local SQLite file + an `fs.watch` notify, both under `~/.chat-mcp/`. No shared background process. The bus itself opens no ports — the browser UI binds a loopback port while you have it open, and exits when you close it.
+Every participant holds a name, and every peer sees every other. Nothing goes to the cloud — state is a local SQLite file plus an `fs.watch` notify, both under `~/.chat-mcp/`. There is no shared daemon: a supervised agent has its own supervisor process, and an attached one has none at all.
 
-**Status:** `v0.5.0`. Slice 1 + rooms + DMs + alerts + dispatch/broadcast + per-agent status + per-peer **context-window gauge** with threshold-crossing warnings + a browser UI + a full-screen terminal UI. Developed and tested end-to-end only against **Claude Code** — other MCP clients (Cursor, Codex, Gemini CLI) can register handles and call every `chat.*` tool, but do not currently have an "idle wake" primitive equivalent to Claude Code's `Monitor`. See [Client support](#client-support) for what that means in practice. Full architecture: [DESIGN.md](DESIGN.md).
+An agent reaches the bus one of two ways. **Supervised**, where chat-mcp spawns it inside a container and owns its stdin — this is the direction. **Attached**, where a client you already run loads the chat-mcp shim and reads the database directly.
 
-## How it fits together
+**Status:** `v0.5.0`. A browser UI, **supervised agents that run inside their own Docker container**, rooms, DMs, alerts, dispatch/broadcast, exclusive claims, per-room writing styles, history search, per-agent status, and a per-peer **context-window gauge** with threshold-crossing warnings. Developed and tested end-to-end only against **Claude Code** — other MCP clients (Cursor, Codex, Gemini CLI) can register handles and call every `chat.*` tool, but do not currently have an "idle wake" primitive equivalent to Claude Code's `Monitor`. See [Client support](#client-support) for what that means in practice. Full architecture: [DESIGN.md](DESIGN.md).
 
-Every participant — LLM agents and the human alike — is a peer against a shared SQLite file and a `fs.watch`ed notify file. Agent participants are stdio MCP shims spawned by their host MCP client. The human joins the same bus via a terminal REPL (`chat-mcp cli`) that speaks the same protocol against the same files.
+## Features
 
-```
-Claude Code #1    Cursor / Claude #2    ...N...    User terminal
-      │                  │                              │
-      ▼                  ▼                              ▼
-  chat-mcp shim     chat-mcp shim                  chat-mcp cli
-  handle: claude1   handle: claude2                handle: lee
-      │                  │                              │
-      └──────────────────┴──────────────────────────────┘
-                         │
-                         ▼
-              ~/.chat-mcp/chat.db  (SQLite WAL)
-              ~/.chat-mcp/notify   (per-handle touch files)
-```
+Each one below is a thing the bus does, and the problem it exists to solve.
 
-Send-to-receive latency: **~1–5 ms** fs event. Latency to the recipient's model depends on whether it's blocked in `wait_for_message` (instant) or doing something else (ambient — surfaces on the next MCP turn boundary via a `resources/updated` notification).
+### Agents that run in their own container
+
+`chat-mcp supervise --container` spawns the agent CLI inside Docker as an
+unprivileged user, with your project mounted and nothing else. The supervisor
+owns its stdin for the life of the process.
+
+**Use it to** run an agent with nobody at the keyboard. An approved command in
+an attached client has your whole machine; a supervised one has the directory
+you mounted. See [Run an agent (supervised)](#run-an-agent-supervised).
+
+### Rooms and direct messages
+
+`#gate`, `#planning`, or a 1:1 DM. Membership in a room is explicit and
+persists across sessions, and only current members receive what is posted.
+
+**Use it to** give a piece of work its own channel. Two agents arguing about a
+payload shape in `#feature` keeps that thread out of the room where a third
+agent is watching a deploy.
+
+### Exclusive claims on shared resources
+
+`claim` takes a named resource — the gate script, a Docker stack, a branch, a
+file two agents could both touch. A second claimant is refused and told who
+holds it. Claims expire on a generous failsafe, and `claims` lists every one
+currently held.
+
+**Use it to** stop the collision that costs the most: two agents running the
+same test suite against the same Docker stack, or both editing one file and one
+of them losing the work in a merge. The sidebar shows held claims at a glance.
+
+### Alerts and tagged dispatch
+
+Every message carries a `kind`. `chat` is ordinary, `dispatch` marks a task
+hand-off, and `alert` surfaces in the recipient's alert lane rather than
+scrolling past with everything else.
+
+**Use it to** let an agent escalate to you without spamming. A blocked agent
+sends one `alert` and goes quiet, instead of posting five times hoping to be
+noticed.
+
+![Typing a tagged dispatch to a peer from the browser composer](docs/images/web-ui-dispatch.png)
+
+### Per-room writing style, pushed not fetched
+
+`set_style` sets the prose style agents must follow in a room. `succinct` is
+the built-in preset, or `custom` takes your own markdown. **The style is pushed
+with every `room_inbox` read of that room**, so it arrives before the writing
+rather than waiting to be asked for.
+
+**Use it to** keep a coordination room readable. A room where five agents each
+post thirty lines is a room nobody reads, including the agents.
+
+![Editing a room's custom style in the browser UI](docs/images/web-ui-room-style.png)
+
+### Live status and focus
+
+`set_status` publishes one of `idle` / `thinking` / `tool` / `blocked` /
+`error` / `offline`, plus a one-line freeform `focus`. Every sibling sees it in
+their sidebar.
+
+**Use it to** answer "what is that agent doing right now" without interrupting
+it to ask. A `blocked` status with a focus line is a request for help that
+costs no tokens to read.
+
+### Context-window gauge with threshold warnings
+
+Each peer pushes its own context usage. Crossing 70% / 85% / 95% emits a
+warning, with 5% hysteresis so the boundary does not chatter.
+
+| % | who hears about it |
+|---|---|
+| ≥ 70 | 🟡 DM to the reporter only |
+| ≥ 85 | 🟠 every room the peer is in |
+| ≥ 95 | 🔴 every room, in the alert lane |
+
+**Use it to** catch a degrading session before it ships something wrong. A
+long-lived agent at 95% is the one about to misread its own notes.
+
+### Search that does not consume your unread
+
+`search` finds messages across every room and DM you can see, newest first,
+with a snippet and the message id. **It does not advance any read watermark**,
+so it is safe to call mid-task.
+
+**Use it to** answer "what did we decide about X" without burning the unread
+queue you have not read yet.
+
+![Filtering the open conversation, with matches highlighted](docs/images/web-ui-search.png)
+
+### Message ids are links
+
+Every message has an id, and `#m12582` in the browser URL opens that message in
+the conversation it belongs to and marks it.
+
+**Use it to** make an agent's citation followable. "See 12582" stops being
+something you have to go hunting for.
+
+### A message reaches the model without a poll
+
+**Supervised:** written to a stdin the supervisor already holds open. There is
+no idle session, so there is nothing to wake.
+
+**Attached:** the notify file holds the whole message, not a bell, so an agent
+whose wake command prints that file starts its turn with the message already in
+the prompt and calls no chat tool at all.
+
+**Use it to** keep an agent current without it asking "anything for me?" on a
+timer. Neither path costs a tool round-trip per message.
+
+### Honest delivery counts
+
+`room_send` returns `notified`, how many members it wrote to, beside
+`online_members`, how many of those are live. `health` reports the resolved
+database and its id high-water mark.
+
+**Use it to** tell "nobody answered" apart from "nobody was there". Those look
+identical otherwise, and handing a review to a dead agent reads as a successful
+hand-off right up until the review never arrives.
+
+### Local, and owner-only
+
+Nothing leaves the machine. State is `~/.chat-mcp/chat.db` plus a notify file,
+the directory `0700` and the database `0600`. On macOS and Linux chat-mcp reads
+the mode back after setting it and **refuses to start** rather than run without
+that guarantee.
+
+🛑 **Loopback is not a containment boundary.** A supervisor's listener, the
+command broker and the browser UI each bind `127.0.0.1`, and a container
+reaches a host `127.0.0.1` through `host.docker.internal`. **A minted token is
+what separates callers**, not the bind address.
+
+**Use it to** put real branch names, ticket numbers and code in the channel.
+
+---
 
 ## Requirements
 
@@ -44,7 +167,9 @@ Send-to-receive latency: **~1–5 ms** fs event. Latency to the recipient's mode
 
 ---
 
-## Start here — the browser UI
+---
+
+## Quick start — the browser UI
 
 **This is the way to use chat-mcp as a human.** One command, no flags to learn,
 no terminal keybindings to fight.
@@ -76,10 +201,127 @@ Design principles: **no persistent daemon** (exits when the last browser tab clo
 
 Flags: `--port <n>` to pin a specific port; `--no-open` to skip auto-launching the browser.
 
+---
+
+## Run an agent (supervised)
+
+**This is where the project is going, and it is the mode to start from.**
+chat-mcp spawns the agent itself, inside a Docker container, and owns the
+process for as long as it runs.
+
+```bash
+node dist/index.js project set claude1 ~/dev/my-project   # once per handle
+./scripts/agent start claude1
+```
+
+That builds `dist/` and the image if either is stale, starts the container,
+and waits for the supervisor to listen. The agent is on the bus when it
+returns.
+
+### Why this mode and not a wake adapter
+
+| | attached client | supervised |
+|---|---|---|
+| who owns the agent process | your editor | chat-mcp |
+| how a message reaches the model | a file-watch pokes an idle session | written to the child's **long-lived stdin** |
+| what the agent can touch | your whole machine | **the one directory you mounted** |
+| runs with nobody at the keyboard | no | yes |
+
+**The second row is the substantive difference.** An attached client needs a
+wake primitive to poke a session that is sitting idle, which is why only Claude
+Code is fully supported. A supervised child has a stdin the supervisor is
+already holding open, so there is nothing to wake — the message is simply
+written to it.
+
+🛑 **One turn at a time, and that is not a detail.** Writing two messages into
+a `--input-format stream-json` child produces **one** turn, not two. The model
+consumes both lines, runs a single loop, and answers only the second question.
+There is no error. So the supervisor sends one prompt, waits for the terminal
+`result` event, and only then sends the next. `src/supervise/turn-queue.ts`
+carries the measurement.
+
+### Operating one
+
+```bash
+./scripts/agent start   <handle> [dir]   # [dir] overrides the registered one
+./scripts/agent stop    <handle> [--now] # --now skips the notice wait only
+./scripts/agent restart <handle>         # reload in place, or cold start
+./scripts/agent status  [handle]         # one handle, or every running agent
+```
+
+`./scripts/agent --help` is the authoritative signature and lives in the
+script, so it cannot drift. Full reference:
+[docs/system/07-operations/operator-scripts.md](docs/system/07-operations/operator-scripts.md).
+
+⚠️ **`stop --now` is not instant.** It skips the graceful notice wait. The
+container still waits out its own shutdown grace.
+
+### Setting one up
+
+| Step | Command |
+|---|---|
+| Register the project directory | `project set <handle> <dir>` |
+| Give the container its Claude credential | `auth set-token` |
+| Let it use `gh` | `auth set-gh-token` |
+| Mount an extra directory | `mount add <handle> <key> <dir>` |
+| List what is registered | `project list` · `mount list` |
+
+`project`, `mount` and `auth` are `node dist/index.js <command>`. So is
+`agents`, which controls a supervisor directly and is what `./scripts/agent`
+wraps:
+
+```bash
+node dist/index.js agents restart <handle>
+node dist/index.js agents stop <handle>
+```
+
+### How a containerized agent reaches the bus
+
+🛑 **It is not a second process on `chat.db`.** The state-directory mount was
+removed. The host opens one MCP listener per child, mints that handle a token,
+and the container speaks HTTP to it.
+
+```
+        ┌─────────────── host ───────────────┐
+        │                                     │
+        │   supervisor ──── stdin ──────────┐ │
+        │       │                           │ │
+        │       │  McpHttpListener          │ │
+        │       │  (one per child, token)   │ │
+        │       │        ▲                  ▼ │
+        │       │        │        ┌─────────────────┐
+        │       │        └── HTTP ┤   container     │
+        │       │                 │   agent CLI     │
+        │  ~/.chat-mcp/chat.db    │   uid 10001     │
+        │                         │   /work (rw)    │
+        └─────────────────────────┴─────────────────┘
+```
+
+**The token is minted per child and replaced on every restart**, because the
+container holding the old one is gone with `--rm`.
+
+### What is not done
+
+**Say so plainly rather than find out in a container.**
+
+- **The test suite does not run in-container.** `node_modules` is built for the
+  host architecture. [#221](https://github.com/edgecase123/chat-mcp/issues/221)
+- **`gh` is unauthenticated** until you run `auth set-gh-token` and restart.
+- **The container's egress is not restricted.** A tree-chosen npm registry is
+  reachable and was measured as such.
+  [#231](https://github.com/edgecase123/chat-mcp/issues/231)
+- **Extra mounts from `mount add` are read-write**, not `:ro`. Same ticket.
+- **The image's toolchain is not checked before the agent starts.**
+  [#233](https://github.com/edgecase123/chat-mcp/issues/233) ·
+  [#234](https://github.com/edgecase123/chat-mcp/issues/234)
+
+Epic: [#129](https://github.com/edgecase123/chat-mcp/issues/129).
 
 ---
 
-## Install for an AI agent (MCP client setup)
+## Attach an existing client (simple)
+
+🛑 **Use this when you want an agent you already run — in your editor, at your keyboard — on the bus too.** It does not sandbox anything: the agent keeps whatever access your machine gives it.
 
 Every agent gets its own handle. Add the MCP server to the client's config with `--handle <name>`, restart the client, then install a wake adapter so incoming messages actually reach the agent while it's idle.
 
@@ -229,201 +471,58 @@ Without this, agents will use the tools when asked but won't check for incoming 
 
 ---
 
-## Other human interfaces — FALLBACK ONLY
+## How it fits together
 
-🛑 **The terminal interfaces are a fallback. They work. They are not nearly as
-polished or as functional as the browser UI.**
+Every participant — agents and the human alike — holds a handle. What differs
+is how the agent's process is owned, and that changes the transport.
 
-**Use the browser UI unless you cannot.** Reach for a terminal interface only
-when no browser is available, or when you are scripting.
+### Supervised agents
 
-All of these speak the same protocol against the same files, so nothing is lost
-or hidden. What differs is finish:
-
-| | browser UI | terminal UI |
-|---|---|---|
-| gets new features first | yes | no |
-| layout survives any content | yes | **no — wide tables, see below** |
-| needs a width to be usable | no | yes |
-
-**Long message text wraps. It is never truncated or hidden.** Measured at a
-40-column budget:
-
-| content | what happens |
-|---|---|
-| prose | wraps at whitespace |
-| a long URL or other unbroken token | hard-broken mid-token |
-| CJK, emoji, combining accents, ZWJ sequences | wrap correctly, and no glyph is split |
-| **a markdown table row** | **overflows the pane** |
-
-**The table row is the one known rough edge.** A `|…|` row is handed to the
-Markdown tokenizer whole, because wrapping it would break the pipe count. So a
-59-column row comes through unwrapped against a 40-column budget, and the row
-budget counts it as one line however many it draws. **Keep tables narrow, or
-read them in the browser.**
-
-### Full-screen terminal UI
-
-```bash
-npx -y github:edgecase123/chat-mcp cli --experimental --handle lee
-```
-
-A React/Ink two-pane interface: sidebar of agents and rooms on the left, message pane on the right, command entry at the bottom. It renders into the terminal's alternate screen buffer, so your original terminal state is restored on exit.
-
-⚠️ **This is the least finished surface in the project.** Hand-rolled wrapping stands in for Ink's own, because Ink's `Text`-inside-`Box` chain mis-renders here. The rough edges listed above live in that code.
+The supervisor owns the child. It writes arriving messages to a **stdin it is
+already holding open**, so there is no idle session to wake.
 
 ```
-chat-mcp ink · lee · ● idle · /help · Ctrl-C
-┌──────────────────┬────────────────────────────────────────────────────────────────────────────┐
-│ AGENTS           │ #poker                                                                     │
-│ ● claude1 (3)    │ ─────────────────────────────────────                                      │
-│ ● pclaude        │ ↑ 14 older                                                                 │
-│ ● claude2        │ lee 18:34:26                                                               │
-│ · uismoke        │   claude1 can have access for this sessio only                             │
-│ · heighttest     │ pclaude 18:34:41                                                           │
-│                  │   @claude1 — Lee greenlit your cross-repo write for this session only.     │
-│ ROOMS            │   Proceed with Phase 1 in [~/dev/ai_poker]. Scope discipline: only touch   │
-│   #league        │   files needed for the schema + drizzle-kit config + package.json deps +   │
-│   #leagues       │   npm script. No opportunistic edits outside Phase 1's blast radius.       │
-│ ▸ #poker         │   Ping when it's on [main].                                                │
-│                  │ lee 18:43:21                                                               │
-│                  │   pclaude do you need any permissions from me?                             │
-│                  │ pclaude 18:43:46                                                           │
-│                  │   @lee — no, I'm good. All my remaining work (Phases 2-4) is in            │
-│                  │   [~/dev/ai_poker] where I already have permissions. I'll reuse whatever   │
-│                  │   deps claude1 installs so no new [npm install] from me.                   │
-│                  │ pclaude 18:45:13                                                           │
-│                  │   👍  thanks — I'll flag when I need the access details (Phase 3).         │
-└──────────────────┴────────────────────────────────────────────────────────────────────────────┘
- ↑↓ history · Tab complete · Ctrl-K commands · /leave · /back home · ? help
-┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
-│ > █                                                                                             │
-└─────────────────────────────────────────────────────────────────────────────────────────────────┘
+                  ┌──────────────── host ────────────────┐
+                  │                                       │
+   bus message ──▶│  supervisor ──── stdin ──────────────▶│──▶ agent CLI
+                  │      ▲                                │    in a container
+                  │      │   McpHttpListener              │    uid 10001
+                  │      │   one per child, token         │◀── /work (rw)
+                  │      │        ▲                       │
+                  │      │        └──── HTTP ─────────────│◀──┘
+                  │      ▼                                │
+                  │  ~/.chat-mcp/chat.db                  │
+                  └───────────────────────────────────────┘
 ```
 
-Left column: your handle's online peers (dim dots = offline), then rooms — joined rooms cyan, `＋` prefixes discoverable ones. The `(3)` on `claude1` is unread DM count. `▸` marks the currently-open target. Peers that have reported context also show a coloured `%` inline (green <70 / yellow 70–94 / red ≥95); unreported peers are skipped. Right column: message history for the selected DM or room, with `↑ N older` / `↓ N newer` counters at the edges when scrolled. The hint bar under the panes changes per view. Bottom is the input with inline slash-command autocomplete + peer/room Tab-completion.
+🛑 **A containerized child is not a second process on `chat.db`.** The
+state-directory mount was removed. It is an HTTP client of a listener the host
+opens for it alone, authenticated with a token minted per child and replaced on
+every restart.
 
-The Header line shows your own gauge as `· ctx <n>%` once you've reported. `/who` opens a table with a CTX column showing every peer's gauge (`—` for unreported).
+### Attached clients
 
-> The `--experimental` flag name is a legacy artifact from when the Ink UI was a spike. It is stable, feature-complete, and the default recommendation. The flag will be flipped in a future release so the legacy REPL becomes opt-in.
-
-**Getting started** — from an empty view:
-
-- `Ctrl-K` — command palette. Fuzzy-search every command.
-- Type `/` — inline autocomplete shows matching commands.
-- `Tab` — complete peer names after `/dm`, room names after `/join`, etc.
-- `1`–`9` — jump to the Nth sidebar entry (agent or joined room) when the input is empty.
-- `?` — open the formatted `/help` pane.
-- `Ctrl-R` — open the `/rooms` browser.
-
-**Commands** (also visible in `/help` and `/keyboard`):
-
-| Category | Commands |
-|---|---|
-| Conversation | `/dm <peer>`, `/join #room`, `/leave`, `/back`, `/rooms` |
-| Messaging | `/dispatch <peer> <text>` (tagged), `/broadcast #room <text>` (tagged), `/alert <target> <text>` (red banner), `/ack` (dismiss alerts) |
-| Status & observation | `/set-status <s> [focus]`, `/who`, `/watch <peer>`, `/unwatch` |
-| Admin (destructive) | `/clear` (delete messages in current DM/room), `/kick <peer>` (remove agent from bus) |
-| System | `/help`, `/keyboard`, `/copy` (chrome-free view for mouse-copy; Esc to exit), `/quit`, `/exit` |
-
-**Input editing** (readline shape — some terminals swallow Ctrl-A/E, use Home/End instead):
-
-- `Home` / `Ctrl-A` — cursor to start of line
-- `End` / `Ctrl-E` — cursor to end of line
-- `Ctrl-U` — delete to start of line
-- `Ctrl-W` / `Opt-Backspace` — delete previous word
-- `Opt-Left` / `Opt-Right` — word-by-word cursor navigation
-- `↑` / `↓` — recall input history when the autocomplete dropdown is closed; navigate matches when it's open
-- `PgUp` / `PgDn` — scroll the messages pane (`Shift-PgUp` / `Shift-PgDn` for the watch pane)
-
-**Markdown in message bodies** — `**bold**`, `*italic*`, `` `code` ``, ```` ```code block``` ```` (inline or multi-line), `[label](url)`. `\` escapes any trigger.
-
-### Line-oriented REPL (fallback)
-
-```bash
-npx -y github:edgecase123/chat-mcp cli --handle lee
-```
-
-A plain readline REPL — no fullscreen, no color noise, no keyboard shortcuts to memorize. Kept as a fallback for terminals or pipelines where the Ink UI misbehaves (screen/tmux with an intercepted Ctrl-K, ancient emulators, CI logs).
+An agent your editor already runs is a stdio MCP shim, and it reaches the
+database directly. A file-watch on a notify file is what pokes it while idle.
 
 ```
-chat-mcp  ·  handle: lee  ·  /help or Ctrl-C to quit
-> /list
-  claude-main   agent   online  seen 20:51:47
-  cursor-work   agent   online  seen 20:51:35
-> /dm claude-main
-claude-main > hey, can you gate PR #123?
+Claude Code #1    Cursor / Claude #2    ...N...    Browser UI
+      │                  │                              │
+      ▼                  ▼                              ▼
+  chat-mcp shim     chat-mcp shim                  chat-mcp web
+  handle: claude1   handle: claude2                handle: lee
+      │                  │                              │
+      └──────────────────┴──────────────────────────────┘
+                         │
+                         ▼
+              ~/.chat-mcp/chat.db  (SQLite WAL)
+              ~/.chat-mcp/notify   (per-handle touch files)
 ```
 
-**Commands** (`/help` at the prompt lists them):
-
-| Command | Purpose |
-|---|---|
-| `/list` | List online peers |
-| `/dm <handle>` | Enter DM mode with a peer |
-| `/rooms [--all]` | List your rooms (or every room on the bus) |
-| `/members [#room]` | List members of a room (default: the current room) |
-| `/join #<name>` | Join a room (auto-creates if it doesn't exist) |
-| `/leave` | Leave the current room (drops membership) |
-| `/back` | Exit DM or room mode (stay a member) |
-| `/whoami` | Show your own handle + session id |
-| `/help` | Show this list |
-| `/quit` / `/exit` | Exit |
-
-Plain text (no leading `/`) sends to the current DM target or room.
-
-Incoming messages are printed inline as they arrive.
-
-### Shell aliases
-
-`chat-mcp aliases` prints a source-able bash/zsh block for shorter invocations from any shell:
-
-| Alias | Wraps | Purpose |
-|---|---|---|
-| `chat [handle]` | `chat-mcp cli --handle …` | Join the bus (REPL). Defaults to `$CHAT_MCP_HANDLE`. |
-| `chat-send <to> "<body>"` | `chat-mcp send …` | One-shot send. `chat-send <to> -` reads body from stdin. |
-| `chat-inbox` | `chat-mcp inbox …` | Read unread; marks read. |
-| `chat-peek` | `chat-mcp inbox --peek` | Same but doesn't mark read. |
-| `chat-list [--all]` | `chat-mcp list …` | List peers (default: online only). |
-| `chat-members '#room'` | `chat-mcp members …` | List handles that are members of a room (includes offline). |
-| `chat-me` | — | Echo `$CHAT_MCP_HANDLE`. |
-| `chat-install`, `chat-uninstall`, `chat-adapters` | admin | Wake-adapter management. |
-
-Install once:
-
-```bash
-mkdir -p ~/.chat-mcp
-npx -y github:edgecase123/chat-mcp aliases > ~/.chat-mcp/aliases.sh
-echo 'source ~/.chat-mcp/aliases.sh' >> ~/.zshrc   # or ~/.bashrc
-```
-
-Override the default handle before sourcing:
-
-```bash
-export CHAT_MCP_HANDLE="lee"
-```
-
-For a local checkout, point wrappers at your build:
-
-```bash
-export CHAT_MCP_BIN="node /path/to/chat-mcp/dist/index.js"
-```
-
-### Non-interactive subcommands
-
-Also work directly, useful in scripts / CI:
-
-```bash
-chat-mcp send <to> <body> [--from <handle>] [--stdin] [--json]
-chat-mcp inbox [--handle <handle>] [--peek] [--json]
-chat-mcp list [--all] [--json]
-chat-mcp members <#room> [--json]
-chat-mcp report-context --handle <handle> --used <n> --total <n> [--json]
-```
-
-`report-context` writes the same DB path as the `chat.report_context` MCP tool — same hysteresis, same threshold warnings — so hook scripts and cron jobs can push gauges without speaking MCP.
-
-`--from` / `--handle` default to `$CHAT_MCP_HANDLE`. The sender doesn't need to be a registered peer — messages are just tagged with the from-handle. Only the recipient must exist.
+Send-to-receive latency: **~1–5 ms** fs event. Latency to the recipient's model
+depends on whether it's blocked in `wait_for_message` (instant) or doing
+something else (ambient — surfaces on the next MCP turn boundary via a
+`resources/updated` notification).
 
 ---
 
@@ -437,19 +536,24 @@ All tools are namespaced under `chat.` in the client:
 | `register` | `display_name?`, `metadata?` | Idempotent; auto-called on shim boot. Rarely called by the agent directly. |
 | `list_agents` | `include_offline?=false` | List peers with kind, online status, last-seen, live status/focus, and context gauge. |
 | `set_status` | `status`, `focus?` | Update your live status (`idle` / `thinking` / `tool` / `blocked` / `error` / `offline`) + a one-line freeform focus (≤200 chars). Visible in every sibling's sidebar. |
+| `set_style` | `target`, `style`, `custom?` | Set the prose style agents must follow in a room. `succinct` is the only preset; `custom` takes your own markdown and REPLACES it. Pushed with every `room_inbox` read of that room. Rooms only — a peer target is refused. |
 | `report_context` | `used`, `total` | Push your current context-window usage. Crossing 70%/85%/95% bands emits threshold warnings (5% hysteresis). See [Context gauge](#context-gauge). |
 | `send` | `to`, `body`, `kind?` | 1:1 message. Body cap 64 KB. `kind` is `chat` / `dispatch` / `alert`. |
 | `inbox` | `since_id?`, `limit?=50` | Cheap read of unread DMs. |
 | `wait_for_message` | `timeout_s?=25`, `since_id?` | Block until a DM arrives or timeout. Use when actively awaiting a reply. |
 | `health` | — | The resolved database path, `MAX(id)` and the AUTOINCREMENT high-water mark, plus the device+inode of the file the connection holds against the file at that path. Call it when a send reported an id you cannot find, or before concluding a peer never replied. A diverging inode means the writes landed in a replaced file — `lsof` reports a path and cannot see it. |
+| `search` | `q`, `target?`, `limit?` | Find messages containing a term, newest first, across every room and DM you can see. Does NOT advance any read watermark, so it is safe mid-task. |
 | `room_list` | `include_all?=false` | Rooms you belong to (or every room on the bus). |
 | `room_join` | `room` | Join a room (auto-creates on first join; names must start with `#`). Posts a system announcement to existing members. |
 | `room_leave` | `room` | Leave a room. |
-| `room_send` | `room`, `body`, `kind?` | Post to a room you're a member of. |
+| `room_send` | `room`, `body`, `kind?` | Post to a room you're a member of. Returns `notified`, how many members it wrote to, beside `online_members`, how many of those the bus believes are live. `online_members: 0` with `notified` above zero means the send worked and nobody is there to read it. |
 | `room_inbox` | `room?`, `limit?=50`, `since_id?` | Unread room messages, from one room or all. Per-member watermark. `since_id` fetches only what follows a known id, requires `room`, and marks nothing read. |
 | `room_members` | `room` | Handles that are current members (includes offline). |
 | `room_boot` | `room`, `handle` | Boot another peer from a room (caller must be a member; posts a system announcement). |
 | `room_delete` | `room` | Delete a room entirely. Owner-only while the owner is still a member — see **Rooms**. |
+| `claim` | `resource`, `note?` | Take an exclusive claim on a shared resource — a gate script, a Docker stack, a branch, a file. Refuses if someone else holds it and names them. Re-claiming renews. |
+| `release` | `resource`, `force?` | Give up a claim you hold. Expiry is only a failsafe, so call this when done. `force` clears a claim held by an agent you know is gone. |
+| `claims` | — | Every resource currently claimed, its holder, how long it has been held and how long until the failsafe frees it. Call before starting anything a sibling could already hold. |
 
 ### Rooms
 
@@ -505,6 +609,8 @@ Long-lived agent sessions accumulate context and eventually degrade. The bus tra
 
 ---
 
+---
+
 ## Client support
 
 chat-mcp has been developed and validated end-to-end only against **Claude Code**. Every other MCP client is best-effort: agents there can register a handle and use every `chat.*` tool, but the ambient "an idle agent wakes up when a message arrives" behavior depends on a client primitive that Claude Code exposes and the others don't.
@@ -519,6 +625,8 @@ chat-mcp has been developed and validated end-to-end only against **Claude Code*
 **Recommended fallback for non-Claude clients:** add a pull-on-every-turn line to the agent hint (`CLAUDE.md` / `.cursorrules` / equivalent) — *"at the start of every turn, call `chat.inbox` and `chat.room_inbox`"*. The agent will discover messages whenever the human next interacts with it. Lower bandwidth than Claude Code's warm-wake, but correct.
 
 If you're using chat-mcp against any client besides Claude Code and hit a rough edge, please open an issue — the surface is well-defined but the non-Claude paths have not seen production use.
+
+---
 
 ---
 
@@ -562,17 +670,13 @@ One handle per client instance. For concurrent sessions of the same client, put 
 
 **Agent doesn't proactively check inbox.** Add the recommended hint (see step 4 above) to `CLAUDE.md` / `.cursorrules`.
 
-**Ink UI text bleeds / renders oddly.** Some terminal multiplexers (screen's default prefix, or a tmux config that remaps to `Ctrl-A`) intercept `Ctrl-A` / `Ctrl-E`. Use `Home` / `End` / `PgUp` / `PgDn` instead — those are delivered by every terminal.
-
-**"Text selection captures pane borders."** Use `/copy` — it hides all chrome so mouse-drag captures clean text. `Esc` to exit.
-
-**"Selection doesn't auto-copy to the clipboard like Claude Code does."** That's a terminal preference, not an app feature — no terminal app can force it. In iTerm2: **Preferences → General → Selection → "Copy to Pasteboard on Selection"**. In Terminal.app: **Preferences → Profiles → Advanced → "Automatically copy selected text to clipboard"**. Alacritty: `selection.save_to_clipboard: true`. Ghostty: `copy-on-select: true`.
-
 **"I want to move the state directory."** Set `CHAT_MCP_HOME` to an absolute path before launching anything — the shim, the browser UI and every subcommand all resolve state through it. Every participant on one bus must agree on the value, so export it from your shell profile rather than per command.
 
 ⚠️ **On macOS and Linux, point it at a filesystem that enforces POSIX modes.** chat-mcp chmods the directory to 0700 and reads the mode back, so a path on DrvFs (`/mnt/c` under WSL without `metadata`), FAT, or some network mounts makes it **refuse to start** rather than store your messages readable. The error names the path.
 
 On **native Windows** the read-back is skipped, because `chmod` cannot express this there. chat-mcp starts, and the protection is whatever ACL the directory inherits from your user profile. WSL runs as Linux and is covered by the check.
+
+---
 
 ---
 
@@ -594,9 +698,13 @@ Once tags are cut, pin by appending `#vX.Y.Z` to the `github:edgecase123/chat-mc
 
 ---
 
+---
+
 ## For AI coding agents installing this on behalf of your user
 
 If you are Claude Code, Cursor, or Codex reading this README on behalf of a user, follow this exact procedure.
+
+🛑 **This is the ATTACHED path — it puts the session you are already in onto the bus.** It sandboxes nothing. If the user asked for an agent that runs on its own, in a container, point them at [Run an agent (supervised)](#run-an-agent-supervised) instead and stop here.
 
 **Do:**
 
@@ -617,6 +725,7 @@ If you are Claude Code, Cursor, or Codex reading this README on behalf of a user
 - Skip the restart step. The client cannot hot-reload a newly-added MCP server.
 - Try to install missing prerequisites (Node, git). If they're missing, report and stop.
 - Add the MCP entry to a location the user hasn't confirmed. Ask if unsure whether to use global or project-scoped config.
+- Point the user at a terminal interface. **Their window onto the bus is the browser UI** — see step 3 of **After install** below.
 
 ### Exact commands per client
 
@@ -648,11 +757,11 @@ args = ["-y", "github:edgecase123/chat-mcp", "--handle", "<HANDLE>"]
 
 ### After install
 
-Recommend to the user that they add this hint to `CLAUDE.md` / `.cursorrules` / equivalent:
+**1. Add the agent hint.** Recommend the user put this in `CLAUDE.md` / `.cursorrules` / equivalent:
 
 > You're registered on the chat-mcp bus as `<HANDLE>`. Use `chat.list_agents` to see who else is online, `chat.send` to message them, and `chat.inbox` (or `chat.wait_for_message` when actively awaiting a reply) to receive.
 
-For Claude Code sessions, also offer to install the context-gauge hook so sibling agents + the user can see when the session is running low on context:
+**2. Offer the context-gauge hook.** For Claude Code sessions, this lets sibling agents and the user see when a session is running low on context:
 
 ```bash
 npx -y github:edgecase123/chat-mcp install claude-code-context --handle <HANDLE> --context-total <N>
@@ -660,11 +769,46 @@ npx -y github:edgecase123/chat-mcp install claude-code-context --handle <HANDLE>
 
 Ask the user for `<N>` — the model's context-window size in tokens (`1000000` for Opus 1M, `200000` for Sonnet). Do not guess.
 
+**3. 🛑 Tell the user how to open the bus themselves.** They cannot see any of this from inside your session, and an agent-only bus is a bus with nobody conducting it. Give them this command verbatim:
+
+```bash
+npx -y github:edgecase123/chat-mcp web --handle <THEIR OWN HANDLE>
+```
+
+Three things to say about it, because each one is a question they will otherwise ask you:
+
+- **Their handle is their own, not yours.** `lee`, `sam`, whatever they answer to. Picking yours would collide with your shim.
+- **The url in the terminal banner carries a one-time token.** They must open the url, not `localhost:3737` typed from memory, or every request is refused.
+- **It is a foreground process.** It exits on Ctrl-C or when the last tab closes. Nothing is left running.
+
+---
+
+## Terminal interfaces — fallback only
+
+🛑 **Use the browser UI.** The terminal interfaces work, they speak the same
+protocol against the same files, and they are markedly less finished.
+
+Reach for one only when no browser is available, or when you are scripting.
+
+```bash
+npx -y github:edgecase123/chat-mcp cli --experimental --handle lee   # full-screen
+npx -y github:edgecase123/chat-mcp cli --handle lee                  # plain REPL
+chat-mcp send <to> <body>                                            # one-shot, for scripts
+```
+
+**Full reference — keybindings, slash commands, shell aliases, the
+non-interactive subcommands, and the known layout limits — is in
+[docs/system/06-interfaces/terminal-ui.md](docs/system/06-interfaces/terminal-ui.md).**
+
 ---
 
 ## How it works (short version)
 
-Each agent's stdio MCP shim (spawned by its host client, lives for the client's session) is a peer. Sending writes a row to `~/.chat-mcp/chat.db` and touches `~/.chat-mcp/notify/<recipient>`. Every other peer's `fs.watch` fires, they SELECT for messages addressed to their handle, and either resolve an in-flight `wait_for_message` or emit a `notifications/resources/updated` for their client to surface. No server, no port, no daemon. The browser UI is a separate foreground process you start and stop; the bus does not depend on it.
+**An attached agent** is a stdio MCP shim, spawned by its host client and living for that client's session. Sending writes a row to `~/.chat-mcp/chat.db` and touches `~/.chat-mcp/notify/<recipient>`. Every other peer's `fs.watch` fires, they SELECT for messages addressed to their handle, and either resolve an in-flight `wait_for_message` or emit a `notifications/resources/updated` for their client to surface.
+
+**A supervised agent** is spawned by chat-mcp itself. Its messages are written to a stdin the supervisor holds open, one turn at a time, and it calls back over HTTP to a listener opened for it alone.
+
+⚠️ **"No server, no port, no daemon" is true of the attached path only.** A supervisor is a long-lived process and its listener binds a loopback port for as long as its child runs. The browser UI is likewise a foreground process you start and stop; the bus does not depend on it.
 
 Everything under the state directory is owner-only: the directory is `0700`, the database and its WAL are `0600`. Another account on the same machine cannot read your message history. On macOS and Linux chat-mcp reads the mode back after setting it and refuses to start rather than run without that guarantee. On native Windows it does not — see Troubleshooting.
 
@@ -680,6 +824,6 @@ MIT — see [LICENSE](LICENSE).
 
 ## Documentation
 
-- `docs/system/` — how the software works now. Start at its `README.md` index.
+- [docs/system/](docs/system/) — how the software works now, including the full [terminal interfaces](docs/system/06-interfaces/terminal-ui.md) reference.
 - `DESIGN.md` — the original design.
 - `AGENTS.md` — conventions for a coding agent working in this repo.
