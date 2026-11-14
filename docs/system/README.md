@@ -31,6 +31,11 @@ listed here will not be found. Add the row in the same commit as the page.
 |---|---|
 | [agent-liveness.md](05-supervision/agent-liveness.md) | How `online` is computed, why a containerized child's row holds the supervisor's pid, and what the exit handler clears |
 
+### [06 — Interfaces](06-interfaces/)
+| File | What it covers |
+|---|---|
+| [terminal-ui.md](06-interfaces/terminal-ui.md) | The fallback terminal surfaces — the ink CLI, the line REPL, shell aliases, the one-shot subcommands, and the layout limits |
+
 ### [07 — Operations](07-operations/)
 | File | What it covers |
 |---|---|
@@ -48,7 +53,7 @@ Ranked by what would help most on arrival.
 | `05-supervision` | Still needed: drivers, the container boundary, the host/container split. Today partly in `AGENTS.md`. Liveness is now covered |
 | `02-setup` | The three clones, `CHAT_MCP_HOME` isolation, wiring an MCP client. Today in `AGENTS.md` and `README.md` |
 | `04-messaging` | DMs, rooms, read watermarks, claims, the notify wake path |
-| `06-interfaces` | The MCP shim's tools, the web UI, the ink CLI, the one-shot subcommands |
+| `06-interfaces` | Still needed: the MCP shim's tools and the web UI. The terminal surfaces are now covered |
 | `08-testing` | The node test runner, `CHAT_MCP_HOME` isolation, proving a guard non-vacuous |
 | `09-conventions` | TDD, commit style, secret handling. Today in `AGENTS.md` § Conventions |
 

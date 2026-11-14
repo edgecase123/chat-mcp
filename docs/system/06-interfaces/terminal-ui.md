@@ -1,6 +1,16 @@
+---
+title: Terminal interfaces
+updated: 2026-11-14
+covers:
+  - src/cli/index.ts
+  - src/cli/ink/App.tsx
+  - src/shell/aliases.ts
+  - src/oneshot
+---
+
 # Terminal interfaces (fallback)
 
-🛑 **Use [the browser UI](../README.md#quick-start--the-browser-ui) instead.**
+🛑 **Use [the browser UI](../../../README.md#quick-start--the-browser-ui) instead.**
 It gets every new feature first, and it has no layout limits.
 
 Reach for a terminal interface only when no browser is available, or when you
