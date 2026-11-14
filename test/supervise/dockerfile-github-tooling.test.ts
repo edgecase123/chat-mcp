@@ -49,12 +49,17 @@ test('an apt-get install line installs the gh CLI, so an agent can file a ticket
 /**
  * The paired control for the `gh` test above. `gh` is not in Debian's own
  * repositories, so `apt-get install gh` alone resolves to nothing and the
- * build SUCCEEDS with no `gh` in the image. The keyring and the source list
- * are what make the package reachable, and their absence is exactly the
- * silent pass this asserts against.
+ * build SUCCEEDS with no `gh` in the image.
+ *
+ * 🛑 ONE REGEX SPANNING BOTH LINES, NOT TWO ASSERTS. A bare /cli\.github\.com/
+ * also matched the keyring `wget` URL, so deleting the `deb` line — the line
+ * that makes the package resolve at all — left this green. Measured.
  */
-test('the gh install configures GitHub own apt source, not just the package name', () => {
-  assert.match(INSTALLS, /cli\.github\.com/);
+test('the gh install writes GitHub own apt source to the list apt reads', () => {
+  assert.match(
+    INSTALLS,
+    /deb \[[^\]]*\] https:\/\/cli\.github\.com\/packages[^\n]*"[\s\\]*>[\s]*\/etc\/apt\/sources\.list\.d\/github-cli\.list/,
+  );
 });
 
 /**
@@ -63,7 +68,9 @@ test('the gh install configures GitHub own apt source, not just the package name
  * one would put the credential in every layer and in `docker history`.
  */
 test('no GitHub credential is baked into the image', () => {
-  assert.doesNotMatch(INSTALLS, /^\s*(ENV|ARG)\s+GH_TOKEN\s*=/m);
+  // No `=`: `ARG GH_TOKEN` fed by --build-arg, and `ENV GH_TOKEN value`,
+  // both bake the credential in and both passed the `=` form.
+  assert.doesNotMatch(INSTALLS, /^\s*(ENV|ARG)\s+GH_TOKEN\b/m);
   assert.doesNotMatch(INSTALLS, /gh\s+auth\s+login/);
 });
 
@@ -77,7 +84,13 @@ test('no GitHub credential is baked into the image', () => {
  * ask `gh`, which reads the token from the environment at run time.
  */
 test('git is configured to get GitHub credentials from gh, so push works at all', () => {
-  assert.match(INSTALLS, /git config --system credential[^\n]*gh auth git-credential/);
+  // 🛑 THE `!` IS LOAD-BEARING. Without it git resolves the value to the
+  // binary `git-credential-gh`, which does not exist, and the push fails.
+  // The host is pinned too: `https://github.co` passed the loose form.
+  assert.match(
+    INSTALLS,
+    /git config --system credential\."https:\/\/github\.com"\.helper '!gh auth git-credential'/,
+  );
 });
 
 /**
