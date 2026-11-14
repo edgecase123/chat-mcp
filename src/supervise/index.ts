@@ -781,6 +781,22 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     log(`replacing child (${reason}); ${unsent.length} prompt(s) carried over`);
     child.kill();
 
+    // 🛑 HERE, NOT IN `onExit`. `kill()` returns immediately — a containerized
+    // child spawns `docker stop` detached — so the exit lands after
+    // `wireChild()` has bumped the generation and `ifCurrent` drops it as
+    // stale. The handler below would never run, and `online` stayed true for a
+    // child that no longer existed, forever if the respawn then failed.
+    //
+    // ⚠️ Moving the `onExit` clear outside `ifCurrent` is NOT the alternative:
+    // that clears a LIVE child's pid on every stale signal. The replacement
+    // re-registers its own pid moments later, so a brief offline window here
+    // is the honest reading.
+    try {
+      dao.clearAgentPid(approvalsDb, childBusHandle());
+    } catch (err) {
+      log(`FAILED to take ${childBusHandle()} offline across a replace: ${String(err)}`);
+    }
+
     if (change.model) currentModel = change.model;
 
     if (change.allowedTools && currentGrant) {
