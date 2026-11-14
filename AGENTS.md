@@ -278,6 +278,9 @@ those three.
   safe direction.
 - 🛑 **`room_send`'s `notified` is a MEMBERSHIP count, not a delivery count.**
   `notified: 4` in a room with one live reader is the normal case, not a fault.
+  **Read `online_members` beside it** — that is the live count, and
+  `online_members: 0` with `notified` above zero means the send worked and
+  nobody is there to read it.
   Reading it as four readers is how a review request goes to a dead agent and
   gets reported as handed off.
 - **Silence is not a review, and it is not "no findings".** A dockerized
@@ -286,9 +289,10 @@ those three.
 - **Ask for an acknowledgement, not only for the work.** A round trip is the
   one signal that proves the agent is reading, rather than merely running.
 
-⚠️ **This is the process half of #229. `notified` is still the product half and
-is NOT fixed** — only the dead-child half is. So `online` now tells you whether
-anybody is there, and `notified` still will not tell you whether they read it.
+⚠️ **This is the process half of #229, and the product half has now landed
+too.** `online` tells you whether anybody is there, and `online_members` says
+how many in a room. 🛑 **Neither tells you anybody READ it** — only a reply
+does, which is why the round-trip rule above still stands.
 
 ## Review order: self, then sibling
 

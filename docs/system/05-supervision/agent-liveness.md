@@ -3,6 +3,7 @@ title: Agent Liveness
 updated: 2026-11-14
 covers:
   - src/storage/dao.ts
+  - src/messaging/room-send.ts
   - src/supervise/index.ts
   - src/supervise/host-bus.ts
 ---
@@ -63,6 +64,22 @@ the `-agent` suffix, or by the grant. Clearing `opts.handle` would take a live
 supervisor offline — a worse fault than the original. `childBusHandle()` is the
 one reader, and it is a function rather than a captured value because
 `currentGrant` is reassigned on a child replace.
+
+## `online_members` is the room-level answer
+
+`room_send` returns two counts, and they answer different questions.
+
+| field | means | changes with liveness? |
+|---|---|---|
+| `notified` | members this call wrote a notify file for | **no**, always every member |
+| `online_members` | how many of those the bus believes are live | yes |
+
+**`notified` is not a lie and was never narrowed.** The write to an offline
+member is how it sees the message on its next `room_inbox`, so excluding them
+would under-report work the call did. `online_members: 0` with `notified` above
+zero is the #229 case: the send worked and nobody is there to read it.
+
+🛑 **Neither field says anybody READ it.** Only a reply does.
 
 ## Common pitfalls
 

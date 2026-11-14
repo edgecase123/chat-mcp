@@ -10,7 +10,7 @@ export function installRoomSend(server: McpServer, ctx: ShimContext): void {
     {
       title: 'Post a message to a room',
       description:
-        'Post a message to a room you are a member of. Every current member (except you) gets a notify event; offline members see the message on their next room_inbox call. Body cap 64 KB.',
+        'Post a message to a room you are a member of. Every current member (except you) gets a notify event; offline members see the message on their next room_inbox call. Returns `notified`, how many members were written to, and `online_members`, how many of those the bus believes are live right now — `online_members: 0` means nobody is there to read it yet. Body cap 64 KB.',
       inputSchema: {
         room: z.string().describe('Room name including leading # (e.g. "#gate")'),
         body: z.string().describe('Message body (UTF-8, max 64 KB)'),
@@ -46,6 +46,11 @@ export function installRoomSend(server: McpServer, ctx: ShimContext): void {
               sent_at: result.sent_at,
               room,
               notified: result.notified,
+              // 🛑 BOTH, AND `notified` FIRST BECAUSE IT IS THE OLDER NAME. A
+              // caller that reads only `notified` gets the member count, which
+              // is what it has always meant. `online_members` is the one that
+              // answers "is anyone there to read this".
+              online_members: result.online_members,
             }),
           },
         ],
