@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+#
+# Start, stop, restart or inspect the browser chat UI server.
+#
+#   ./scripts/web start   [handle]
+#   ./scripts/web stop
+#   ./scripts/web restart [handle]
+#   ./scripts/web status
+#
+# 🛑 EVERY START MINTS A NEW API TOKEN, AND THE BANNER IS THE ONLY PLACE IT IS
+# PUBLISHED. `~/.chat-mcp/web-url` holds the PLAIN url, deliberately, because a
+# container can read that file. So this script scrapes the token-bearing url
+# out of the log and prints it — detaching the server without doing that leaves
+# the UI unreachable with no visible error.
+
+set -euo pipefail
+# shellcheck source=scripts/lib/procctl.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/procctl.sh"
+
+USAGE='./scripts/web start|stop|restart|status [handle]'
+
+VERB="${1:-}"
+[ -n "$VERB" ] || pc_usage_die "$USAGE"
+
+# The handle the web UI joins the bus as. It is a peer like any other, so two
+# servers on the same handle collide with HandleClaimedError.
+HANDLE="${2:-${CHAT_MCP_WEB_HANDLE:-leejenkins}}"
+
+# 🛑 PINNED, NOT RANDOM. `chat-mcp web` falls back to an OS-assigned port when
+# its preferred 3737 is taken, which would leave `stop` and `status` with no
+# fixed thing to check. Passing --port makes it fail loudly on a clash instead.
+PORT="${CHAT_MCP_WEB_PORT:-3737}"
+
+PROC_NAME='web'
+URL_FILE="$CHAT_MCP_HOME/web-url"
+START_TIMEOUT_SECONDS="${WEB_START_TIMEOUT:-60}"
+
+# The pid listening on PORT, whoever started it. Empty if nothing is bound.
+port_pid() {
+  { lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null || true; } \
+    | tr -s '[:space:]' '\n' | sed '/^$/d' | sort -u | head -n 1
+}
+
+# The handshake url from the banner, which carries this session's credential.
+handshake_url() {
+  local log; log="$(pc_logfile "$PROC_NAME")"
+  [ -f "$log" ] || return 0
+  { sed -n 's/^[[:space:]]*open:[[:space:]]*//p' "$log" 2>/dev/null || true; } | tail -n 1
+}
+
+print_url() {
+  local url; url="$(handshake_url || true)"
+  if [ -z "$url" ]; then
+    pc_warn 'the server is up but no handshake url appeared in the log'
+    pc_info "plain url: $(cat "$URL_FILE" 2>/dev/null || echo unknown)"
+    pc_info "that url has no credential — the UI will refuse it"
+    return 1
+  fi
+  printf '\n  %s%s%s\n\n' "$PC_BOLD" "$url" "$PC_OFF"
+  pc_info 'that url carries this session api credential — reopen it after every restart'
+}
+
+do_start() {
+  local pid foreign
+  pid="$(pc_live_pid "$PROC_NAME")"
+  if [ -n "$pid" ]; then
+    pc_warn "the web ui is already running as pid $pid"
+    print_url || true
+    exit 0
+  fi
+
+  foreign="$(port_pid)"
+  if [ -n "$foreign" ]; then
+    pc_err "port $PORT is already bound by pid $foreign, which this script did not start"
+    pc_info "stop it yourself, or start on another port: CHAT_MCP_WEB_PORT=3738 $0 start"
+    exit 1
+  fi
+
+  pc_init
+  pc_ensure_built
+
+  pc_info "handle:  $HANDLE"
+  pc_info "port:    $PORT"
+  pc_info "log:     $(pc_logfile "$PROC_NAME")"
+
+  # --no-open because the process is detached: this script prints the url
+  # instead, and it prints the one that carries the credential.
+  pid="$(pc_spawn "$PROC_NAME" '' \
+    node "$PC_CLI" web --handle "$HANDLE" --port "$PORT" --no-open)"
+
+  _ready() {
+    if ! pc_alive "$pid"; then
+      printf '\n'
+      pc_err 'the web server exited during startup'
+      pc_log_tail "$PROC_NAME" 25
+      rm -f "$(pc_pidfile "$PROC_NAME")"
+      exit 1
+    fi
+    [ -n "$(handshake_url)" ]
+  }
+
+  if ! pc_wait_until "$START_TIMEOUT_SECONDS" "the web ui to bind port $PORT" _ready; then
+    pc_err "the web ui did not report a url within ${START_TIMEOUT_SECONDS}s"
+    pc_log_tail "$PROC_NAME" 25
+    exit 1
+  fi
+
+  pc_ok "web ui is up as '$HANDLE' (pid $pid)"
+  print_url || true
+}
+
+do_stop() {
+  local pid foreign
+  pid="$(pc_live_pid "$PROC_NAME")"
+
+  if [ -z "$pid" ]; then
+    foreign="$(port_pid)"
+    if [ -n "$foreign" ]; then
+      pc_err "port $PORT is bound by pid $foreign, which this script did not start"
+      pc_info 'not killing a process this script does not own — stop it yourself'
+      exit 1
+    fi
+    pc_info 'the web ui is not running'
+    return 0
+  fi
+
+  # 🛑 THERE IS NO `chat-mcp web stop`. The server's own banner says Ctrl-C, so
+  # a signal is the only stop path and the pid is the only handle on it.
+  pc_kill_pid "$pid"
+  rm -f "$(pc_pidfile "$PROC_NAME")"
+
+  # The server unlinks its url file on shutdown, so a lingering one means the
+  # teardown did not complete.
+  if [ -e "$URL_FILE" ]; then
+    pc_warn "pid $pid is gone but $URL_FILE was left behind — removing it"
+    rm -f "$URL_FILE"
+  fi
+
+  pc_ok 'web ui stopped'
+}
+
+do_restart() {
+  do_stop
+  do_start
+}
+
+do_status() {
+  local pid foreign
+  pid="$(pc_live_pid "$PROC_NAME" 2>/dev/null || true)"
+  foreign="$(port_pid)"
+
+  printf '%sweb ui%s\n' "$PC_BOLD" "$PC_OFF"
+  printf '  server      %s\n' "${pid:-not running}"
+  if [ -n "$foreign" ]; then
+    printf '  port %-6s bound by pid %s\n' "$PORT" "$foreign"
+  else
+    printf '  port %-6s free\n' "$PORT"
+  fi
+  printf '  url file    %s\n' "$(cat "$URL_FILE" 2>/dev/null || echo absent)"
+  printf '  log         %s\n' "$(pc_logfile "$PROC_NAME")"
+  [ -n "$pid" ] && print_url || true
+}
+
+case "$VERB" in
+  start)   do_start ;;
+  stop)    do_stop ;;
+  restart) do_restart ;;
+  status)  do_status ;;
+  *)       pc_usage_die "$USAGE" ;;
+esac
