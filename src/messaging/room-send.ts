@@ -56,6 +56,21 @@ export interface SendToRoomResult {
   sent_at: number;
   /** Recipients notified, which is the member count minus the sender. */
   notified: number;
+  /**
+   * How many of those recipients the bus believes are ONLINE right now.
+   *
+   * 🛑 A SECOND FIELD, BECAUSE `notified` IS ALREADY TRUE. Every member really
+   * is written to, and an offline one reads the message on its next
+   * `room_inbox` — so narrowing `notified` would under-report work this call
+   * did. What it cannot answer is whether anyone is there to read it now, and
+   * reading it as if it could is how a review request reached a dead agent and
+   * was reported as handed off. #229.
+   *
+   * ⚠️ `notified` minus this is the number of recipients that will not see the
+   * message until they next poll. Zero here with `notified` above zero means
+   * the send succeeded and nobody is listening.
+   */
+  onlineMembers: number;
 }
 
 /**
@@ -81,12 +96,16 @@ export function sendToRoom(db: Db, input: SendToRoomInput): SendToRoomResult {
   if (advanceOwnRead) dao.advanceRoomRead(db, room, from, sent.id);
 
   let notified = 0;
+  let onlineMembers = 0;
   for (const member of dao.roomMembers(db, room)) {
     if (member === from) continue;
     const unread = dao.totalUnreadFor(db, member);
     notifyPeer(member, { id: sent.id, to: room, from, ts: sent.sent_at, body, kind, unread });
     notified += 1;
+    // Counted inside the SAME loop, so the two figures can never be taken
+    // over different member sets.
+    if (dao.getAgent(db, member)?.online === true) onlineMembers += 1;
   }
 
-  return { id: sent.id, sent_at: sent.sent_at, notified };
+  return { id: sent.id, sent_at: sent.sent_at, notified, onlineMembers };
 }

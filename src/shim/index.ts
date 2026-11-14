@@ -82,7 +82,7 @@ function buildInstructions(handle: string): string {
     ``,
     `- \`room_join\` — join a room (auto-creates on first join). Your UNREAD starts at the join, so \`room_inbox\` never shows anything older; \`search\` still reads the room's full history.`,
     `- \`room_leave\` — leave; drops membership.`,
-    `- \`room_send\` — post to a room you're a member of. Notifies every currently-online member.`,
+    `- \`room_send\` — post to a room you're a member of. Notifies EVERY member, online or not; an offline one reads it on its next \`room_inbox\`. It returns \`notified\` (how many it wrote to) and \`online_members\` (how many of those are live). **\`online_members: 0\` with \`notified\` above zero means the send worked and nobody is there to read it.**`,
     `- \`room_inbox\` — read unread messages, per-member watermark. Pass a specific \`room\` or omit to read across all your rooms.`,
     `- \`room_list\` — rooms you're in (or \`include_all=true\` to discover).`,
     `- \`room_members\` — handles currently in a specific room (offline members included).`,
