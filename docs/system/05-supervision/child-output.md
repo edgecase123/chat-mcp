@@ -49,6 +49,15 @@ dropped.
 **Blank and whitespace-only lines are dropped**, at the wiring and again at the
 supervisor. A flush of pure whitespace would otherwise be one log entry each.
 
+🔴 **A DYING PROCESS NEVER SENDS ITS CLOSING BREAK, so `end` drains the
+buffer.** Splitting on a break alone dropped the last line — which is the ONE
+line naming why the container died, and the whole reason this channel exists.
+
+⚠️ **`\r` COUNTS AS A BREAK, NOT JUST `\n`.** `npm` and `docker pull` draw
+progress by returning the carriage without a newline, so a `\n`-only split
+buffered a whole run and delivered it as one entry thousands of characters
+long. `\r\n` is one break, not two.
+
 ## 🛑 Why `onStderr` goes through the generation guard
 
 Every child callback registered in `wireChild` is wrapped in `ifCurrent`, which

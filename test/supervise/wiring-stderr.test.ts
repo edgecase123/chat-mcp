@@ -44,7 +44,13 @@ function wired() {
   const agent = wireAgentChild(child, vendor);
   agent.onStderr((l) => lines.push(l));
 
-  return { emit: (chunk: string) => child.stderr.emit('data', chunk), lines };
+  return {
+    emit: (chunk: string) => child.stderr.emit('data', chunk),
+    // A dying process closes its pipe. `end` is the only signal that no
+    // further newline is coming.
+    end: () => child.stderr.emit('end'),
+    lines,
+  };
 }
 
 test('a complete line is delivered once', () => {
@@ -110,4 +116,84 @@ test('every subscriber receives each line', () => {
 
   assert.deepEqual(a, ['boom']);
   assert.deepEqual(b, ['boom']);
+});
+
+/**
+ * 🔴 THE CASE THIS WHOLE CHANGE EXISTS FOR, AND THE FIRST CUT LOST IT.
+ *
+ * A process that dies mid-line never sends the closing newline. Draining only
+ * on `\n` meant the buffer still held the last line when the pipe closed, so
+ * the ONE line naming why the container died was the one line dropped. Raised
+ * by claude2 on PR 238 with a failing repro against this harness.
+ */
+test('🚨 a final line with NO trailing newline is delivered when the stream ends', () => {
+  const w = wired();
+
+  w.emit('npm error code EACCES');
+  assert.deepEqual(w.lines, [], 'a partial line must wait for a newline or an end');
+
+  w.end();
+
+  assert.deepEqual(w.lines, ['npm error code EACCES']);
+});
+
+test('🚨 an end after a complete line does not re-deliver or invent one', () => {
+  const w = wired();
+
+  w.emit('done\n');
+  w.end();
+
+  assert.deepEqual(w.lines, ['done'], 'end must not duplicate or emit a blank');
+});
+
+/** The negative control: an end on an empty buffer emits nothing. */
+test('🚨 an end with nothing buffered emits nothing', () => {
+  const w = wired();
+
+  w.end();
+
+  assert.deepEqual(w.lines, []);
+});
+
+/** Whitespace-only residue is still residue, and still not worth a line. */
+test('🚨 an end flushing only whitespace emits nothing', () => {
+  const w = wired();
+
+  w.emit('   ');
+  w.end();
+
+  assert.deepEqual(w.lines, []);
+});
+
+/**
+ * 🟡 `\r` IS A BREAK TOO. `npm` and `docker pull` draw progress by returning
+ * the carriage and never sending a newline, so a `\n`-only split buffered the
+ * whole run and delivered it as one entry thousands of characters long.
+ * Measured by claude2 on PR 238.
+ */
+test('🚨 carriage-return progress output is split, not buffered into one entry', () => {
+  const w = wired();
+
+  w.emit('10%\r20%\r30%\r');
+
+  assert.deepEqual(w.lines, ['10%', '20%', '30%']);
+});
+
+test('🚨 a CRLF pair is ONE break, not two', () => {
+  const w = wired();
+
+  w.emit('first\r\nsecond\r\n');
+
+  assert.deepEqual(w.lines, ['first', 'second'], 'CRLF must not emit a blank between lines');
+});
+
+/** A real npm shape: progress by \r, then the error by \n, then death. */
+test('🚨 progress then a final error with no trailing break delivers every part', () => {
+  const w = wired();
+
+  w.emit('fetch 40%\rfetch 80%\r');
+  w.emit('npm error code EACCES\nnpm error path /work');
+  w.end();
+
+  assert.deepEqual(w.lines, ['fetch 40%', 'fetch 80%', 'npm error code EACCES', 'npm error path /work']);
 });
