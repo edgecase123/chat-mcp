@@ -390,6 +390,7 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   if (path === '/api/kick' && req.method === 'POST') return handleKick(req, res, ctx);
   if (path === '/api/rooms/delete' && req.method === 'POST') return handleRoomDelete(req, res, ctx);
   if (path === '/api/rooms/read' && req.method === 'POST') return handleRoomRead(req, res, ctx);
+  if (path === '/api/activity' && req.method === 'POST') return handleActivity(req, res, ctx);
   if (path === '/api/messages/clear' && req.method === 'POST')
     return handleMessagesClear(req, res, ctx);
   if (path === '/api/approvals' && req.method === 'GET') return handleGetApprovals(res, ctx);
@@ -659,6 +660,48 @@ async function handleRoomRead(req: IncomingMessage, res: ServerResponse, ctx: Ro
     return respondJson(res, { error: `you are not a member of ${room}` }, 403);
   }
   dao.advanceRoomRead(ctx.db, room, ctx.handle, body.up_to_id);
+  respondJson(res, { ok: true });
+}
+
+/**
+ * Relay a supervisor's "this agent is working" to every open browser, #240.
+ *
+ * 🛑 THIS ROUTE MUST NOT TOUCH `sseClients`. `armIdleShutdown` keys on that
+ * set's membership alone, so adding to it here would disarm the 60-second idle
+ * shutdown and turn `chat-mcp web` into the persistent daemon that was
+ * rejected on purpose. A supervisor pulses every 250ms while an agent works,
+ * so this route would hold the server up forever.
+ *
+ * ⚠️ THE FRAME CARRIES THE HANDLE, unlike `event: wake`, which carries a
+ * timestamp and makes the client re-fetch. A pulse has nowhere to re-fetch
+ * FROM — no endpoint reports who is working — so the payload is the message.
+ */
+async function handleActivity(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+  const body = (await readJsonBody(req)) as { handle?: unknown; phase?: unknown };
+  const handle = typeof body.handle === 'string' ? body.handle : null;
+  const phase = body.phase;
+
+  if (handle === null || handle.length === 0) {
+    return respondJson(res, { error: 'handle required' }, 400);
+  }
+
+  // 🛑 AN ENUMERATED SET, NOT A STRING PASSED THROUGH. A client switching on
+  // this value would be switching on whatever a caller sent.
+  if (phase !== 'tick' && phase !== 'end') {
+    return respondJson(res, { error: "phase must be 'tick' or 'end'" }, 400);
+  }
+
+  const frame = `event: activity\ndata: ${JSON.stringify({ handle, phase, ts: Date.now() })}\n\n`;
+
+  for (const client of ctx.sseClients) {
+    try {
+      client.write(frame);
+    } catch {
+      // A hung browser must not turn a pulse into a 500. Every other fan-out
+      // in this file does the same, and this one fires far more often.
+    }
+  }
+
   respondJson(res, { ok: true });
 }
 

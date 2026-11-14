@@ -78,6 +78,11 @@ const READ_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 const WRITE_ROUTES: ReadonlySet<string> = new Set([
+  // 🛑 CLASSIFIED, BECAUSE THE FALLBACK WOULD MAKE A PULSE AN ADMIN ACTION.
+  // An unrecognised /api/* path returns 'admin', which fails closed and is
+  // therefore safe and wrong — the supervisor holds a write credential, so an
+  // unclassified route silently 403s every pulse. #240.
+  '/api/activity',
   '/api/messages',
   '/api/messages/clear',
   '/api/rooms/join',
