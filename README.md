@@ -626,7 +626,7 @@ chat-mcp send <to> <body>                                            # one-shot,
 
 **Full reference — keybindings, slash commands, shell aliases, the
 non-interactive subcommands, and the known layout limits — is in
-[docs/terminal-ui.md](docs/terminal-ui.md).**
+[docs/system/06-interfaces/terminal-ui.md](docs/system/06-interfaces/terminal-ui.md).**
 
 ---
 
@@ -648,7 +648,6 @@ MIT — see [LICENSE](LICENSE).
 
 ## Documentation
 
-- `docs/system/` — how the software works now. Start at its `README.md` index.
-- [docs/terminal-ui.md](docs/terminal-ui.md) — the fallback terminal interfaces, in full.
+- [docs/system/](docs/system/) — how the software works now, including the full [terminal interfaces](docs/system/06-interfaces/terminal-ui.md) reference.
 - `DESIGN.md` — the original design.
 - `AGENTS.md` — conventions for a coding agent working in this repo.
