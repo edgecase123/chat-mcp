@@ -7,7 +7,7 @@ import { spawn as realSpawn } from 'node:child_process';
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-driver-'));
 
-const { setToken } = await import('../../../src/supervise/auth.js');
+const { setToken, setGhToken, clearGhToken } = await import('../../../src/supervise/auth.js');
 const { stateDir } = await import('../../../src/util/paths.js');
 const { registerMount, mountsPath } = await import('../../../src/supervise/mounts.js');
 const { claudeSpawn } = await import('../../../src/adapters/claude-spawn.js');
@@ -674,4 +674,73 @@ test('🚨 a plan that cannot be built kills nothing', async (t) => {
   const removals = calls.filter((argv) => argv[0] === 'rm');
 
   assert.deepEqual(removals, [], `the live container was removed anyway: ${JSON.stringify(removals)}`);
+});
+
+/**
+ * #214: a containerized agent had no GitHub credential, so it could not file a
+ * ticket, open a PR, or push. The token is injected exactly the way the Claude
+ * token is — by NAME, so the value never reaches argv.
+ */
+test('the gh token is injected by NAME via -e, and the value never appears as a bare arg', () => {
+  setToken('sk-ant-oat-x');
+  setGhToken('ghp-secret-value');
+
+  const { args } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+
+  assert.ok(args.includes('GH_TOKEN'), 'GH_TOKEN is not passed by name');
+
+  for (const arg of args) {
+    assert.ok(
+      !arg.includes('ghp-secret-value'),
+      `the gh token value reached the docker argv as ${arg}`,
+    );
+  }
+});
+
+/**
+ * The paired control. An argv that named the var and never carried the value
+ * would pass the test above, and `gh` inside the container would still be
+ * unauthenticated.
+ */
+test('the gh token reaches the container through the spawn env instead', () => {
+  setToken('sk-ant-oat-x');
+  setGhToken('ghp-secret-value');
+
+  const { env } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+
+  assert.equal(env.GH_TOKEN, 'ghp-secret-value');
+});
+
+/**
+ * 🛑 OPTIONAL, BECAUSE MOST HANDLES NEED NO GITHUB ACCESS. A missing gh token
+ * must not fail the spawn the way a missing Claude token does — and it must
+ * not pass `-e GH_TOKEN` either. Docker copies a named var from this process's
+ * environment, so naming it while the host has none would hand the container
+ * an empty `GH_TOKEN`, which `gh` reports as a bad credential rather than as
+ * no credential at all.
+ */
+test('no gh token on file means no -e GH_TOKEN, and the spawn still succeeds', () => {
+  setToken('sk-ant-oat-x');
+  clearGhToken();
+
+  const { args, env } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+
+  assert.ok(!args.includes('GH_TOKEN'), 'GH_TOKEN was named with no token on file');
+  assert.equal(env.GH_TOKEN, undefined);
+});
+
+/**
+ * 🛑 ONE STRING, NOT TWO THAT HAPPEN TO MATCH. The storage key IS the injected
+ * env var name. Two independent literals would let a rename inject
+ * `-e <newname>` for a var `auth.ts` never stores, and the container would get
+ * an UNSET `GH_TOKEN` — which `gh` reports as a bad credential rather than as
+ * no credential at all. Caught in review before merge; this is the guard.
+ */
+test('the driver env var name IS the storage key, with no second literal to drift', async () => {
+  const { GH_TOKEN_KEY } = await import('../../../src/supervise/auth.js');
+  const { CONTAINER_GH_TOKEN_ENV } = await import(
+    '../../../src/supervise/drivers/containerized.js'
+  );
+
+  assert.equal(CONTAINER_GH_TOKEN_ENV, GH_TOKEN_KEY);
 });

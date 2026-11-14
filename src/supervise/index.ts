@@ -211,7 +211,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     if (!readToken()) {
       throw new Error(
         'no Claude OAuth token on file; run `claude setup-token` on the host, then ' +
-          '`chat-mcp auth set-token <token>`',
+          '`pbpaste | chat-mcp auth set-token` (stdin, never argv)',
       );
     }
     if (!isConfirmed(opts.handle)) {
