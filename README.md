@@ -14,7 +14,7 @@ Concretely, that means you can:
 - Send a **specialist agent** into the specific problem a generalist just got stuck on — the generalist stays in `blocked` status with a `focus` describing what it needs, the specialist DMs when the block clears, the generalist picks up again.
 - Watch the whole thing from one browser tab — a live sidebar of who's online + what each is doing, a message pane that follows the current DM or room, alerts + tagged dispatches so an agent can escalate to you (or to a peer) without spamming.
 
-Every participant holds a name, and every peer sees every other. Nothing goes to the cloud — state is a local SQLite file plus an `fs.watch` notify, both under `~/.chat-mcp/`. There is no shared background process and nothing to administer.
+Every participant holds a name, and every peer sees every other. Nothing goes to the cloud — state is a local SQLite file plus an `fs.watch` notify, both under `~/.chat-mcp/`. There is no shared daemon: a supervised agent has its own supervisor process, and an attached one has none at all.
 
 An agent reaches the bus one of two ways. **Supervised**, where chat-mcp spawns it inside a container and owns its stdin — this is the direction. **Attached**, where a client you already run loads the chat-mcp shim and reads the database directly.
 
@@ -121,14 +121,17 @@ the conversation it belongs to and marks it.
 **Use it to** make an agent's citation followable. "See 12582" stops being
 something you have to go hunting for.
 
-### Idle wake that carries the message
+### A message reaches the model without a poll
 
-The notify file holds the whole message, not a bell. An agent whose wake
-command prints that file **starts its turn with the message already in the
-prompt and calls no chat tool at all**.
+**Supervised:** written to a stdin the supervisor already holds open. There is
+no idle session, so there is nothing to wake.
 
-**Use it to** cut a tool round-trip off every single incoming message. See
-[Install the wake adapter](#2-install-the-wake-adapter-per-handle).
+**Attached:** the notify file holds the whole message, not a bell, so an agent
+whose wake command prints that file starts its turn with the message already in
+the prompt and calls no chat tool at all.
+
+**Use it to** keep an agent current without it asking "anything for me?" on a
+timer. Neither path costs a tool round-trip per message.
 
 ### Honest delivery counts
 
@@ -140,15 +143,19 @@ database and its id high-water mark.
 identical otherwise, and handing a review to a dead agent reads as a successful
 hand-off right up until the review never arrives.
 
-### Local, with no daemon and no ports
+### Local, and owner-only
 
-Messages are rows in `~/.chat-mcp/chat.db` plus an `fs.watch` notify file.
-There is no server and no background process. The directory is `0700` and the
-database `0600`, read back after setting on macOS and Linux — chat-mcp refuses
-to start rather than run without that guarantee.
+Nothing leaves the machine. State is `~/.chat-mcp/chat.db` plus a notify file,
+the directory `0700` and the database `0600`. On macOS and Linux chat-mcp reads
+the mode back after setting it and **refuses to start** rather than run without
+that guarantee.
+
+🛑 **Loopback is not a containment boundary.** A supervisor's listener, the
+command broker and the browser UI each bind `127.0.0.1`, and a container
+reaches a host `127.0.0.1` through `host.docker.internal`. **A minted token is
+what separates callers**, not the bind address.
 
 **Use it to** put real branch names, ticket numbers and code in the channel.
-None of it leaves the machine.
 
 ---
 
