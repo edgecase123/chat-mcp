@@ -130,6 +130,15 @@ export function containerCredentialEnvVars(vendor: VendorSpawn): readonly string
 }
 
 /**
+ * What the prelude writes to stderr when `shasum` does not resolve.
+ *
+ * 🛑 EXPORTED SO THE SUITE HAS NO SECOND LITERAL. A test matching its own copy
+ * of this sentence passes while the prelude says something else entirely.
+ */
+export const SHASUM_MISSING_WARNING =
+  'chat-mcp: shasum is missing, so every warm spawn reinstalls all dependencies';
+
+/**
  * 🛑 THE VOLUME COMES UP EMPTY, so without this the overlay only trades a
  * WRONG-platform `node_modules` for NO `node_modules`. The image carries only
  * an empty, agent-owned directory at the destination — which is where the
@@ -150,6 +159,15 @@ export function containerCredentialEnvVars(vendor: VendorSpawn): readonly string
  * ⚠️ AN UNREADABLE HASH INSTALLS. `want` empty would otherwise equal an absent
  * stamp and skip, so the cheap failure is a reinstall rather than a false
  * green.
+ *
+ * 🛑 THE `shasum` CHECK REPORTS AND LETS THE INSTALL PROCEED, #234. A bare
+ * `command -v shasum` would exit non-zero, and the prelude chains on `&&` — so
+ * a `perl`-less image would start no agent at all. The cheap failure above is
+ * correct; what was missing was any signal that it had become the only branch.
+ *
+ * 🛑 STDERR, NOT STDOUT. `child.ts` drops a non-JSON stdout line on purpose,
+ * so a warning written there vanishes exactly as quietly as the defect it
+ * reports.
  *
  * ⚠️ `shasum -a 256`, NOT `sha256sum`. Both the image and a macOS host carry
  * `shasum`; only the image carries `sha256sum`, and the suite runs on the host.
@@ -190,6 +208,7 @@ export function nodeModulesInstallStep(
 
   return (
     `if [ ! -f '${lock}' ]; then :; else ` +
+    `command -v shasum >/dev/null 2>&1 || echo '${SHASUM_MISSING_WARNING}' >&2; ` +
     `want=$(shasum -a 256 '${lock}' | cut -d' ' -f1); ` +
     `if [ -n "$want" ] && [ "$want" = "$(cat '${stamp}' 2>/dev/null)" ]; then :; else ` +
     `env ${scrubbed} npm ci --ignore-scripts && printf '%s' "$want" > '${stamp}'; fi; fi`

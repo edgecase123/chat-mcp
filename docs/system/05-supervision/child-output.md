@@ -58,6 +58,32 @@ progress by returning the carriage without a newline, so a `\n`-only split
 buffered a whole run and delivered it as one entry thousands of characters
 long. `\r\n` is one break, not two.
 
+## What the channel is used for first
+
+`nodeModulesInstallStep` hashes `package-lock.json` with `shasum`, and an
+unreadable hash **installs** rather than skips — the cheap failure is a
+reinstall, never a false green. `shasum` reaches the image only because `perl`
+is in the apt list, so dropping `perl` turns every warm spawn into a full
+142-package install. Nothing fails. #234.
+
+So the prelude now checks `command -v shasum` and writes
+`SHASUM_MISSING_WARNING` to `stderr` when it does not resolve.
+
+🛑 **IT REPORTS. IT DOES NOT BLOCK.** The prelude chains on `&&` and ends in
+`exec "$@"`, so a bare `command -v shasum` would mean no agent starts at all on
+a `perl`-less image. A missing `shasum` is a performance defect, not a reason
+to refuse a spawn.
+
+| | |
+|---|---|
+| where it goes | `stderr`, because a non-JSON `stdout` line is dropped above |
+| what it changes | nothing — the install still runs and still stamps |
+| the constant | `SHASUM_MISSING_WARNING`, exported so the suite has no second literal |
+
+⚠️ **THIS IS WHY THE STDERR WIRING CAME FIRST.** With both channels dead the
+check would have written into nothing in either arm — a guard that always fails
+open is worse than no guard.
+
 ## 🛑 Why `onStderr` goes through the generation guard
 
 Every child callback registered in `wireChild` is wrapped in `ifCurrent`, which
