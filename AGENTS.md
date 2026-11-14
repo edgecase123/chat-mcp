@@ -257,6 +257,40 @@ exists for. The bearer token is the whole boundary there.
 - `.claude/agents/dry-solid-reviewer.md` — DRY/SOLID review against this codebase's own patterns.
 - `.claude/agents/security-scanner.md` — scans for this repo's actual attack surface (command injection, secret handling, path traversal, SQL interpolation).
 
+## 🛑 A dockerized sibling is presumed DEAD until a round trip comes back
+
+**Liveness belongs to the CHILD, and every cheap signal reports the
+SUPERVISOR.** The container, the socket, the pidfile and `list_agents`' own
+`online` flag all outlive a child that has exited, so not one of them answers
+"is anyone there".
+
+- 🛑 **`list_agents`' `online` DOES NOT READ THE CHILD.** It is
+  `isProcessAlive(row.pid)`, and for a containerized child that row is written
+  by `shimContextFor` running inside the host bus, so the pid is the
+  SUPERVISOR's. An exited dockerized child reads `online: true` until its
+  supervisor dies. `src/supervise/host-bus.ts` says so in its own words, at the
+  `force: true` comment.
+- **Read `last_seen_at` instead.** 17 of the 20 shim tools move it for the
+  calling handle, and a containerized child's calls arrive through the host
+  bus, so the field tracks the child and goes stale when it dies. A handle
+  absent from `list_agents` altogether still has nobody behind it.
+- ⚠️ **`claims`, `health` and `search` move nothing**, so a child working
+  through those alone reads stale while alive. **That error direction is the
+  safe one** — it over-reports dead, which costs a ping rather than a phantom
+  hand-off. Do not "fix" it by trusting `online` again.
+- 🛑 **`room_send`'s `notified` is a MEMBERSHIP count, not a delivery count.**
+  `notified: 4` in a room with one live reader is the normal case, not a fault.
+  Reading it as four readers is how a review request goes to a dead agent and
+  gets reported as handed off.
+- **Silence is not a review, and it is not "no findings".** A dockerized
+  sibling that has not answered has not started. Never record its silence as
+  either, and never merge on it.
+- **Ask for an acknowledgement, not only for the work.** The round trip IS the
+  liveness check. There is no cheaper one today.
+
+⚠️ **This is the process half of #229, which is the product half.** Until #229
+lands, this rule is the only thing between a phantom review and a merge.
+
 ## Review order: self, then sibling
 
 Run the matching `.claude/agents/*.md` reviewer(s) on your own diff **before**
