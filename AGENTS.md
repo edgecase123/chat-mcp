@@ -185,12 +185,18 @@ path anywhere else.**
   container installs its own into it on first start. ⚠️ **A declared
   `readOnlyPaths` entry of `node_modules` now REFUSES the spawn**, because it
   would put a host bind on the same destination.
-- 🛑 **The install is the one prelude step that runs code this project did not
-  write.** `npm ci` fires every dependency's lifecycle scripts, so the vendor
-  auth key, `GH_TOKEN` and the MCP-config var are `env -u`'d out of scope for
-  it — scrubbed rather than `--ignore-scripts`, which esbuild's postinstall
-  needs. Proven in a built image against a `preinstall` that dumps its own
-  environment, with the unscrubbed control printing both tokens.
+- 🚨 **The install is the one prelude step that runs code this project did not
+  write, and it IS INSIDE the boundary, not outside it.** `npm ci` fires every
+  dependency's lifecycle scripts, and they can read all three credentials: the
+  config file at `$HOME` is `0600` owned by the same `agent` uid they run as,
+  and `/proc/1/environ` holds the lot because docker hands them to PID 1. **Both
+  routes measured in a built image.** The `env -u` scrub on the install stops a
+  script that merely dumps its environment and is NOT a boundary. **#231 is the
+  boundary** — the install moving to its own credential-free container.
+- ⚠️ **The volume is writable, executable code that outlives `--rm`.** One
+  hostile install persists, because the lockfile-hash guard then skips the
+  reinstall. `docker volume rm` is the only reset, and the name comes from
+  `nodeModulesVolumeFor`, never a hand-spelled prefix.
 - The install is guarded on the **lockfile's sha256**, stamped into the volume.
   The volume outlives the `--rm`, so a presence-only guard would run every
   later suite against the dependency tree of a lockfile the host had since

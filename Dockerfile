@@ -12,8 +12,13 @@ FROM node:22-slim
 #
 # wget is here to fetch the gh keyring in the next layer, and that fetch is
 # itself https — so it has to follow ca-certificates, not accompany it.
+#
+# ⚠️ perl IS NAMED FOR `shasum`, WHICH THE INSTALL GUARD RUNS. It arrived only
+# as a dependency of git, and the failure if it stopped arriving is silent: the
+# hash comes back empty, the guard installs by design, and every cold spawn
+# pays a full `npm ci` with nothing saying why.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates git wget \
+  && apt-get install -y --no-install-recommends ca-certificates git perl wget \
   && rm -rf /var/lib/apt/lists/*
 
 # 🛑 GitHub's OWN apt SOURCE, NOT `apt-get install gh`. `gh` is not in Debian's

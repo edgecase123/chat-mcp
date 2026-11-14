@@ -1132,3 +1132,44 @@ test('⚠️ control — the install still has the ordinary environment it needs
   assert.match(seen, /^PATH=/m, 'the install lost PATH, so npm itself is unreachable');
   assert.match(seen, /^HOME=\/tmp\/chat-mcp-rig-home$/m, 'the install lost HOME, where npm caches');
 });
+
+/**
+ * 🛑 THE GUARD THAT WAS MISSING, AND ITS ABSENCE IS WHY THIS EXISTS. The scrub
+ * list and the `-e` pushes were two hand-kept enumerations that happened to
+ * coincide. A FOURTH credential added to the argv would have been in scope for
+ * every dependency's lifecycle script and no test would have failed.
+ *
+ * This derives the expectation from the argv rather than restating the three
+ * names, so it fails on a credential nobody remembered to scrub.
+ *
+ * ⚠️ IT GUARDS THE DRIFT, NOT THE BOUNDARY. #231 is the boundary: the
+ * credentials reach PID 1 regardless, so a lifecycle script recovers them from
+ * `/proc/1/environ` whatever this asserts.
+ */
+test('🛑 the install scrubs EVERY credential the plan names with -e', () => {
+  setToken('sk-ant-oat-x');
+  setGhToken('ghp-x');
+
+  const args = dockerArgsFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: 'claude1',
+    bus: BUS,
+    grant: { handle: 'claude1-agent', configPath: '/unused.json', tools: [] },
+  });
+  const named = args.filter((_, i) => args[i - 1] === '-e');
+  const step = args.find((a) => a.includes('npm ci'));
+
+  assert.ok(step, `no install step in ${args.join(' ')}`);
+  assert.ok(
+    named.length >= 3,
+    `expected the granted plan to name every credential; got ${named.join(', ')}`,
+  );
+  for (const name of named) {
+    assert.ok(
+      step.includes(`-u '${name}'`),
+      `${name} is handed to the container and NOT scrubbed from the install`,
+    );
+  }
+
+  clearGhToken();
+});

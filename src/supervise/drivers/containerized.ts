@@ -11,6 +11,13 @@ import { realpathSync } from 'node:fs';
 
 export const CONTAINER_PROJECT_DIR = '/work';
 
+/**
+ * The project-relative directory the container owns rather than reads from the
+ * bind. One spelling, because the volume destination, the install guard, the
+ * collision refusal and the Dockerfile's pre-created mount point must agree.
+ */
+export const CONTAINER_NODE_MODULES_DIR = 'node_modules';
+
 /** Carries the whole MCP config, token included, so none of it is in argv. */
 export const CONTAINER_MCP_CONFIG_ENV = 'CHAT_MCP_MCP_CONFIG';
 
@@ -110,26 +117,25 @@ function mcpConfigStep(vendor: VendorSpawn): string {
 }
 
 /**
- * The credentials in scope when the install runs, and therefore in scope for
- * every dependency's lifecycle scripts. `npm ci` fires those regardless of
- * `--omit`, so the install is the one step in the prelude that executes code
- * this project did not write.
+ * Every credential `dockerRunPlan` may name with `-e`, in ONE place.
  *
- * 🛑 SCRUBBED, NOT `--ignore-scripts`. esbuild resolves its platform binary
- * from a postinstall, and that resolution is the entire reason this volume
- * exists — disabling scripts would leave the suite unrunnable for a new
- * reason.
+ * 🛑 THE `-e` PUSHES AND THE INSTALL SCRUB BOTH DERIVE FROM THIS. Two
+ * hand-kept lists coincided exactly and nothing tied them together, so a
+ * fourth credential added to the argv would have been in scope for every
+ * dependency's lifecycle script with no test failing. Pinned by "the install
+ * scrubs EVERY credential the plan names".
  */
-function installScrubbedEnvVars(vendor: VendorSpawn): readonly string[] {
+export function containerCredentialEnvVars(vendor: VendorSpawn): readonly string[] {
   return [vendor.authEnvVar, CONTAINER_GH_TOKEN_ENV, CONTAINER_MCP_CONFIG_ENV];
 }
 
 /**
  * 🛑 THE VOLUME COMES UP EMPTY, so without this the overlay only trades a
- * WRONG-platform `node_modules` for NO `node_modules`. The image has nothing
- * at `/work`, and docker seeds a volume from the image layer, never from the
- * bind under it — so there is no copy of the host's tree to inherit, which is
- * the whole point and also why something must install.
+ * WRONG-platform `node_modules` for NO `node_modules`. The image carries only
+ * an empty, agent-owned directory at the destination — which is where the
+ * volume gets its ownership — and docker seeds a volume from the image layer,
+ * never from the bind under it. So there is no copy of the host's tree to
+ * inherit, which is the whole point and also why something must install.
  *
  * 🛑 NO LOCKFILE MEANS SKIP, NOT FAIL. A configured project need not be a node
  * project, and the prelude chains on `&&` — so a failed install is an agent
@@ -147,14 +153,27 @@ function installScrubbedEnvVars(vendor: VendorSpawn): readonly string[] {
  *
  * ⚠️ `shasum -a 256`, NOT `sha256sum`. Both the image and a macOS host carry
  * `shasum`; only the image carries `sha256sum`, and the suite runs on the host.
+ *
+ * 🚨 THE SCRUB IS NOT A BOUNDARY, AND #231 IS THE BOUNDARY. Docker hands the
+ * credentials to PID 1, which is this very shell running as `agent`, so a
+ * lifecycle script reads them from `/proc/1/environ` whatever `env -u` does to
+ * its own child — measured, not reasoned. It is kept because it still stops
+ * the careless case, a script that dumps its environment to a build log. Do
+ * not describe it as anything more until the install runs in its own
+ * credential-free container.
+ *
+ * ⚠️ `containerWorkDir`, NOT the host's project dir. `dockerRunPlan` holds a
+ * host `projectDir` that reads as the natural argument and would emit a host
+ * path into a script running inside the container. The parameter exists so the
+ * suite can drive this step against a real directory in a real `sh`.
  */
 export function nodeModulesInstallStep(
   vendor: VendorSpawn,
-  projectDir: string = CONTAINER_PROJECT_DIR,
+  containerWorkDir: string = CONTAINER_PROJECT_DIR,
 ): string {
-  const lock = `${projectDir}/package-lock.json`;
-  const stamp = `${projectDir}/node_modules/.lock-sha`;
-  const scrubbed = installScrubbedEnvVars(vendor)
+  const lock = `${containerWorkDir}/package-lock.json`;
+  const stamp = `${containerWorkDir}/${CONTAINER_NODE_MODULES_DIR}/.lock-sha`;
+  const scrubbed = containerCredentialEnvVars(vendor)
     .map((name) => `-u '${name}'`)
     .join(' ');
 
@@ -299,7 +318,7 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
     // Its argv position is incidental, per the measured note below: the daemon
     // sorts mount destinations, so this does not rely on being emitted here.
     '-v',
-    `${nodeModulesVolumeFor(supervisorHandle, projectDir)}:${CONTAINER_PROJECT_DIR}/node_modules`,
+    `${nodeModulesVolumeFor(supervisorHandle, projectDir)}:${CONTAINER_PROJECT_DIR}/${CONTAINER_NODE_MODULES_DIR}`,
   ];
 
   // 🛑 NAMED ONLY WHEN THERE IS ONE, because `-e NAME` with no `=` copies
@@ -326,11 +345,15 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
     // line connecting it to the manifest that caused it.
     const segment = inner.toLowerCase();
 
-    if (segment === 'node_modules' || segment.startsWith('node_modules/')) {
+    if (
+      segment === CONTAINER_NODE_MODULES_DIR ||
+      segment.startsWith(`${CONTAINER_NODE_MODULES_DIR}/`)
+    ) {
       throw new Error(
-        `read-only path '${entry}' collides with the container-owned node_modules volume ` +
-          `at ${CONTAINER_PROJECT_DIR}/node_modules; the container installs its own, so it ` +
-          'cannot also be mounted from the host',
+        `read-only path '${entry}' collides with the container-owned ` +
+          `${CONTAINER_NODE_MODULES_DIR} volume at ` +
+          `${CONTAINER_PROJECT_DIR}/${CONTAINER_NODE_MODULES_DIR}; the container installs its ` +
+          'own, so it cannot also be mounted from the host',
       );
     }
 
@@ -362,29 +385,32 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
 
   const cli = [opts.binary ?? vendor.binary, ...vendor.argsFor(opts, 'docker')];
 
-  // 🛑 ON BOTH BRANCHES, NOT JUST THE GRANTED ONE. Only a granted spawn used
-  // to need a shell at all, so an install added to that branch alone would be
-  // present in every granted test and missing from every plain one.
-  if (!opts.grant) {
-    args.push('sh', '-c', prelude([nodeModulesInstallStep(vendor)]), 'sh', ...cli);
+  // 🛑 ONE PUSH, SO THE TWO BRANCHES CANNOT DIVERGE AGAIN. Only a granted
+  // spawn used to need a shell at all, so an install added to that branch
+  // alone was present in every granted test and missing from every plain one.
+  // Building one step list removes the shape that allowed it.
+  const steps: string[] = [];
 
-    return { args, env };
+  if (opts.grant) {
+    // 🛑 REFUSE RATHER THAN START BLIND. A granted child with no bus endpoint
+    // would come up with an MCP config pointing nowhere, and the only symptom
+    // is an agent that answers nothing.
+    if (!opts.bus) {
+      throw new Error('a containerized spawn with a grant needs opts.bus to reach the host bus');
+    }
+
+    cli.push('--mcp-config', vendor.mcpConfigFor(opts.grant, 'docker'), '--strict-mcp-config');
+
+    env[CONTAINER_MCP_CONFIG_ENV] = buildContainerMcpConfig(opts.bus);
+
+    // Config first, because it is instant and the install is not. A spawn that
+    // dies in `npm ci` then still leaves the config written for the retry.
+    steps.push(mcpConfigStep(vendor));
   }
 
-  // 🛑 REFUSE RATHER THAN START BLIND. A granted child with no bus endpoint
-  // would come up with an MCP config pointing nowhere, and the only symptom is
-  // an agent that answers nothing.
-  if (!opts.bus) {
-    throw new Error('a containerized spawn with a grant needs opts.bus to reach the host bus');
-  }
+  steps.push(nodeModulesInstallStep(vendor));
 
-  cli.push('--mcp-config', vendor.mcpConfigFor(opts.grant, 'docker'), '--strict-mcp-config');
-
-  env[CONTAINER_MCP_CONFIG_ENV] = buildContainerMcpConfig(opts.bus);
-
-  // Config first, because it is instant and the install is not. A spawn that
-  // dies in `npm ci` then still leaves the config written for the retry.
-  args.push('sh', '-c', prelude([mcpConfigStep(vendor), nodeModulesInstallStep(vendor)]), 'sh', ...cli);
+  args.push('sh', '-c', prelude(steps), 'sh', ...cli);
 
   return { args, env };
 }
