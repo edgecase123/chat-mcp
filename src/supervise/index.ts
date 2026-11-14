@@ -561,6 +561,24 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
      * that answered perfectly logs, and the difference is only visible in
      * the database afterwards.
      */
+    // 🛑 GUARDED, FOR THE SAME REASON `onEvent` IS. A first cut left this
+    // unwrapped, arguing a replaced child's dying words are the most useful
+    // stderr there is. They are — but a stale child keeps emitting, and an
+    // unguarded line is logged as the LIVE child's, which is the ambiguity
+    // this logging exists to remove. A `← child stderr:` prefix does not
+    // separate the old child from the new one. `ifCurrent` SAYS it dropped a
+    // stale line, so the loss is visible rather than silent.
+    child.onStderr(
+      ifCurrent('onStderr', (line: string) => {
+      // `wiring.ts` already drops blank lines. Repeated here because a driver
+      // may deliver this callback by another route, and a log spammed one
+      // entry per empty flush is unreadable either way.
+        if (line.trim().length === 0) return;
+
+        log(`← child stderr: ${line}`);
+      }),
+    );
+
     child.onEvent(
       ifCurrent('onEvent', (event) => {
         const said = describeChildOutput(event);

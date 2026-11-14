@@ -52,6 +52,7 @@ export function wireAgentChild(
   const contextCbs: ((s: ContextSnapshot) => void)[] = [];
   const denialCbs: ((d: Denial) => void)[] = [];
   const sessionCbs: ((id: string) => void)[] = [];
+  const stderrCbs: ((chunk: string) => void)[] = [];
   let lastSession: string | null = null;
 
   const feed = createLineParser((parsed) => {
@@ -82,6 +83,28 @@ export function wireAgentChild(
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', feed);
 
+  // 🛑 ATTACHED HERE, NOT PER DRIVER, so no driver can ship without it. A
+  // containerized child died with its reason on this stream and nothing was
+  // listening — the prelude chains on `&&` and `npm` writes its errors here,
+  // so a failed install meant no agent started and no line said why.
+  //
+  // ⚠️ Buffered to a newline, because a chunk is not a line. `npm` emits
+  // partial writes, and logging raw chunks splits one error across entries.
+  child.stderr.setEncoding('utf8');
+  let errBuffer = '';
+  child.stderr.on('data', (chunk: string) => {
+    errBuffer += chunk;
+    let newline = errBuffer.indexOf('\n');
+    while (newline >= 0) {
+      const line = errBuffer.slice(0, newline).trim();
+      errBuffer = errBuffer.slice(newline + 1);
+      // An empty line carries nothing a reader needs, and a flush of pure
+      // whitespace would otherwise spam one entry per write.
+      if (line.length > 0) for (const cb of stderrCbs) cb(line);
+      newline = errBuffer.indexOf('\n');
+    }
+  });
+
   return {
     // The VENDOR's declaration, passed through. A hard-coded `true` here
     // promised a reading for a router that may never call either sink. #219.
@@ -106,6 +129,9 @@ export function wireAgentChild(
       sessionCbs.push(cb);
       // A late subscriber must not miss an id that already arrived.
       if (lastSession) cb(lastSession);
+    },
+    onStderr(cb): void {
+      stderrCbs.push(cb);
     },
     onEvent(cb): void {
       eventCbs.push(cb);

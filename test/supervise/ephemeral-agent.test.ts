@@ -39,6 +39,7 @@ function fakeChild(): AgentChild {
     onDenial: () => undefined,
     onSession: () => undefined,
     onEvent: () => undefined,
+    onStderr: () => undefined,
     onExit: () => undefined,
     kill: () => undefined,
   };

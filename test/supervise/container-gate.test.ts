@@ -85,6 +85,7 @@ test('a CONFIRMED handle with a token spawns via the docker driver', async () =>
         onDenial: () => undefined,
         onSession: () => undefined,
         onEvent: () => undefined,
+        onStderr: () => undefined,
         onExit: () => undefined,
         kill: () => undefined,
       };

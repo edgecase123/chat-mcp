@@ -38,6 +38,7 @@ function recordingChild(children: FakeChild[]) {
       onDenial: () => undefined,
       onSession: () => undefined,
       onEvent: () => undefined,
+      onStderr: () => undefined,
       onExit: () => undefined,
       kill: () => {
         rec.killed = true;

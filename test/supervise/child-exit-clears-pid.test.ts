@@ -40,6 +40,7 @@ function fakeChild(capture: { fire?: (code: number | null, signal: string | null
     onDenial: () => undefined,
     onSession: () => undefined,
     onEvent: () => undefined,
+    onStderr: () => undefined,
     onExit: (cb) => {
       capture.fire = cb;
     },

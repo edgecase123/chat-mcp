@@ -63,6 +63,7 @@ function fakeChild(): {
       onDenial: () => undefined,
       onSession: () => undefined,
       onEvent: () => undefined,
+      onStderr: () => undefined,
       onExit: () => undefined,
       kill: () => undefined,
     },
@@ -369,6 +370,7 @@ test('a driver that reports NO usage is UNMETERED and says so, not "unknown" for
       onDenial: () => undefined,
       onSession: () => undefined,
       onEvent: () => undefined,
+      onStderr: () => undefined,
       onExit: () => undefined,
       kill: () => undefined,
     }),
@@ -442,6 +444,7 @@ test('a driver that reports NO context announces the blank at startup and still 
       onDenial: () => undefined,
       onSession: () => undefined,
       onEvent: () => undefined,
+      onStderr: () => undefined,
       onExit: () => undefined,
       kill: () => undefined,
     }),
@@ -521,6 +524,7 @@ test('a driver that OMITS a capability fails fast, naming the field it omitted',
           onDenial: () => undefined,
           onSession: () => undefined,
           onEvent: () => undefined,
+          onStderr: () => undefined,
           onExit: () => undefined,
           kill: () => undefined,
         }) as unknown as AgentChild;
@@ -568,6 +572,7 @@ test('a failed start releases the socket, so one bad spawn is not a permanent on
       onDenial: () => undefined,
       onSession: () => undefined,
       onEvent: () => undefined,
+      onStderr: () => undefined,
       onExit: () => undefined,
       kill: () => undefined,
     }) as unknown as AgentChild;
@@ -603,6 +608,7 @@ test('a driver that DECLARES false is legal and still starts', async () => {
       onDenial: () => undefined,
       onSession: () => undefined,
       onEvent: () => undefined,
+      onStderr: () => undefined,
       onExit: () => undefined,
       kill: () => undefined,
     }),
@@ -632,6 +638,7 @@ test('an undeclared driver has its spawned child KILLED before the error propaga
       onDenial: () => undefined,
       onSession: () => undefined,
       onEvent: () => undefined,
+      onStderr: () => undefined,
       onExit: () => undefined,
       kill: () => {
         kills += 1;
@@ -671,6 +678,7 @@ test('a RESTART into an undeclared child surfaces the error and does not leave a
       onDenial: () => undefined,
       onSession: () => undefined,
       onEvent: () => undefined,
+      onStderr: () => undefined,
       onExit: () => undefined,
       kill: () => {
         kills += 1;
