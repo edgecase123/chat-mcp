@@ -336,8 +336,12 @@ export async function runCli(opts: CliOptions): Promise<void> {
       }),
     );
 
+    // 🛑 THE BOOT ALREADY LANDED, ABOVE, AND IS NOT ROLLED BACK. Printing the
+    // send failure alone reads as "nothing happened", and the retry it invites
+    // then fails with "not a member". Name both outcomes. Raised by claude1.
     if ("reason" in out) {
-      console.log(dim(`  ${out.reason}`));
+      console.log(dim(`  booted ${target} from ${roomName}`));
+      console.log(dim(`  but ${roomName} was not told: ${out.reason}`));
       return;
     }
 

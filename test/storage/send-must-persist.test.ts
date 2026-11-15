@@ -238,6 +238,19 @@ test("🛑 the TUI and the REPL route every send through sendOrReason", () => {
 });
 
 /**
+ * Every statement shape that writes a row into `messages`.
+ *
+ * 🛑 `INSERT OR IGNORE` IS THE SHAPE #138 IS ABOUT, so a pattern matching only
+ * bare `INSERT INTO` is blind to the one statement that reaches
+ * `lastInsertRowid` with `changes` at 0. `REPLACE`, a quoted identifier and a
+ * `main.` qualifier are the same statement to SQLite and are counted here for
+ * the same reason. `\b` keeps a future `messages_archive` from reading as a
+ * writer of `messages`.
+ */
+const WRITES_MESSAGES =
+  /(?:INSERT(?:\s+OR\s+\w+)?|REPLACE)\s+INTO\s+["'`[]?(?:main\.)?messages\b/i;
+
+/**
  * 🛑 FOUR SURFACES WROTE `messages` WITH THEIR OWN INSERT, AND NONE OF THEM
  * CHECKED `changes`. `joinRoom`, the REPL's boot, the oneshot boot verb and the
  * `room_boot` tool each read `lastInsertRowid` straight back — which a swallowed
@@ -253,10 +266,54 @@ test("🛑 src/ writes the messages table in exactly one place", () => {
   assert.ok(files.length >= 100, `found only ${files.length} source files`);
 
   const writers = files.filter((f) =>
-    /INSERT\s+INTO\s+messages/i.test(stripComments(readFileSync(f, "utf8"))),
+    WRITES_MESSAGES.test(stripComments(readFileSync(f, "utf8"))),
   );
 
   assert.deepEqual(writers, ["src/storage/dao.ts"]);
+});
+
+/**
+ * 🛑 THE GUARD ABOVE IS ONLY AS WIDE AS ITS PATTERN, AND A NARROW PATTERN READS
+ * EXACTLY LIKE A CLEAN TREE. The first version counted `INSERT INTO messages`
+ * alone. claude1 measured four mutants against it on #267: `INSERT OR IGNORE`,
+ * `REPLACE INTO`, a quoted `"messages"` and `main.messages` all PASSED, so a
+ * fifth writer in any of those shapes arrives silently.
+ *
+ * Each row below IS that mutant, asserted against the pattern itself rather
+ * than installed into a source file — which makes the measurement repeatable
+ * instead of a number in a review comment.
+ */
+test("🛑 the writer pattern catches every shape that writes messages", () => {
+  for (const stmt of [
+    "INSERT INTO messages (body) VALUES (?)",
+    "INSERT OR IGNORE INTO messages (body) VALUES (?)",
+    "INSERT OR REPLACE INTO messages (body) VALUES (?)",
+    "INSERT OR ROLLBACK INTO messages (body) VALUES (?)",
+    "REPLACE INTO messages (body) VALUES (?)",
+    'INSERT INTO "messages" (body) VALUES (?)',
+    "INSERT INTO `messages` (body) VALUES (?)",
+    "INSERT INTO [messages] (body) VALUES (?)",
+    "INSERT INTO main.messages (body) VALUES (?)",
+    "insert\n  into messages (body) values (?)",
+  ]) {
+    assert.match(stmt, WRITES_MESSAGES, `a writer slipped the guard: ${stmt}`);
+  }
+
+  // The negative half: a pattern matching everything would pass the loop above
+  // vacuously and then report every source file as a writer.
+  for (const stmt of [
+    "INSERT INTO messages_archive (body) VALUES (?)",
+    "INSERT INTO room_members (handle) VALUES (?)",
+    "SELECT * FROM messages WHERE id > ?",
+    "UPDATE messages SET body = ? WHERE id = ?",
+    "DELETE FROM messages WHERE id = ?",
+  ]) {
+    assert.doesNotMatch(
+      stmt,
+      WRITES_MESSAGES,
+      `the guard over-matches, so its count is noise: ${stmt}`,
+    );
+  }
 });
 
 /**
@@ -272,16 +329,16 @@ test("🛑 the comment stripper removes a quoted INSERT but not a real one", () 
 
   // The positive control: the string really is in that file, so a stripper that
   // deleted everything would pass the negative half below vacuously.
-  assert.match(quoted, /INSERT INTO messages/);
+  assert.match(quoted, WRITES_MESSAGES);
 
   assert.doesNotMatch(
     stripComments(quoted),
-    /INSERT\s+INTO\s+messages/i,
+    WRITES_MESSAGES,
     "room-announce.ts has a real messages insert, not just a quoted one",
   );
   assert.match(
     stripComments(real),
-    /INSERT\s+INTO\s+messages/i,
+    WRITES_MESSAGES,
     "the stripper ate dao.ts's real insert, so the guard above is blind",
   );
 });

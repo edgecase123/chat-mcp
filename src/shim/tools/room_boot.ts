@@ -44,8 +44,12 @@ export function installRoomBoot(server: McpServer, ctx: ShimContext): void {
         room,
         body,
         actor: ctx.handle,
-        // The tool's caller is not shown the room transcript, so there is no
-        // echo to suppress. The REPL is the one surface that advances.
+        // ⚠️ PRESERVED FROM THE CODE THIS REPLACED, NOT CHOSEN. The caller IS a
+        // room member, and the announcement's `from_handle` is `SYSTEM_HANDLE`,
+        // so `roomUnread`'s "not from me" filter does not hide it. The booting
+        // agent gets its own boot back as unread. Advancing instead is a
+        // behaviour change that wants its own test, so this keeps the answer
+        // the three copied surfaces already gave. Raised by claude1 on #267.
         advanceActorRead: false,
       });
 
