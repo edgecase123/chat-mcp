@@ -47,3 +47,19 @@ export function assertHandle(s: string): void {
     throw new Error(handleRefusal(s));
   }
 }
+
+/**
+ * The shared clause for a room name handed to a peer-only send.
+ *
+ * `nextStep` differs per surface because the surfaces differ: the MCP shim has
+ * a `room_send` tool, the one-shot CLI has no room-send verb at all. Only the
+ * first sentence is common, so only the first sentence lives here.
+ *
+ * 🛑 CALL THIS ON THE `#` PREFIX, NEVER ON `isRoomName`. `isRoomName` decides
+ * VALID, not room-or-peer, and `#Ops` is invalid while being unmistakably a
+ * room attempt. `handleMessagesClear` carries a comment about that exact
+ * discrimination sending `#Ops` down the DM branch.
+ */
+export function roomTargetRefusal(target: string, nextStep: string): string {
+  return `${target} is a room, and send is peer-only. ${nextStep}`;
+}
