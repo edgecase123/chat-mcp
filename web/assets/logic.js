@@ -1370,3 +1370,109 @@ export function roomMetaLabel(room) {
 
   return room.created_by ? `${members} · owned by ${room.created_by}` : members;
 }
+
+// ── the activity pulse, #240 ────────────────────────────────────────────
+
+/**
+ * How long a pulse survives with no further event.
+ *
+ * ⚠️ IT IS A FAILSAFE, NOT THE NORMAL PATH. `onTurnEnd`, `onExit` and
+ * `replaceChild` each send an `end`, so this only has to outlast a child that
+ * dies without reaching any of them. A short value would re-introduce the
+ * mid-turn blackout it replaced: a single long `Bash` emits no event for its
+ * whole duration, so the dot would stop while the agent is working.
+ */
+export const PULSE_FAILSAFE_MS = 30_000;
+
+/**
+ * Read one `event: activity` frame, or decide it is not one.
+ *
+ * 🛑 AN EXCEPTION IN AN SSE LISTENER IS SILENT AND PERMANENT. EventSource does
+ * not reconnect when a handler throws, so one malformed frame would freeze the
+ * pulse for the rest of the page's life with nothing in the UI to say so.
+ *
+ * @param {string} raw the frame's `data:` payload
+ * @returns {{handle: string, phase: 'tick'|'end'} | null}
+ */
+export function activityEvent(raw) {
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return null;
+
+  const { handle, phase } = data;
+
+  if (typeof handle !== 'string' || handle.length === 0) return null;
+  // An enumerated set, mirroring server.ts's own check. A phase this file does
+  // not know must not become a third state downstream.
+  if (phase !== 'tick' && phase !== 'end') return null;
+
+  return { handle, phase };
+}
+
+/**
+ * Fold one activity event into the set of handles currently working.
+ *
+ * 🛑 AN UNCHANGED RESULT IS THE SAME REFERENCE, AND CALLERS RELY ON IT. A tick
+ * arrives every 250ms for a whole turn and all but the first say nothing new.
+ * Returning a fresh equal Set would hand the caller no way to tell, so the
+ * sidebar would be rewritten four times a second to look identical.
+ *
+ * @param {Set<string>} prev
+ * @param {{handle: string, phase: 'tick'|'end'} | null} event
+ * @returns {Set<string>} `prev` itself when nothing changed
+ */
+export function nextPulses(prev, event) {
+  if (event === null || event === undefined) return prev;
+
+  const { handle, phase } = event;
+
+  if (phase === 'tick') {
+    if (prev.has(handle)) return prev;
+    return new Set(prev).add(handle);
+  }
+
+  if (!prev.has(handle)) return prev;
+
+  const next = new Set(prev);
+  next.delete(handle);
+  return next;
+}
+
+/**
+ * What the sidebar dot means, in words.
+ *
+ * 🛑 ONLY THE WORKING STATE IS NAMED, BY lee'S RULING OF 2026-11-14: "no
+ * title". The dot has carried "online" in colour alone since it was written,
+ * and that stays as it is. This names the ONE state #240 added, so the pulse
+ * does not become a second meaning carried by colour alone.
+ *
+ * 🛑 THIS DOES NOT SETTLE `prefers-reduced-motion`, AND IT READ AS IF IT DID.
+ * A title answers WCAG 1.4.1, meaning carried in colour alone. 2.2.2 asks
+ * whether motion running over five seconds can be STOPPED, which no amount of
+ * text answers. `style.css` reduces the animation separately. Found by claude1.
+ *
+ * ⚠️ IT TAKES NO `online`. The online and offline states are deliberately
+ * unnamed, so reading that flag would be reading something this function
+ * cannot act on.
+ *
+ * @param {{kind: string, working: boolean}} row
+ * @returns {string | null} null when the dot carries no meaning
+ */
+export function dotTitle({ kind, working }) {
+  // Every room is passed `online: true` because the dot is decoration there.
+  // A shared title would label each one "Online", which asserts nothing.
+  if (kind !== 'peer') return null;
+
+  // 🛑 ONLY THE WORKING STATE IS NAMED. lee, 2026-11-14: "no title". Online and
+  // offline stay as they have always been, carried by the dot's colour alone.
+  // The consequence is deliberate: the tooltip appears and disappears with the
+  // work, so a reader who hovers an idle agent gets nothing rather than "idle".
+  if (!working) return null;
+
+  return 'Working — producing output now';
+}

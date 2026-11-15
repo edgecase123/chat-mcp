@@ -49,6 +49,10 @@ import {
   nextUnreadSince,
   searchableText,
   searchFilterEmpty,
+  activityEvent,
+  nextPulses,
+  dotTitle,
+  PULSE_FAILSAFE_MS,
 } from './logic.js';
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -91,6 +95,11 @@ const state = {
   // shown relative to these.
   roots: null,
   theme: null, // set below
+  // #240 — handles whose supervisor says they are producing output right now.
+  // 🛑 IT LIVES HERE AND NOT IN THE DOM. renderSidebar() rebuilds every row on
+  // any peer status change, so a pulse held only as a class is dropped by the
+  // next `wake` — mid-turn, which is exactly when it is the only signal.
+  activity: new Set(),
 };
 
 const el = {
@@ -297,11 +306,32 @@ function renderSidebar() {
 
 function sidebarItem({ label, target, online, active, kind, unread = 0, gauge = null }) {
   const open = state.openMenuFor === target;
+  // 🛑 THE KIND GATE BELONGS ON BOTH PATHS, NOT JUST THE LOOKUP. `target` is a
+  // room NAME for a room row, so without this a pulse naming `#mcp` animates
+  // that room's dot on the next rebuild — `paintPulse`'s scoped selector
+  // refuses it, and then `renderSidebar` does it anyway.
+  const working = kind === 'peer' && state.activity.has(target);
+  // 🛑 role="img" IS WHAT MAKES THE LABEL REACH A SCREEN READER. aria-label on
+  // a bare span is ignored, because a span has no role to name.
+  const dotState = dotTitle({ kind, working });
   return h('div', {
-    className: `sidebar__item${online ? ' is-online' : ''}${active ? ' is-active' : ''}`,
+    className: `sidebar__item${online ? ' is-online' : ''}${active ? ' is-active' : ''}${working ? ' is-working' : ''}`,
+    // #240 — the pulse handler finds ONE row by these and mutates it in place.
+    // A tick arrives every 250ms, so it must never go through renderSidebar().
+    // 🛑 `data-kind` IS WHAT MAKES THE BYPASS SAFE, NOT DECORATION. Rooms carry
+    // `data-handle` too, because `target` is a room NAME for a room row. Without
+    // this attribute in the selector, a pulse naming `#mcp` would find the room
+    // row and dress it as a working peer until the next rebuild undressed it.
+    'data-kind': kind,
+    'data-handle': target,
     onclick: () => selectTarget(target),
   }, [
-    h('span', { className: 'sidebar__item-dot' }),
+    h('span', {
+      className: 'sidebar__item-dot',
+      title: dotState,
+      'aria-label': dotState,
+      role: dotState === null ? null : 'img',
+    }),
     h('span', { className: 'sidebar__item-label' }, [label]),
     unread > 0 ? h('span', { className: 'sidebar__item-unread' }, [`(${unread})`]) : null,
     // #103 — a stale reading shows a dash, never its last number. The digits
@@ -1594,9 +1624,92 @@ el.composer.addEventListener('submit', async (ev) => {
 
 // ── SSE ──────────────────────────────────────────────────────────────────
 
+/**
+ * #240 — one re-armable timer per working handle. NOT an interval: lee ruled
+ * out polling on this whole path, and a tick is what re-arms this.
+ */
+const pulseTimers = new Map();
+
+function stopPulseFailsafe(handle) {
+  clearTimeout(pulseTimers.get(handle));
+  pulseTimers.delete(handle);
+}
+
+/**
+ * ⚠️ THE FAILSAFE IS NOT THE NORMAL PATH. `onTurnEnd`, `onExit` and
+ * `replaceChild` each POST an `end`. This only has to outlast a child that
+ * died without reaching any of them, so a dead agent's dot cannot pulse
+ * forever.
+ */
+function armPulseFailsafe(handle) {
+  stopPulseFailsafe(handle);
+  pulseTimers.set(handle, setTimeout(() => {
+    pulseTimers.delete(handle);
+    state.activity = nextPulses(state.activity, { handle, phase: 'end' });
+    paintPulse(handle);
+  }, PULSE_FAILSAFE_MS));
+}
+
+/**
+ * Repaint ONE row from `state.activity`, without a render.
+ *
+ * 🛑 THIS MUST NOT CALL renderSidebar(). It would wipe and rebuild the whole
+ * sidebar four times a second, and it would close an open (...) menu under the
+ * operator's cursor every time an agent emitted a tool call.
+ *
+ * A handle with no row is normal and silent — a pulse can arrive for an agent
+ * the peer list has not caught up with, or one the operator cannot see.
+ */
+function paintPulse(handle) {
+  const row = el.sidebar.querySelector(
+    `.sidebar__item[data-kind="peer"][data-handle="${CSS.escape(handle)}"]`,
+  );
+  if (row === null) return;
+
+  const working = state.activity.has(handle);
+  row.classList.toggle('is-working', working);
+
+  const dot = row.querySelector('.sidebar__item-dot');
+  if (dot === null) return;
+
+  // `kind` is true by construction: the selector above matched on it.
+  const title = dotTitle({ kind: 'peer', working });
+
+  // 🛑 AN `end` MUST UNDO WHAT A TICK DID. Returning early on a null title
+  // would leave "Working" on the dot of an agent that stopped minutes ago, and
+  // only a full rebuild would clear it.
+  if (title === null) {
+    for (const attr of ['title', 'aria-label', 'role']) dot.removeAttribute(attr);
+    return;
+  }
+
+  dot.setAttribute('title', title);
+  dot.setAttribute('aria-label', title);
+  dot.setAttribute('role', 'img');
+}
+
 function connectSse() {
   const source = new EventSource('/api/events');
   source.addEventListener('wake', () => { refresh(); });
+
+  // #240 — the supervisor POSTs /api/activity and server.ts fans this out.
+  // 🛑 THE FRAME IS THE MESSAGE. Unlike `wake`, there is nothing to re-fetch:
+  // no endpoint reports who is working.
+  source.addEventListener('activity', (e) => {
+    const event = activityEvent(e.data);
+    if (event === null) return;
+
+    const next = nextPulses(state.activity, event);
+    // All but the first tick of a turn say nothing new, and the reducer signals
+    // that by handing back the same Set.
+    const changed = next !== state.activity;
+    state.activity = next;
+
+    if (event.phase === 'tick') armPulseFailsafe(event.handle);
+    else stopPulseFailsafe(event.handle);
+
+    if (changed) paintPulse(event.handle);
+  });
 
   // 🛑 A SEPARATE EVENT, SERVER-POLLED, NOT FILE-WATCHED. A dropped `wake`
   // costs a chat message some latency; a dropped approval means a blocked
