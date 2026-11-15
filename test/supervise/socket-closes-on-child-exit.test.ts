@@ -51,8 +51,17 @@ interface TeardownChild extends FakeChild {
   finishTeardown: () => void;
 }
 
-/** `kill()` fires no exit, like the real thing — the exit is a later event. */
-function recordingChild(children: FakeChild[]) {
+/**
+ * `exitOnKill` picks which of the two models in this repo the fake follows.
+ *
+ * 🛑 THE DEFAULT IS `false`, AND IT CANNOT PROVE `replacingChild`. A fake whose
+ * `kill()` fires nothing never produces the synchronous exit that flag exists
+ * for, so dropping the flag left every test in this file green — the coverage
+ * was in `replace-child.test.ts`, a file this change does not own. Raised by
+ * claude2; same shape as #236, where four green tests certified a park a real
+ * killed process defeats.
+ */
+function recordingChild(children: FakeChild[], exitOnKill = false) {
   return (_opts: SpawnOptions): AgentChild => {
     const sent: string[] = [];
     let onExit: ((c: number | null, s: string | null) => void) | undefined;
@@ -76,12 +85,12 @@ function recordingChild(children: FakeChild[]) {
       onExit: (cb) => {
         onExit = cb;
       },
-      kill: () => undefined,
+      kill: () => (exitOnKill ? onExit?.(null, 'SIGTERM') : undefined),
     };
   };
 }
 
-async function supervisorFor(handle: string, children: FakeChild[]) {
+async function supervisorFor(handle: string, children: FakeChild[], exitOnKill = false) {
   const db = new DatabaseSync(':memory:');
   migrate(db);
 
@@ -90,7 +99,7 @@ async function supervisorFor(handle: string, children: FakeChild[]) {
     vendor: claudeSpawn,
     db,
     extraDirs: [process.cwd()],
-    spawnChild: recordingChild(children),
+    spawnChild: recordingChild(children, exitOnKill),
     log: () => undefined,
   });
 
@@ -254,6 +263,55 @@ test('🚨 a stop does not let the child exit close the socket before the teardo
     assert.equal(existsSync(socketPath), false, 'the stop left its socket behind');
   } finally {
     children[0]?.finishTeardown();
+    await sup.stop('now').catch(() => undefined);
+    db.close();
+  }
+});
+
+
+/**
+ * 🚨 THE CONTROL FOR `replacingChild`, IN THE FILE THAT OWNS IT.
+ *
+ * `ifCurrent` drops a stale exit by generation, and the generation only moves
+ * inside `wireChild` or on a throw. So an exit delivered SYNCHRONOUSLY from
+ * `kill()` is still current, reaches the handler, and without the flag takes
+ * the socket of a supervisor whose replacement is already running.
+ *
+ * ⚠️ THIS FAKE EXITS FROM `kill()` AND THE OTHERS IN THIS FILE DO NOT. The two
+ * models disagree in this repo — `replace-child.test.ts:91` against
+ * `respawn-loses-queue.test.ts:52` — and the guard is correct under both
+ * rather than picking one.
+ */
+test('🚨 a replace whose kill exits SYNCHRONOUSLY keeps the socket for the new child', async () => {
+  const children: FakeChild[] = [];
+  const handle = `xk${process.pid}`;
+  const { sup, db } = await supervisorFor(handle, children, true);
+
+  try {
+    const socketPath = sup.socketPath;
+    await deliver(handle, 1, { body: 'so the first child exists' });
+
+    await deliver(handle, 2, {
+      approval: {
+        approvalId: 1,
+        decision: 'approve',
+        requested: "rm in '/tmp/x.txt'",
+        grant: 'Bash(rm -f /tmp/x.txt)',
+        sessionId: 'sess-1',
+      },
+    });
+
+    assert.equal(children.length, 2, 'the approval was supposed to replace the child');
+    assert.ok(
+      existsSync(socketPath),
+      "the killed child's synchronous exit closed the socket of a live supervisor",
+    );
+
+    const after = await deliver(handle, 3, { body: 'the new child must still receive this' });
+
+    assert.notEqual(after, null, 'the replacement had no socket to receive on');
+    assert.equal(after?.ok, true, 'the supervisor refused a wake while its new child was live');
+  } finally {
     await sup.stop('now').catch(() => undefined);
     db.close();
   }

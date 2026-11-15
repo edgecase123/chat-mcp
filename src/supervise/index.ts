@@ -493,13 +493,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   /**
    * Whether a replace or a restart is between the kill and the respawn.
    *
-   * 🛑 `ifCurrent` IS NOT ENOUGH ON ITS OWN, BECAUSE IT ASSUMES THE EXIT IS
-   * ASYNC. The generation only moves inside `wireChild` or on a throw, so an
-   * exit delivered synchronously from `kill()` is still CURRENT and reaches
-   * the handler. Two fakes in this repo disagree about that very thing —
-   * `replace-child.test.ts` fires the exit from `kill()`, and
-   * `respawn-loses-queue.test.ts` says a real child does not — so the socket
-   * close must not depend on which model is right.
+   * 🛑 `ifCurrent` ASSUMES THE EXIT IS ASYNC, and the generation only moves
+   * inside `wireChild` or on a throw. An exit delivered synchronously from
+   * `kill()` is therefore still CURRENT, so the socket close needs this too.
+   * Cleared only where the generation has already moved.
    */
   let replacingChild = false;
 
@@ -954,17 +951,20 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
           `${unsent.length} prompt(s) parked, NO agent is running for this handle`,
       );
 
+      // 🛑 CLEARED WHERE THE GENERATION HAS ALREADY MOVED, not in a
+      // `finally`. A `finally` runs BEFORE `wireChild`, so on the success
+      // path it cleared the flag while the generation was still the old
+      // one — safe only because nothing awaits in between, which is a
+      // timing argument this guard exists to avoid. Raised by claude2.
+      replacingChild = false;
+
       for (const p of unsent) queue.park(p);
 
       throw err;
-    } finally {
-      // Cleared on BOTH paths. A success bumped the generation inside
-      // `wireChild`; a throw bumped it in the catch above. Either way the
-      // outgoing child's exit is stale from here, so the flag is spent.
-      replacingChild = false;
     }
 
     wireChild();
+    replacingChild = false;
     queue.offer({ text: prompt, messageIds: [] });
 
     for (const p of unsent) queue.reoffer(p);
@@ -1136,17 +1136,21 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
           `${unsent.length} prompt(s) parked, NO agent is running for this handle`,
       );
 
+      // 🛑 CLEARED WHERE THE GENERATION HAS ALREADY MOVED, not in a
+      // `finally`. A `finally` runs BEFORE `wireChild`, so on the success
+      // path it cleared the flag while the generation was still the old
+      // one — safe only because nothing awaits in between, which is a
+      // timing argument this guard exists to avoid. Raised by claude2.
+      replacingChild = false;
+
       for (const p of unsent) queue.park(p);
 
       throw err;
-    } finally {
-      // Cleared on BOTH paths. A success bumped the generation inside
-      // `wireChild`; a throw bumped it in the catch above. Either way the
-      // outgoing child's exit is stale from here, so the flag is spent.
-      replacingChild = false;
     }
 
     wireChild();
+    replacingChild = false;
+
     for (const p of unsent) queue.reoffer(p);
   };
 
