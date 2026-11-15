@@ -393,9 +393,27 @@ export function openDb(): Db {
   // swap mid-startup, so `health` would compare a mark to itself and report OK
   // for a connection writing to the file that was moved away.
   const opened = identityOf(dbPath());
-  // Unset rather than null on the impossible branch, so `health` reports the
-  // mark as UNREADABLE instead of as a divergence it cannot substantiate.
-  if (opened) identities.set(db, opened);
+
+  // 🛑 A CONNECTION WITHOUT A MARK CAN NEVER SELF-CHECK, SO IT MUST NOT EXIST.
+  // `insertMessage` compares this mark on every send and SKIPS the comparison
+  // when it is absent, which made a missing mark a silent licence to write into
+  // a replaced file for the life of the process. Throwing here is what makes
+  // "came from `openDb`" and "carries a mark" the same statement.
+  //
+  // ⚠️ REACHED ONLY BY AN UNLINK INSIDE THIS WINDOW. `new DatabaseSync(path)`
+  // creates the file eagerly — measured — so the file is there one line above.
+  // Something removing it between these two lines is the state directory being
+  // destroyed under a live process, which is lee's "fail loudly" case, not a
+  // condition to paper over.
+  if (!opened) {
+    throw new Error(
+      `The database at ${dbPath()} vanished while it was being opened, so ` +
+        `this connection cannot tell whether its file is later replaced. ` +
+        `Something is modifying the state directory; retry once it is stable.`,
+    );
+  }
+
+  identities.set(db, opened);
 
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA synchronous = NORMAL");
