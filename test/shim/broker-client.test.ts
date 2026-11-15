@@ -34,10 +34,14 @@ function brokerFor(handle: string): Promise<Broker> {
 
   mkdirSync(join(dir, "scripts"), { recursive: true });
   const script = join(dir, "scripts", "gate.sh");
-  // `resolveArgv` passes the declared params as bare VALUES in order, so the
-  // first positional is `lane`. Echoing `$*` too, so a shape change shows up
-  // here as a readable diff rather than an empty string.
-  writeFileSync(script, '#!/bin/sh\necho "lane=$1 argv=$*"\n');
+  // 🛑 THE FIXTURE PARSES A FLAG, because that is what a host's script now
+  // has to do. Reading `$1` would only re-state the unit test's spelling one
+  // layer out; recovering the value proves a real script can get it. Echoing
+  // `$*` too, so a spelling change shows up here as a readable diff.
+  writeFileSync(
+    script,
+    '#!/bin/sh\nfor arg in "$@"; do\n  case "$arg" in --lane=*) lane="${arg#--lane=}" ;; esac\ndone\necho "lane=$lane argv=$*"\n',
+  );
   chmodSync(script, 0o755);
 
   registerProject(handle, dir);
@@ -132,7 +136,12 @@ test("a run-command reply carries the script exit code and output", async (t) =>
   );
 
   assert.equal(reply.exitCode, 0);
-  assert.match(String(reply.stdout), /lane=php/);
+  // 🛑 EXACT, NOT `assert.match(/lane=php/)`. That regex is satisfied by any
+  // argv spelling ENDING in `lane=php`, so a switch to `--lane=php` kept this
+  // test green while the contract broke. Its two sibling fixtures
+  // (`run-command.test.ts`, `broker.test.ts`) already compare exactly and do
+  // fail. An exact comparison is what cannot match by accident.
+  assert.equal(String(reply.stdout), "lane=php argv=--lane=php\n");
 });
 
 test("🛑 A WRONG TOKEN CLOSES THE SOCKET WITH NO REPLY, and that is reported as a cause", async (t) => {

@@ -34,8 +34,8 @@ function parseManifest(raw: unknown): ReturnType<typeof parseRaw> {
 }
 
 /**
- * The sample the ticket names: one enumerated positional with a default,
- * matching a script whose body is `MODE="${1:-all}"`.
+ * The sample the ticket names: one enumerated param with a default, matching a
+ * script that reads `--mode=<value>` off its own argv.
  */
 const GATE = {
   projectDir: PROJECT_DIR,
@@ -62,17 +62,53 @@ test("the ticket’s sample command parses", () => {
   assert.equal(m.commands[0]?.name, "run-gate");
 });
 
-test("a single enumerated positional with a default resolves to one argv entry", () => {
+test("🛑 A DEFAULTED PARAM IS NAMED TOO, not left as a bare value", () => {
+  // The branch a half-done migration leaves behind. `resolveArgv` used to
+  // return `param.default` directly, so spelling only the supplied branch
+  // produced `["all"]` here and `["--mode=e2e"]` in the test below, with both
+  // reading as correct on their own.
   const resolved = resolveArgv(parseManifest(GATE), "run-gate", {});
-  assert.deepEqual(resolved.argv, ["all"]);
+  assert.deepEqual(resolved.argv, ["--mode=all"]);
   assert.equal(resolved.script.relative, "scripts/reset-and-test.sh");
 });
 
 test("an explicit enum value overrides the default", () => {
   assert.deepEqual(
     resolveArgv(parseManifest(GATE), "run-gate", { mode: "e2e" }).argv,
-    ["e2e"],
+    ["--mode=e2e"],
   );
+});
+
+test("🛑 THE FLAG CARRIES THE PARAM NAME'S DECLARED SPELLING, byte for byte", () => {
+  // 🛑 THE ONLY ASSERTION IN THE SUITE THAT SPELLS A NAME, SO THE ONLY ONE
+  // THAT CAN CATCH A MANGLING. A param name is matched case-INSENSITIVELY, so
+  // `Mode` is legal, and lowercasing it inside `toArgv` left all 1708 tests
+  // green. claude1's measurement, reproduced here as a test.
+  //
+  // The consequence is this ticket's own defect class one layer in: a host
+  // declares `Mode`, their script matches `--Mode=*`, a later name change
+  // makes it recover nothing, and the script still exits 0 with an empty
+  // value. Nothing refuses the call.
+  //
+  // ⚠️ THIS IS NOT A RULE ABOUT NAME CASE. The `/i` in the name pattern may
+  // well be deliberate. The gap was that the spelling was untested either way.
+  const m = parseManifest({
+    commands: [
+      {
+        name: "g",
+        script: "a.sh",
+        params: [
+          { name: "Mode", type: "enum", values: ["all"], default: "all" },
+          { name: "Dry-Run", type: "enum", values: ["Yes"] },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(resolveArgv(m, "g", { "Dry-Run": "Yes" }).argv, [
+    "--Mode=all",
+    "--Dry-Run=Yes",
+  ]);
 });
 
 test("a command with no params resolves to an empty argv", () => {
@@ -300,23 +336,61 @@ test("a non-string param value is refused", () => {
   );
 });
 
-test("argv order follows the declared param order, not the caller’s key order", () => {
-  const m = parseManifest({
-    commands: [
-      {
-        name: "g",
-        script: "a.sh",
-        params: [
-          { name: "first", type: "enum", values: ["A"] },
-          { name: "second", type: "enum", values: ["B"] },
-        ],
-      },
-    ],
-  });
-  assert.deepEqual(resolveArgv(m, "g", { second: "B", first: "A" }).argv, [
-    "A",
-    "B",
-  ]);
+/**
+ * Recover one param's value from argv BY NAME, refusing anything but exactly
+ * one match.
+ *
+ * 🛑 THE COUNT IS ASSERTED, NOT ASSUMED. A lookup that returned the first
+ * hit would read as a pass over an argv carrying the param twice, and over an
+ * argv carrying it zero times it would return undefined and compare equal to
+ * an expectation of undefined.
+ */
+function valueOf(argv: readonly string[], param: string): string {
+  const flag = `--${param}=`;
+  const hits = argv.filter((entry) => entry.startsWith(flag));
+
+  assert.equal(
+    hits.length,
+    1,
+    `argv ${JSON.stringify(argv)} must carry exactly one ${flag}`,
+  );
+
+  return hits[0]!.slice(flag.length);
+}
+
+test("🛑 REORDERING THE MANIFEST CHANGES NO ARGUMENT'S MEANING", () => {
+  // The guard this ticket exists for. A host that inserted a param into the
+  // middle of a command's list used to shift every argument after it: the
+  // agent saw no change, every value was still individually valid, so nothing
+  // refused the call and the script ran the right count in the wrong places.
+  const declare = (params: readonly unknown[]) =>
+    parseManifest({ commands: [{ name: "g", script: "a.sh", params }] });
+
+  const first = { name: "first", type: "enum", values: ["A"] };
+  const second = { name: "second", type: "enum", values: ["B"] };
+  const call = { second: "B", first: "A" };
+
+  const forwards = resolveArgv(declare([first, second]), "g", call).argv;
+  const backwards = resolveArgv(declare([second, first]), "g", call).argv;
+
+  // The exact spelling, pinned in the one place argv is built.
+  assert.deepEqual(forwards, ["--first=A", "--second=B"]);
+  assert.deepEqual(backwards, ["--second=B", "--first=A"]);
+
+  // ⚠️ POSITION STILL FOLLOWS THE DECLARATION. Nothing here sorts argv, so
+  // the two orders are genuinely different arrays. That is why "the same argv
+  // SET" is the wrong assertion for this ticket: the set was already identical
+  // under the positional form, so it could never have caught the defect.
+  assert.notDeepEqual(forwards, backwards);
+
+  // 🛑 THE DISCRIMINATING PROPERTY: a script recovers a param by NAME, and
+  // gets the same answer from either declaration order. Under the positional
+  // form argv was ["A","B"] and ["B","A"], so `valueOf` finds zero matches and
+  // both arms fail.
+  for (const argv of [forwards, backwards]) {
+    assert.equal(valueOf(argv, "first"), "A");
+    assert.equal(valueOf(argv, "second"), "B");
+  }
 });
 
 // ── readManifest ─────────────────────────────────────────────────────────────
@@ -376,8 +450,10 @@ test('🛑 a free-form "string" param type no longer exists', () => {
 });
 
 test('🛑 an enum value that starts with "-" is refused', () => {
-  // `-e/bin/sh` and `--upload-pack=…` are flags to whatever the script execs.
-  // execFile without a shell does not neutralise that.
+  // ⚠️ NOT because a leading `-` reaches the callee as a flag any more. A
+  // value now rides after the `=` of its own flag, so it is never its own argv
+  // entry. What this refuses is the author who writes `-rf` expecting a bare
+  // switch and silently gets `--m=-rf`.
   assert.throws(
     () =>
       parseManifest({
@@ -503,7 +579,9 @@ test("a param NAMED constructor is allowed, and hasOwn is what makes it safe", (
     () => resolveArgv(m, "g", {}),
     /needs a value for "constructor"/,
   );
-  assert.deepEqual(resolveArgv(m, "g", { constructor: "x" }).argv, ["x"]);
+  assert.deepEqual(resolveArgv(m, "g", { constructor: "x" }).argv, [
+    "--constructor=x",
+  ]);
 });
 
 test("🛑 a prototype key cannot stand in for a supplied value", () => {

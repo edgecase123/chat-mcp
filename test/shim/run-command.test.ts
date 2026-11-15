@@ -34,7 +34,10 @@ function projectFor(handle: string): void {
   mkdirSync(join(dir, "scripts"), { recursive: true });
 
   const gate = join(dir, "scripts", "gate.sh");
-  writeFileSync(gate, '#!/bin/sh\necho "lane=$1"\n');
+  writeFileSync(
+    gate,
+    '#!/bin/sh\nfor arg in "$@"; do\n  case "$arg" in --lane=*) lane="${arg#--lane=}" ;; esac\ndone\necho "lane=$lane"\n',
+  );
   chmodSync(gate, 0o755);
 
   // Exists so a NON-ZERO EXIT has its own command. A failing command is a

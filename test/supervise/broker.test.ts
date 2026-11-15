@@ -289,7 +289,8 @@ test("a handle named in the request is ignored", async (t) => {
 
 test("run-command runs the script and reports its exit code and output", async (t) => {
   const dir = project(ECHO, {
-    "gate.sh": '#!/bin/sh\necho "lane=$1"\nexit 0\n',
+    "gate.sh":
+      '#!/bin/sh\nfor arg in "$@"; do\n  case "$arg" in --lane=*) lane="${arg#--lane=}" ;; esac\ndone\necho "lane=$lane"\nexit 0\n',
   });
   const broker = await brokerFor(`h5-${process.pid}`, dir);
   t.after(() => broker.close());
