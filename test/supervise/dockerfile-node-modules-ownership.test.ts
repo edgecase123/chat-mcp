@@ -115,6 +115,11 @@ test('⚠️ control — the path the image pre-creates is the path the driver m
  * PLACE; the image test proves the built result. A Dockerfile can be correct
  * and the published image stale, and a build can be correct while a future
  * root-run layer lands below this chown.
+ *
+ * 🛑 THE CHOWN OF `/root` MUST BE ITS OWN DIRECTIVE. Joining `\`-continuations
+ * is what closes the fail-open below, and it also hides order WITHIN a chain —
+ * so a chown placed after the npm in the SAME `&&` chain is correct and still
+ * fails here. Fail-closed is the trade. Raised by claude2 on PR 243.
  */
 test('🔴 /root is chowned to agent AFTER the last root-run npm, or a cold npm ci dies EACCES', () => {
   const userAt = DIRECTIVES.findIndex((d) => /^\s*USER\s+agent\b/.test(d));
