@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { stateDir as defaultStateDir } from '../util/paths.js';
-import { COOKIE_NAME } from '../cli/web/credential.js';
+import { COOKIE_NAME, HANDSHAKE_PARAM } from '../cli/web/credential.js';
 
 /**
  * Telling the web UI that a supervised agent is WORKING, #240.
@@ -52,15 +52,21 @@ export interface ActivityTarget {
 /**
  * The running web server's origin and token, or `null` when none is up.
  *
- * 🛑 BOTH FILES OR NEITHER, AND THE EXISTENCE CHECK IS THE WHOLE POINT. The
- * web server is DOWN most of the time — `server.ts` arms a 60-second idle
- * shutdown at boot and exits once no browser holds an SSE stream. Attempting a
- * POST per stream event against a closed port is what would fill a supervisor
- * log with refusals, so the cheap answer is to not attempt one.
+ * 🛑 `web-handshake` IS A URL WITH THE TOKEN IN A QUERY PARAM, NOT A TOKEN.
+ * `server.ts:155` builds `${url}?t=${token}` and `:183` writes that. Sending
+ * the file's contents as the cookie value 401s every pulse: `tokenMatches`
+ * compares lengths first, 68 against 43. Found by claude1 on PR 244, and the
+ * fixtures hid it by writing a bare token no producer emits.
  *
- * ⚠️ A URL WITHOUT A TOKEN IS ALSO NO TARGET. `/api/*` is cookie-authenticated,
- * so posting without one trades a refused connection for a 401 — the same
- * flood wearing a different hat.
+ * 🛑 THE EXISTENCE CHECK IS THE OTHER HALF. The web server is DOWN most of the
+ * time — `server.ts` arms a 60-second idle shutdown at boot and exits once no
+ * browser holds an SSE stream. Attempting a POST per stream event against a
+ * closed port is what would fill a supervisor log with refusals, so the cheap
+ * answer is to not attempt one.
+ *
+ * ⚠️ `web-url` IS NOT READ, AND IT IS NOT AN OVERSIGHT. It is the tokenless
+ * twin, so it can never produce a usable target — the handshake url carries
+ * the origin as well as the credential.
  */
 export function activityTarget(dir: string = defaultStateDir()): ActivityTarget | null {
   const read = (name: string): string | null => {
@@ -74,13 +80,17 @@ export function activityTarget(dir: string = defaultStateDir()): ActivityTarget 
     }
   };
 
-  const url = read('web-url');
-  const token = read('web-handshake');
+  const handshake = read('web-handshake');
 
-  if (url === null || token === null) return null;
+  if (handshake === null) return null;
 
   try {
-    return { origin: new URL(url).origin, token };
+    const parsed = new URL(handshake);
+    const token = parsed.searchParams.get(HANDSHAKE_PARAM);
+
+    if (token === null || token.length === 0) return null;
+
+    return { origin: parsed.origin, token };
   } catch {
     // A truncated url file — a server mid-write, or killed between open and
     // write. Not a target, and not worth a word.

@@ -11,6 +11,13 @@ import {
   activityTarget,
   createActivityReporter,
 } from '../../src/supervise/activity.js';
+import {
+  COOKIE_NAME,
+  HANDSHAKE_PARAM,
+  cookieValue,
+  mintToken,
+  tokenMatches,
+} from '../../src/cli/web/credential.js';
 
 /**
  * #240. The supervisor reads a child's stdout and the browser shows nothing,
@@ -22,6 +29,22 @@ import {
  * `fetch` would assert that this file calls the function it calls, which is
  * the vacuity the repo keeps catching. The server records what arrived.
  */
+
+/**
+ * 🛑 THE PRODUCER'S EXACT STRING, NOT A TOKEN. `server.ts:155` builds
+ * `${url}?t=${token}` and `:183` writes THAT, plus a newline, to
+ * `web-handshake`. A fixture holding a bare token is a string no producer ever
+ * writes, and it passed while production 401'd on every pulse. Found by
+ * claude1 on PR 244.
+ */
+/** A real minted token, so the fixtures carry the shape production carries. */
+const TOKEN = mintToken();
+
+function writeHandshake(dir: string, port: number | string, token: string): void {
+  const url = `http://127.0.0.1:${String(port)}/`;
+
+  writeFileSync(join(dir, 'web-handshake'), `${url}?${HANDSHAKE_PARAM}=${token}\n`);
+}
 
 function stateRig(): { dir: string; cleanup: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'activity-'));
@@ -80,7 +103,7 @@ test('🛑 the two constants are the values lee ruled, not a developer default',
   assert.equal(PULSE_FAILSAFE_MS, 30_000);
 });
 
-test('🛑 no web-url means NOTHING IS LISTENING, so there is no target at all', () => {
+test('🛑 no web-handshake means NOTHING IS LISTENING, so there is no target at all', () => {
   const rig = stateRig();
 
   try {
@@ -92,34 +115,48 @@ test('🛑 no web-url means NOTHING IS LISTENING, so there is no target at all',
   }
 });
 
-test('🛑 a web-url with NO handshake token is still no target', () => {
+test('🛑 a handshake url with NO token in it is still no target', () => {
   const rig = stateRig();
 
   try {
-    writeFileSync(join(rig.dir, 'web-url'), 'http://127.0.0.1:4321/');
+    // A parseable url carrying no `?t=` — a truncated write, or a future
+    // producer that stops appending the param.
+    writeFileSync(join(rig.dir, 'web-handshake'), 'http://127.0.0.1:4321/\n');
 
-    // 🛑 BOTH FILES OR NEITHER. The route is cookie-authenticated, so a url
-    // without a token produces a 401 on every single event — the same log
-    // flood the check exists to prevent, arriving as failures instead of
-    // refusals.
+    // 🛑 THE ROUTE IS COOKIE-AUTHENTICATED, so a tokenless target produces a
+    // 401 on every single event — the same log flood the check exists to
+    // prevent, arriving as failures instead of refusals.
     assert.equal(activityTarget(rig.dir), null);
   } finally {
     rig.cleanup();
   }
 });
 
-test('⚠️ control — both files present yields the port and the token', () => {
+test('🛑 a web-handshake that is not a url at all is no target', () => {
   const rig = stateRig();
 
   try {
-    writeFileSync(join(rig.dir, 'web-url'), 'http://127.0.0.1:4321/\n');
-    writeFileSync(join(rig.dir, 'web-handshake'), 'sekrit\n');
+    // ⚠️ THIS IS THE STRING EVERY FIXTURE IN THIS FILE USED TO WRITE. It is a
+    // bare token, which no producer emits, and it must not look like a target.
+    writeFileSync(join(rig.dir, 'web-handshake'), 'tok123\n');
+
+    assert.equal(activityTarget(rig.dir), null);
+  } finally {
+    rig.cleanup();
+  }
+});
+
+test('⚠️ control — a real handshake url yields the origin and the bare token', () => {
+  const rig = stateRig();
+
+  try {
+    writeHandshake(rig.dir, 4321, 'sekrit');
 
     const target = activityTarget(rig.dir);
 
-    assert.ok(target, 'both files present and still no target');
+    assert.ok(target, 'the producer\'s own string yielded no target');
     assert.equal(target.origin, 'http://127.0.0.1:4321');
-    assert.equal(target.token, 'sekrit', 'the trailing newline reached the token');
+    assert.equal(target.token, 'sekrit', 'the url, or its newline, reached the token');
   } finally {
     rig.cleanup();
   }
@@ -130,8 +167,7 @@ test('🛑 a tick REACHES the server, authenticated, with the handle in the BODY
   const web = await recordingServer();
 
   try {
-    writeFileSync(join(rig.dir, 'web-url'), `http://127.0.0.1:${web.port}/`);
-    writeFileSync(join(rig.dir, 'web-handshake'), 'tok123');
+    writeHandshake(rig.dir, web.port, TOKEN);
 
     const report = createActivityReporter({ handle: 'claude2', stateDir: () => rig.dir });
 
@@ -147,8 +183,10 @@ test('🛑 a tick REACHES the server, authenticated, with the handle in the BODY
     // other route in `server.ts` is a fixed path with a JSON body too.
     assert.deepEqual(JSON.parse(web.seen[0]!.body), { handle: 'claude2', phase: 'tick' });
 
-    // The supervisor has no cookie jar, so it sets the header itself.
-    assert.match(web.seen[0]!.cookie ?? '', /tok123/);
+    // 🛑 EQUALITY, NOT `assert.match`. A substring check passes when the
+    // WHOLE handshake url is sent, because the url contains the token — which
+    // is exactly how PR 244's 🔴 stayed green.
+    assert.equal(web.seen[0]!.cookie, `${COOKIE_NAME}=${TOKEN}`);
 
     // The Host allowlist is checked before auth and before routing.
     assert.equal(web.seen[0]!.host, `127.0.0.1:${web.port}`);
@@ -163,8 +201,7 @@ test('🛑 bursts THROTTLE, so a chatty turn cannot flood the web server', async
   const web = await recordingServer();
 
   try {
-    writeFileSync(join(rig.dir, 'web-url'), `http://127.0.0.1:${web.port}/`);
-    writeFileSync(join(rig.dir, 'web-handshake'), 'tok123');
+    writeHandshake(rig.dir, web.port, TOKEN);
 
     const report = createActivityReporter({ handle: 'claude2', stateDir: () => rig.dir });
 
@@ -190,8 +227,7 @@ test('⚠️ control — the throttle REOPENS, so a later tick is not swallowed'
   const web = await recordingServer();
 
   try {
-    writeFileSync(join(rig.dir, 'web-url'), `http://127.0.0.1:${web.port}/`);
-    writeFileSync(join(rig.dir, 'web-handshake'), 'tok123');
+    writeHandshake(rig.dir, web.port, TOKEN);
 
     let now = 1_000;
     const report = createActivityReporter({
@@ -223,8 +259,7 @@ test('🛑 an END is never throttled, even immediately after a tick', async () =
   const web = await recordingServer();
 
   try {
-    writeFileSync(join(rig.dir, 'web-url'), `http://127.0.0.1:${web.port}/`);
-    writeFileSync(join(rig.dir, 'web-handshake'), 'tok123');
+    writeHandshake(rig.dir, web.port, TOKEN);
 
     const report = createActivityReporter({ handle: 'claude2', stateDir: () => rig.dir });
 
@@ -251,8 +286,7 @@ test('🛑 a dead web server costs one silent return, not a throw and not a log'
   try {
     // A port nothing is listening on, with both files present — so the
     // existence check passes and the connection itself is refused.
-    writeFileSync(join(rig.dir, 'web-url'), 'http://127.0.0.1:1/');
-    writeFileSync(join(rig.dir, 'web-handshake'), 'tok123');
+    writeHandshake(rig.dir, 1, TOKEN);
 
     const report = createActivityReporter({ handle: 'claude2', stateDir: () => rig.dir });
 
@@ -291,8 +325,7 @@ test('⚠️ two handles throttle independently', async () => {
 
   try {
     mkdirSync(rig.dir, { recursive: true });
-    writeFileSync(join(rig.dir, 'web-url'), `http://127.0.0.1:${web.port}/`);
-    writeFileSync(join(rig.dir, 'web-handshake'), 'tok123');
+    writeHandshake(rig.dir, web.port, TOKEN);
 
     const a = createActivityReporter({ handle: 'claude1', stateDir: () => rig.dir });
     const b = createActivityReporter({ handle: 'claude2', stateDir: () => rig.dir });
@@ -308,6 +341,43 @@ test('⚠️ two handles throttle independently', async () => {
     );
   } finally {
     await web.close();
+    rig.cleanup();
+  }
+});
+
+/**
+ * 🔴 THE ASSERTION THE OTHER TESTS COULD NOT MAKE, AND IT IS THE WHOLE POINT.
+ * Every fixture here used to write a bare token, so `activityTarget` returning
+ * the WHOLE handshake url went unnoticed — `tokenMatches` compares lengths
+ * first, 68 against 43, and `server.ts:373` answers 401. The two halves of
+ * #240 were each green against their own fixture and disagreed with each
+ * other. Found by claude1 on PR 244.
+ *
+ * ⚠️ IT GOES THROUGH THE REAL `cookieValue` AND `tokenMatches`. Asserting the
+ * token merely APPEARS in the header passes on the url too, because the url
+ * contains it.
+ */
+test('🔴 the token activityTarget yields is one the real server ACCEPTS', () => {
+  const rig = stateRig();
+
+  try {
+    const token = mintToken();
+
+    writeHandshake(rig.dir, 4321, token);
+
+    const target = activityTarget(rig.dir);
+
+    assert.ok(target, 'the producer\'s own handshake string yielded no target');
+    assert.equal(target.origin, 'http://127.0.0.1:4321');
+
+    const presented = cookieValue(`${COOKIE_NAME}=${target.token}`, COOKIE_NAME);
+
+    assert.ok(
+      tokenMatches(token, presented),
+      `the server refuses what the supervisor sends: presented ${String(presented?.length)} ` +
+        `characters where the token is ${String(token.length)}`,
+    );
+  } finally {
     rig.cleanup();
   }
 });
