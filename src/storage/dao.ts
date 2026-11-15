@@ -663,12 +663,13 @@ export function joinRoom(db: Db, room: string, handle: string): JoinResult {
   ).run(room, handle, now);
 
   const body = `${handle} joined ${room}`;
-  const sysInfo = db
-    .prepare(
-      `INSERT INTO messages (from_handle, to_handle, body, sent_at) VALUES (?, ?, ?, ?)`,
-    )
-    .run(SYSTEM_HANDLE, room, body, now);
-  const sysId = Number(sysInfo.lastInsertRowid);
+
+  // 🛑 THROUGH `insertMessage`, NOT A RAW INSERT. Its own statement read
+  // `lastInsertRowid` with no `changes` check, so a swallowed insert handed back
+  // a rowid from another table — and that id is what anchors the watermark two
+  // lines below. A bogus high one makes `room_inbox` skip real messages, which
+  // the joiner reads as an empty room. #138.
+  const sent = insertMessage(db, { from: SYSTEM_HANDLE, to: room, body });
 
   // Anchor the new joiner's watermark AT the system message so they don't
   // see their own "joined" line. Existing members have lower watermarks
@@ -676,12 +677,15 @@ export function joinRoom(db: Db, room: string, handle: string): JoinResult {
   db.prepare(
     `INSERT INTO room_reads (room_name, handle, last_read_id) VALUES (?, ?, ?)
      ON CONFLICT(room_name, handle) DO UPDATE SET last_read_id = excluded.last_read_id`,
-  ).run(room, handle, sysId);
+  ).run(room, handle, sent.id);
 
   return {
     room: hydrateRoom(db, room),
     was_new_member: true,
-    system_message: { id: sysId, sent_at: now, body },
+    // ⚠️ `sent.sent_at`, NOT the local `now`. The row carries the one
+    // `insertMessage` stamped, and returning a different number would make the
+    // reported timestamp disagree with the message a reader fetches.
+    system_message: { id: sent.id, sent_at: sent.sent_at, body },
   };
 }
 

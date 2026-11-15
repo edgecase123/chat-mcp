@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as dao from "../../storage/dao.js";
-import { notifyPeer } from "../../notify/bus.js";
+import { announceToRoom } from "../../messaging/room-announce.js";
 import { assertRoomName } from "../../util/naming.js";
 import type { ShimContext } from "../index.js";
 
@@ -35,26 +35,23 @@ export function installRoomBoot(server: McpServer, ctx: ShimContext): void {
 
       const removed = dao.bootFromRoom(ctx.db, room, handle);
 
-      const now = Date.now();
       const body = `${ctx.handle} booted ${handle} from ${room}`;
-      const sysInfo = ctx.db
-        .prepare(
-          `INSERT INTO messages (from_handle, to_handle, body, sent_at) VALUES (?, ?, ?, ?)`,
-        )
-        .run(dao.SYSTEM_HANDLE, room, body, now);
-      const sysId = Number(sysInfo.lastInsertRowid);
 
-      const remaining = dao.roomMembers(ctx.db, room);
-      for (const member of remaining) {
-        if (member === ctx.handle) continue;
-        notifyPeer(member, {
-          id: sysId,
-          to: room,
-          from: dao.SYSTEM_HANDLE,
-          ts: now,
-          body,
-        });
-      }
+      // 🛑 ONE WRITER. The raw insert this replaced skipped every guard in
+      // `insertMessage` and fanned out a `lastInsertRowid` that a swallowed
+      // insert takes from another table. #138.
+      announceToRoom(ctx.db, {
+        room,
+        body,
+        actor: ctx.handle,
+        // ⚠️ PRESERVED FROM THE CODE THIS REPLACED, NOT CHOSEN. The caller IS a
+        // room member, and the announcement's `from_handle` is `SYSTEM_HANDLE`,
+        // so `roomUnread`'s "not from me" filter does not hide it. The booting
+        // agent gets its own boot back as unread. Advancing instead is a
+        // behaviour change that wants its own test, so this keeps the answer
+        // the three copied surfaces already gave. Raised by claude1 on #267.
+        advanceActorRead: false,
+      });
 
       return {
         content: [
