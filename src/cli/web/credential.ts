@@ -1,11 +1,13 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 /**
- * 🛑 THE TOKEN IS NEVER WRITTEN UNDER `stateDir()`. The whole state dir is
- * bind-mounted read-write into every containerized agent, and a container runs
- * as root, so a 0600 file there is readable by the thing the credential exists
- * to refuse. It is printed in the terminal banner and handed to the browser,
- * and `web-url` stays tokenless.
+ * 🛑 THE TOKEN IS WRITTEN UNDER `stateDir()`, 0600, AND THAT IS DELIBERATE.
+ * This said the opposite, on #162's finding that the whole state dir is
+ * bind-mounted into every container. Re-measured 2026-11-14: it is not in the
+ * container at all, and `assertProjectDirOutsideState` refuses any mount that
+ * overlaps it. Commands and output in `test/cli/web/handshake-file.test.ts`.
+ *
+ * ⚠️ `web-url` STAYS TOKENLESS — it is the twin external readers expect.
  */
 export const COOKIE_NAME = 'chat_mcp_api';
 
@@ -78,6 +80,11 @@ const READ_ROUTES: ReadonlySet<string> = new Set([
 ]);
 
 const WRITE_ROUTES: ReadonlySet<string> = new Set([
+  // 🛑 CLASSIFIED, BECAUSE THE FALLBACK WOULD MAKE A PULSE AN ADMIN ACTION.
+  // An unrecognised /api/* path returns 'admin', which fails closed and is
+  // therefore safe and wrong — the supervisor holds a write credential, so an
+  // unclassified route silently 403s every pulse. #240.
+  '/api/activity',
   '/api/messages',
   '/api/messages/clear',
   '/api/rooms/join',

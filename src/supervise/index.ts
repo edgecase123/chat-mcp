@@ -22,6 +22,7 @@ import {
 import { openHostBus, type HostBus } from './host-bus.js';
 import { applyContextReport } from '../shim/gauge-report.js';
 import type { ContextSnapshot } from './context-gauge.js';
+import { createActivityReporter } from './activity.js';
 import { describeContextGauge } from './context-gauge.js';
 
 /**
@@ -478,6 +479,17 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    */
   let childGeneration = 0;
 
+  /**
+   * Tells the web UI this agent is working, #240.
+   *
+   * 🛑 ONE PER SUPERVISOR, AND IT TAKES `childBusHandle` ITSELF. A reporter per
+   * child would reset the throttle on every replacement, and a captured handle
+   * would go stale against the rule on `childBusHandle` above. The pulse lands
+   * on the CHILD row because that is the one `list_agents` shows — the same
+   * finding `context-gauge.test.ts` records for the gauge.
+   */
+  const reportActivity = createActivityReporter({ handle: childBusHandle });
+
   let childSession: string | null = null;
 
   /**
@@ -581,6 +593,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
     child.onEvent(
       ifCurrent('onEvent', (event) => {
+        // 🛑 NOT AWAITED, AND INSIDE `ifCurrent`. This runs while draining the
+        // child's stdout, and a dead child must not pulse a live dot.
+        reportActivity('tick');
+
         const said = describeChildOutput(event);
 
         if (said) log(`← child: ${said}`);
@@ -594,6 +610,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     child.onTurnEnd(
       ifCurrent('onTurnEnd', () => {
         turnEndCount++;
+        // 🛑 CLEARS THE PULSE, AND IT IS NEVER THROTTLED. A dropped `end`
+        // leaves the dot running to the 30s failsafe, which reads as an agent
+        // that never finished.
+        reportActivity('end');
         queue.turnEnded();
         log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
 
@@ -743,6 +763,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       // 🛑 Anything queued is UNSENT. Reporting it is the difference between a
       // visible gap and silence, and silence is the ambiguity this whole change
       // exists to remove.
+        // 🛑 CLEARS THE DOT. `onTurnEnd` does not fire for a child that dies
+        // mid-turn, so without this the 30s failsafe is the only thing that
+        // ends the pulse — and for those 30 seconds a working agent and a dead
+        // one look identical, which is the ambiguity #240 exists to remove.
+        reportActivity('end');
+
         const unsent = queue.drain();
         log(`child exited code=${code} signal=${signal}; ${unsent.length} prompt(s) never sent`);
 
@@ -813,6 +839,17 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // ⚠️ BEFORE `spawnFn`, deliberately. A spawn that throws then leaves
     // `pid = NULL` and the bus honest rather than advertising a child that
     // never started.
+    // 🛑 HERE TOO, AND FOR THE REASON THE PID CLEAR BELOW IS HERE. `kill()`
+    // returns before the exit lands, so `onExit` sees a bumped generation and
+    // `ifCurrent` drops it — the handler above would never run and the
+    // outgoing child's dot would pulse on.
+    //
+    // ⚠️ BEFORE `spawnFn`, for the same reason the pid clear is: a spawn that
+    // throws then leaves the dot cleared rather than pulsing for a child that
+    // never started. NOT because `currentGrant` is about to change — the
+    // reassignment below spreads `handle` through untouched.
+    reportActivity('end');
+
     try {
       if (!dao.clearAgentPid(approvalsDb, childBusHandle())) {
         // More surprising here than on an exit: a replace means the child has
