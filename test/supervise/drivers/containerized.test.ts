@@ -611,15 +611,24 @@ test("🛑 the container name is force-cleared BEFORE docker run, or a restart h
     supervisorHandle: "claude1",
   });
 
-  assert.deepEqual(
-    calls[0],
-    ["rm", "-f", "chat-mcp-claude1"],
-    "the first docker call must be rm -f",
+  // 🛑 POSITIONS FOUND BY ARGV, NOT BY INDEX. This read `calls[0]` and
+  // `calls[1]` until #231 put the credential-free install container ahead of
+  // both — so the index was a proxy for "the agent's run", and the install
+  // broke the proxy while the invariant it stands for was untouched.
+  const removalAt = calls.findIndex((argv) => argv[0] === "rm");
+  const agentRunAt = calls.findIndex(
+    (argv) => argv[0] === "run" && argv.includes("chat-mcp-claude1"),
   );
-  assert.equal(
-    calls[1]?.[0],
-    "run",
-    "docker run must follow the rm -f, not precede it",
+
+  assert.deepEqual(
+    calls[removalAt],
+    ["rm", "-f", "chat-mcp-claude1"],
+    `no docker rm -f was issued: ${JSON.stringify(calls)}`,
+  );
+  assert.ok(agentRunAt >= 0, `the agent never ran: ${JSON.stringify(calls)}`);
+  assert.ok(
+    removalAt < agentRunAt,
+    `the rm -f clears nothing: rm at ${removalAt}, agent run at ${agentRunAt}`,
   );
 });
 
@@ -1947,7 +1956,7 @@ test("🛑 the install container runs to completion BEFORE the agent container s
  * guaranteed while both lived in one container. An agent that starts on a
  * half-written volume produces a review claiming a green suite it never ran.
  */
-test("🚨 an install that fails starts no agent, and the error names the cause", async (t) => {
+test("🚨 an install that fails kills nothing and starts no agent, and the error names the cause", async (t) => {
   setToken("sk-ant-oat-x");
   const calls: string[][] = [];
   let installStdio: unknown[] | undefined;
@@ -1964,7 +1973,9 @@ test("🚨 an install that fails starts no agent, and the error names the cause"
         o?: { stdio?: unknown[]; env?: NodeJS.ProcessEnv },
       ) => {
         calls.push(args);
-        // The `rm -f` must still succeed; only the install fails.
+        // Only the install fails. The `rm -f` is left working on purpose, so
+        // that its ABSENCE below is the implementation's choice and not the
+        // mock's.
         if (args.some((a) => a.includes("npm ci"))) {
           installStdio = o?.stdio;
           throw new Error("npm ci exited 1");
@@ -2013,6 +2024,22 @@ test("🚨 an install that fails starts no agent, and the error names the cause"
     String(((thrown as Error).cause as Error)?.message),
     /npm ci exited 1/,
     "the underlying failure is unreachable from the wrapper",
+  );
+
+  // 🚨 THE INVARIANT `dockerRunPlan` IS ALREADY HELD TO, AND THE FIRST CUT OF
+  // THIS PR BROKE IT. `docker rm -f` SIGKILLs the container this handle is
+  // replacing, so a throw ordered after it means a spawn that could never
+  // succeed — a registry 503, say — destroys the agent on its way out.
+  //
+  // Its sibling is "a plan that cannot be built kills nothing", which covers
+  // the other throw source. Raised by claude1 on PR 259; my own test asserted
+  // only that nothing SPAWNED, which the broken order satisfied.
+  const removals = calls.filter((argv) => argv[0] === "rm");
+
+  assert.deepEqual(
+    removals,
+    [],
+    `a failed install removed the live container anyway: ${JSON.stringify(removals)}`,
   );
 
   // 🛑 STDERR INHERITED, AND A COMMENT CLAIMS THIS TOO. `NO_LOCK_HASH_WARNING`

@@ -739,6 +739,28 @@ export function spawnContainerized(
   // SIGKILLed the live agent on its way to the error. `dockerRunPlan` is pure.
   const plan = dockerRunPlan(vendor, opts);
 
+  // 🚨 THE CREDENTIAL-FREE INSTALL, AND IT RUNS BEFORE THE REMOVAL BELOW
+  // BECAUSE IT THROWS. The agent container holds every credential, so running
+  // `npm ci` in it put the project tree's choice of packages in the same
+  // process tree as the bus token, `GH_TOKEN` and the Claude OAuth token.
+  //
+  // 🛑 ABOVE `docker rm -f`, FOR THE SAME REASON `dockerRunPlan` IS. A
+  // registry 503 throws here, and ordered after the removal that throw cost a
+  // live container its life on the way out — a spawn that could not succeed
+  // taking down the agent it was replacing. Raised by claude1 on PR 259; the
+  // first cut had it on the wrong side and the test pinned it open.
+  //
+  // ⚠️ NOTHING IS RACED BY MOVING IT UP. `doRestart` and `replaceChild` both
+  // call `child.kill()` before they reach `spawnFn`, so no live container is
+  // reading this volume while the install writes it.
+  //
+  // ⚠️ EVERY SPAWN, INCLUDING A RESTART. `startSupervisor` also calls this once
+  // before binding its wake listener, which is what keeps the FIRST start's
+  // cold install off a loop anybody is waiting on. Dropping it here would leave
+  // a restart after a lockfile change running the agent against the previous
+  // dependency tree, with nothing saying so.
+  runDependencyInstall(vendor, opts);
+
   // 🛑 CLEAR THE NAME FIRST, SYNCHRONOUSLY. The name is fixed per handle, and
   // `kill()` no longer waits for the teardown — so restarting a handle inside
   // the grace window meets `Conflict. The container name is already in use`
@@ -756,18 +778,6 @@ export function spawnContainerized(
     // Nothing by that name — the normal case, and not distinguishable from a
     // missing docker without a logger at this layer.
   }
-
-  // 🚨 THE CREDENTIAL-FREE INSTALL, BEFORE THE CONTAINER THAT HOLDS THE
-  // CREDENTIALS. It throws on failure, so a broken install starts no agent —
-  // the property the old prelude's `&&` carried while both ran in one
-  // container.
-  //
-  // ⚠️ EVERY SPAWN, INCLUDING A RESTART. `startSupervisor` also calls this
-  // once before binding its wake listener, which is what keeps the FIRST
-  // start's cold install off a loop anybody is waiting on. Dropping it here
-  // would leave a restart after a lockfile change running the agent against
-  // the previous dependency tree, with nothing saying so.
-  runDependencyInstall(vendor, opts);
 
   const child: ChildProcessWithoutNullStreams = spawn("docker", plan.args, {
     stdio: ["pipe", "pipe", "pipe"],
