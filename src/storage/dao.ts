@@ -1,7 +1,13 @@
 import type { Db } from "./db.js";
 // A value import: `db.ts` owns the schema_version table, and it imports only
 // `util/paths.js`, so this cannot cycle back.
-import { currentSchemaVersion, verifierFor } from "./db.js";
+import {
+  currentSchemaVersion,
+  identityFor,
+  identityOf,
+  verifierFor,
+} from "./db.js";
+import { dbPath } from "../util/paths.js";
 import type { ClaimRow } from "../claims/lifecycle.js";
 // A value import, not a type: `searchMessages` has to tell a room target from
 // a peer target at runtime. `naming.ts` imports nothing, so this cannot cycle.
@@ -340,7 +346,8 @@ export interface SendResult {
 }
 
 /** Which check rejected the send. Each one is a different claim about what happened. */
-export type NotPersistedReason = "no-rows-changed" | "row-absent-on-reread";
+export type NotPersistedReason =
+  "no-rows-changed" | "row-absent-on-reread" | "file-replaced";
 
 /**
  * #138 — a send reported an id for a row that was never written.
@@ -355,21 +362,70 @@ export type NotPersistedReason = "no-rows-changed" | "row-absent-on-reread";
 export class MessageNotPersistedError extends Error {
   constructor(
     readonly reason: NotPersistedReason,
-    readonly claimedId: number,
+    /** Null for `file-replaced`, which is refused before any INSERT runs. */
+    readonly claimedId: number | null,
     readonly from: string,
     readonly to: string,
   ) {
     super(
-      `Nothing was sent from ${from} to ${to}. ` +
-        (reason === "no-rows-changed"
-          ? `The INSERT into messages changed no rows, so id ${claimedId} belongs to another table.`
-          : `A second connection cannot read id ${claimedId} back, so the row did not survive.`),
+      `Nothing was sent from ${from} to ${to}. ${detailFor(reason, claimedId)}`,
     );
     this.name = "MessageNotPersistedError";
   }
 }
 
+/**
+ * 🛑 `file-replaced` IS THE ONLY ONE THAT TELLS THE AGENT WHAT TO DO. The other
+ * two describe a write that failed, which a retry can legitimately fix. A
+ * replaced file is a property of the CONNECTION, so every retry on this handle
+ * lands in the same orphaned inode — the sentence has to say restart or the
+ * agent loops.
+ */
+function detailFor(
+  reason: NotPersistedReason,
+  claimedId: number | null,
+): string {
+  switch (reason) {
+    case "no-rows-changed":
+      return `The INSERT into messages changed no rows, so id ${claimedId} belongs to another table.`;
+    case "row-absent-on-reread":
+      return `A second connection cannot read id ${claimedId} back, so the row did not survive.`;
+    case "file-replaced":
+      return (
+        `This connection holds a database file that is no longer the file at ` +
+        `${dbPath()}, so nothing written through it can be read by anyone else. ` +
+        `RESTART this agent; retrying on this handle writes to the same ` +
+        `orphaned file.`
+      );
+  }
+}
+
 export function insertMessage(db: Db, input: SendInput): SendResult {
+  // 🛑 BEFORE THE INSERT, NOT AFTER IT. The two checks below describe a write
+  // that did not land; this one says the write CANNOT be read by anyone else,
+  // and both of them pass truthfully when it happens. The primary and the
+  // verifier are opened back to back in `openDb`, so a file moved aside
+  // afterwards is held by BOTH — the row writes to the orphan and reads back
+  // from it. Measured on 2f3f4f3: `changes === 1`, the read-back succeeded,
+  // and the file at the path held no rows.
+  //
+  // ⚠️ AN UNSET MARK IS NOT A MISMATCH. `identityFor` is undefined only for a
+  // database that did not come from `openDb`, which in practice is `:memory:` —
+  // there is no file to compare, and a guard test keeps `openDb` the single
+  // place production opens one.
+  const atOpen = identityFor(db);
+  if (atOpen) {
+    const now = identityOf(dbPath());
+    if (!now || now.dev !== atOpen.dev || now.ino !== atOpen.ino) {
+      throw new MessageNotPersistedError(
+        "file-replaced",
+        null,
+        input.from,
+        input.to,
+      );
+    }
+  }
+
   const sent_at = Date.now();
   const kind: MessageKind = input.kind ?? "chat";
   const info = db

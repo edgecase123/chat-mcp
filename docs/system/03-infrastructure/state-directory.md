@@ -1,8 +1,10 @@
 ---
 title: The state directory
-updated: 2026-11-14
+updated: 2026-11-15
 covers:
   - src/util/paths.ts
+  - src/storage/db.ts
+  - src/storage/dao.ts
   - src/supervise/container.ts
   - src/supervise/mounts.ts
   - src/supervise/auth.ts
@@ -71,6 +73,21 @@ by `[ -e ]`.
 helper references. `dbPath()` returns `chat.db`. Safe to delete.
 
 **`chat.db.bak-*` files accumulate** and are never pruned automatically.
+
+🛑 **A PATH IS NOT A DATABASE, AND MOVING `chat.db` ASIDE UNDER A LIVE AGENT IS
+SILENT.** A connection keeps the file it opened, so an agent goes on writing to
+the moved-away inode while everyone who opens the path afterwards sees an empty
+database. `lsof` and `PRAGMA database_list` both report the path, so neither can
+see it.
+
+- **`openDb` records the device and inode at open**, and `insertMessage` compares
+  them on every send. A mismatch throws `MessageNotPersistedError` with reason
+  `file-replaced`, which says to RESTART the agent — a retry on the same handle
+  lands in the same orphaned file.
+- **The `health` tool reports both marks**, so an agent can check without
+  sending.
+- ⚠️ **Restoring the file does not fix a live agent.** The connection still holds
+  the old inode, and only a restart re-opens it.
 
 ---
 
