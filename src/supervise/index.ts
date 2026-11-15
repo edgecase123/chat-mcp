@@ -799,6 +799,44 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   wireChild();
 
   /**
+   * Take the outgoing child offline on the bus and stop its activity dot.
+   *
+   * 🛑 HERE, NOT IN `onExit`. `kill()` returns immediately — a containerized
+   * child spawns `docker stop` detached — so the exit lands after the
+   * generation has moved and `ifCurrent` drops it as stale. The handler would
+   * never run, and `online` stayed true for a child that no longer existed,
+   * forever if the respawn then failed. The dot pulsed on for the same reason.
+   *
+   * ⚠️ Moving the `onExit` clear outside `ifCurrent` is NOT the alternative:
+   * that clears a LIVE child's pid on every stale signal. The replacement
+   * re-registers its own pid moments later, so a brief offline window here is
+   * the honest reading.
+   *
+   * ⚠️ CALL IT BEFORE `spawnFn`, deliberately. A spawn that throws then leaves
+   * `pid = NULL` and the dot cleared, rather than advertising a child that
+   * never started.
+   *
+   * 🛑 `doRestart` HAD NEITHER STEP AND RELIED ENTIRELY ON `onExit`. Bumping
+   * the generation on its throw path suppressed that exit, so a failed restart
+   * left a dead child reading online with its dot still moving. Found by
+   * claude2 on review; shared from one place so the next respawn path cannot
+   * miss a step.
+   */
+  const takeChildOffline = (verb: string): void => {
+    reportActivity('end');
+
+    try {
+      if (!dao.clearAgentPid(approvalsDb, childBusHandle())) {
+        // More surprising here than on an exit: a replace or restart means the
+        // child has been running, so its shim should long since have registered.
+        log(`${verb} ${childBusHandle()}, which has no bus row to take offline`);
+      }
+    } catch (err) {
+      log(`FAILED to take ${childBusHandle()} offline across a ${verb}: ${String(err)}`);
+    }
+  };
+
+  /**
    * Replace the live child, resuming its session, with different flags.
    *
    * 🛑 ONE OPERATION, THREE CALLERS, AND THAT IS THE POINT. An approval
@@ -825,40 +863,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     log(`replacing child (${reason}); ${unsent.length} prompt(s) carried over`);
     child.kill();
 
-    // 🛑 HERE, NOT IN `onExit`. `kill()` returns immediately — a containerized
-    // child spawns `docker stop` detached — so the exit lands after
-    // `wireChild()` has bumped the generation and `ifCurrent` drops it as
-    // stale. The handler below would never run, and `online` stayed true for a
-    // child that no longer existed, forever if the respawn then failed.
-    //
-    // ⚠️ Moving the `onExit` clear outside `ifCurrent` is NOT the alternative:
-    // that clears a LIVE child's pid on every stale signal. The replacement
-    // re-registers its own pid moments later, so a brief offline window here
-    // is the honest reading.
-    //
-    // ⚠️ BEFORE `spawnFn`, deliberately. A spawn that throws then leaves
-    // `pid = NULL` and the bus honest rather than advertising a child that
-    // never started.
-    // 🛑 HERE TOO, AND FOR THE REASON THE PID CLEAR BELOW IS HERE. `kill()`
-    // returns before the exit lands, so `onExit` sees a bumped generation and
-    // `ifCurrent` drops it — the handler above would never run and the
-    // outgoing child's dot would pulse on.
-    //
-    // ⚠️ BEFORE `spawnFn`, for the same reason the pid clear is: a spawn that
-    // throws then leaves the dot cleared rather than pulsing for a child that
-    // never started. NOT because `currentGrant` is about to change — the
-    // reassignment below spreads `handle` through untouched.
-    reportActivity('end');
-
-    try {
-      if (!dao.clearAgentPid(approvalsDb, childBusHandle())) {
-        // More surprising here than on an exit: a replace means the child has
-        // been running, so its shim should long since have registered.
-        log(`replacing ${childBusHandle()}, which has no bus row to take offline`);
-      }
-    } catch (err) {
-      log(`FAILED to take ${childBusHandle()} offline across a replace: ${String(err)}`);
-    }
+    takeChildOffline('replacing');
 
     if (change.model) currentModel = change.model;
 
@@ -1042,6 +1047,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     const unsent = queue.drain();
     log(`restarting child (${unsent.length} prompt(s) carried over)`);
     child.kill();
+    takeChildOffline('restarting');
     childSession = null;
     needsMountBanner = isContainerSpawn;
 

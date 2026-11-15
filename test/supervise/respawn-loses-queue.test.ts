@@ -14,6 +14,7 @@ const { startSupervisor } = await import('../../src/supervise/index.js');
 const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
 const { claudeSpawn } = await import('../../src/adapters/claude-spawn.js');
 const { TurnQueue } = await import('../../src/supervise/turn-queue.js');
+const dao = await import('../../src/storage/dao.js');
 import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
 
 /**
@@ -278,4 +279,72 @@ test('🚨 a drained prompt can be offered again', () => {
     'a drained prompt cannot be re-offered, so every respawn loses the queue',
   );
   assert.deepEqual(sent, ['A', 'B'], 'the re-offered prompt was never written to the child');
+});
+
+/**
+ * 🛑 THE BUS MUST LEARN THE CHILD IS GONE, AND THE GENERATION BUMP CAN HIDE IT.
+ *
+ * `doRestart` had no `clearAgentPid` of its own and relied entirely on the
+ * killed child's `onExit`. Bumping the generation on the throw path suppressed
+ * that exit, so a failed restart left a dead child reading ONLINE. Found by
+ * claude2 on review of `94badb8`; `takeChildOffline` is now shared by both
+ * respawn paths.
+ */
+async function supervisorWithAgentRow(handle: string, spawnChild: (o: SpawnOptions) => AgentChild) {
+  const db = new DatabaseSync(':memory:');
+  migrate(db);
+  dao.upsertAgent(db, {
+    handle: `${handle}-agent`,
+    pid: process.pid,
+    session_id: 's',
+    display_name: `${handle}-agent`,
+    metadata: {},
+  });
+  assert.equal(dao.getAgent(db, `${handle}-agent`)?.online, true, 'the fixture must start online');
+
+  const sup = await startSupervisor({
+    handle,
+    vendor: claudeSpawn,
+    db,
+    extraDirs: DIRS,
+    spawnChild,
+    log: () => undefined,
+  });
+
+  return { sup, db };
+}
+
+test('🚨 a failed RESTART takes the dead child offline on the bus', async () => {
+  const children: FakeChild[] = [];
+  const handle = `rt-${process.pid}-offline-restart`;
+  const { sup, db } = await supervisorWithAgentRow(handle, spawnFailingOn([2], children));
+
+  try {
+    await deliver(handle, { id: 1, control: { kind: 'restart', mode: 'now' } });
+    assert.equal(children.length, 1, 'the restart spawn was supposed to throw');
+
+    assert.equal(dao.getAgent(db, `${handle}-agent`)?.pid, null);
+    assert.equal(dao.getAgent(db, `${handle}-agent`)?.online, false);
+  } finally {
+    await sup.stop();
+    db.close();
+  }
+});
+
+/** The sibling path, which already did this before the generation bump. */
+test('🚨 a failed REPLACE takes the dead child offline on the bus', async () => {
+  const children: FakeChild[] = [];
+  const handle = `rt-${process.pid}-offline-replace`;
+  const { sup, db } = await supervisorWithAgentRow(handle, spawnFailingOn([2], children));
+
+  try {
+    await deliver(handle, { id: 1, approval });
+    assert.equal(children.length, 1, 'the replacement spawn was supposed to throw');
+
+    assert.equal(dao.getAgent(db, `${handle}-agent`)?.pid, null);
+    assert.equal(dao.getAgent(db, `${handle}-agent`)?.online, false);
+  } finally {
+    await sup.stop();
+    db.close();
+  }
 });
