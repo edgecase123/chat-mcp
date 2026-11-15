@@ -91,6 +91,7 @@ not by reading every module. Verify before treating it as exhaustive.
 |---|---|---|---|---|
 | `projects.json` | per-handle project dirs | `project set\|list\|forget` | ✅ | Validate through containment checks. |
 | `mounts.json` | per-handle extra container mounts, exposed at `/mnt/<key>` | `mount add\|list` | ✅ | Confirmation required. **Never allow mounting `stateDir()` into a container** (AGENTS.md ruling). |
+| `limits.json` | the three limits on a project command: `maxConcurrent`, `timeoutMinutes`, `maxBufferMb` | an operator, by hand | ✅ | `maxConcurrent` is a security limit on host-process spawn. An unreadable file REFUSES commands rather than falling back. |
 | `secrets.env` | shared Claude OAuth token, `0600` | `auth set-token` | 🟡 | Show set/unset only. Never return the value. |
 | `tokens/<handle>` | per-handle bearer token digests for the HTTP MCP listener | supervisor | 🟡 | Show status. Rotate/clear OK. Never display. |
 | `container.json` | per-handle plan confirmation, image build hash | supervisor | 🟡 | Show state. Confirmation must be a deliberate human action. |
@@ -121,9 +122,6 @@ not by reading every module. Verify before treating it as exhaustive.
 | MCP listener | receive timeout | 10 s | `supervise/mcp-listener.ts` |
 | MCP listener | max unauthenticated refusals | 3 | `supervise/mcp-listener.ts` |
 | MCP HTTP | max body | 4 MB | `supervise/mcp-http.ts` |
-| Run-command service | timeout | 15 min | `supervise/run-command-service.ts` |
-| Run-command service | max buffer | 8 MB | `supervise/run-command-service.ts` |
-| Run-command service | per-handle concurrency | 4 | `supervise/run-command-service.ts` |
 | Shim | broker deadline | 16 min | `shim/broker-client.ts` |
 | Shim | gauge stale-after | 15 min | `shim/gauge-freshness.ts` |
 | Shim | planning band | 50 | `shim/gauge.ts` |
@@ -131,7 +129,7 @@ not by reading every module. Verify before treating it as exhaustive.
 | Socket | ack timeout | 2 s | `supervise/socket.ts` |
 | Messages | body cap | 64 KB | `oneshot/send.ts`, `shim/tools/send.ts`, `messaging/room-send.ts` — three copies |
 
-⚠️ **Every ROW BELOW was re-checked against source on 2026-11-15, 16 of 16 — but 16 is a count
+⚠️ **Every ROW ABOVE was re-checked against source on 2026-11-15, 14 of 14 — but 14 is a count
 of rows verified, not an inventory of what exists.** This table is as complete as the grep that
 built it, per the caveat at the top of the page. `shim/gauge.ts` is the demonstration:
 `PLANNING_BAND` is listed and the `BANDS` array beside it holds eight more numbers of exactly
