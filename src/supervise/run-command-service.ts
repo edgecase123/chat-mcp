@@ -12,6 +12,9 @@ import { runScript, type ScriptResult, type ScriptRunner } from './run-script.js
 export const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 export const DEFAULT_MAX_BUFFER = 8 * 1024 * 1024;
 
+/** How many of ONE handle's commands may be running at once. */
+export const DEFAULT_MAX_CONCURRENT = 4;
+
 /**
  * A refusal with two faces: what the caller is told, and what the operator can
  * read in the host's log.
@@ -34,8 +37,60 @@ export class Refusal extends Error {
 export interface RunCommandOptions {
   readonly timeoutMs?: number;
   readonly maxBuffer?: number;
+  /** Per-handle cap on commands running at once. Below 1 is read as 1. */
+  readonly maxConcurrent?: number;
   /** Test seam; see `run-script.ts`. */
   readonly run?: ScriptRunner;
+}
+
+/**
+ * How many of each handle's commands are running, and who is waiting.
+ *
+ * 🛑 PER HANDLE, BY lee's RULING OF 2026-11-15. A timeout already bounds how
+ * LONG one command runs (`DEFAULT_TIMEOUT_MS`); nothing bounded how many START,
+ * so an agent could spawn host processes as fast as it issued tool calls.
+ *
+ * 🛑 KEYED BY HANDLE EVEN THOUGH A BARE COUNTER WOULD BE PER-HANDLE TODAY. One
+ * process serves one handle: `startSupervisor` runs once per CLI invocation and
+ * `openHostBus` once per supervisor. Keying it means the guarantee does not
+ * rest on that, and nothing enforces it.
+ *
+ * Rejected: handing a released permit straight to the next waiter. It closes a
+ * rare overtake by a synchronous arrival, and costs a non-obvious invariant.
+ */
+const running = new Map<string, number>();
+const waiting = new Map<string, (() => void)[]>();
+
+/**
+ * 🛑 A `while`, NOT AN `if`. The woken waiter re-checks, so a release only has
+ * to wake one of them. The check and the increment sit in one synchronous turn,
+ * so two waiters cannot both pass the check.
+ */
+async function acquireSlot(handle: string, limit: number): Promise<void> {
+  while ((running.get(handle) ?? 0) >= limit) {
+    await new Promise<void>((resolve) => {
+      const queue = waiting.get(handle) ?? [];
+
+      queue.push(resolve);
+      waiting.set(handle, queue);
+    });
+  }
+
+  running.set(handle, (running.get(handle) ?? 0) + 1);
+}
+
+function releaseSlot(handle: string): void {
+  const left = (running.get(handle) ?? 1) - 1;
+
+  if (left <= 0) running.delete(handle);
+  else running.set(handle, left);
+
+  const queue = waiting.get(handle);
+  const next = queue?.shift();
+
+  if (queue !== undefined && queue.length === 0) waiting.delete(handle);
+
+  next?.();
 }
 
 /**
@@ -98,6 +153,14 @@ export async function runCommandFor(
     throw new Refusal('the command script is not inside the project directory', err);
   }
 
+  // 🛑 AFTER AUTHORIZATION, NOT BEFORE. A command refused for its name or its
+  // script path must not wait behind work that is already running, and must not
+  // hold a slot while being refused.
+  //
+  // A limit below 1 is read as 1. Honouring a 0 would wait forever, and a
+  // caller that passes one wants throttling, never a deadlock.
+  await acquireSlot(handle, Math.max(1, opts.maxConcurrent ?? DEFAULT_MAX_CONCURRENT));
+
   try {
     return await runScript(
       script,
@@ -111,5 +174,7 @@ export async function runCommandFor(
     );
   } catch (err) {
     throw new Refusal(err instanceof Error ? err.message : 'the command failed to run', err);
+  } finally {
+    releaseSlot(handle);
   }
 }

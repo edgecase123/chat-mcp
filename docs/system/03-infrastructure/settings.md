@@ -123,6 +123,7 @@ not by reading every module. Verify before treating it as exhaustive.
 | MCP HTTP | max body | 4 MB | `supervise/mcp-http.ts` |
 | Run-command service | timeout | 15 min | `supervise/run-command-service.ts` |
 | Run-command service | max buffer | 8 MB | `supervise/run-command-service.ts` |
+| Run-command service | per-handle concurrency | 4 | `supervise/run-command-service.ts` |
 | Shim | broker deadline | 16 min | `shim/broker-client.ts` |
 | Shim | gauge stale-after | 15 min | `shim/gauge-freshness.ts` |
 | Shim | planning band | 50 | `shim/gauge.ts` |
