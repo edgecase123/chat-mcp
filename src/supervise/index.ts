@@ -882,7 +882,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     wireChild();
     queue.offer({ text: prompt, messageIds: [] });
 
-    for (const p of unsent) queue.offer(p);
+    for (const p of unsent) queue.reoffer(p);
   };
 
   /**
@@ -1026,7 +1026,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     });
 
     wireChild();
-    for (const p of unsent) queue.offer(p);
+    for (const p of unsent) queue.reoffer(p);
   };
 
   const restartChild = (mode: 'graceful' | 'now'): void => {

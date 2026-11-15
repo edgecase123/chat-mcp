@@ -63,6 +63,27 @@ export class TurnQueue {
 
     for (const id of fresh) this.seen.add(id);
 
+    return this.dispatch(prompt);
+  }
+
+  /**
+   * Re-offer a prompt this queue already drained, skipping the gate above.
+   *
+   * 🛑 `offer` REFUSES ITS OWN DRAINED PROMPTS. Their ids are in `seen` from
+   * the first offer and `drain()` does not remove them, so a respawn's
+   * carry-over returned `duplicate` and the operator's unsent work was
+   * discarded. `replaceChild`'s docblock asserted the opposite.
+   *
+   * ⚠️ The gate is SKIPPED, not cleared. A drained prompt was never written
+   * to a child, so sending it once is correct — and leaving the id in `seen`
+   * keeps the bus's own re-reads de-duplicated afterwards.
+   */
+  reoffer(prompt: QueuedPrompt): 'sent' | 'queued' {
+    return this.dispatch(prompt);
+  }
+
+  /** Send now when idle, queue behind the running turn otherwise. */
+  private dispatch(prompt: QueuedPrompt): 'sent' | 'queued' {
     if (this.state === 'idle') {
       this.state = 'inTurn';
       this.events.send(prompt);
