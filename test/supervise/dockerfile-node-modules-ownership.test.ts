@@ -125,17 +125,23 @@ test('🔴 /root is chowned to agent AFTER the last root-run npm, or a cold npm 
 
   assert.notEqual(userAt, -1, 'no `USER agent` line — has the image stopped dropping root?');
 
-  const rootNpm = DIRECTIVES.filter((d, i) => isRootNpm(d) && i < userAt);
-  const chownRoot = DIRECTIVES.map((d, i) => (chownsRoot(d) ? i : -1)).filter((i) => i !== -1);
+  // 🛑 INDICES, NOT THE DIRECTIVES THEMSELVES. Collecting the strings and
+  // recovering a position with `lastIndexOf` searches by VALUE, so a directive
+  // duplicated below `USER agent` — where it runs as agent and is harmless —
+  // resolved to the later copy and failed the test with a false message.
+  const rootNpmAt = DIRECTIVES.map((d, i) => (isRootNpm(d) && i < userAt ? i : -1)).filter(
+    (i) => i !== -1,
+  );
+  const chownRootAt = DIRECTIVES.map((d, i) => (chownsRoot(d) ? i : -1)).filter((i) => i !== -1);
 
-  assert.ok(rootNpm.length > 0, 'no root-run `npm ci`/`npm install` found before USER agent');
+  assert.ok(rootNpmAt.length > 0, 'no root-run `npm ci`/`npm install` found before USER agent');
   assert.ok(
-    chownRoot.length > 0,
+    chownRootAt.length > 0,
     'nothing chowns /root to agent at all; the npm cache lives at /root/.npm (#242)',
   );
 
-  const lastNpmAt = DIRECTIVES.lastIndexOf(rootNpm[rootNpm.length - 1]!);
-  const lastChownAt = Math.max(...chownRoot);
+  const lastNpmAt = Math.max(...rootNpmAt);
+  const lastChownAt = Math.max(...chownRootAt);
 
   assert.ok(
     lastChownAt > lastNpmAt,
