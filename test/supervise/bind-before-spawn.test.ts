@@ -351,19 +351,85 @@ test("🚨 the dependency install runs BEFORE the wake listener binds", () => {
   );
   const lines = src.split("\n");
 
-  // 🛑 CALLS, NOT MENTIONS. The import names `runDependencyInstall` too, and
-  // an import line sits above the bind in every arrangement — so matching the
-  // bare name would pass with no call site at all.
-  const callAt = lines.findIndex((l) => /^\s*runDependencyInstall\(/.test(l));
+  // 🛑 THE CALL IS `installDeps(`, NOT `runDependencyInstall(`. The install is
+  // routed through an injectable seam so an injected `spawnChild` cannot
+  // inherit a real `docker run` — so matching the concrete name would find only
+  // the default lambda and the import, neither of which is the call site.
+  const callAt = lines.findIndex((l) => /^\s*installDeps\(/.test(l));
   const bindAt = lines.findIndex((l) => l.includes("WakeListener.bind("));
 
   assert.ok(
     callAt >= 0,
     "startSupervisor never installs dependencies, so a cold first spawn has none",
   );
+  // ⚠️ AND THE SEAM MUST STILL DEFAULT TO THE REAL THING. A seam wired to a
+  // no-op in both arms would satisfy the ordering above and install nothing
+  // ever.
+  assert.ok(
+    src.includes("runDependencyInstall(opts.vendor, o)"),
+    "the install seam no longer defaults to the real installer",
+  );
   assert.ok(bindAt >= 0, "bind call not found");
   assert.ok(
     callAt < bindAt,
     `the install freezes a bound loop: install at ${callAt + 1}, bind at ${bindAt + 1}`,
+  );
+});
+
+/**
+ * 🚨 THE GUARD THAT WAS MISSING, AND ITS ABSENCE COST A FALSE GREEN ON PR 259.
+ *
+ * The pre-bind install used to be a bare `runDependencyInstall` call, outside
+ * any injectable seam. Three tests injected `spawnChild` to avoid spawning,
+ * inherited the real install, and ran an actual `docker run`.
+ *
+ * ```
+ * CI        the image does not exist on the runner -> 3 tests FAILED
+ * my host   the image DOES exist -> the install really ran, 40 volumes left
+ * ```
+ *
+ * 🛑 SO A GREEN SUITE WAS EVIDENCE ABOUT THE HOST, NOT ABOUT THE CODE. Found
+ * by claude1 reading CI, not by the suite.
+ *
+ * ⚠️ IT ASSERTS THE SOURCE, BECAUSE THE FAILURE IS A MISSING DEFAULT RATHER
+ * THAN A WRONG RESULT. A behavioural test would have to let the bad version
+ * shell out to docker to observe it, which is the thing being prevented.
+ */
+test("🚨 an injected spawnChild silences the real install, so no test shells out to docker", () => {
+  const src = readFileSync(
+    new URL("../../src/supervise/index.ts", import.meta.url),
+    "utf8",
+  );
+
+  // 🛑 BOUNDED BY ITS OWN STATEMENT, NOT BY THE NEXT LANDMARK. The first cut
+  // sliced to `if (isContainerSpawn)`, which occurs TWICE in this file and
+  // whose first occurrence is ABOVE the seam — so the slice came back empty and
+  // the test failed for a reason that had nothing to do with the code.
+  const seamStart = src.indexOf("const installDeps =");
+
+  assert.ok(seamStart >= 0, "the install seam was not found at all");
+
+  const seam = src.slice(seamStart, src.indexOf(";", seamStart) + 1);
+  assert.match(
+    seam,
+    /opts\.spawnChild/,
+    "the install default ignores spawnChild, so an injected spawn still installs for real",
+  );
+  assert.match(
+    seam,
+    /opts\.installDeps/,
+    "the install cannot be overridden, so no test can assert it happened",
+  );
+
+  // 🛑 AND NOTHING MAY CALL THE REAL INSTALLER OUTSIDE THAT SEAM. One stray
+  // direct call puts the side effect back where no injection reaches it.
+  const direct = src
+    .split("\n")
+    .filter((l) => /^\s*runDependencyInstall\(/.test(l));
+
+  assert.deepEqual(
+    direct,
+    [],
+    `runDependencyInstall is called outside the seam: ${direct.join(" | ")}`,
   );
 });

@@ -112,6 +112,24 @@ export interface SupervisorOptions extends SpawnOptions {
 
   /** Injected so the supervisor is testable without spawning or spending. */
   readonly spawnChild?: (opts: SpawnOptions) => AgentChild;
+
+  /**
+   * The pre-bind dependency install, injectable for the same reason.
+   *
+   * 🚨 DEFAULTS TO A NO-OP WHEN `spawnChild` IS INJECTED, AND THAT COUPLING IS
+   * THE POINT. Installing dependencies is part of creating a containerized
+   * child, so a caller that replaced child creation has replaced this too.
+   *
+   * Two independent seams were the first cut and they were wrong: three tests
+   * injected `spawnChild`, inherited the real install, and shelled out to a
+   * real `docker run`. CI failed on a missing image; the author's host HAD the
+   * image, so the install really ran and left 40 volumes behind. Caught by
+   * claude1 on PR 259 against a local suite that read green.
+   *
+   * ⚠️ PASS IT EXPLICITLY to assert the install happened. The default only
+   * decides what an uninjected caller gets.
+   */
+  readonly installDeps?: (opts: SpawnOptions) => void;
   readonly log?: (line: string) => void;
 }
 
@@ -361,8 +379,19 @@ export async function startSupervisor(
   // alternative and it is worse: `doRestart` kills the child before it spawns,
   // so a refusal leaves the handle with no agent at all and no remedy short of
   // restarting the supervisor. A pause self-resolves.
+  //
+  // 🛑 ROUTED THROUGH THE SAME SEAM AS THE SPAWN. `spawnChild` means the caller
+  // owns child creation, and a containerized child is not created without its
+  // dependencies — so an injected spawn silences this by default rather than
+  // leaving a second real side effect for every test to remember.
+  const installDeps =
+    opts.installDeps ??
+    (opts.spawnChild
+      ? () => undefined
+      : (o: SpawnOptions) => runDependencyInstall(opts.vendor, o));
+
   if (isContainerSpawn) {
-    runDependencyInstall(opts.vendor, {
+    installDeps({
       ...opts,
       cwd: childCwd,
       supervisorHandle: opts.handle,
