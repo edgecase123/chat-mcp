@@ -25,6 +25,7 @@ listed here will not be found. Add the row in the same commit as the page.
 | File | What it covers |
 |---|---|
 | [state-directory.md](03-infrastructure/state-directory.md) | Every entry under `~/.chat-mcp`, who owns it, what is safe to delete |
+| [settings.md](03-infrastructure/settings.md) | Every env var, CLI flag, state file and hardcoded tunable, and which of them a config UI could safely write |
 
 ### [05 — Supervision](05-supervision/)
 | File | What it covers |
