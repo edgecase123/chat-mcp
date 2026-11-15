@@ -52,7 +52,8 @@ not by reading every module. Verify before treating it as exhaustive.
 | `cli` | `--handle` | `user` | ✅ web/CLI default identity |
 | `cli` | `--experimental` | off | ✅ UI preference (Ink vs REPL) |
 | `web` | `--handle` | `user` | ✅ |
-| `web` | `--port` | `127.0.0.1:3737`, else an OS-assigned free port | ✅ applies on next launch |
+| `web` | `--port` **unset** | `127.0.0.1:3737`, falling back to an OS-assigned free port if 3737 is taken | ✅ applies on next launch |
+| `web` | `--port <n>` **set** | honoured verbatim. 🛑 **No fallback — the server fails on `EADDRINUSE`.** | ✅ applies on next launch; a UI writing this must surface the failure |
 | `web` | `--no-open` | open browser | ✅ applies on next launch |
 | `install` / `uninstall` | `--handle`, `--scope`, `--cwd`, `--force`, `--context-total` | per adapter | 🟡 list installed adapters; install is a human-run command (a Claude Code `[Self-Modification]` classifier blocks agents writing the hook file) |
 
@@ -129,9 +130,14 @@ not by reading every module. Verify before treating it as exhaustive.
 | Socket | ack timeout | 2 s | `supervise/socket.ts` |
 | Messages | body cap | 64 KB | `oneshot/send.ts`, `shim/tools/send.ts`, `messaging/room-send.ts` — three copies |
 
-⚠️ **Every value in this table was re-checked against source on 2026-11-15, 16 of 16.** The
-message body cap is the one that is not a single constant — it is declared independently in
-three files, so changing it in one place does not change the cap.
+⚠️ **Every ROW BELOW was re-checked against source on 2026-11-15, 16 of 16 — but 16 is a count
+of rows verified, not an inventory of what exists.** This table is as complete as the grep that
+built it, per the caveat at the top of the page. `shim/gauge.ts` is the demonstration:
+`PLANNING_BAND` is listed and the `BANDS` array beside it holds eight more numbers of exactly
+this class.
+
+The message body cap is the one row that is not a single constant — it is declared independently
+in three files, so changing it in one place does not change the cap.
 
 Some of these are security limits (connection caps, refusal count, body size). Promoting them to
 config means a UI could weaken them, so each needs bounds and a confirmation.
