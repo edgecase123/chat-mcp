@@ -51,12 +51,10 @@ export function dbPath(): string {
  * must go through `writePrivateFileSync`. The server unlinks it on shutdown so
  * a token never outlives the server that minted it.
  *
- * ⚠️ `credential.ts` USED TO say the token is never written under `stateDir()`,
- * because #162 measured the whole state dir bind-mounted into every container.
- * Re-measured 2026-11-14 against the real mount set: the state dir is not
- * present in the container at all, and `assertProjectDirOutsideState` refuses
- * any registered mount that overlaps it. See `test/cli/web/handshake-file.test.ts`
- * for the commands and their output.
+ * ⚠️ A 0600 FILE HERE IS NOT REACHABLE FROM A SANDBOXED AGENT. The state dir is
+ * bind-mounted into no container, and `assertProjectDirOutsideState` refuses any
+ * registered mount that overlaps it. Commands and output in
+ * `test/cli/web/handshake-file.test.ts`.
  */
 export function webHandshakeFile(): string {
   return join(stateDir(), 'web-handshake');

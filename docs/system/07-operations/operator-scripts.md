@@ -165,14 +165,11 @@ accept the call and keep the old mode. `src/util/paths.ts` carries
 a credential world-readable while this page claimed `0600`. Point
 `CHAT_MCP_HOME` at a real unix filesystem or the scripts refuse to start.
 
-✅ **The token is no longer scraped from the log.** `src/cli/web/credential.ts`
-used to state the invariant that the token is never written under `stateDir()`,
-because
-#162 measured the whole state dir bind-mounted into every container. **That was
-re-measured on 2026-11-14 and is no longer true** — with the real mount set
-(`/work` plus one configured extra mount at `/mnt/<key>`) the state dir is not present in the container
-at all, `/work/..` is the container root, and `assertProjectDirOutsideState`
-refuses any registered mount overlapping it.
+✅ **The token is no longer scraped from the log.** Writing it under `stateDir()`
+is safe because no container can reach there: with the real mount set (`/work`
+plus one configured extra mount at `/mnt/<key>`) the state dir is not present in
+the container at all, `/work/..` is the container root, and
+`assertProjectDirOutsideState` refuses any registered mount overlapping it.
 
 So the server now writes `~/.chat-mcp/web-handshake` through
 `writePrivateFileSync` (0600) and unlinks it on shutdown, this script reads that
