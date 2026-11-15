@@ -348,3 +348,45 @@ test('🚨 a failed REPLACE takes the dead child offline on the bus', async () =
     db.close();
   }
 });
+
+/**
+ * 🛑 THE OTHER STALE SIGNAL, AND MY TESTS DID NOT REACH IT. claude2's probe B:
+ * a late `onTurnEnd` from the killed child runs `turnEnded()`, which dispatches
+ * a parked prompt straight into a dead process. The generation bump covers it
+ * because `ifCurrent` wraps every callback, not just `onExit` — but nothing
+ * here proved that, and an untested half of a guard is the half that rots.
+ */
+test('🚨 a late turn-end from the KILLED child does not dispatch a parked prompt', async () => {
+  const children: FakeChild[] = [];
+  const handle = `rt-${process.pid}-stale-turnend`;
+  const { sup, db } = await supervisorFor(handle, spawnFailingOn([2], children));
+
+  try {
+    await withOnePromptQueued(handle, children);
+
+    await deliver(handle, { id: 3, control: { kind: 'restart', mode: 'now' } });
+    assert.equal(children.length, 1, 'the restart spawn was supposed to throw');
+
+    const dead = children[0]!;
+    assert.equal(dead.sent.length, 1, 'the dead child had one prompt before the stale signal');
+
+    // The killed child's turn-end lands late.
+    dead.finishTurn();
+
+    assert.equal(
+      dead.sent.length,
+      1,
+      `a stale turn-end wrote a parked prompt to a dead child (it got ${JSON.stringify(dead.sent)})`,
+    );
+
+    // And the work is still there for a child that exists.
+    await deliver(handle, { id: 4, control: { kind: 'restart', mode: 'now' } });
+    assert.ok(
+      children[1]?.sent.some((t) => t.includes('QUEUED WORK')),
+      'the parked prompt did not survive to the revived child',
+    );
+  } finally {
+    await sup.stop();
+    db.close();
+  }
+});
