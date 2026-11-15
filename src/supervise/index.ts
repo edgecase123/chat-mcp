@@ -480,6 +480,30 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   let childGeneration = 0;
 
   /**
+   * Whether `doStop` has begun. Read by `onExit`, which is why it is declared
+   * HERE rather than beside `doStop`.
+   *
+   * 🛑 A STOP KILLS THE CHILD WITHOUT MOVING THE GENERATION, so the exit of a
+   * stopping supervisor's child is CURRENT and its handler runs. `doStop`
+   * closes the socket itself, after the teardown, and `onExit` must not beat
+   * it to it — see the socket close there.
+   */
+  let hasStopped = false;
+
+  /**
+   * Whether a replace or a restart is between the kill and the respawn.
+   *
+   * 🛑 `ifCurrent` IS NOT ENOUGH ON ITS OWN, BECAUSE IT ASSUMES THE EXIT IS
+   * ASYNC. The generation only moves inside `wireChild` or on a throw, so an
+   * exit delivered synchronously from `kill()` is still CURRENT and reaches
+   * the handler. Two fakes in this repo disagree about that very thing —
+   * `replace-child.test.ts` fires the exit from `kill()`, and
+   * `respawn-loses-queue.test.ts` says a real child does not — so the socket
+   * close must not depend on which model is right.
+   */
+  let replacingChild = false;
+
+  /**
    * Tells the web UI this agent is working, #240.
    *
    * 🛑 ONE PER SUPERVISOR, AND IT TAKES `childBusHandle` ITSELF. A reporter per
@@ -789,6 +813,27 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
         } catch (err) {
           log(`FAILED to take ${childBusHandle()} offline on the bus: ${String(err)}`);
         }
+
+        // 🛑 THE SOCKET GOES WITH THE CHILD, per lee's ruling of 2026-11-14.
+        // `onWake` refuses a STARTING and a STOPPING supervisor and nothing
+        // else, so an own-exit tripped neither guard: the drain above leaves
+        // the queue idle, the next `offer` takes the idle branch, and the
+        // sender is acked `sent` for a process that is gone. Closed, the
+        // delivery returns `null`, which every caller already reads as "no
+        // supervisor".
+        //
+        // 🛑 TWO EXITS ARE NOT A DEATH, AND NEITHER IS EXCLUDED BY `ifCurrent`
+        // ALONE. `replacingChild` covers a replace or a restart, whose kill
+        // may deliver the exit synchronously and therefore CURRENT.
+        // `hasStopped` covers a stop, which kills the child without moving
+        // the generation at all — and `doStop` closes this itself after the
+        // teardown, so the socket's disappearance keeps meaning "fully
+        // stopped" rather than moving earlier.
+        if (!hasStopped && !replacingChild) {
+          void listener.close().catch((err: unknown) => {
+            log(`FAILED to close the wake socket after the child exited: ${String(err)}`);
+          });
+        }
       }),
     );
 
@@ -861,6 +906,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     const unsent = queue.drain();
 
     log(`replacing child (${reason}); ${unsent.length} prompt(s) carried over`);
+    replacingChild = true;
     child.kill();
 
     takeChildOffline('replacing');
@@ -911,6 +957,11 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       for (const p of unsent) queue.park(p);
 
       throw err;
+    } finally {
+      // Cleared on BOTH paths. A success bumped the generation inside
+      // `wireChild`; a throw bumped it in the catch above. Either way the
+      // outgoing child's exit is stale from here, so the flag is spent.
+      replacingChild = false;
     }
 
     wireChild();
@@ -1046,6 +1097,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   const doRestart = (): void => {
     const unsent = queue.drain();
     log(`restarting child (${unsent.length} prompt(s) carried over)`);
+    replacingChild = true;
     child.kill();
     takeChildOffline('restarting');
     childSession = null;
@@ -1087,6 +1139,11 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       for (const p of unsent) queue.park(p);
 
       throw err;
+    } finally {
+      // Cleared on BOTH paths. A success bumped the generation inside
+      // `wireChild`; a throw bumped it in the catch above. Either way the
+      // outgoing child's exit is stale from here, so the flag is spent.
+      replacingChild = false;
     }
 
     wireChild();
@@ -1102,7 +1159,6 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     sendNoticeThenFinish(RESTART_NOTICE, GRACEFUL_RESTART_TIMEOUT_MS, doRestart);
   };
 
-  let hasStopped = false;
   /**
    * Set while a graceful stop is waiting out its grace period. Calling it ends
    * that wait immediately.
