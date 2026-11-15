@@ -88,8 +88,9 @@ repo can supply it, because the whole point is that each one differs.
 
 ### Testing a clone in isolation uses `CHAT_MCP_HOME`, not ports
 
-Ports are already not a collision: `chat-mcp web --port` defaults to a random
-free port. The state is the shared thing. `stateDir()` in `src/util/paths.ts`
+Ports are already not a collision: `chat-mcp web` prefers `127.0.0.1:3737` and
+falls back to an OS-assigned free port when a sibling already holds it, and
+`--port` overrides both. The state is the shared thing. `stateDir()` in `src/util/paths.ts`
 resolves all five of `chat.db`, `notify/`, `sock/`, `mcp/` and `adapters/`
 under one root, and `CHAT_MCP_HOME` is that root.
 

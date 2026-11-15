@@ -38,11 +38,10 @@ test('the handshake file lives under the state directory', () => {
 });
 
 /**
- * ⚠️ `credential.ts` SAYS THE TOKEN IS NEVER WRITTEN UNDER `stateDir()`, ON THE
- * GROUNDS THAT THE WHOLE STATE DIR IS MOUNTED INTO EVERY CONTAINER. That was
- * true when #162 measured it. **Re-measured 2026-11-14 against the real mount
- * set** that `dockerRunPlan` builds — `/work` plus one configured extra mount
- * at `/mnt/<key>`, nothing else:
+ * ⚠️ A 0600 FILE UNDER `stateDir()` IS NOT REACHABLE FROM A SANDBOXED AGENT, AND
+ * THAT IS THE ONLY REASON WRITING THE TOKEN THERE IS SAFE. Measured against the
+ * real mount set that `dockerRunPlan` builds — `/work` plus one configured extra
+ * mount at `/mnt/<key>`, nothing else:
  *
  *   ls /Users/leejenkins/.chat-mcp   ->  No such file or directory
  *   mount | grep chat-mcp            ->  (none)

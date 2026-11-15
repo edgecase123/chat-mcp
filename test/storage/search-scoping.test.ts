@@ -14,8 +14,13 @@ import * as dao from '../../src/storage/dao.js';
  * lee ruled the CODE was wrong, not the description.
  *
  * ⚠️ THE HTTP ROUTE IS DELIBERATELY UNSCOPED and that is not the same defect.
- * `/api/search` is lee's own UI on `127.0.0.1` behind the DNS-rebinding guard,
- * so it passes no caller. The scope is opt-in for exactly that reason.
+ * `/api/search` serves the operator's own UI, so it passes no caller and the
+ * scope stays opt-in.
+ *
+ * 🛑 THE BIND ADDRESS IS NOT WHAT MAKES THAT SAFE, WHICH IS WHAT THIS COMMENT
+ * USED TO SAY. A container reaches the host's `127.0.0.1`, so the unguessable
+ * api credential is the check — `tokenMatches`, else 401, pinned in
+ * `api-credential.test.ts`. The `read` tier above it refuses nobody yet.
  */
 
 const NOW = Date.now();
