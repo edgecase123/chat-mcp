@@ -45,6 +45,11 @@ listed here will not be found. Add the row in the same commit as the page.
 |---|---|
 | [operator-scripts.md](07-operations/operator-scripts.md) | `./scripts/agent` and `./scripts/web` — start, stop, restart, status |
 
+### [09 — Conventions](09-conventions/)
+| File | What it covers |
+|---|---|
+| [formatting.md](09-conventions/formatting.md) | Prettier's defaults are the rule, why there is no config file, and the two things the one-time reformat broke |
+
 ---
 
 ## Not written yet
@@ -59,7 +64,7 @@ Ranked by what would help most on arrival.
 | `04-messaging` | DMs, rooms, read watermarks, claims, the notify wake path |
 | `06-interfaces` | Still needed: the MCP shim's tools and the web UI. The terminal surfaces are now covered |
 | `08-testing` | The node test runner, `CHAT_MCP_HOME` isolation, proving a guard non-vacuous |
-| `09-conventions` | TDD, commit style, secret handling. Today in `AGENTS.md` § Conventions |
+| `09-conventions` | Still needed: TDD, commit style, secret handling. Today in `AGENTS.md` § Conventions. Formatting is now covered |
 
 ⚠️ **`AGENTS.md`, `README.md` and `DESIGN.md` at the repo root are not
 superseded by this tree.** Where a topic moves here, leave a one-line pointer

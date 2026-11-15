@@ -24,4 +24,9 @@ jobs:
       - run: npm run build
 
       - run: npx tsc --noEmit
+
+      # Prettier's own defaults, with no config overriding them. A
+      # formatting failure here reads as formatting, not as a test.
+      - run: npm run format:check
+
       - run: npm test
