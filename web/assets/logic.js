@@ -995,14 +995,17 @@ export function styleEditAffordance(style) {
   return style === "custom";
 }
 
+export const STYLE_CUSTOM_MAX_BYTES = 65536;
+
 /**
  * Whether the markdown in the editor can be saved, and why not when it cannot.
  *
  * Mirrors the server's own guard so the operator hears about an empty or
  * oversized style before a round trip, not after a 400.
+ *
+ * @param {string | null | undefined} markdown
+ * @returns {{ ok: true, style: "custom", custom: string } | { ok: false, error: string }}
  */
-export const STYLE_CUSTOM_MAX_BYTES = 65536;
-
 export function customStyleSubmission(markdown) {
   const text = (markdown ?? "").trim();
 
@@ -1229,7 +1232,8 @@ export function messageHash(id) {
  * wrong message or send NaN to the server. Mirrors `parseAroundId` on the
  * server deliberately — the two have to agree about what an id is.
  *
- * @param {string} hash  `location.hash`, with or without the leading #
+ * @param {string | null | undefined} hash  `location.hash`, with or without
+ *   the leading #. Absent when nothing has set a fragment.
  * @returns {number|null}
  */
 export function messageIdFromHash(hash) {
@@ -1452,7 +1456,8 @@ export function searchAriaLabel(isMac) {
  * present is what `roomDeleteVerdict` decides, server-side, and duplicating
  * that judgement here would be free to drift from it.
  *
- * @param {{ member_count?: number, created_by?: string } | undefined} room
+ * @param {{ member_count?: number, created_by?: string } | null | undefined} room
+ *   `undefined` or `null` when `renderPaneHeader`'s `.find()` missed.
  */
 export function roomMetaLabel(room) {
   if (room === undefined || room === null) return "";

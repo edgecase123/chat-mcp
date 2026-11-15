@@ -95,6 +95,21 @@ const CTX = {
   rooms: ["#ops", "#gate"],
 };
 
+/**
+ * `suggestionsFor`, with its null return turned into a named failure.
+ *
+ * 🛑 THE NULL IS A REAL RETURN, NOT A TYPE ARTEFACT. Ordinary typing and an
+ * unmatched command both give null, and the tests below assert that directly.
+ * Dereferencing it instead gave a TypeError naming `items`, which reads as a
+ * defect in the suggestion list rather than as "there was no list".
+ */
+function suggesting(input: string, ctx = CTX) {
+  const s = suggestionsFor(input, ctx);
+  assert.ok(s, `suggestionsFor(${JSON.stringify(input)}) returned null`);
+
+  return s;
+}
+
 // ── scroll anchoring ─────────────────────────────────────────────────────
 
 test("at the bottom is pinned, and a fractional gap still counts", () => {
@@ -280,9 +295,9 @@ test("ordinary typing is never interrupted", () => {
 });
 
 test("a slash lists commands, and typing filters them", () => {
-  assert.equal(suggestionsFor("/", CTX).items.length, COMMANDS.length);
+  assert.equal(suggesting("/").items.length, COMMANDS.length);
   assert.deepEqual(
-    suggestionsFor("/jo", CTX).items.map((i: any) => i.name),
+    suggesting("/jo").items.map((i: any) => i.name),
     ["/join"],
   );
   assert.equal(suggestionsFor("/nope", CTX), null);
@@ -290,27 +305,23 @@ test("a slash lists commands, and typing filters them", () => {
 
 test("a command that takes an argument suggests the right pool", () => {
   assert.deepEqual(
-    suggestionsFor("/dm ", CTX).items.map((i: any) => i.name),
+    suggesting("/dm ").items.map((i: any) => i.name),
     ["alice", "bob"],
   );
   assert.deepEqual(
-    suggestionsFor("/join ", CTX).items.map((i: any) => i.name),
+    suggesting("/join ").items.map((i: any) => i.name),
     ["#ops", "#gate"],
   );
-  assert.equal(
-    suggestionsFor("/alert ", CTX).items.length,
-    4,
-    "/alert takes either",
-  );
+  assert.equal(suggesting("/alert ").items.length, 4, "/alert takes either");
 });
 
 test("a # prefix is ignored when matching a room", () => {
   assert.deepEqual(
-    suggestionsFor("/join #op", CTX).items.map((i: any) => i.name),
+    suggesting("/join #op").items.map((i: any) => i.name),
     ["#ops"],
   );
   assert.deepEqual(
-    suggestionsFor("/join op", CTX).items.map((i: any) => i.name),
+    suggesting("/join op").items.map((i: any) => i.name),
     ["#ops"],
   );
 });
@@ -335,7 +346,7 @@ test("Enter ACCEPTS a half-typed command", () => {
 });
 
 test('"/who" still reaches "/whoami", because that insert differs', () => {
-  const s = suggestionsFor("/who", CTX);
+  const s = suggesting("/who");
   assert.equal(s.items[0].name, "/who");
   assert.equal(enterShouldSend(s, "/who"), true, "the exact match sends");
   s.index = moveIndex(s.index, 1, s.items.length);

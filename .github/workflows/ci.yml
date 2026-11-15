@@ -23,7 +23,12 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-      - run: npx tsc --noEmit
+      # 🛑 `tsconfig.test.json`, NOT the build config. `tsc --noEmit` reads
+      # `include: ['src/**/*']`, so for months a test could import a symbol
+      # that does not exist and both agents quoted "tsc clean" on the PR.
+      # `npm run build` above already proves the build config compiles, so
+      # this replaces the src-only run rather than sitting beside it.
+      - run: npm run typecheck
 
       # Prettier's own defaults, with no config overriding them. A
       # formatting failure here reads as formatting, not as a test.

@@ -133,7 +133,10 @@ test("the failsafe outlasts a long silent tool call", () => {
  * `style.css`. Found by claude1.
  */
 test("a working peer says so in words, not only in motion", () => {
-  assert.match(dotTitle({ kind: "peer", working: true }), /working/i);
+  const title = dotTitle({ kind: "peer", working: true });
+
+  assert.ok(title, "a working peer was given no title at all");
+  assert.match(title, /working/i);
 });
 
 test("🛑 an idle peer is given no title at all", () => {
