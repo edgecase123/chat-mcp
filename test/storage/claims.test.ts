@@ -76,6 +76,7 @@ test("a claim is readable straight back, with its holder and expiry", () => {
     expires_at: NOW + 1000,
   });
 
+  assert.ok(row, "insertClaim refused on a fresh database");
   assert.equal(row.holder, "claude1");
   assert.equal(row.note, "full gate, mode=all");
   assert.equal(row.released_at, null);

@@ -12,12 +12,12 @@ function makeMessage(id: number, body: string): Message {
     id,
     from_handle: "alice",
     to_handle: "bob",
-    to_room: null,
     kind: "chat",
     body,
     sent_at: 1_700_000_000 + id,
+    delivered_at: null,
     read_at: null,
-  } as Message;
+  };
 }
 
 /** Renders the message body as MessagesPane does — pre-wrapped, indented by 2 —

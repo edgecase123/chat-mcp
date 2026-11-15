@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 
 /**
@@ -132,5 +132,79 @@ test("⚠️ checkJs stays off — web/assets is UNCHECKED, not clean", () => {
     compilerOptions.checkJs,
     true,
     "checkJs is on; web/assets carries 408 errors and no slice has budgeted them",
+  );
+});
+
+/**
+ * 🛑 THE CONFIG BEING RIGHT IS NOT THE CONFIG BEING RUN. Slices 1 to 4 left a
+ * `tsconfig.test.json` that reached every test file and reported zero errors,
+ * and nothing executed it — so a type error could still land on `main`.
+ *
+ * These two assert the wiring, which is slice 5. They are the reason "tsc
+ * clean" means the test tree from here on.
+ */
+
+test("🛑 npm run typecheck reads the TEST config, not the build one", () => {
+  const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
+    scripts: Record<string, string>;
+  };
+
+  assert.match(
+    pkg.scripts.typecheck ?? "",
+    /tsconfig\.test\.json/,
+    "the typecheck script does not name tsconfig.test.json",
+  );
+});
+
+test("🛑 CI runs the typecheck, or nothing enforces any of this", () => {
+  const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+
+  assert.match(ci, /run: npm run typecheck/, "ci.yml does not run typecheck");
+
+  // ⚠️ THE OLD SRC-ONLY RUN IS GONE, NOT KEPT BESIDE IT. Left in place it
+  // passes while the test tree is broken, which is the whole defect of #166.
+  assert.doesNotMatch(
+    ci,
+    /run: npx tsc --noEmit\s*$/m,
+    "ci.yml still runs the src-only typecheck, which greens a broken test tree",
+  );
+});
+
+/**
+ * 🛑 A TEMPLATE-LITERAL `await import()` TYPES AS `any`, SO EVERY ARGUMENT AT
+ * THAT CALL SITE IS UNCHECKED EVEN NOW.
+ *
+ * Measured while clearing #166: seven `ChildGrant` literals named a `tools`
+ * field that does not exist, and tsc reported SIX. The seventh sat behind
+ * `await import(\`…?order-test=${Date.now()}\`)`, which TypeScript cannot
+ * resolve, so the whole module came back `any`.
+ *
+ * The specifier is a cache-buster for module-mock ordering and cannot simply
+ * become a literal. The fix is a `typeof import("…")` cast at each site, which
+ * is its own change.
+ *
+ * ⚠️ THIS PINS THE COUNT RATHER THAN BANNING THE SHAPE. A new one is then a
+ * deliberate act with a failing test beside it, instead of a silent hole.
+ */
+test("⚠️ the dynamic imports that type as `any` are the nine already known", () => {
+  const known = 9;
+  // `testFilesOnDisk` already matches `.mts`, which is where one of the nine
+  // lives, so the walk needs no second pass for it.
+  const sites = testFilesOnDisk().flatMap((file) => {
+    const text = readFileSync(file, "utf8");
+
+    return [...text.matchAll(/await\s+import\(\s*`/g)].map(() =>
+      relative(ROOT, file),
+    );
+  });
+
+  assert.ok(
+    sites.length > 0,
+    "the scan found no dynamic imports at all, so it is not reading the tree",
+  );
+  assert.equal(
+    sites.length,
+    known,
+    `template-literal dynamic imports moved from ${known} to ${sites.length}: ${[...new Set(sites)].join(", ")}`,
   );
 });

@@ -1,5 +1,6 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import { childGrant } from "../../support/child-grant.js";
 import {
   existsSync,
   mkdtempSync,
@@ -318,7 +319,7 @@ test("🛑 the install plan is identical whether the spawn is granted or not", (
     cwd: PROJECT_DIR,
     supervisorHandle: "claude1",
     bus: BUS,
-    grant: { handle: "claude1-agent", configPath: "/unused.json", tools: [] },
+    grant: childGrant({ handle: "claude1-agent", configPath: "/unused.json" }),
   });
 
   assert.deepEqual(granted.args, plain.args);
@@ -981,11 +982,10 @@ function dockerBusPlan() {
     cwd: PROJECT_DIR,
     supervisorHandle: "claude1",
     bus: BUS,
-    grant: {
+    grant: childGrant({
       handle: "claude1-agent",
       configPath: "/unused/host/path.json",
-      tools: [],
-    },
+    }),
   });
 }
 
@@ -1084,11 +1084,10 @@ test("🚨 a containerized spawn with no bus endpoint refuses rather than starti
       dockerRunPlanFor({
         cwd: PROJECT_DIR,
         supervisorHandle: "claude1",
-        grant: {
+        grant: childGrant({
           handle: "claude1-agent",
           configPath: "/unused.json",
-          tools: [],
-        },
+        }),
       }),
     /bus/i,
   );
@@ -1113,11 +1112,10 @@ test("🚨 a plan that cannot be built kills nothing", async (t) => {
       spawnContainerized(claudeSpawn, {
         cwd: PROJECT_DIR,
         supervisorHandle: "claude1",
-        grant: {
+        grant: childGrant({
           handle: "claude1-agent",
           configPath: "/unused.json",
-          tools: [],
-        },
+        }),
       }),
     /bus/i,
   );
@@ -1713,7 +1711,7 @@ test("🚨 the install container is handed NO credential at all", (t) => {
     cwd: PROJECT_DIR,
     supervisorHandle: "claude1",
     bus: BUS,
-    grant: { handle: "claude1-agent", configPath: "/unused.json", tools: [] },
+    grant: childGrant({ handle: "claude1-agent", configPath: "/unused.json" }),
   });
   const named = args.filter((_, i) => args[i - 1] === "-e");
 
@@ -1854,7 +1852,7 @@ test("🚨 the AGENT container's prelude no longer installs anything", () => {
     cwd: PROJECT_DIR,
     supervisorHandle: "claude1",
     bus: BUS,
-    grant: { handle: "claude1-agent", configPath: "/unused.json", tools: [] },
+    grant: childGrant({ handle: "claude1-agent", configPath: "/unused.json" }),
   });
 
   assert.ok(
@@ -1906,7 +1904,7 @@ test("⚠️ control — the agent container still writes its MCP config", () =>
     cwd: PROJECT_DIR,
     supervisorHandle: "claude1",
     bus: BUS,
-    grant: { handle: "claude1-agent", configPath: "/unused.json", tools: [] },
+    grant: childGrant({ handle: "claude1-agent", configPath: "/unused.json" }),
   });
   const script = args.find((a) => a.includes("umask 077"));
 

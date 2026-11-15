@@ -224,7 +224,7 @@ test("🚨 touch() leaves its notify file 0600", async () => {
     "the fixture is group-readable going into touch()",
   );
 
-  bus.touch({ id: 1, from: "claude1", body: "payload" });
+  bus.touch({ id: 1, to: "claude2", from: "claude1", ts: 1, body: "payload" });
 
   assert.equal(modeOf(path), STATE_FILE_MODE);
 });
@@ -282,7 +282,13 @@ test("🚨 notifyPeer leaves the recipient notify file 0600", async () => {
     "the fixture really is group-readable first",
   );
 
-  notifyPeer("perms-peer", { id: 1, from: "claude1", body: "payload" });
+  notifyPeer("perms-peer", {
+    id: 1,
+    to: "perms-peer",
+    from: "claude1",
+    ts: 1,
+    body: "payload",
+  });
 
   assert.equal(modeOf(path), STATE_FILE_MODE);
 });
