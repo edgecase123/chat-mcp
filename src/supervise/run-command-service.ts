@@ -139,10 +139,11 @@ export async function runCommandFor(
   try {
     limits = commandLimits();
   } catch (err) {
-    throw new Refusal(
-      err instanceof Error ? err.message : 'the command limits are unreadable',
-      err,
-    );
+    // 🛑 A FIXED SENTENCE, NOT THE COLLABORATOR'S. Its message names
+    // `limits.json` by absolute path, and that path is inside the directory the
+    // container boundary exists to hide. `manifestFor` below is the same shape:
+    // a fixed public sentence, the detail in `Refusal.detail`.
+    throw new Refusal('the command limits on this host are not readable', err);
   }
 
   const { dir, manifest } = manifestFor(handle);

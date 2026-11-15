@@ -300,9 +300,17 @@ test('🛑 AN UNREADABLE limits.json REFUSES THE COMMAND rather than running it 
 
   const runner = heldRunner();
 
+  // 🛑 THE PUBLIC MESSAGE MUST NOT NAME THE PATH. `limits.json` sits inside the
+  // state directory, which the container boundary exists to hide, and the
+  // caller here is the agent. The path rides in `detail`, for the host's log.
   await assert.rejects(
     () => runCommandFor(handle, 'slow', {}, { run: runner.run }),
-    (err: Error) => err.name === 'Refusal' && err.message.includes(limitsFile),
+    (err: Error & { detail?: string }) =>
+      err.name === 'Refusal' &&
+      !err.message.includes(limitsFile) &&
+      !err.message.includes('/') &&
+      err.detail !== undefined &&
+      err.detail.includes(limitsFile),
   );
 
   assert.equal(runner.started, 0, 'the script ran despite an unreadable limits file');

@@ -83,32 +83,46 @@ work.
   **This is a security limit, not a preference.** It is the only thing stopping
   an agent starting host processes as fast as it can issue tool calls. Lower it
   when an agent's commands are heavy enough that four at once hurts the host.
-  A value below 1 is read as 1.
+  A value below 1 is read as 1, and the ceiling is 64.
 - **`timeoutMinutes`** — how long one command may run before it is killed.
   Raise it for a slow gate or a deploy. Lower it if a wedged command should be
-  reaped sooner. It must be greater than zero.
+  reaped sooner. Greater than zero, and the ceiling is 1440 — one day.
 - **`maxBufferMb`** — how much a command may print. Exceeding it fails the
   command, because output past the cap is not safe to return. Raise it for a
-  verbose test run. It must be greater than zero.
+  verbose test run. Greater than zero, and the ceiling is 1024.
+
+🛑 **EACH CEILING EXISTS BECAUSE VALIDATING THE INPUT DOES NOT BOUND THE
+PRODUCT.** `1e305` is a finite number, and `1e305 * 60 * 1000` is `Infinity` —
+so without a ceiling a `timeoutMinutes` that passed every check gave no timeout
+at all, which is the bound this file exists to make configurable.
 
 ### What a bad value does
 
 | in the file | result |
 |---|---|
 | the file is absent | all three defaults. The normal case. |
-| the file is not readable JSON | **the command is REFUSED**, naming the path |
+| the file is not readable JSON | **the command is REFUSED** |
+| the file is not a JSON object | **the command is REFUSED** |
+| a key is misspelled | **the command is REFUSED**, naming the key and the three real ones |
 | a key is not a finite number | **the command is REFUSED**, naming the key |
+| a key is above its ceiling | **the command is REFUSED**, naming the ceiling |
 | `timeoutMinutes` or `maxBufferMb` is zero or negative | **the command is REFUSED**, naming the key |
 | `maxConcurrent` is zero or negative | read as 1 |
-| a key is misspelled | ignored, and that limit keeps its default |
 
 🛑 **A BAD FILE REFUSES RATHER THAN FALLING BACK.** Falling back would hand the
 caller the PERMISSIVE default while the operator's tightened value sat in the
 file looking applied. For the concurrency cap that is a security limit failing
-open, so the refusal names the path and the operator sees the cause.
+open.
 
-⚠️ **A misspelled key is the one bad value that is silent.** The file parses,
-so the limit it was meant to set keeps its default and nothing says so.
+🛑 **A MISSPELLED KEY IS REFUSED TOO, AND THAT IS THE POINT.** It is the one bad
+input that still parses, so ignoring it was the same silent fallback one step
+removed: `maxConcurent` with one `r` left the cap at 4 with the file reading
+correct at a glance.
+
+⚠️ **THE REFUSAL THE AGENT SEES DOES NOT NAME THE PATH.** It reads *"the command
+limits on this host are not readable"*. `limits.json` is inside the directory
+the container boundary exists to hide, so the path and the key ride in the
+host's log instead.
 
 ### When a change takes effect
 
