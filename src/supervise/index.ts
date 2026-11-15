@@ -842,8 +842,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // 🛑 HERE TOO, AND FOR THE REASON THE PID CLEAR BELOW IS HERE. `kill()`
     // returns before the exit lands, so `onExit` sees a bumped generation and
     // `ifCurrent` drops it — the handler above would never run and the
-    // outgoing child's dot would pulse on. Before `currentGrant` is
-    // reassigned, so the `end` names the child that is leaving.
+    // outgoing child's dot would pulse on.
+    //
+    // ⚠️ BEFORE `spawnFn`, for the same reason the pid clear is: a spawn that
+    // throws then leaves the dot cleared rather than pulsing for a child that
+    // never started. NOT because `currentGrant` is about to change — the
+    // reassignment below spreads `handle` through untouched.
     reportActivity('end');
 
     try {

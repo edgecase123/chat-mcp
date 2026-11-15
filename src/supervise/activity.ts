@@ -102,11 +102,15 @@ export interface ActivityReporterOptions {
   /**
    * The supervised agent this reporter speaks for.
    *
-   * 🛑 A THUNK IS ACCEPTED BECAUSE THE CALLER'S HANDLE IS DERIVED, NOT FIXED.
-   * `index.ts` builds it from `currentGrant`, which is reassigned on a child
-   * replacement, and that file's own rule is to READ it rather than cache it.
-   * A captured string would survive a replacement the rest of the supervisor
-   * treats as a new handle.
+   * 🛑 A THUNK IS ACCEPTED BECAUSE `index.ts` PASSES `childBusHandle`, WHICH
+   * CARRIES A READ-IT-DO-NOT-CACHE RULE. Following that rule is the whole
+   * reason, and it costs one `typeof` per pulse.
+   *
+   * ⚠️ THE HANDLE IS CONSTANT TODAY, so this guards nothing yet. An earlier
+   * version of this comment claimed `currentGrant` is reassigned with a new
+   * handle; it is reassigned once, by a spread that carries `handle` through
+   * untouched. Raised by claude1 on PR 244, who had endorsed the wrong
+   * mechanism first.
    */
   handle: string | (() => string);
   /** Overridable for tests. */
