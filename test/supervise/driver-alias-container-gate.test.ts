@@ -1,6 +1,6 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -110,3 +110,43 @@ test("🚨 an unconfirmed plan refuses with a non-zero exit instead of printing 
  * `dist/` into `chat-mcp-agent:local` through the Dockerfile's `COPY dist`.
  * An uncontrolled guard is worth less than the two that are controlled.
  */
+
+/**
+ * 🛑 THE TWO TESTS ABOVE CANNOT TELL A MODE-KEYED GATE FROM A STRING-KEYED
+ * ONE, AND claude1 MEASURED THAT. `if (o.driver === "docker-claude" ||
+ * o.container)` passes both of them, because `docker-claude` is the only
+ * `ALIASES` entry with `mode: "docker"` today. A behavioural test needs a
+ * SECOND docker alias to separate the two, and inventing one in production
+ * code to be testable is worse than the gap.
+ *
+ * So this is a source guard, after `bind-before-spawn.test.ts`'s precedent in
+ * this repo. It exists because the gate's comment claims a future alias is
+ * covered the day it joins `ALIASES`, and that claim had no test behind it.
+ */
+test("🛑 the container gate reads the resolved mode, never a driver name", () => {
+  const src = readFileSync(
+    new URL("../../src/index.ts", import.meta.url),
+    "utf8",
+  );
+
+  // ⚠️ THE DENOMINATOR FIRST. A guard that greps a file it failed to read, or
+  // whose landmark moved, reports clean for the wrong reason.
+  assert.ok(src.length > 10_000, `read only ${src.length} bytes of index.ts`);
+  assert.equal(
+    (src.match(/\.mode === "docker"/g) ?? []).length,
+    1,
+    "the gate's own condition is gone or duplicated — this guard is now blind",
+  );
+
+  const nameChecks = [
+    ...src.matchAll(/o\.driver\s*===|===\s*"docker-[a-z]+"|"docker-[a-z]+"/g),
+  ].map((m) => m[0]);
+
+  assert.deepEqual(
+    nameChecks,
+    [],
+    `the gate is matching a driver NAME: ${nameChecks.join(", ")}. A second ` +
+      `vendor spells its own alias differently, so a name match reopens #260 ` +
+      `for every alias added after the first.`,
+  );
+});
