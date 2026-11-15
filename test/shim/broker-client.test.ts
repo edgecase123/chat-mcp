@@ -132,7 +132,12 @@ test("a run-command reply carries the script exit code and output", async (t) =>
   );
 
   assert.equal(reply.exitCode, 0);
-  assert.match(String(reply.stdout), /lane=php/);
+  // 🛑 EXACT, NOT `assert.match(/lane=php/)`. That regex is satisfied by any
+  // argv spelling ENDING in `lane=php`, so a switch to `--lane=php` kept this
+  // test green while the contract broke. Its two sibling fixtures
+  // (`run-command.test.ts`, `broker.test.ts`) already compare exactly and do
+  // fail. An exact comparison is what cannot match by accident.
+  assert.equal(String(reply.stdout), "lane=php argv=php\n");
 });
 
 test("🛑 A WRONG TOKEN CLOSES THE SOCKET WITH NO REPLY, and that is reported as a cause", async (t) => {
