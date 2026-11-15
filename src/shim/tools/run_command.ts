@@ -77,12 +77,22 @@ export function installRunCommand(
     "list_commands",
     {
       title: "Which of this project's commands can I run?",
+      // 🛑 "MAY RUN" WAS FALSE FOR A CONTAINERIZED CALLER, AND A DESCRIPTION IS
+      // READ BEFORE ANY CALL. It promised a list of runnable commands to an
+      // agent that is refused on every one of them, so the agent retried and
+      // then reported the bus broken. #264.
       description:
-        "Every command this agent may run, with the parameters each one takes. The list comes from a manifest the agent cannot edit, so a name missing from it cannot be run however it is spelled. Call this before run_command rather than guessing a name. An agent with no manifest gets ok false and an error saying so.",
+        "The commands this agent may run, with the parameters each one takes. The list comes from a manifest the agent cannot edit, so a name missing from it cannot be run however it is spelled. Call this before run_command rather than guessing a name. An agent running in a container gets ok false instead of a list, because commands do not run for it at all. An agent with no manifest gets ok false and an error saying so.",
       inputSchema: {},
     },
     async () =>
-      text(await answerFor(ctx.handle, () => listCommandsFor(ctx.handle))),
+      text(
+        await answerFor(ctx.handle, () =>
+          // 🛑 `ctx.sandbox`, FOR `run_command`'s REASON BELOW. Nothing outside
+          // `shimContextFor` may say where this agent runs.
+          listCommandsFor(ctx.handle, { sandbox: ctx.sandbox }),
+        ),
+      ),
   );
 
   server.registerTool(

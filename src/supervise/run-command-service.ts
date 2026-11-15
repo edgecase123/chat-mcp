@@ -134,7 +134,53 @@ export function manifestFor(handle: string): {
   return { dir: manifest.projectDir, manifest };
 }
 
-export function listCommandsFor(handle: string): { commands: ListedCommand[] } {
+/**
+ * What `listCommandsFor` needs, which is the mode and nothing else.
+ *
+ * 🛑 REQUIRED, AND THE PARAMETER IS NOT DEFAULTED, for `RunCommandOptions`'
+ * reason: a transport that omits it must be a compile error rather than an
+ * ungated list. Both transports that reach this service already hold the mode.
+ */
+export type ListCommandsOptions = Pick<RunCommandOptions, "sandbox">;
+
+/**
+ * 🛑 THE ONE PLACE THAT SAYS COMMANDS DO NOT RUN IN A CONTAINER. Two callers
+ * need this refusal and a second copy of the sentence is how the two drift —
+ * which is the defect four `messages` writers had just been merged for.
+ *
+ * lee, 2026-11-15: "anything the agent can write is NOT trusted to run outside
+ * of the container." A containerized agent has its project directory
+ * bind-mounted writable, so it chooses the bytes the operator would run.
+ */
+function refuseInContainer(opts: ListCommandsOptions): void {
+  if (opts.sandbox !== "docker") return;
+
+  throw new Refusal(
+    "commands do not run for an agent in a container, because this agent " +
+      "can write the files they are made of",
+  );
+}
+
+/**
+ * The commands `handle`'s manifest declares, or a refusal.
+ *
+ * 🛑 REFUSES A CONTAINERIZED CALLER RATHER THAN LISTING. The tool's own
+ * description called this list "every command this agent may run", and for a
+ * containerized agent every one of them is then refused by `runCommandFor`. An
+ * agent acting on that list retries, concludes the bus is broken, and an
+ * operator reads the confusion as a transport fault. #264.
+ *
+ * ⚠️ NOT AN EMPTY LIST. That is indistinguishable from having no manifest, so
+ * the agent learns nothing it can act on.
+ */
+export function listCommandsFor(
+  handle: string,
+  opts: ListCommandsOptions,
+): { commands: ListedCommand[] } {
+  // Before the manifest is read, so a refused call touches no file and names no
+  // host path — the order `runCommandFor` uses, for the same reason.
+  refuseInContainer(opts);
+
   return { commands: listCommands(manifestFor(handle).manifest) };
 }
 
@@ -152,16 +198,9 @@ export async function runCommandFor(
   opts: RunCommandOptions,
 ): Promise<ScriptResult> {
   // 🛑 FIRST, BEFORE THE MANIFEST AND BEFORE ANY SLOT. `runScript` reaches the
-  // project directory with `execFile`, on the host, and a containerized agent
-  // has that directory bind-mounted writable — so the agent chooses the bytes
-  // the operator runs. lee, 2026-11-15: "anything the agent can write is NOT
-  // trusted to run outside of the container."
-  if (opts.sandbox === "docker") {
-    throw new Refusal(
-      "commands do not run for an agent in a container, because this agent " +
-        "can write the files they are made of",
-    );
-  }
+  // project directory with `execFile`, on the host, so a refused call must cost
+  // nothing and take no concurrency slot.
+  refuseInContainer(opts);
 
   // 🛑 RESOLVED ONCE, BEFORE ANY WAIT. `acquireSlot` takes a number, so a
   // command that parks keeps the limit it arrived with even if the file is

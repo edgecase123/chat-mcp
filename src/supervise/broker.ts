@@ -252,7 +252,13 @@ export class CommandBroker {
     envelope: Record<string, unknown>,
   ): Promise<{ commands: ListedCommand[] } | ScriptResult> {
     if (envelope.op === "list-commands") {
-      return listCommandsFor(handle);
+      // 🛑 THIS IS THE CALL SITE THE BUG LIVED ON, NOT THE SHIM'S. `host-bus.ts`
+      // constructs this broker with `sandbox: "docker"` hardcoded, and a
+      // container reaches `list-commands` only through here — so the shim's own
+      // gate leaves the whole defect ungated. `runCommand` below already
+      // threads the same field; this line did not, and that asymmetry WAS the
+      // bug. #264.
+      return listCommandsFor(handle, { sandbox: this.options.sandbox });
     }
 
     if (envelope.op === "run-command") {

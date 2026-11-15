@@ -99,8 +99,12 @@ async function post(
   };
 }
 
-/** Initialize, acknowledge, and call `run_command` once over the host bus. */
-async function callRunCommand(t: TestContext, handle: string): Promise<string> {
+/** Initialize, acknowledge, and call one tool once over the host bus. */
+async function callOverHostBus(
+  t: TestContext,
+  handle: string,
+  tool: string,
+): Promise<string> {
   const bus = await openHostBus(handle);
   t.after(() => bus.close());
 
@@ -132,13 +136,25 @@ async function callRunCommand(t: TestContext, handle: string): Promise<string> {
   const call = await post(
     url,
     token,
-    rpc("tools/call", { name: "run_command", arguments: { name: "mark" } }, 2),
+    rpc("tools/call", argumentsFor(tool), 2),
     session,
   );
 
   assert.equal(call.status, 200, `tools/call failed: ${call.text}`);
 
   return call.text;
+}
+
+/**
+ * The `tools/call` params for either tool.
+ *
+ * `list_commands` takes none, and passing `{ name: "mark" }` to it would be
+ * accepted and ignored — so a test that got the shape wrong would still pass.
+ */
+function argumentsFor(tool: string): Record<string, unknown> {
+  return tool === "run_command"
+    ? { name: tool, arguments: { name: "mark" } }
+    : { name: tool, arguments: {} };
 }
 
 /**
@@ -152,7 +168,7 @@ test("🚨 run_command over the HOST BUS refuses, and the script never runs", as
   const handle = `hostbus-sandbox-${process.pid}`;
   const { marker } = projectFor(handle);
 
-  const body = await callRunCommand(t, handle);
+  const body = await callOverHostBus(t, handle, "run_command");
 
   assert.ok(
     !existsSync(marker),
@@ -178,7 +194,11 @@ const ENTRY = new URL("../../src/index.ts", import.meta.url).pathname;
  * would race the teardown and this test would be flaky in the direction that
  * looks like a refusal.
  */
-async function callOverStdio(t: TestContext, handle: string): Promise<string> {
+async function callOverStdio(
+  t: TestContext,
+  handle: string,
+  tool: string,
+): Promise<string> {
   const { spawn } = await import("node:child_process");
 
   const child = spawn(
@@ -255,13 +275,7 @@ async function callOverStdio(t: TestContext, handle: string): Promise<string> {
     )}\n`,
   );
   child.stdin.write(`${rpc("notifications/initialized", {}, null)}\n`);
-  child.stdin.write(
-    `${rpc(
-      "tools/call",
-      { name: "run_command", arguments: { name: "mark" } },
-      2,
-    )}\n`,
-  );
+  child.stdin.write(`${rpc("tools/call", argumentsFor(tool), 2)}\n`);
 
   return reply;
 }
@@ -281,7 +295,7 @@ test("🚨 run_command over the STDIO SHIM runs the script on the host", async (
   const handle = `shim-sandbox-${process.pid}`;
   const { marker } = projectFor(handle);
 
-  const body = await callOverStdio(t, handle);
+  const body = await callOverStdio(t, handle, "run_command");
 
   assert.doesNotMatch(
     body,
@@ -293,4 +307,62 @@ test("🚨 run_command over the STDIO SHIM runs the script on the host", async (
     existsSync(marker),
     `the command did not run on the host path:\n${body}`,
   );
+});
+
+/**
+ * 🛑 `list_commands` TOLD A CONTAINERIZED AGENT IT MAY RUN COMMANDS IT MAY NOT.
+ * `runCommandFor` refused every one of them, so the agent retried and then
+ * reported the bus broken. #264.
+ *
+ * ⚠️ THE COMMAND NAME IS THE ASSERTION, NOT THE SENTENCE. A refusal that still
+ * leaked the manifest, or a shim that broke for an unrelated reason, both answer
+ * with something that lacks the sentence — only the absence of `mark` separates
+ * "refused before reading the manifest" from "answered differently".
+ *
+ * 🛑 THE GATE THIS COVERS IS `broker.ts`'s, NOT THE SHIM'S. A container reaches
+ * `list-commands` only through the broker, and `host-bus.ts` is the one line
+ * that constructs it with `sandbox: "docker"`. Gating only the shim leaves this
+ * test red.
+ */
+test("🚨 list_commands over the HOST BUS refuses, and names no command", async (t) => {
+  const handle = `hostbus-list-${process.pid}`;
+  projectFor(handle);
+
+  const body = await callOverHostBus(t, handle, "list_commands");
+
+  assert.doesNotMatch(
+    body,
+    /mark/,
+    `the manifest reached a containerized agent:\n${body}`,
+  );
+
+  assert.match(
+    body,
+    /in a container/,
+    `expected the container refusal, got:\n${body}`,
+  );
+});
+
+/**
+ * 🛑 THE PAIRED CONTROL, AND IT IS NOT OPTIONAL. A `listCommandsFor` that
+ * refused every caller satisfies the test above, and the refusal would then be
+ * indistinguishable from the fix. The host path must be shown to still LIST.
+ *
+ * ⚠️ ASSERTING THE ABSENCE OF THE REFUSAL SENTENCE IS TRUE HOWEVER BADLY THE
+ * SHIM BREAKS, which is the shape that let a one-line mutant through on
+ * `run_command`. `mark` present is the assertion.
+ */
+test("🚨 list_commands over the STDIO SHIM still lists the project's commands", async (t) => {
+  const handle = `shim-list-${process.pid}`;
+  projectFor(handle);
+
+  const body = await callOverStdio(t, handle, "list_commands");
+
+  assert.doesNotMatch(
+    body,
+    /in a container/,
+    `the host shim was refused as containerized:\n${body}`,
+  );
+
+  assert.match(body, /mark/, `the host path listed no commands:\n${body}`);
 });

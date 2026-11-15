@@ -58,7 +58,7 @@ const GATE = {
 test("the service is reachable without a transport, and lists a handle's commands", () => {
   install("lister", project(GATE, { "gate.sh": "#!/bin/sh\necho hi\n" }));
 
-  const { commands } = listCommandsFor("lister");
+  const { commands } = listCommandsFor("lister", { sandbox: "host" });
 
   assert.deepEqual(
     commands.map((c) => c.name),
@@ -69,7 +69,7 @@ test("the service is reachable without a transport, and lists a handle's command
 test("a listed command never carries its script path to the caller", () => {
   install("nopath", project(GATE, { "gate.sh": "#!/bin/sh\necho hi\n" }));
 
-  const { commands } = listCommandsFor("nopath");
+  const { commands } = listCommandsFor("nopath", { sandbox: "host" });
 
   assert.equal(JSON.stringify(commands).includes("gate.sh"), false);
 });

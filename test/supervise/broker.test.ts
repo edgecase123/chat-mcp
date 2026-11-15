@@ -192,6 +192,54 @@ test("list-commands returns the command names and their params", async (t) => {
 });
 
 /**
+ * 🛑 THE LIST WAS HANDED TO A CONTAINERIZED AGENT THAT IS REFUSED ON EVERY NAME
+ * IN IT. `run-command` already refused for `sandbox: "docker"`; `list-commands`
+ * did not, so the agent retried each name and then reported the bus broken.
+ * #264.
+ *
+ * ⚠️ THIS TRANSPORT HAS NO PRODUCTION CALLER YET — nothing in `src/`
+ * constructs a `CommandBroker`, as `BrokerOptions.sandbox` says. The live
+ * containerized path is `host-bus.ts` into the shim tool, covered in
+ * `sandbox-mode-wiring.test.ts`. The gate is here anyway for the reason that
+ * field is required: an absent guard on an unwired listener is a guard missing
+ * on the day someone wires it.
+ *
+ * 🛑 THE COMMAND NAME IS THE ASSERTION. `ok: false` alone is also what a wrong
+ * token, a bad op and a missing manifest produce, so only the absence of `gate`
+ * separates "refused before reading the manifest" from "failed some other way".
+ */
+test("🚨 list-commands is REFUSED for a containerized agent, and names nothing", async (t) => {
+  registerWith(`h3c-${process.pid}`, project(ECHO));
+
+  const broker = await CommandBroker.bind({
+    sandbox: "docker",
+    authenticate: (t2) => (t2 === "tok-secret" ? `h3c-${process.pid}` : null),
+  });
+
+  t.after(() => broker.close());
+
+  const [reply] = await replies(broker.port, [
+    { id: 9, token: "tok-secret", op: "list-commands" },
+  ]);
+
+  assert.equal(reply?.id, 9);
+  assert.equal(reply?.ok, false);
+  assert.match(String(reply?.error), /in a container/);
+  assert.equal(
+    JSON.stringify(reply).includes("gate"),
+    false,
+    "the manifest reached a containerized agent",
+  );
+});
+
+/**
+ * 🛑 THE PAIRED CONTROL FOR THE TEST ABOVE, SPELLED OUT. `list-commands returns
+ * the command names` binds `sandbox: "host"` through `brokerFor`, so a guard
+ * that refused every caller would turn it red. That is what keeps the refusal
+ * above from being indistinguishable from a broken lister.
+ */
+
+/**
  * 🛑 THE KEY IS ABSENT, NOT FALSY. `assert.equal(script, undefined)` passes for
  * a key that is present and null, and a null script is still a disclosure that
  * the field exists at all.
