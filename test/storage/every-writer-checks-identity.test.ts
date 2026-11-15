@@ -196,6 +196,45 @@ test("🛑 EVERY dao WRITER CHECKS ITS CONNECTION'S FILE IDENTITY FIRST", () => 
 });
 
 /**
+ * 🛑 A CLASS NESTS TWO WRITERS UNDER ONE TOP-LEVEL NAME, SO THE SECOND ONE
+ * INHERITS THE FIRST ONE'S GUARD. claude1 measured it: a `ClaimWriter` with a
+ * guarded `take` and an unguarded `drop` passes 1716/1716.
+ *
+ * ⚠️ THE ANSWER IS NOT A WIDER REGEX. A line-based census cannot do
+ * method-level scoping, and widening it again is how the splitter grows a third
+ * blind spot. So this BANS the laundering shape instead of parsing it, and the
+ * day somebody wants a writing class the failure says why.
+ *
+ * 🛑 CORRECTION TO THE REVIEW THAT ASKED FOR THIS: "dao.ts declares no
+ * top-level class" is FALSE. It declares three — `HandleClaimedError`,
+ * `MessageNotPersistedError` and `UnnameableApprovalError`. They are Error
+ * subclasses and none of them writes, so the ban that is both true and
+ * sufficient is on a class that WRITES, not on a class.
+ */
+test("🛑 NO CLASS IN dao.ts WRITES, so no method can inherit another's guard", () => {
+  const source = stripComments(readFileSync(DAO, "utf8"));
+  const classes = functionsOf(source).filter((f) =>
+    /^(?:export\s+)?class\s/.test(f.body),
+  );
+
+  // Denominator: a splitter blind to `class` would report no classes and pass
+  // this vacuously, which is the exact failure mode this file already paid for.
+  assert.ok(
+    classes.length >= 3,
+    `found only ${classes.length} classes in ${DAO}; there are 3 Error subclasses`,
+  );
+
+  const writing = classes.filter(isWriter).map((f) => f.name);
+
+  assert.deepEqual(
+    writing,
+    [],
+    `${writing.join(", ")} writes from inside a class, where this census cannot ` +
+      `tell one method's guard from another's. Use a free function.`,
+  );
+});
+
+/**
  * ⚠️ THE GUARD ABOVE PROVES PRESENCE, NOT POSITION. A call placed after a
  * writer's first statement still satisfies it, and that is exactly the shape
  * that turns a replaced file into PARTIAL state — `joinRoom` writes

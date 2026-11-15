@@ -565,9 +565,14 @@ export function totalUnreadFor(db: Db, handle: string): number {
 }
 
 export function markRead(db: Db, ids: number[]): void {
+  // ⚠️ BELOW THE EARLY RETURN, UNLIKE EVERY OTHER WRITER. An empty id list
+  // is not a write, and this call was a no-op before the guard existed. Above
+  // the return, a replaced handle turned that no-op into a throw — a behaviour
+  // change in a function the caller never asked to write anything.
+  if (ids.length === 0) return;
+
   assertLiveDatabase(db, "markRead");
 
-  if (ids.length === 0) return;
   const now = Date.now();
   const placeholders = ids.map(() => "?").join(",");
   db.prepare(
@@ -576,9 +581,14 @@ export function markRead(db: Db, ids: number[]): void {
 }
 
 export function markDelivered(db: Db, ids: number[]): void {
+  // ⚠️ BELOW THE EARLY RETURN, UNLIKE EVERY OTHER WRITER. An empty id list
+  // is not a write, and this call was a no-op before the guard existed. Above
+  // the return, a replaced handle turned that no-op into a throw — a behaviour
+  // change in a function the caller never asked to write anything.
+  if (ids.length === 0) return;
+
   assertLiveDatabase(db, "markDelivered");
 
-  if (ids.length === 0) return;
   const now = Date.now();
   const placeholders = ids.map(() => "?").join(",");
   db.prepare(
