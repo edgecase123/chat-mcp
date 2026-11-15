@@ -87,6 +87,7 @@ function contextFor(
 ): ShimContext {
   return {
     handle,
+    sandbox: "host",
     session_id: randomUUID(),
     db: openDb(),
     notify: new NotifyBus(handle),

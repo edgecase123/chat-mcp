@@ -71,7 +71,7 @@ export async function answerFor(
 export function installRunCommand(
   server: McpServer,
   ctx: ShimContext,
-  opts: RunCommandOptions = {},
+  opts: Omit<RunCommandOptions, "sandbox"> = {},
 ): void {
   server.registerTool(
     "list_commands",
@@ -107,7 +107,13 @@ export function installRunCommand(
     async ({ name, params }) =>
       text(
         await answerFor(ctx.handle, () =>
-          runCommandFor(ctx.handle, name, params ?? {}, opts),
+          // 🛑 THE SANDBOX COMES FROM THE CONTEXT, NOT FROM `opts`. A caller
+          // may tune a timeout; nothing outside `shimContextFor` may say
+          // where this agent runs.
+          runCommandFor(ctx.handle, name, params ?? {}, {
+            ...opts,
+            sandbox: ctx.sandbox,
+          }),
         ),
       ),
   );

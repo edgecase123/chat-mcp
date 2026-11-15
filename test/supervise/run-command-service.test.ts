@@ -80,7 +80,12 @@ test("a command runs in the directory the MANIFEST names", async () => {
     project(GATE, { "gate.sh": "#!/bin/sh\npwd\n" }),
   );
 
-  const result = await runCommandFor("runner", "run-gate", {});
+  const result = await runCommandFor(
+    "runner",
+    "run-gate",
+    {},
+    { sandbox: "host" },
+  );
 
   assert.equal(result.exitCode, 0);
   // macOS /var is a symlink to /private/var, so compare the tail.
@@ -96,7 +101,12 @@ test("a NON-ZERO exit is a RESULT, not a refusal", async () => {
     project(GATE, { "gate.sh": "#!/bin/sh\necho out\nexit 3\n" }),
   );
 
-  const result = await runCommandFor("failer", "run-gate", {});
+  const result = await runCommandFor(
+    "failer",
+    "run-gate",
+    {},
+    { sandbox: "host" },
+  );
 
   assert.equal(result.exitCode, 3);
   assert.equal(result.stdout.trim(), "out");
@@ -104,7 +114,7 @@ test("a NON-ZERO exit is a RESULT, not a refusal", async () => {
 
 test("a handle with no manifest is REFUSED, and the caller is told nothing about the host", async () => {
   await assert.rejects(
-    () => runCommandFor("nomanifest", "run-gate", {}),
+    () => runCommandFor("nomanifest", "run-gate", {}, { sandbox: "host" }),
     (err: unknown) => {
       assert.ok(err instanceof Refusal, "must be a Refusal");
       assert.equal(err.message, "this agent has no usable command manifest");
@@ -116,7 +126,7 @@ test("a handle with no manifest is REFUSED, and the caller is told nothing about
 
 test("a Refusal keeps the operator detail OFF the public message", async () => {
   await assert.rejects(
-    () => runCommandFor("nomanifest2", "run-gate", {}),
+    () => runCommandFor("nomanifest2", "run-gate", {}, { sandbox: "host" }),
     (err: unknown) => {
       assert.ok(err instanceof Refusal);
       // The detail exists for the host log and is NOT the public sentence.
@@ -131,7 +141,7 @@ test("a command name absent from the manifest is refused however it is spelled",
   install("narrow", project(GATE, { "gate.sh": "#!/bin/sh\necho hi\n" }));
 
   await assert.rejects(
-    () => runCommandFor("narrow", "run-deploy", {}),
+    () => runCommandFor("narrow", "run-deploy", {}, { sandbox: "host" }),
     (err: unknown) => err instanceof Refusal,
   );
 });
@@ -144,7 +154,7 @@ test("a script outside the project directory is refused", async () => {
   install("escapee", built);
 
   await assert.rejects(
-    () => runCommandFor("escapee", "escape", {}),
+    () => runCommandFor("escapee", "escape", {}, { sandbox: "host" }),
     (err: unknown) => {
       assert.ok(err instanceof Refusal);
       assert.equal(
@@ -179,7 +189,12 @@ test("rewriting the registration does not move where a command runs", async () =
   // would leave this test green while proving nothing.
   assert.deepEqual(dirsFor("swapped"), [decoy.dir]);
 
-  const result = await runCommandFor("swapped", "run-gate", {});
+  const result = await runCommandFor(
+    "swapped",
+    "run-gate",
+    {},
+    { sandbox: "host" },
+  );
 
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /real/);

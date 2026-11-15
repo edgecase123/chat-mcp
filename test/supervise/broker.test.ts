@@ -148,6 +148,7 @@ async function brokerFor(
   registerWith(handle, dir);
 
   return CommandBroker.bind({
+    sandbox: "host",
     authenticate: (t) => (t === token ? handle : null),
   });
 }
@@ -337,6 +338,7 @@ test("a hanging command times out and the broker still answers afterwards", asyn
 
   registerWith(`h9-${process.pid}`, dir);
   const broker = await CommandBroker.bind({
+    sandbox: "host",
     authenticate: (tkn) => (tkn === "tok-secret" ? `h9-${process.pid}` : null),
     timeoutMs: 300,
   });
@@ -418,6 +420,7 @@ test("rewriting the registration does not move where a command runs", async (t) 
   assert.deepEqual(dirsFor(handle), [decoy]);
 
   const broker = await CommandBroker.bind({
+    sandbox: "host",
     authenticate: (tkn) => (tkn === "tok-secret" ? handle : null),
   });
   t.after(() => broker.close());
@@ -443,6 +446,7 @@ test("rewriting the registration does not move where a command runs", async (t) 
  */
 test("a handle with no manifest is refused, not defaulted to cwd", async (t) => {
   const broker = await CommandBroker.bind({
+    sandbox: "host",
     authenticate: (tkn) =>
       tkn === "tok-secret" ? `nowhere-${process.pid}` : null,
   });
@@ -468,6 +472,7 @@ test("a handle with a manifest but no registration still runs its command", asyn
   installManifest(handle, dir);
 
   const broker = await CommandBroker.bind({
+    sandbox: "host",
     authenticate: (tkn) => (tkn === "tok-secret" ? handle : null),
   });
   t.after(() => broker.close());
@@ -662,6 +667,7 @@ test("an envelope split mid-character is reassembled intact", async (t) => {
 test("an authenticate that returns undefined does not authenticate", async (t) => {
   registerWith(`h19-${process.pid}`, project(ECHO));
   const broker = await CommandBroker.bind({
+    sandbox: "host",
     authenticate: () => undefined as unknown as string | null,
   });
   t.after(() => broker.close());
@@ -677,7 +683,10 @@ test("an authenticate that returns undefined does not authenticate", async (t) =
 });
 
 test("an authenticate that returns an empty string does not authenticate", async (t) => {
-  const broker = await CommandBroker.bind({ authenticate: () => "" });
+  const broker = await CommandBroker.bind({
+    sandbox: "host",
+    authenticate: () => "",
+  });
   t.after(() => broker.close());
 
   const { raw } = await probe(
@@ -701,6 +710,7 @@ test("a throwing authenticate refuses the caller and leaves the broker alive", a
 
   let explode = true;
   const broker = await CommandBroker.bind({
+    sandbox: "host",
     authenticate: (tkn) => {
       if (explode) throw new Error("config blew up");
 
@@ -744,6 +754,7 @@ test("more requests than the in-flight cap are refused rather than all run", asy
 
   registerWith(handle, dir);
   const broker = await CommandBroker.bind({
+    sandbox: "host",
     authenticate: (tkn) => (tkn === "tok-secret" ? handle : null),
     maxInFlight: 1,
   });

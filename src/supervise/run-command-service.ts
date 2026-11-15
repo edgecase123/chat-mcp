@@ -7,6 +7,7 @@ import {
   type ListedCommand,
 } from "./commands.js";
 import { commandLimits } from "./command-limits.js";
+import type { SandboxMode } from "./vendor.js";
 import { checkedScriptPath } from "./containment.js";
 import {
   runScript,
@@ -41,6 +42,17 @@ export class Refusal extends Error {
 }
 
 export interface RunCommandOptions {
+  /**
+   * 🛑 THE SUPERVISOR'S OWN RESOLVED MODE, NEVER ANYTHING AN AGENT SUPPLIES.
+   * Both transports that reach this service are constructed inside the
+   * supervisor, which already holds `selection.mode`.
+   *
+   * ⚠️ REQUIRED, AND `opts` IS NO LONGER DEFAULTED, so a transport that omits
+   * it is a compile error rather than a host execution. An optional field here
+   * would fail OPEN, which is the wrong direction for the only guard between a
+   * sandboxed agent and `execFile`.
+   */
+  readonly sandbox: SandboxMode;
   readonly timeoutMs?: number;
   readonly maxBuffer?: number;
   /** Per-handle cap on commands running at once. Below 1 is read as 1. */
@@ -137,8 +149,20 @@ export async function runCommandFor(
   handle: string,
   name: string,
   params: Readonly<Record<string, string>>,
-  opts: RunCommandOptions = {},
+  opts: RunCommandOptions,
 ): Promise<ScriptResult> {
+  // 🛑 FIRST, BEFORE THE MANIFEST AND BEFORE ANY SLOT. `runScript` reaches the
+  // project directory with `execFile`, on the host, and a containerized agent
+  // has that directory bind-mounted writable — so the agent chooses the bytes
+  // the operator runs. lee, 2026-11-15: "anything the agent can write is NOT
+  // trusted to run outside of the container."
+  if (opts.sandbox === "docker") {
+    throw new Refusal(
+      "commands do not run for an agent in a container, because this agent " +
+        "can write the files they are made of",
+    );
+  }
+
   // 🛑 RESOLVED ONCE, BEFORE ANY WAIT. `acquireSlot` takes a number, so a
   // command that parks keeps the limit it arrived with even if the file is
   // edited while it waits. The counter and the limit cannot disagree.

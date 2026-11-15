@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { SandboxMode } from "../supervise/vendor.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { randomUUID } from "node:crypto";
 import { openDb, type Db } from "../storage/db.js";
@@ -121,6 +122,16 @@ function buildInstructions(handle: string): string {
 
 export interface ShimContext {
   handle: string;
+  /**
+   * 🛑 WHERE THIS SESSION'S AGENT RUNS, AND IT GATES `run_command`. A
+   * containerized agent has its project directory bind-mounted writable, so
+   * the host must not `execFile` anything out of it.
+   *
+   * Derived at each of the two construction sites, never guessed: the stdio
+   * shim is a host process, and `openHostBus` is opened only under
+   * `isContainerSpawn`.
+   */
+  sandbox: SandboxMode;
   session_id: string;
   db: Db;
   notify: NotifyBus;
@@ -178,6 +189,8 @@ export function buildServer(ctx: ShimContext): McpServer {
 
 export interface ShimContextOptions {
   handle: string;
+  /** See `ShimContext.sandbox`. Required, because an absent one fails OPEN. */
+  sandbox: SandboxMode;
   /** How this session is woken. The stdio shim and the host bus differ here. */
   adapterStatus: AdapterStatus;
   /** Claim the handle even if a live process holds it. See `ShimOptions`. */
@@ -208,6 +221,7 @@ export function shimContextFor(opts: ShimContextOptions): ShimContext {
 
   return {
     handle: opts.handle,
+    sandbox: opts.sandbox,
     session_id,
     db,
     notify,
@@ -218,6 +232,13 @@ export function shimContextFor(opts: ShimContextOptions): ShimContext {
 export async function runShim(opts: ShimOptions): Promise<void> {
   const ctx = shimContextFor({
     handle: opts.handle,
+
+    // 🛑 THIS FUNCTION *IS* THE HOST PATH. It speaks stdio to the process that
+    // launched it, and a container reaches the bus over HTTP through
+    // `openHostBus` instead — the state-dir mount that could have carried a
+    // stdio shim inside a container was deleted, and AGENTS.md forbids its
+    // return. If that ever changes, this line is the one that fails open.
+    sandbox: "host",
     adapterStatus: checkWakeAdapter(opts.handle),
     force: opts.force,
   });

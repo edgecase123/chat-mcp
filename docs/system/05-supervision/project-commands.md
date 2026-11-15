@@ -31,6 +31,45 @@ tool can run today.**
 directory come from `manifestDir()/<handle>.json`, which the agent cannot edit.
 A name missing from it cannot be run however it is spelled.
 
+## A containerized agent gets no commands at all
+
+```
+sandbox "host"     the command runs                     unchanged
+sandbox "docker"   REFUSED, before the manifest is read, before any slot
+```
+
+🛑 **Because the host would be running bytes the agent chose.** The project
+directory is bind-mounted WRITABLE — it is the agent's own clone and it has to
+be — and `runScript` reaches that same directory with `execFile`, on the host,
+as the operator. So the agent can rewrite the body of a command the operator
+already approved.
+
+lee, 2026-11-15: _"anything the agent can write is NOT trusted to run outside
+of the container."_
+
+⚠️ **`readOnlyPaths` cannot close this at any depth, and it looks like it can.**
+A `:ro` bind holds only while every directory between it and the project root
+is itself a mountpoint, and only the root is. Measured on four shapes: a direct
+child of the root holds, and anything nested is defeated by renaming an
+ancestor and symlinking its name back. The host then resolves the agent's file,
+because `checkedProjectPath` requires only that the realpath stay INSIDE the
+project.
+
+**Where the mode comes from, and why it is not a flag anyone passes:**
+
+| construction site | mode     | why it is derived, not assumed                           |
+| ----------------- | -------- | -------------------------------------------------------- |
+| `runShim`         | `host`   | it speaks stdio to the process that launched it          |
+| `openHostBus`     | `docker` | `startSupervisor` opens it only under `isContainerSpawn` |
+
+🛑 **`RunCommandOptions.sandbox` is REQUIRED and `opts` is no longer defaulted.**
+A transport that omits it is a compile error. An optional field would fail
+OPEN, which is the wrong direction for the only guard between a sandboxed agent
+and `execFile`.
+
+**Running such a command INSIDE the container is a separate piece of work.**
+This refusal closes the hole; it does not add the capability back.
+
 ## The three limits
 
 | limit                  | default | set via          | bounds                                            |

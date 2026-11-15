@@ -39,6 +39,7 @@ const DEAD_PID = 4194303;
 function contextFor(handle: string): ShimContext {
   return {
     handle,
+    sandbox: "host",
     session_id: randomUUID(),
     db: openDb(),
     notify: new NotifyBus(handle),

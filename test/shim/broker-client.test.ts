@@ -48,6 +48,7 @@ function brokerFor(handle: string): Promise<Broker> {
   );
 
   return CommandBroker.bind({
+    sandbox: "host",
     authenticate: (t) => (t === TOKEN ? handle : null),
   });
 }
