@@ -13,7 +13,7 @@ import { KNOWN_SUBCOMMANDS } from '../../src/util/subcommands.js';
  */
 test('every commander verb is also in KNOWN_SUBCOMMANDS', () => {
   const source = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
-  const registered = [...source.matchAll(/\.command\('([^'\s<[]+)/g)].map((m) => m[1]!);
+  const registered = [...source.matchAll(/\.command\(['"]([^'"\s<[]+)/g)].map((m) => m[1]!);
 
   assert.ok(registered.length > 10, `expected to find the verbs, found ${registered.length}`);
 
@@ -25,7 +25,7 @@ test('every commander verb is also in KNOWN_SUBCOMMANDS', () => {
 test('supervise is registered and reachable', () => {
   const source = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
 
-  assert.ok(source.includes(".command('supervise"), 'the verb is not registered');
+  assert.match(source, /\.command\(['"]supervise/, 'the verb is not registered');
   assert.ok(KNOWN_SUBCOMMANDS.has('supervise'), 'the verb would fall through to shim mode');
 });
 

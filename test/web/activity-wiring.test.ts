@@ -24,8 +24,9 @@ const APP_CODE = APP.split('\n')
 
 /** The body of the SSE listener that owns the pulse. */
 function listenerBody(): string {
-  const start = APP_CODE.indexOf("source.addEventListener('activity'");
-  assert.notEqual(start, -1, 'no SSE listener for `activity` — the pulse is not wired');
+  const found = APP_CODE.match(/source\.addEventListener\(['"]activity['"]/);
+  assert.notEqual(found, null, 'no SSE listener for `activity` — the pulse is not wired');
+  const start = found!.index!;
 
   const end = APP_CODE.indexOf('\n  });', start);
   assert.notEqual(end, -1, 'the activity listener block is unterminated');
@@ -108,7 +109,7 @@ test('🛑 a rebuilt row re-reads the pulse from state', () => {
 });
 
 test('🛑 the row is addressable, or the handler cannot find it', () => {
-  assert.match(sidebarItemBody(), /'data-handle': target/);
+  assert.match(sidebarItemBody(), /['"]data-handle['"]: target/);
   assert.match(APP_CODE, /data-handle="\$\{CSS\.escape\(handle\)\}"/, 'the lookup does not escape the handle');
 });
 
@@ -122,7 +123,7 @@ test('🛑 the row is addressable, or the handler cannot find it', () => {
  * rather than asserted. Found by claude1 on PR 246.
  */
 test('🛑 the bypass can only reach a PEER row, by construction', () => {
-  assert.match(sidebarItemBody(), /'data-kind': kind/, 'the row does not declare its kind');
+  assert.match(sidebarItemBody(), /['"]data-kind['"]: kind/, 'the row does not declare its kind');
   assert.match(
     APP_CODE,
     /\.sidebar__item\[data-kind="peer"\]\[data-handle=/,
@@ -140,7 +141,7 @@ test('🛑 the bypass can only reach a PEER row, by construction', () => {
 test('🛑 a rebuilt ROOM row can never be marked working', () => {
   assert.match(
     sidebarItemBody(),
-    /kind === 'peer' && state\.activity\.has\(target\)/,
+    /kind === ['"]peer['"] && state\.activity\.has\(target\)/,
     'the rebuild path is not gated on kind — a room dot will animate',
   );
 });
@@ -159,7 +160,7 @@ test('🛑 the repaint REMOVES the attributes when the work ends', () => {
 
   assert.match(body, /removeAttribute/, 'a stale "Working" would survive the turn');
   for (const attr of ['title', 'aria-label', 'role']) {
-    assert.ok(body.includes(`'${attr}'`), `${attr} is never cleared`);
+    assert.match(body, new RegExp(`['"]${attr}['"]`), `${attr} is never cleared`);
   }
 });
 
@@ -178,8 +179,8 @@ test('🛑 the dot states what it means in text, not only in colour', () => {
 
   assert.match(body, /dotTitle\(\{ kind, working \}\)/);
   assert.match(body, /title: dotState/);
-  assert.match(body, /'aria-label': dotState/);
-  assert.match(body, /role: dotState === null \? null : 'img'/);
+  assert.match(body, /['"]aria-label['"]: dotState/);
+  assert.match(body, /role: dotState === null \? null : ['"]img['"]/);
 });
 
 test('the direct repaint sets the same three attributes as a rebuild', () => {
@@ -190,7 +191,7 @@ test('the direct repaint sets the same three attributes as a rebuild', () => {
 
   assert.match(body, /dotTitle\(/, 'the repaint invents its own wording');
   for (const attr of ['title', 'aria-label', 'role']) {
-    assert.match(body, new RegExp(`setAttribute\\('${attr}'`), `the repaint drops ${attr}`);
+    assert.match(body, new RegExp(`setAttribute\\(['"]${attr}['"]`), `the repaint drops ${attr}`);
   }
 });
 

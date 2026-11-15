@@ -334,7 +334,7 @@ test('the generated config launches the CLI, not some other file called index', 
     // The CLI registers subcommands and the shim fallback. The supervisor
     // does neither, so this distinguishes them by CONTENT, not by name.
     assert.ok(
-      source.includes('KNOWN_SUBCOMMANDS') || source.includes("command('supervise"),
+      source.includes('KNOWN_SUBCOMMANDS') || /command\(['"]supervise/.test(source),
       `that is not the chat-mcp CLI entry: ${script}`,
     );
     assert.ok(
@@ -491,7 +491,7 @@ test('--auto is a shorthand, and an explicit --permission-mode still wins', asyn
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
 
-  assert.match(src, /\.option\(\s*'--auto'/, 'there is no opt-in flag');
+  assert.match(src, /\.option\(\s*['"]--auto['"]/, 'there is no opt-in flag');
   assert.match(
     src,
     /permissionMode:\s*\n?\s*o\.permissionMode \?\?/,
@@ -503,7 +503,9 @@ test('the help text says what --auto costs, not just what it does', async () => 
   const { readFileSync } = await import('node:fs');
   const src = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
 
-  const help = src.slice(src.indexOf("'--auto'"), src.indexOf("'--auto'") + 400);
+  const flagAt = src.search(/['"]--auto['"]/);
+  assert.notEqual(flagAt, -1, 'the --auto flag is gone');
+  const help = src.slice(flagAt, flagAt + 400);
 
   assert.match(help, /allowlist/, 'the flag does not say what it replaces');
   assert.match(help, /not written down|cannot read|second person/, 'it does not state the cost');

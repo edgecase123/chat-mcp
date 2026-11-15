@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { oneLine } from '../support/source-text.js';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -226,8 +227,11 @@ test('🛑 the refusal is the wrapper FIRST statement, above the stop branch', (
     .filter((l) => l !== '' && !l.startsWith('//') && !l.startsWith('*') && !l.startsWith('/*'));
 
   assert.ok(statements.length > 0, 'the wrapper body must hold statements');
+
+  // 🛑 JOINED, NOT `statements[0]`. Prettier wraps this refusal over two lines,
+  // and the anchored `^` still proves nothing precedes it.
   assert.match(
-    statements[0]!,
+    oneLine(statements.join(' ')),
     /^if \(onWake === null\) return \{ ok: false,/,
     'the refusal must come before anything else in the wrapper, including the stop branch',
   );

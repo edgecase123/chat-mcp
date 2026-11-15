@@ -245,7 +245,7 @@ test('🛑 EVERY api path in the dispatch table is classified, and the count is 
   const dispatched = new Map<string, Set<string>>();
 
   for (const m of src.matchAll(
-    /path === '(\/api\/[^']*)'(?:\s*&&\s*req\.method === '([A-Z]+)')?/g,
+    /path === ['"](\/api\/[^'"]*)['"](?:\s*&&\s*req\.method === ['"]([A-Z]+)['"])?/g,
   )) {
     const path = m[1]!;
     // No method clause means the route answers ANY verb, so GET reaches it.

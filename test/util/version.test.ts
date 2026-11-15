@@ -27,7 +27,7 @@ const SCAN_ROOTS = ['src', 'scripts'];
  * and tracking chat-mcp's would be wrong. The test below asserts the hit is
  * still there, so the carve-out cannot outlive its reason.
  */
-const ALLOWED = new Map([['scripts/smoke.mjs', "version: '0.0.1'"]]);
+const ALLOWED = new Map([['scripts/smoke.mjs', /^version:\s*['"]0\.0\.1['"]$/]]);
 
 function declaredVersion(): string {
   const raw = readFileSync(new URL('../../package.json', import.meta.url), 'utf8');
@@ -100,7 +100,9 @@ test('no source file hardcodes a version — every surface reads package.json', 
     const text = readFileSync(f, 'utf8');
     if (text.includes('packageVersion(')) callers += 1;
     for (const m of text.matchAll(HARDCODED)) {
-      if (ALLOWED.get(rel) === m[0]) {
+      // Anchored, so the carve-out still cannot absorb an unrelated hit. A
+      // pattern rather than a literal because prettier picks the quote.
+      if (ALLOWED.get(rel)?.test(m[0]) === true) {
         allowedSeen.add(rel);
         continue;
       }

@@ -24,7 +24,7 @@ import { join } from 'node:path';
  * ⚠️ Each line is a claim about what is reachable at that call site. If one
  * gains a body, delete its entry rather than widening this list.
  */
-const ALLOWED = new Map<string, string>([
+const ALLOWED = exempt([
   [
     'src/cli/ink/App.tsx :: notifyPeer(member, { id: 0, to: member, from: dao.SYSTEM_HANDLE, ts: Date.now() });',
     'presence ping, id 0, there is no message',
@@ -69,10 +69,29 @@ function siteKey(rel: string, call: string): string {
   const code = call
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/\/\/[^\n]*/g, ' ')
-    .replace(/\s+/g, ' ')
     .trim();
 
-  return `${rel} :: ${code}`;
+  return deformatted(`${rel} :: ${code}`);
+}
+
+/**
+ * Formatting removed from a call's text: whitespace runs, and the trailing
+ * comma prettier adds to every argument list it wraps.
+ *
+ * ⚠️ A TRAILING COMMA IS FORMATTING, NOT A CODE EDIT, so it must not change a
+ * site's identity. Two hand-written keys below carried one and the rest did
+ * not, which is exactly the disagreement this removes.
+ */
+function deformatted(site: string): string {
+  return site
+    .replace(/\s+/g, ' ')
+    .replace(/,(\s*[}\])])/g, '$1')
+    .trim();
+}
+
+/** Hand-written keys, normalised the same way a scanned one is. */
+function exempt(entries: [string, string][]): Map<string, string> {
+  return new Map(entries.map(([site, why]) => [deformatted(site), why]));
 }
 
 function dropSites(): string[] {
@@ -175,7 +194,7 @@ test('the scan sees EVERY notifyPeer call — a regex blind spot would hide drop
  * an exemption would cover both. That is a smaller hazard than a list that
  * goes stale on every unrelated insertion.
  */
-const KIND_EXEMPT = new Map<string, string>([
+const KIND_EXEMPT = exempt([
   [
     'src/cli/ink/App.tsx :: notifyPeer(member, { id: 0, to: member, from: dao.SYSTEM_HANDLE, ts: Date.now() });',
     'presence ping, id 0, there is no message',

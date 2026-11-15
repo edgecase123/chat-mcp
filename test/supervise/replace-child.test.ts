@@ -511,7 +511,7 @@ test('EVERY child callback registration goes through the generation guard', () =
   // by claude1 as optional; it is three lines. The regex already captured
   // both halves.
   const mislabelled = registrations
-    .filter(([, name, next]) => !next.includes(`'${name}'`))
+    .filter(([, name, next]) => !new RegExp(`['"]${name}['"]`).test(next))
     .map(([, name]) => name);
 
   assert.deepEqual(mislabelled, [], `these log under the wrong name: ${mislabelled.join(', ')}`);

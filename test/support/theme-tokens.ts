@@ -13,10 +13,18 @@ import { readFileSync } from 'node:fs';
 
 export const CSS = readFileSync(new URL('../../web/assets/style.css', import.meta.url), 'utf8');
 
-/** The body of a top-level rule, by its exact selector. */
+/**
+ * The body of a top-level rule, by its selector.
+ *
+ * ⚠️ ATTRIBUTE QUOTES MATCH LOOSELY. Prettier normalises `[a='b']` to `[a="b"]`
+ * in CSS, and no caller is asserting which quote the stylesheet uses.
+ */
 export function block(selector: string): string {
-  const start = CSS.indexOf(`${selector} {`);
-  assert.notEqual(start, -1, `selector ${selector} is gone from style.css`);
+  const loose = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/['"]/g, `['"]`);
+  const found = new RegExp(`${loose}\\s*\\{`).exec(CSS);
+  assert.ok(found, `selector ${selector} is gone from style.css`);
+
+  const start = found.index;
   const end = CSS.indexOf('\n}', start);
   assert.notEqual(end, -1, `selector ${selector} has no closing brace`);
 
