@@ -2,7 +2,9 @@ import type { Db } from "./db.js";
 // A value import: `db.ts` owns the schema_version table, and it imports only
 // `util/paths.js`, so this cannot cycle back.
 import {
+  assertLiveDatabase,
   currentSchemaVersion,
+  databaseWasReplaced,
   identityFor,
   identityOf,
   verifierFor,
@@ -142,6 +144,8 @@ export function setAgentStatus(
   status: AgentStatus,
   focus: string | null,
 ): void {
+  assertLiveDatabase(db, "setAgentStatus");
+
   db.prepare(
     `UPDATE agents SET status = ?, focus = ?, status_updated_at = ?, last_seen_at = ? WHERE handle = ?`,
   ).run(status, focus, Date.now(), Date.now(), handle);
@@ -153,6 +157,8 @@ export function setAgentContext(
   used: number,
   total: number,
 ): void {
+  assertLiveDatabase(db, "setAgentContext");
+
   const now = Date.now();
   db.prepare(
     `UPDATE agents SET context_used = ?, context_total = ?, context_reported_at = ?, last_seen_at = ? WHERE handle = ?`,
@@ -164,6 +170,8 @@ export function setAgentContextWarned(
   handle: string,
   threshold: number | null,
 ): void {
+  assertLiveDatabase(db, "setAgentContextWarned");
+
   db.prepare(
     `UPDATE agents SET context_warned_threshold = ? WHERE handle = ?`,
   ).run(threshold, handle);
@@ -254,6 +262,8 @@ export function writeClaim(
   input: RegisterInput,
   expectedPid: number | null,
 ): boolean {
+  assertLiveDatabase(db, "writeClaim");
+
   // A forced claim is "take it regardless", so it must not also lose the race
   // to the very row it is overriding.
   const guard = input.force
@@ -327,6 +337,8 @@ export function listAgents(db: Db, includeOffline = false): Agent[] {
 }
 
 export function touchLastSeen(db: Db, handle: string): void {
+  assertLiveDatabase(db, "touchLastSeen");
+
   db.prepare(`UPDATE agents SET last_seen_at = ? WHERE handle = ?`).run(
     Date.now(),
     handle,
@@ -417,17 +429,18 @@ export function insertMessage(db: Db, input: SendInput): SendResult {
   // 🛑 THE SKIP USED TO BE THE FAIL-OPEN. `openDb` recorded nothing when its own
   // stat failed, and a connection in that state wrote into a replaced file for
   // its whole life with no guard and no signal. Raised by claude1 on #138.
-  const atOpen = identityFor(db);
-  if (atOpen) {
-    const now = identityOf(dbPath());
-    if (!now || now.dev !== atOpen.dev || now.ino !== atOpen.ino) {
-      throw new MessageNotPersistedError(
-        "file-replaced",
-        null,
-        input.from,
-        input.to,
-      );
-    }
+  //
+  // ⚠️ THE COMPARISON MOVED TO `databaseWasReplaced` AND THE THROW STAYED.
+  // Every other writer calls `assertLiveDatabase`, which throws a
+  // `DatabaseReplacedError`; a send has a from and a to to name, and its
+  // callers already discriminate on `NotPersistedReason`.
+  if (databaseWasReplaced(db)) {
+    throw new MessageNotPersistedError(
+      "file-replaced",
+      null,
+      input.from,
+      input.to,
+    );
   }
 
   const sent_at = Date.now();
@@ -554,6 +567,8 @@ export function totalUnreadFor(db: Db, handle: string): number {
 }
 
 export function markRead(db: Db, ids: number[]): void {
+  assertLiveDatabase(db, "markRead");
+
   if (ids.length === 0) return;
   const now = Date.now();
   const placeholders = ids.map(() => "?").join(",");
@@ -563,6 +578,8 @@ export function markRead(db: Db, ids: number[]): void {
 }
 
 export function markDelivered(db: Db, ids: number[]): void {
+  assertLiveDatabase(db, "markDelivered");
+
   if (ids.length === 0) return;
   const now = Date.now();
   const placeholders = ids.map(() => "?").join(",");
@@ -642,6 +659,8 @@ interface RoomRow {
  * "joined" line. Existing members' watermarks are lower, so they see it.
  */
 export function joinRoom(db: Db, room: string, handle: string): JoinResult {
+  assertLiveDatabase(db, "joinRoom");
+
   const now = Date.now();
   db.prepare(
     `INSERT INTO rooms (name, created_at, created_by) VALUES (?, ?, ?)
@@ -690,6 +709,8 @@ export function joinRoom(db: Db, room: string, handle: string): JoinResult {
 }
 
 export function leaveRoom(db: Db, room: string, handle: string): boolean {
+  assertLiveDatabase(db, "leaveRoom");
+
   const info = db
     .prepare(`DELETE FROM room_members WHERE room_name = ? AND handle = ?`)
     .run(room, handle);
@@ -763,6 +784,8 @@ export function deleteRoom(
   room: string,
   caller: string,
 ): RoomDeleteResult {
+  assertLiveDatabase(db, "deleteRoom");
+
   const owner = roomOwner(db, room);
 
   if (owner === undefined) return { ok: false, reason: "not-found" };
@@ -792,6 +815,8 @@ export function deleteRoom(
  * and isn't booting themselves).
  */
 export function bootFromRoom(db: Db, room: string, handle: string): boolean {
+  assertLiveDatabase(db, "bootFromRoom");
+
   const info = db
     .prepare(`DELETE FROM room_members WHERE room_name = ? AND handle = ?`)
     .run(room, handle);
@@ -1013,6 +1038,8 @@ export function advanceRoomRead(
   handle: string,
   upToId: number,
 ): void {
+  assertLiveDatabase(db, "advanceRoomRead");
+
   db.prepare(
     `INSERT INTO room_reads (room_name, handle, last_read_id) VALUES (?, ?, ?)
      ON CONFLICT(room_name, handle) DO UPDATE SET
@@ -1092,6 +1119,8 @@ export function pruneAgents(db: Db, handles: readonly string[]): string[] {
  * No-op (returns false) if the handle isn't registered.
  */
 export function deleteAgent(db: Db, handle: string): boolean {
+  assertLiveDatabase(db, "deleteAgent");
+
   const info = db.prepare("DELETE FROM agents WHERE handle = ?").run(handle);
   db.prepare("DELETE FROM room_members WHERE handle = ?").run(handle);
   db.prepare("DELETE FROM room_reads WHERE handle = ?").run(handle);
@@ -1119,6 +1148,8 @@ export function deleteAgent(db: Db, handle: string): boolean {
  * Returns false if the handle isn't registered.
  */
 export function clearAgentPid(db: Db, handle: string): boolean {
+  assertLiveDatabase(db, "clearAgentPid");
+
   const info = db
     .prepare("UPDATE agents SET pid = NULL WHERE handle = ?")
     .run(handle);
@@ -1130,6 +1161,8 @@ export function clearAgentPid(db: Db, handle: string): boolean {
  * number of rows deleted.
  */
 export function deleteDmMessages(db: Db, a: string, b: string): number {
+  assertLiveDatabase(db, "deleteDmMessages");
+
   const info = db
     .prepare(
       `DELETE FROM messages
@@ -1147,6 +1180,8 @@ export function deleteDmMessages(db: Db, a: string, b: string): number {
  * deleted.
  */
 export function deleteRoomMessages(db: Db, room: string): number {
+  assertLiveDatabase(db, "deleteRoomMessages");
+
   const info = db.prepare("DELETE FROM messages WHERE to_handle = ?").run(room);
   db.prepare("UPDATE room_reads SET last_read_id = 0 WHERE room_name = ?").run(
     room,
@@ -1296,6 +1331,8 @@ function toApproval(row: ApprovalRow): Approval {
 }
 
 export function insertApproval(db: Db, input: ApprovalInput): number {
+  assertLiveDatabase(db, "insertApproval");
+
   const result = db
     .prepare(
       `INSERT INTO approvals (agent_handle, supervisor_handle, requested, grant_entry, grant_forms, allowlist, reason, session_id, created_at)
@@ -1385,6 +1422,8 @@ export function answerApproval(
   decision: "approve" | "deny",
   answeredBy: string,
 ): boolean {
+  assertLiveDatabase(db, "answerApproval");
+
   // ⚠️ ONLY WHEN THE ROW EXISTS. `?.requested == null` is also true for an
   // approval that is not there, so the first version threw
   // UnnameableApprovalError for a missing id instead of returning false —
@@ -1492,6 +1531,8 @@ export function setRoomStyle(
   style: string | null,
   custom?: string,
 ): void {
+  assertLiveDatabase(db, "setRoomStyle");
+
   db.prepare("UPDATE rooms SET style = ?, style_custom = ? WHERE name = ?").run(
     style,
     style === "custom" ? (custom ?? null) : null,
@@ -1505,6 +1546,8 @@ export function setAgentStyle(
   style: string | null,
   custom?: string,
 ): void {
+  assertLiveDatabase(db, "setAgentStyle");
+
   db.prepare(
     "UPDATE agents SET style = ?, style_custom = ? WHERE handle = ?",
   ).run(style, style === "custom" ? (custom ?? null) : null, handle);
@@ -1676,6 +1719,8 @@ export function insertClaim(
     expires_at: number;
   },
 ): ClaimRow | null {
+  assertLiveDatabase(db, "insertClaim");
+
   const info = db
     .prepare(
       `INSERT INTO claims (resource, holder, note, claimed_at, expires_at)
@@ -1706,6 +1751,8 @@ export function renewClaim(
   db: Db,
   input: { id: number; holder: string; expires_at: number; now: number },
 ): ClaimRow | null {
+  assertLiveDatabase(db, "renewClaim");
+
   const info = db
     .prepare(
       `UPDATE claims SET expires_at = @expires_at
@@ -1720,6 +1767,8 @@ export function renewClaim(
 
 /** Mark a claim released. Returns false if the row was already released. */
 export function releaseClaim(db: Db, id: number, released_at: number): boolean {
+  assertLiveDatabase(db, "releaseClaim");
+
   const info = db
     .prepare(
       "UPDATE claims SET released_at = ? WHERE id = ? AND released_at IS NULL",

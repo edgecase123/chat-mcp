@@ -80,10 +80,27 @@ the moved-away inode while everyone who opens the path afterwards sees an empty
 database. `lsof` and `PRAGMA database_list` both report the path, so neither can
 see it.
 
-- **`openDb` records the device and inode at open**, and `insertMessage` compares
-  them on every send. A mismatch throws `MessageNotPersistedError` with reason
-  `file-replaced`, which says to RESTART the agent — a retry on the same handle
-  lands in the same orphaned file.
+- **`openDb` records the device and inode at open**, and EVERY writer in
+  `dao.ts` compares them before its first statement. A mismatch throws, and the
+  message says to RESTART the agent — a retry on the same handle lands in the
+  same orphaned file.
+- 🛑 **`insertMessage` WAS THE ONLY WRITER THAT COMPARED THEM UNTIL #268.** The
+  other 23 — claims, approvals, rooms, agents, read watermarks, every delete —
+  wrote blind and reported success. **A lost message is noticed when no reply
+  comes; a lost claim is noticed when both agents have already acted.**
+- **The comparison has one implementation**, `databaseWasReplaced` in `db.ts`.
+  Writers reach it through `assertLiveDatabase(db, "<fn>")`, which throws
+  `DatabaseReplacedError` naming the function. `insertMessage` keeps its own
+  `MessageNotPersistedError` because a send has a from and a to to report.
+- 🛑 **THE CHECK IS A WRITER'S FIRST LINE, AND THAT IS THE POINT.** Checking
+  mid-operation would turn a replaced file into PARTIAL state: `joinRoom` writes
+  `room_members` before it announces, so a throw between them leaves a member
+  joined with no announcement. Checked first, a refused writer has written
+  nothing. A test asserts the position, not just the presence.
+- ⚠️ **PRESENCE OF THE CALL PROVES NOTHING ON ITS OWN.** The comparison is a
+  no-op for a connection with no mark, which is every `:memory:` database — so
+  most of the suite exercises a call that cannot fire. Two tests replace a real
+  file to cover the mechanism.
 - **The `health` tool reports both marks**, so an agent can check without
   sending.
 - 🛑 **`openDb` THROWS if it cannot stat the file it just opened**, rather than
