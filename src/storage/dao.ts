@@ -409,10 +409,14 @@ export function insertMessage(db: Db, input: SendInput): SendResult {
   // from it. Measured on 2f3f4f3: `changes === 1`, the read-back succeeded,
   // and the file at the path held no rows.
   //
-  // ⚠️ AN UNSET MARK IS NOT A MISMATCH. `identityFor` is undefined only for a
-  // database that did not come from `openDb`, which in practice is `:memory:` —
-  // there is no file to compare, and a guard test keeps `openDb` the single
-  // place production opens one.
+  // ⚠️ AN UNSET MARK IS NOT A MISMATCH, AND `openDb` NOW THROWS RATHER THAN
+  // HANDING ONE BACK. So this branch is reached only by a database that did not
+  // come from `openDb`, which in practice is `:memory:` — there is no file to
+  // compare. A guard test keeps `openDb` the single place production opens one.
+  //
+  // 🛑 THE SKIP USED TO BE THE FAIL-OPEN. `openDb` recorded nothing when its own
+  // stat failed, and a connection in that state wrote into a replaced file for
+  // its whole life with no guard and no signal. Raised by claude1 on #138.
   const atOpen = identityFor(db);
   if (atOpen) {
     const now = identityOf(dbPath());

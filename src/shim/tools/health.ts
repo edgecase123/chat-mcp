@@ -55,8 +55,15 @@ export function identityReading(
       matches: false,
       // Not a match and not a fault. Claiming either would be an instrument
       // that could not say no.
+      //
+      // ⚠️ UNREACHABLE FROM `openDb` SINCE #138's SECOND SLICE, and kept
+      // anyway. `openDb` throws instead of returning an unmarked connection, so
+      // the only callers that land here are a `:memory:` database and this
+      // function's own tests. A reading that cannot be produced is still the
+      // honest answer for the shape, and deleting it would make `atOpen`'s
+      // nullable type a lie.
       reading:
-        "This connection did not record a file identity at open, so whether the file moved underneath it is UNREADABLE. Only a database opened through openDb carries the mark.",
+        "This connection did not record a file identity at open, so whether the file moved underneath it is UNREADABLE. Only a database opened through openDb carries the mark, and openDb now throws rather than returning one without it.",
     };
   }
 

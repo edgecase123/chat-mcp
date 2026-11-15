@@ -86,6 +86,10 @@ see it.
   lands in the same orphaned file.
 - **The `health` tool reports both marks**, so an agent can check without
   sending.
+- 🛑 **`openDb` THROWS if it cannot stat the file it just opened**, rather than
+  handing back a connection with no mark. An unmarked connection skips the
+  comparison on every send, so it would write into a replaced file for the life
+  of the process without refusing once.
 - ⚠️ **Restoring the file does not fix a live agent.** The connection still holds
   the old inode, and only a restart re-opens it.
 
