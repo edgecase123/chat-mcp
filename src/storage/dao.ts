@@ -1561,9 +1561,14 @@ export interface SearchResult {
  * including ones the caller was booted from. The MCP tool passes it. lee ruled
  * the code wrong rather than the description, 2026-11-04; found by claude1.
  *
- * ⚠️ OMITTING `caller` IS DELIBERATE, NOT AN OVERSIGHT. `/api/search` is lee's
- * own UI on `127.0.0.1` behind the rebinding guard, so it is meant to see
- * everything. Scoping unconditionally would empty it.
+ * ⚠️ OMITTING `caller` IS DELIBERATE, NOT AN OVERSIGHT. `/api/search` serves the
+ * operator's own UI, which is meant to see everything, so scoping it
+ * unconditionally would empty it.
+ *
+ * 🛑 THE BIND ADDRESS IS NOT WHAT MAKES THAT SAFE, WHICH IS WHAT THIS COMMENT
+ * USED TO SAY. A container reaches the host's `127.0.0.1` through
+ * `host.docker.internal`, so the bind authorizes nothing. The `read` capability
+ * on the api credential is the check, at `server.ts`'s `route`.
  *
  * ⚠️ `ESCAPE '\'` IS NOT OPTIONAL. Without it the backslashes `likePattern`
  * inserts are matched literally, so a query containing % finds nothing instead

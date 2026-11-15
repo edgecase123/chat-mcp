@@ -461,9 +461,10 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
  * 🛑 THIS MUST NOT BE A SOFTER DOOR THAN `target=` ON THE SAME ROUTE.
  * `handleGetMessages` refuses a room the caller is not a member of, so the
  * same check runs here — and a DM requires the caller to be a party to it.
- * `/api/search` is deliberately unscoped because it is lee's own UI behind the
- * rebinding guard, but THIS route already chose the stricter rule and an
- * id-based lookup that relaxed it would be a bypass, not a precedent.
+ * `/api/search` is deliberately unscoped because it serves the operator's own
+ * UI — NOT because of the bind address, which authorizes nothing. THIS route
+ * already chose the stricter rule, and an id-based lookup that relaxed it would
+ * be a bypass, not a precedent.
  *
  * ⚠️ 404 FOR BOTH "no such id" AND "not yours", deliberately. Distinguishing
  * them would turn the endpoint into an oracle for which ids exist in
