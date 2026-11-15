@@ -26,26 +26,26 @@ other path is derived from it.
 🛑 **Under the node test runner `stateDir()` THROWS rather than defaulting.**
 A test that resolved the real `~/.chat-mcp` could bind a supervisor socket
 there, and binding unlinks whatever looks stale — which silently stops a
-running agent. Set `process.env.CHAT_MCP_HOME` to a temp directory *before*
+running agent. Set `process.env.CHAT_MCP_HOME` to a temp directory _before_
 importing anything that resolves a path.
 
 ## What is in it
 
-| Entry | Owner | What it holds |
-|---|---|---|
-| `chat.db` | `src/storage/db.ts` | Every message, room, membership and agent row. The `-wal` and `-shm` files beside it are SQLite's, not ours |
-| `sock/<handle>` | `src/supervise/socket.ts` | Where a supervisor listens for direct delivery. **Kept short deliberately** — a unix socket path caps at ~104 bytes on macOS and a too-long one fails as a truncated bind, not a clear error |
-| `notify/<handle>` | `src/notify/bus.ts` | The wake file an adapter watches. A write here is what pulls an idle agent back into its inference loop |
-| `projects.json` | `src/index.ts` (`project` command) | Which directory each handle's agent works in |
-| `mounts.json` | `src/supervise/mounts.ts` | Extra mounts a containerized handle gets beyond `/work`, each attached **read-only** at `/mnt/<key>` — the tree chooses the code that runs in the container, so a writable extra mount is a write path onto the host directory it names (#231) |
-| `container.json` | `src/supervise/container.ts` | Which handles have accepted the container confirmation banner, and the image fingerprint |
-| `secrets.env` | `src/supervise/auth.ts` | `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN`. Mode `0600` |
-| `tokens/` | `src/supervise/handle-tokens.ts` | Per-handle bus bearer tokens |
-| `mcp/<handle>.json` | `src/util/paths.ts` (`mcpConfigPathFor`) | The MCP client config handed to a supervised child |
-| `adapters/` | `src/util/paths.ts` (`adaptersDir`) | Installed wake-adapter scripts, one per framework and handle |
-| `web-url` | `src/cli/web/server.ts` | The running web UI's **plain** url. Unlinked on shutdown |
-| `aliases.sh` | `src/index.ts` (`aliases` command) | A source-able shell alias block |
-| `run/*.pid`, `logs/*.log` | `scripts/lib/procctl.sh` | Written by the operator scripts, not by the CLI |
+| Entry                     | Owner                                    | What it holds                                                                                                                                                                                                                                  |
+| ------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat.db`                 | `src/storage/db.ts`                      | Every message, room, membership and agent row. The `-wal` and `-shm` files beside it are SQLite's, not ours                                                                                                                                    |
+| `sock/<handle>`           | `src/supervise/socket.ts`                | Where a supervisor listens for direct delivery. **Kept short deliberately** — a unix socket path caps at ~104 bytes on macOS and a too-long one fails as a truncated bind, not a clear error                                                   |
+| `notify/<handle>`         | `src/notify/bus.ts`                      | The wake file an adapter watches. A write here is what pulls an idle agent back into its inference loop                                                                                                                                        |
+| `projects.json`           | `src/index.ts` (`project` command)       | Which directory each handle's agent works in                                                                                                                                                                                                   |
+| `mounts.json`             | `src/supervise/mounts.ts`                | Extra mounts a containerized handle gets beyond `/work`, each attached **read-only** at `/mnt/<key>` — the tree chooses the code that runs in the container, so a writable extra mount is a write path onto the host directory it names (#231) |
+| `container.json`          | `src/supervise/container.ts`             | Which handles have accepted the container confirmation banner, and the image fingerprint                                                                                                                                                       |
+| `secrets.env`             | `src/supervise/auth.ts`                  | `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN`. Mode `0600`                                                                                                                                                                                          |
+| `tokens/`                 | `src/supervise/handle-tokens.ts`         | Per-handle bus bearer tokens                                                                                                                                                                                                                   |
+| `mcp/<handle>.json`       | `src/util/paths.ts` (`mcpConfigPathFor`) | The MCP client config handed to a supervised child                                                                                                                                                                                             |
+| `adapters/`               | `src/util/paths.ts` (`adaptersDir`)      | Installed wake-adapter scripts, one per framework and handle                                                                                                                                                                                   |
+| `web-url`                 | `src/cli/web/server.ts`                  | The running web UI's **plain** url. Unlinked on shutdown                                                                                                                                                                                       |
+| `aliases.sh`              | `src/index.ts` (`aliases` command)       | A source-able shell alias block                                                                                                                                                                                                                |
+| `run/*.pid`, `logs/*.log` | `scripts/lib/procctl.sh`                 | Written by the operator scripts, not by the CLI                                                                                                                                                                                                |
 
 ## The two entries whose location will surprise you
 
@@ -76,11 +76,11 @@ helper references. `dbPath()` returns `chat.db`. Safe to delete.
 
 ## Source files
 
-| File | Role |
-|---|---|
-| `src/util/paths.ts` | Every path in the table above, plus `writePrivateFileSync` for the `0600` ones |
-| `src/supervise/socket.ts` | Binds and unlinks `sock/<handle>` |
-| `src/notify/bus.ts` | Writes `notify/<handle>` |
+| File                      | Role                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| `src/util/paths.ts`       | Every path in the table above, plus `writePrivateFileSync` for the `0600` ones |
+| `src/supervise/socket.ts` | Binds and unlinks `sock/<handle>`                                              |
+| `src/notify/bus.ts`       | Writes `notify/<handle>`                                                       |
 
 ## Related docs
 

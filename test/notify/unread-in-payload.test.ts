@@ -1,9 +1,9 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
-import { migrate } from '../../src/storage/db.js';
-import * as dao from '../../src/storage/dao.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { readFileSync } from "node:fs";
+import { migrate } from "../../src/storage/db.js";
+import * as dao from "../../src/storage/dao.js";
 
 /**
  * 🛑 THE WHOLE POINT OF `unread` IS TO LET A WOKEN AGENT CALL NOTHING.
@@ -16,35 +16,41 @@ import * as dao from '../../src/storage/dao.js';
  */
 
 function bus(): DatabaseSync {
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(":memory:");
   migrate(db);
-  for (const h of ['me', 'other']) {
-    dao.upsertAgent(db, { handle: h, pid: 1, session_id: h, display_name: h, metadata: {} });
+  for (const h of ["me", "other"]) {
+    dao.upsertAgent(db, {
+      handle: h,
+      pid: 1,
+      session_id: h,
+      display_name: h,
+      metadata: {},
+    });
   }
 
   return db;
 }
 
-test('🚨 one waiting DM counts as 1, so the agent can skip the inbox', () => {
+test("🚨 one waiting DM counts as 1, so the agent can skip the inbox", () => {
   const db = bus();
 
   try {
-    dao.insertMessage(db, { from: 'other', to: 'me', body: 'hello' });
+    dao.insertMessage(db, { from: "other", to: "me", body: "hello" });
 
-    assert.equal(dao.totalUnreadFor(db, 'me'), 1);
+    assert.equal(dao.totalUnreadFor(db, "me"), 1);
   } finally {
     db.close();
   }
 });
 
-test('🚨 two waiting DMs count as 2, which is what forces the read', () => {
+test("🚨 two waiting DMs count as 2, which is what forces the read", () => {
   const db = bus();
 
   try {
-    dao.insertMessage(db, { from: 'other', to: 'me', body: 'first' });
-    dao.insertMessage(db, { from: 'other', to: 'me', body: 'second' });
+    dao.insertMessage(db, { from: "other", to: "me", body: "first" });
+    dao.insertMessage(db, { from: "other", to: "me", body: "second" });
 
-    assert.equal(dao.totalUnreadFor(db, 'me'), 2);
+    assert.equal(dao.totalUnreadFor(db, "me"), 2);
   } finally {
     db.close();
   }
@@ -56,49 +62,59 @@ test('🚨 two waiting DMs count as 2, which is what forces the read', () => {
  * the agent decides from it, so a count that includes what the read excludes
  * sends the agent after a message that is not there.
  */
-test('🚨 the DM count equals what pendingInbox returns', () => {
+test("🚨 the DM count equals what pendingInbox returns", () => {
   const db = bus();
 
   try {
-    for (const body of ['a', 'b', 'c']) dao.insertMessage(db, { from: 'other', to: 'me', body });
-    const first = dao.pendingInbox(db, { to: 'me' });
+    for (const body of ["a", "b", "c"])
+      dao.insertMessage(db, { from: "other", to: "me", body });
+    const first = dao.pendingInbox(db, { to: "me" });
     dao.markRead(db, [first[0]!.id]);
 
-    assert.equal(dao.totalUnreadFor(db, 'me'), dao.pendingInbox(db, { to: 'me' }).length);
-    assert.equal(dao.totalUnreadFor(db, 'me'), 2);
+    assert.equal(
+      dao.totalUnreadFor(db, "me"),
+      dao.pendingInbox(db, { to: "me" }).length,
+    );
+    assert.equal(dao.totalUnreadFor(db, "me"), 2);
   } finally {
     db.close();
   }
 });
 
-test('🚨 a read DM stops counting, so the number can reach the skip case again', () => {
+test("🚨 a read DM stops counting, so the number can reach the skip case again", () => {
   const db = bus();
 
   try {
-    dao.insertMessage(db, { from: 'other', to: 'me', body: 'old' });
-    dao.markRead(db, dao.pendingInbox(db, { to: 'me' }).map((m) => m.id));
-    dao.insertMessage(db, { from: 'other', to: 'me', body: 'new' });
+    dao.insertMessage(db, { from: "other", to: "me", body: "old" });
+    dao.markRead(
+      db,
+      dao.pendingInbox(db, { to: "me" }).map((m) => m.id),
+    );
+    dao.insertMessage(db, { from: "other", to: "me", body: "new" });
 
-    assert.equal(dao.totalUnreadFor(db, 'me'), 1);
+    assert.equal(dao.totalUnreadFor(db, "me"), 1);
   } finally {
     db.close();
   }
 });
 
 /** A room message with no DMs waiting reaches the skip case on its own. */
-test('🚨 one waiting room message counts as 1', () => {
+test("🚨 one waiting room message counts as 1", () => {
   const db = bus();
 
   try {
-    for (const h of ['me', 'other']) dao.joinRoom(db, '#r', h);
+    for (const h of ["me", "other"]) dao.joinRoom(db, "#r", h);
     const newest = db
-      .prepare("SELECT COALESCE(MAX(id), 0) AS n FROM messages WHERE to_handle = '#r'")
+      .prepare(
+        "SELECT COALESCE(MAX(id), 0) AS n FROM messages WHERE to_handle = '#r'",
+      )
       .get() as unknown as { n: number };
-    for (const h of ['me', 'other']) dao.advanceRoomRead(db, '#r', h, Number(newest.n));
+    for (const h of ["me", "other"])
+      dao.advanceRoomRead(db, "#r", h, Number(newest.n));
 
-    dao.insertMessage(db, { from: 'other', to: '#r', body: 'room msg' });
+    dao.insertMessage(db, { from: "other", to: "#r", body: "room msg" });
 
-    assert.equal(dao.totalUnreadFor(db, 'me'), 1);
+    assert.equal(dao.totalUnreadFor(db, "me"), 1);
   } finally {
     db.close();
   }
@@ -113,56 +129,66 @@ test('🚨 one waiting room message counts as 1', () => {
  *
  * Found by claude1 reviewing 2ca8b10, reproduced at runtime before fixing.
  */
-test('🚨 unread spans DMs AND rooms, because one file carries both', () => {
+test("🚨 unread spans DMs AND rooms, because one file carries both", () => {
   const db = bus();
 
   try {
-    for (const h of ['me', 'other']) dao.joinRoom(db, '#r', h);
+    for (const h of ["me", "other"]) dao.joinRoom(db, "#r", h);
     const newest = db
-      .prepare("SELECT COALESCE(MAX(id), 0) AS n FROM messages WHERE to_handle = '#r'")
+      .prepare(
+        "SELECT COALESCE(MAX(id), 0) AS n FROM messages WHERE to_handle = '#r'",
+      )
       .get() as unknown as { n: number };
-    for (const h of ['me', 'other']) dao.advanceRoomRead(db, '#r', h, Number(newest.n));
+    for (const h of ["me", "other"])
+      dao.advanceRoomRead(db, "#r", h, Number(newest.n));
 
-    dao.insertMessage(db, { from: 'other', to: 'me', body: 'a DM waits' });
-    dao.insertMessage(db, { from: 'other', to: '#r', body: 'a room message waits' });
+    dao.insertMessage(db, { from: "other", to: "me", body: "a DM waits" });
+    dao.insertMessage(db, {
+      from: "other",
+      to: "#r",
+      body: "a room message waits",
+    });
 
     // Two are waiting, so the agent MUST read whichever send wrote the file.
-    assert.equal(dao.totalUnreadFor(db, 'me'), 2);
+    assert.equal(dao.totalUnreadFor(db, "me"), 2);
   } finally {
     db.close();
   }
 });
 
-test('🚨 a second room adds to the same total', () => {
+test("🚨 a second room adds to the same total", () => {
   const db = bus();
 
   try {
-    for (const room of ['#r', '#s']) {
-      for (const h of ['me', 'other']) dao.joinRoom(db, room, h);
+    for (const room of ["#r", "#s"]) {
+      for (const h of ["me", "other"]) dao.joinRoom(db, room, h);
       const newest = db
-        .prepare('SELECT COALESCE(MAX(id), 0) AS n FROM messages WHERE to_handle = ?')
+        .prepare(
+          "SELECT COALESCE(MAX(id), 0) AS n FROM messages WHERE to_handle = ?",
+        )
         .get(room) as unknown as { n: number };
-      for (const h of ['me', 'other']) dao.advanceRoomRead(db, room, h, Number(newest.n));
+      for (const h of ["me", "other"])
+        dao.advanceRoomRead(db, room, h, Number(newest.n));
     }
 
-    dao.insertMessage(db, { from: 'other', to: '#r', body: 'one' });
-    dao.insertMessage(db, { from: 'other', to: '#s', body: 'two' });
+    dao.insertMessage(db, { from: "other", to: "#r", body: "one" });
+    dao.insertMessage(db, { from: "other", to: "#s", body: "two" });
 
-    assert.equal(dao.totalUnreadFor(db, 'me'), 2);
+    assert.equal(dao.totalUnreadFor(db, "me"), 2);
   } finally {
     db.close();
   }
 });
 
 /** A room the handle is not in must not contribute. */
-test('🚨 a room I am not a member of is not counted', () => {
+test("🚨 a room I am not a member of is not counted", () => {
   const db = bus();
 
   try {
-    dao.joinRoom(db, '#theirs', 'other');
-    dao.insertMessage(db, { from: 'other', to: '#theirs', body: 'not mine' });
+    dao.joinRoom(db, "#theirs", "other");
+    dao.insertMessage(db, { from: "other", to: "#theirs", body: "not mine" });
 
-    assert.equal(dao.totalUnreadFor(db, 'me'), 0);
+    assert.equal(dao.totalUnreadFor(db, "me"), 0);
   } finally {
     db.close();
   }
@@ -175,27 +201,34 @@ test('🚨 a room I am not a member of is not counted', () => {
  * Scoped to the paths an AGENT is woken by. The CLI and one-shot senders are
  * deliberately excluded — `unread` is documented as absent-means-unknown.
  */
-test('🚨 every live send path passes unread to notifyPeer', () => {
+test("🚨 every live send path passes unread to notifyPeer", () => {
   const live = [
-    'src/shim/tools/send.ts',
+    "src/shim/tools/send.ts",
     // \u2b50 ROOM SENDS MOVED HERE from `shim/tools/room_send.ts`, and this is
     // now the ONE room path behind the MCP tool, the web UI and the TUI. The
     // guard got stronger: three callers, one place to check.
-    'src/messaging/room-send.ts',
-    'src/cli/web/server.ts',
+    "src/messaging/room-send.ts",
+    "src/cli/web/server.ts",
   ];
 
   for (const file of live) {
-    const src = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
-    const calls = src.split('notifyPeer(').slice(1);
-    assert.ok(calls.length > 0, `${file} still calls notifyPeer, so the guard is not vacuous`);
+    const src = readFileSync(new URL(`../../${file}`, import.meta.url), "utf8");
+    const calls = src.split("notifyPeer(").slice(1);
+    assert.ok(
+      calls.length > 0,
+      `${file} still calls notifyPeer, so the guard is not vacuous`,
+    );
 
     for (const [i, call] of calls.entries()) {
-      const args = call.slice(0, call.indexOf(';'));
+      const args = call.slice(0, call.indexOf(";"));
       // Only the paths carrying a message body owe a count. A bodyless ping
       // correctly tells the agent to go and read.
       if (!/body/.test(args)) continue;
-      assert.match(args, /unread/, `${file} notifyPeer call ${i + 1} carries a body but no unread`);
+      assert.match(
+        args,
+        /unread/,
+        `${file} notifyPeer call ${i + 1} carries a body but no unread`,
+      );
     }
   }
 });

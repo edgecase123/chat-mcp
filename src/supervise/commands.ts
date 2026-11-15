@@ -1,6 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, normalize } from 'node:path';
-import { assertNoControlChars, containedRelative, type UncheckedScript } from './containment.js';
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, normalize } from "node:path";
+import {
+  assertNoControlChars,
+  containedRelative,
+  type UncheckedScript,
+} from "./containment.js";
 
 /**
  * The commands a supervised agent may ask the host to run.
@@ -22,7 +26,7 @@ import { assertNoControlChars, containedRelative, type UncheckedScript } from '.
  * is an enumerated mode. A free-form type needs a mandatory anchored pattern
  * before it comes back.
  */
-export type ParamType = 'enum';
+export type ParamType = "enum";
 
 export interface CommandParam {
   readonly name: string;
@@ -99,17 +103,23 @@ interface ParamKind {
     context: string,
   ) => readonly string[] | undefined;
   /** Refuse a supplied value the type does not permit. */
-  readonly assertValue: (value: string, param: CommandParam, context: string) => void;
+  readonly assertValue: (
+    value: string,
+    param: CommandParam,
+    context: string,
+  ) => void;
 }
 
 const PARAM_KINDS: Record<ParamType, ParamKind> = {
   enum: {
     parseValues: (raw, context) => {
       if (!Array.isArray(raw.values) || raw.values.length === 0) {
-        throw new Error(`${context} is an enum and needs a non-empty "values" array`);
+        throw new Error(
+          `${context} is an enum and needs a non-empty "values" array`,
+        );
       }
 
-      if (!raw.values.every((v): v is string => typeof v === 'string')) {
+      if (!raw.values.every((v): v is string => typeof v === "string")) {
         throw new Error(`${context}: every value must be a string`);
       }
 
@@ -117,8 +127,10 @@ const PARAM_KINDS: Record<ParamType, ParamKind> = {
         // 🛑 A VALUE STARTING WITH `-` IS A FLAG TO THE CALLEE. The manifest
         // author controls this list, so this catches their mistake rather than
         // an agent's attack — but it is the same consequence either way.
-        if (value.startsWith('-')) {
-          throw new Error(`${context}: value "${value}" must not start with "-"`);
+        if (value.startsWith("-")) {
+          throw new Error(
+            `${context}: value "${value}" must not start with "-"`,
+          );
         }
       }
 
@@ -126,14 +138,16 @@ const PARAM_KINDS: Record<ParamType, ParamKind> = {
     },
     assertValue: (value, param, context) => {
       if (!param.values?.includes(value)) {
-        throw new Error(`${context}: "${value}" is not one of ${param.values?.join(', ')}`);
+        throw new Error(
+          `${context}: "${value}" is not one of ${param.values?.join(", ")}`,
+        );
       }
     },
   },
 };
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /** Refuse a repeated `name`, for whichever noun the caller is checking. */
@@ -169,7 +183,7 @@ function containedScript(commandName: string, raw: unknown): string {
  * supervisor's own working directory.
  */
 function parseProjectDir(raw: unknown): string {
-  if (typeof raw !== 'string' || raw.length === 0) {
+  if (typeof raw !== "string" || raw.length === 0) {
     throw new Error('a command manifest needs a non-empty "projectDir"');
   }
 
@@ -197,15 +211,17 @@ function parseReadOnlyPaths(raw: unknown): readonly string[] | undefined {
     throw new Error('a command manifest\'s "readOnlyPaths" must be an array');
   }
 
-  const noun = 'read-only path';
+  const noun = "read-only path";
   // Trailing slashes stripped so the stored value is the one the spawn mounts.
   // Two spellings of one directory is how a duplicate goes unnoticed.
-  const paths = raw.map((entry) => containedRelative(entry, noun).replace(/\/+$/, ''));
+  const paths = raw.map((entry) =>
+    containedRelative(entry, noun).replace(/\/+$/, ""),
+  );
 
   for (const path of paths) {
     // `.`, `./` and `scripts/..` all land here, and mounting the root
     // read-only stops the agent editing the repo it is working in.
-    if (path === '' || path === '.') {
+    if (path === "" || path === ".") {
       throw new Error(`a ${noun} may not be the project root`);
     }
   }
@@ -213,7 +229,8 @@ function parseReadOnlyPaths(raw: unknown): readonly string[] | undefined {
   const seen = new Set<string>();
 
   for (const path of paths) {
-    if (seen.has(path)) throw new Error(`duplicate ${noun} "${path}" in the manifest`);
+    if (seen.has(path))
+      throw new Error(`duplicate ${noun} "${path}" in the manifest`);
     seen.add(path);
   }
 
@@ -221,7 +238,7 @@ function parseReadOnlyPaths(raw: unknown): readonly string[] | undefined {
 }
 
 function parseParam(commandName: string, raw: unknown): CommandParam {
-  if (!isRecord(raw) || typeof raw.name !== 'string' || raw.name.length === 0) {
+  if (!isRecord(raw) || typeof raw.name !== "string" || raw.name.length === 0) {
     throw new Error(`command "${commandName}" has a param with no name`);
   }
 
@@ -231,11 +248,15 @@ function parseParam(commandName: string, raw: unknown): CommandParam {
   // Keeps a param out of Object.prototype's key space, and keeps a name out of
   // the shapes a callee might read as a flag.
   if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name)) {
-    throw new Error(`${context}: a param name must match /^[a-z0-9][a-z0-9_-]*$/i`);
+    throw new Error(
+      `${context}: a param name must match /^[a-z0-9][a-z0-9_-]*$/i`,
+    );
   }
 
-  if (typeof raw.type !== 'string' || !Object.hasOwn(PARAM_KINDS, raw.type)) {
-    throw new Error(`${context}: unknown param type ${JSON.stringify(raw.type)}`);
+  if (typeof raw.type !== "string" || !Object.hasOwn(PARAM_KINDS, raw.type)) {
+    throw new Error(
+      `${context}: unknown param type ${JSON.stringify(raw.type)}`,
+    );
   }
 
   const type = raw.type as ParamType;
@@ -243,14 +264,16 @@ function parseParam(commandName: string, raw: unknown): CommandParam {
   let fallback: string | undefined;
 
   if (raw.default !== undefined) {
-    if (typeof raw.default !== 'string') {
+    if (typeof raw.default !== "string") {
       throw new Error(`${context}: default must be a string`);
     }
 
     fallback = raw.default;
 
     if (values && !values.includes(fallback)) {
-      throw new Error(`${context}: default "${fallback}" is not one of ${values.join(', ')}`);
+      throw new Error(
+        `${context}: default "${fallback}" is not one of ${values.join(", ")}`,
+      );
     }
   }
 
@@ -263,7 +286,7 @@ function parseParam(commandName: string, raw: unknown): CommandParam {
 }
 
 function parseCommand(raw: unknown): CommandSpec {
-  if (!isRecord(raw) || typeof raw.name !== 'string' || raw.name.length === 0) {
+  if (!isRecord(raw) || typeof raw.name !== "string" || raw.name.length === 0) {
     throw new Error('every command needs a non-empty "name"');
   }
 
@@ -277,7 +300,10 @@ function parseCommand(raw: unknown): CommandSpec {
   }
 
   const params = raw.params.map((p) => parseParam(name, p));
-  assertUniqueNames(params, (dup) => `command "${name}" has a duplicate param "${dup}"`);
+  assertUniqueNames(
+    params,
+    (dup) => `command "${name}" has a duplicate param "${dup}"`,
+  );
 
   return { name, script, params };
 }
@@ -285,7 +311,7 @@ function parseCommand(raw: unknown): CommandSpec {
 /** Validate a parsed JSON value into a manifest, or throw saying why. */
 export function parseManifest(raw: unknown): CommandManifest {
   if (!isRecord(raw)) {
-    throw new Error('a command manifest must be an object');
+    throw new Error("a command manifest must be an object");
   }
 
   if (!Array.isArray(raw.commands)) {
@@ -295,7 +321,10 @@ export function parseManifest(raw: unknown): CommandManifest {
   const projectDir = parseProjectDir(raw.projectDir);
   const readOnlyPaths = parseReadOnlyPaths(raw.readOnlyPaths);
   const commands = raw.commands.map(parseCommand);
-  assertUniqueNames(commands, (dup) => `duplicate command "${dup}" in the manifest`);
+  assertUniqueNames(
+    commands,
+    (dup) => `duplicate command "${dup}" in the manifest`,
+  );
 
   return { projectDir, ...(readOnlyPaths ? { readOnlyPaths } : {}), commands };
 }
@@ -317,10 +346,10 @@ export function readManifest(path: string): CommandManifest {
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(readFileSync(path, 'utf8'));
+    parsed = JSON.parse(readFileSync(path, "utf8"));
   } catch (err) {
     throw new Error(
-      `${path} is not valid JSON: ${err instanceof Error ? err.message : 'unparseable'}`,
+      `${path} is not valid JSON: ${err instanceof Error ? err.message : "unparseable"}`,
     );
   }
 
@@ -374,14 +403,16 @@ export function resolveArgv(
 
   const argv = declared.map((param) => {
     const context = `command "${name}" param "${param.name}"`;
-    const supplied = Object.hasOwn(params, param.name) ? params[param.name] : undefined;
+    const supplied = Object.hasOwn(params, param.name)
+      ? params[param.name]
+      : undefined;
 
     if (supplied === undefined) {
       if (param.default !== undefined) return param.default;
       throw new Error(`command "${name}" needs a value for "${param.name}"`);
     }
 
-    if (typeof supplied !== 'string') {
+    if (typeof supplied !== "string") {
       throw new Error(`${context} must be a string`);
     }
 

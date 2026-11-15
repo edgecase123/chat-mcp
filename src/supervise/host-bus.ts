@@ -1,7 +1,7 @@
-import { buildServer, shimContextFor } from '../shim/index.js';
-import type { BusEndpoint } from './child.js';
-import { authenticateToken, mintToken, revokeToken } from './handle-tokens.js';
-import { McpHttpListener } from './mcp-listener.js';
+import { buildServer, shimContextFor } from "../shim/index.js";
+import type { BusEndpoint } from "./child.js";
+import { authenticateToken, mintToken, revokeToken } from "./handle-tokens.js";
+import { McpHttpListener } from "./mcp-listener.js";
 
 export interface HostBus {
   /** What the child is configured with. */

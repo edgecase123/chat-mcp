@@ -1,16 +1,16 @@
-import hljs from 'highlight.js/lib/core';
-import bash from 'highlight.js/lib/languages/bash';
-import css from 'highlight.js/lib/languages/css';
-import diff from 'highlight.js/lib/languages/diff';
-import json from 'highlight.js/lib/languages/json';
-import php from 'highlight.js/lib/languages/php';
-import python from 'highlight.js/lib/languages/python';
-import sql from 'highlight.js/lib/languages/sql';
-import typescript from 'highlight.js/lib/languages/typescript';
-import xml from 'highlight.js/lib/languages/xml';
-import yaml from 'highlight.js/lib/languages/yaml';
-import { tokenize, type Token } from '../ink/util/markdown.js';
-import { rehydrateEscapedNewlines } from '../../util/wrap.js';
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import css from "highlight.js/lib/languages/css";
+import diff from "highlight.js/lib/languages/diff";
+import json from "highlight.js/lib/languages/json";
+import php from "highlight.js/lib/languages/php";
+import python from "highlight.js/lib/languages/python";
+import sql from "highlight.js/lib/languages/sql";
+import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
+import { tokenize, type Token } from "../ink/util/markdown.js";
+import { rehydrateEscapedNewlines } from "../../util/wrap.js";
 
 /**
  * Server-side markdown → safe HTML. Reuses the same tokenizer the Ink UI
@@ -23,11 +23,11 @@ import { rehydrateEscapedNewlines } from '../../util/wrap.js';
  */
 
 const ESCAPE_MAP: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;',
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
 };
 
 function escapeHtml(s: string): string {
@@ -40,21 +40,32 @@ function safeUrl(raw: string): string {
   const trimmed = raw.trim();
   if (/^(https?:|mailto:)/i.test(trimmed)) return trimmed;
   if (/^[\/#?]/.test(trimmed)) return trimmed;
-  return '#';
+  return "#";
 }
 
 // Registered explicitly rather than importing the full bundle: this runs in
 // a local dev tool and the full grammar set is an order of magnitude larger
 // than the ten people here actually paste.
 for (const [name, lang] of Object.entries({
-  bash, css, diff, json, php, python, sql, typescript, xml, yaml,
+  bash,
+  css,
+  diff,
+  json,
+  php,
+  python,
+  sql,
+  typescript,
+  xml,
+  yaml,
 })) {
   hljs.registerLanguage(name, lang);
 }
-hljs.registerAliases(['sh', 'shell', 'zsh'], { languageName: 'bash' });
-hljs.registerAliases(['js', 'jsx', 'ts', 'tsx', 'javascript'], { languageName: 'typescript' });
-hljs.registerAliases(['html', 'svg'], { languageName: 'xml' });
-hljs.registerAliases(['yml'], { languageName: 'yaml' });
+hljs.registerAliases(["sh", "shell", "zsh"], { languageName: "bash" });
+hljs.registerAliases(["js", "jsx", "ts", "tsx", "javascript"], {
+  languageName: "typescript",
+});
+hljs.registerAliases(["html", "svg"], { languageName: "xml" });
+hljs.registerAliases(["yml"], { languageName: "yaml" });
 
 /**
  * 🛑 THE ONLY PLACE UNESCAPED HTML IS EMITTED. highlight.js escapes the code
@@ -64,7 +75,10 @@ hljs.registerAliases(['yml'], { languageName: 'yaml' });
 function renderCode(value: string, lang: string | undefined): string {
   if (lang === undefined || !hljs.getLanguage(lang)) return escapeHtml(value);
   try {
-    const { value: html } = hljs.highlight(value, { language: lang, ignoreIllegals: true });
+    const { value: html } = hljs.highlight(value, {
+      language: lang,
+      ignoreIllegals: true,
+    });
     return html;
   } catch {
     return escapeHtml(value);
@@ -80,8 +94,14 @@ function trimUrlTail(url: string): string {
   let end = url.length;
   while (end > 0) {
     const ch = url[end - 1]!;
-    if ('.,;:!?'.includes(ch)) { end -= 1; continue; }
-    if (ch === ')' && !url.slice(0, end).includes('(')) { end -= 1; continue; }
+    if (".,;:!?".includes(ch)) {
+      end -= 1;
+      continue;
+    }
+    if (ch === ")" && !url.slice(0, end).includes("(")) {
+      end -= 1;
+      continue;
+    }
     break;
   }
   return url.slice(0, end);
@@ -93,41 +113,45 @@ function trimUrlTail(url: string): string {
  * are separate tokens by the time this is called.
  */
 function renderText(value: string): string {
-  let out = '';
+  let out = "";
   let last = 0;
   for (const m of value.matchAll(BARE_URL)) {
     const raw = trimUrlTail(m[0]);
     const start = m.index!;
-    out += escapeHtml(value.slice(last, start)).replace(/\n/g, '<br>');
+    out += escapeHtml(value.slice(last, start)).replace(/\n/g, "<br>");
     out += `<a href="${escapeHtml(safeUrl(raw))}" target="_blank" rel="noopener noreferrer">${escapeHtml(raw)}</a>`;
     last = start + raw.length;
   }
-  out += escapeHtml(value.slice(last)).replace(/\n/g, '<br>');
+  out += escapeHtml(value.slice(last)).replace(/\n/g, "<br>");
 
   return out;
 }
 
 function renderToken(t: Token): string {
   switch (t.kind) {
-    case 'text':
+    case "text":
       return renderText(t.value);
-    case 'bold':
+    case "bold":
       return `<strong>${escapeHtml(t.value)}</strong>`;
-    case 'italic':
+    case "italic":
       return `<em>${escapeHtml(t.value)}</em>`;
-    case 'code':
+    case "code":
       return `<code class="inline">${escapeHtml(t.value)}</code>`;
-    case 'code-block': {
-      const cls = t.lang === undefined ? 'hljs' : `hljs language-${escapeHtml(t.lang)}`;
+    case "code-block": {
+      const cls =
+        t.lang === undefined ? "hljs" : `hljs language-${escapeHtml(t.lang)}`;
       return `<pre><code class="${cls}">${renderCode(t.value, t.lang)}</code></pre>`;
     }
-    case 'link':
+    case "link":
       return `<a href="${escapeHtml(safeUrl(t.url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(t.label)}</a>`;
-    case 'table': {
-      const header = t.header.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
+    case "table": {
+      const header = t.header.map((h) => `<th>${escapeHtml(h)}</th>`).join("");
       const rows = t.rows
-        .map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c ?? '')}</td>`).join('')}</tr>`)
-        .join('');
+        .map(
+          (r) =>
+            `<tr>${r.map((c) => `<td>${escapeHtml(c ?? "")}</td>`).join("")}</tr>`,
+        )
+        .join("");
       return `<table><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
     }
   }
@@ -138,5 +162,5 @@ function renderToken(t: Token): string {
 export function renderBodyToHtml(body: string): string {
   const clean = rehydrateEscapedNewlines(body);
   const tokens = tokenize(clean);
-  return tokens.map(renderToken).join('');
+  return tokens.map(renderToken).join("");
 }

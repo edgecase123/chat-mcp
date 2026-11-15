@@ -1,6 +1,9 @@
-import { openSync, readSync, fstatSync, closeSync } from 'node:fs';
+import { openSync, readSync, fstatSync, closeSync } from "node:fs";
 // `adapters/` may import from `supervise/`; the reverse is the banned edge.
-import { usedFromUsage, claudeContextUsage } from '../supervise/drivers/claude-events.js';
+import {
+  usedFromUsage,
+  claudeContextUsage,
+} from "../supervise/drivers/claude-events.js";
 
 /**
  * How many tokens an agent's context window actually holds, read from the
@@ -77,11 +80,14 @@ export const TAIL_BYTES = 512 * 1024;
  * when it does not know is what this whole change exists to remove. The caller
  * reports nothing rather than reporting an estimate.
  */
-export function usedFromTranscript(path: string, tailBytes = TAIL_BYTES): number | null {
+export function usedFromTranscript(
+  path: string,
+  tailBytes = TAIL_BYTES,
+): number | null {
   let fd: number | undefined;
 
   try {
-    fd = openSync(path, 'r');
+    fd = openSync(path, "r");
     const size = fstatSync(fd).size;
     const length = Math.min(size, tailBytes);
     const start = size - length;
@@ -91,7 +97,7 @@ export function usedFromTranscript(path: string, tailBytes = TAIL_BYTES): number
 
     // A tail that starts mid-line leaves a fragment first; it fails to parse
     // and is skipped by the scan above, so no special case is needed.
-    return newestUsedInLines(buf.toString('utf8').split('\n'));
+    return newestUsedInLines(buf.toString("utf8").split("\n"));
   } catch {
     return null;
   } finally {

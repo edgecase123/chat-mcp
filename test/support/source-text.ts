@@ -19,5 +19,5 @@
  * line numbers; an index comparison survives it.
  */
 export function oneLine(source: string): string {
-  return source.replace(/\s+/g, ' ').trim();
+  return source.replace(/\s+/g, " ").trim();
 }

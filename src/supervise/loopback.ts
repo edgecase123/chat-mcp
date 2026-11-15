@@ -1,4 +1,4 @@
-import type { AddressInfo, Server } from 'node:net';
+import type { AddressInfo, Server } from "node:net";
 
 /**
  * 🛑 LOOPBACK IS NOT THE BOUNDARY. A container reaches a host `127.0.0.1` bind
@@ -8,7 +8,7 @@ import type { AddressInfo, Server } from 'node:net';
  * Extracted rather than copied, so the warning above cannot drift between the
  * two host listeners that share it — `CommandBroker` and `McpHttpListener`.
  */
-export const BIND_ADDRESS = '127.0.0.1';
+export const BIND_ADDRESS = "127.0.0.1";
 
 /**
  * Bind `server` to an OS-assigned loopback port and resolve the port it got.
@@ -22,9 +22,9 @@ export const BIND_ADDRESS = '127.0.0.1';
  */
 export async function listenOnLoopback(server: Server): Promise<number> {
   await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
+    server.once("error", reject);
     server.listen(0, BIND_ADDRESS, () => {
-      server.removeListener('error', reject);
+      server.removeListener("error", reject);
       resolve();
     });
   });

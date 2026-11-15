@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * What a real child did when it attempted something, read from a record of
@@ -34,7 +34,7 @@ export interface Captured {
 }
 
 export interface RefusedRecord extends Captured {
-  readonly outcome: 'refused';
+  readonly outcome: "refused";
   readonly approvalId: number;
   readonly attempted: string;
   /**
@@ -62,7 +62,7 @@ export interface RefusedRecord extends Captured {
  * "yes, and it did not work".
  */
 export interface RefusedUnderGrantRecord extends Captured {
-  readonly outcome: 'refused_under_grant';
+  readonly outcome: "refused_under_grant";
   /**
    * ⚠️ PLURAL. A probe can answer more than one approval before its target
    * is checked, and the existing records' singular `approvalId` is why a
@@ -82,7 +82,7 @@ export interface RefusedUnderGrantRecord extends Captured {
 }
 
 export interface PermittedRecord extends Captured {
-  readonly outcome: 'permitted';
+  readonly outcome: "permitted";
   readonly approvalId: number;
   readonly attempted: string;
   readonly allowlistEntry: string;
@@ -90,18 +90,27 @@ export interface PermittedRecord extends Captured {
 }
 
 export type Verdict =
-  | { readonly kind: 'refused'; readonly record: RefusedRecord }
-  | { readonly kind: 'refused_under_grant'; readonly record: RefusedUnderGrantRecord }
-  | { readonly kind: 'permitted'; readonly record: PermittedRecord }
-  | { readonly kind: 'unknown'; readonly reason: string };
+  | { readonly kind: "refused"; readonly record: RefusedRecord }
+  | {
+      readonly kind: "refused_under_grant";
+      readonly record: RefusedUnderGrantRecord;
+    }
+  | { readonly kind: "permitted"; readonly record: PermittedRecord }
+  | { readonly kind: "unknown"; readonly reason: string };
 
-export type CorpusRecord = RefusedRecord | RefusedUnderGrantRecord | PermittedRecord;
+export type CorpusRecord =
+  RefusedRecord | RefusedUnderGrantRecord | PermittedRecord;
 
 // ⚠️ RESOLVED FROM THIS MODULE, NOT THE CWD. A relative path made the corpus
 // load only when the suite ran from the package root.
-const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'captured-refusals.json');
+const FIXTURE = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "fixtures",
+  "captured-refusals.json",
+);
 
-const CORPUS: CorpusRecord[] = JSON.parse(readFileSync(FIXTURE, 'utf8'));
+const CORPUS: CorpusRecord[] = JSON.parse(readFileSync(FIXTURE, "utf8"));
 
 // 🛑 EVERY OUTCOME IS COUNTED. A third outcome absent from here could grow
 // to any size without the number anyone reads changing.
@@ -110,9 +119,10 @@ export const corpusSize = (): {
   refusedUnderGrant: number;
   permitted: number;
 } => ({
-  refused: CORPUS.filter((r) => r.outcome === 'refused').length,
-  refusedUnderGrant: CORPUS.filter((r) => r.outcome === 'refused_under_grant').length,
-  permitted: CORPUS.filter((r) => r.outcome === 'permitted').length,
+  refused: CORPUS.filter((r) => r.outcome === "refused").length,
+  refusedUnderGrant: CORPUS.filter((r) => r.outcome === "refused_under_grant")
+    .length,
+  permitted: CORPUS.filter((r) => r.outcome === "permitted").length,
 });
 
 /**
@@ -126,7 +136,10 @@ export const corpusSize = (): {
  */
 export function normalise(command: string): string {
   return command
-    .replace(/(\/private)?\/var\/folders\/\S+?\/chat-mcp-e2e-\w+/g, '$1/var/folders/T/e2e')
+    .replace(
+      /(\/private)?\/var\/folders\/\S+?\/chat-mcp-e2e-\w+/g,
+      "$1/var/folders/T/e2e",
+    )
     .trim();
 }
 
@@ -180,9 +193,15 @@ export function classify(
    * to live — its second refusal is recorded with the first grant present.
    */
   for (const r of corpus) {
-    if (r.outcome !== 'refused_under_grant' || normalise(r.attempted) !== want) continue;
-    if (sameSet(r.allowlist.map((a) => normalise(a)), grants)) {
-      return { kind: 'refused_under_grant', record: r };
+    if (r.outcome !== "refused_under_grant" || normalise(r.attempted) !== want)
+      continue;
+    if (
+      sameSet(
+        r.allowlist.map((a) => normalise(a)),
+        grants,
+      )
+    ) {
+      return { kind: "refused_under_grant", record: r };
     }
   }
 
@@ -193,7 +212,7 @@ export function classify(
   // "nothing granted", which is why the N-of-N test passes an empty one —
   // that is the single case those rows are evidence for, not a fiction.
   for (const r of corpus) {
-    if (r.outcome !== 'refused' || normalise(r.attempted) !== want) continue;
+    if (r.outcome !== "refused" || normalise(r.attempted) !== want) continue;
 
     // 🛑 A NULL ALLOWLIST IS NOT AN EMPTY ONE. Reading it as `[]` made a row
     // that recorded nothing return a positive `refused` for the "nothing
@@ -203,7 +222,13 @@ export function classify(
     // Found by claude1 on PR 43, after I had claimed to have removed it.
     if (r.allowlist === null) continue;
 
-    if (sameSet(r.allowlist.map((a) => normalise(a)), grants)) return { kind: 'refused', record: r };
+    if (
+      sameSet(
+        r.allowlist.map((a) => normalise(a)),
+        grants,
+      )
+    )
+      return { kind: "refused", record: r };
   }
 
   // 🛑 A MEASURED SUCCESS NEEDS ITS ALLOWLIST ENTRY PRESENT. The same tool
@@ -214,15 +239,16 @@ export function classify(
     // ⚠️ THE STORED KEY NEEDS NORMALISING TOO. A capture harness writes the
     // run's real scratch path, so comparing it raw against a normalised query
     // never matches. I fixed the allowlist comparison and missed this one.
-    if (r.outcome !== 'permitted' || normalise(r.attempted) !== want) continue;
-    if (grants.includes(normalise(r.allowlistEntry))) return { kind: 'permitted', record: r };
+    if (r.outcome !== "permitted" || normalise(r.attempted) !== want) continue;
+    if (grants.includes(normalise(r.allowlistEntry)))
+      return { kind: "permitted", record: r };
   }
 
   return {
-    kind: 'unknown',
+    kind: "unknown",
     reason:
       `nothing in the corpus records attempting ${JSON.stringify(want)} under this ` +
       `allowlist (${grants.length} entries). Capture it from a live run rather ` +
-      'than assuming it is allowed.',
+      "than assuming it is allowed.",
   };
 }

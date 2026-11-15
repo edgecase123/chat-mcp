@@ -1,4 +1,4 @@
-import { MessageNotPersistedError } from '../storage/dao.js';
+import { MessageNotPersistedError } from "../storage/dao.js";
 
 export type SendOutcome<T> = { sent: T } | { reason: string };
 

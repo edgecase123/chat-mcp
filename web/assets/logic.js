@@ -48,7 +48,9 @@ export function isPinnedToBottom(geo) {
 export function shouldShowJump(unread, geo) {
   if (unread > 0) return true;
 
-  return distanceFromBottom(geo) > Math.max(JUMP_VISIBLE_AFTER_PX, geo.clientHeight);
+  return (
+    distanceFromBottom(geo) > Math.max(JUMP_VISIBLE_AFTER_PX, geo.clientHeight)
+  );
 }
 
 /**
@@ -85,15 +87,15 @@ export function shouldShowJump(unread, geo) {
  * @returns {{ mode: 'full', freshIds?: number[] } | { mode: 'append', from: number }}
  */
 export function streamPlan(prev, next) {
-  if (prev.target !== next.target) return { mode: 'full' };
-  if (prev.ids.length === 0) return { mode: 'full' };
-  if (next.ids.length < prev.ids.length) return { mode: 'full' };
+  if (prev.target !== next.target) return { mode: "full" };
+  if (prev.ids.length === 0) return { mode: "full" };
+  if (next.ids.length < prev.ids.length) return { mode: "full" };
 
   for (let i = 0; i < prev.ids.length; i++) {
     if (prev.ids[i] !== next.ids[i]) return rebuildNamingArrivals(prev, next);
   }
 
-  return { mode: 'append', from: prev.ids.length };
+  return { mode: "append", from: prev.ids.length };
 }
 
 /**
@@ -111,18 +113,19 @@ function rebuildNamingArrivals(prev, next) {
 
   // Not found means the window moved past everything the DOM held, so which
   // rows are new is unknowable. Shimmering all of them is worse than none.
-  if (at === -1) return { mode: 'full' };
+  if (at === -1) return { mode: "full" };
 
   const freshIds = next.ids.slice(at + 1);
 
-  return freshIds.length === 0 ? { mode: 'full' } : { mode: 'full', freshIds };
+  return freshIds.length === 0 ? { mode: "full" } : { mode: "full", freshIds };
 }
 
 /** @param {number} unread */
 export function jumpLabel(unread) {
-  if (unread > 0) return `${unread} new message${unread === 1 ? '' : 's'} ↓  (End)`;
+  if (unread > 0)
+    return `${unread} new message${unread === 1 ? "" : "s"} ↓  (End)`;
 
-  return 'Jump to newest ↓  (End)';
+  return "Jump to newest ↓  (End)";
 }
 
 /**
@@ -204,7 +207,7 @@ export function nextUnreadBelow(previous, arrived, wasPinned) {
  * @param {{ commands: any[], peers: string[], rooms: string[] }} ctx
  */
 export function suggestionsFor(value, ctx) {
-  if (!value.startsWith('/') || value.includes('\n')) return null;
+  if (!value.startsWith("/") || value.includes("\n")) return null;
   const m = value.match(/^\/(\S*)(\s+)?(.*)$/);
   if (!m) return null;
   const [, name, space, rest] = m;
@@ -212,22 +215,36 @@ export function suggestionsFor(value, ctx) {
   if (!space) {
     const items = ctx.commands
       .filter((c) => c.name.startsWith(name.toLowerCase()))
-      .map((c) => ({ insert: `/${c.name}${c.arg ? ' ' : ''}`, name: `/${c.name}`, arg: c.arg, desc: c.desc, cat: c.cat }));
+      .map((c) => ({
+        insert: `/${c.name}${c.arg ? " " : ""}`,
+        name: `/${c.name}`,
+        arg: c.arg,
+        desc: c.desc,
+        cat: c.cat,
+      }));
 
-    return items.length ? { items, index: 0, kind: 'command' } : null;
+    return items.length ? { items, index: 0, kind: "command" } : null;
   }
 
   const cmd = ctx.commands.find((c) => c.name === name.toLowerCase());
-  if (!cmd || !cmd.suggest || rest.includes(' ')) return null;
-  const pool = cmd.suggest === 'peer' ? ctx.peers
-    : cmd.suggest === 'room' ? ctx.rooms
-      : [...ctx.peers, ...ctx.rooms];
-  const q = rest.toLowerCase().replace(/^#/, '');
+  if (!cmd || !cmd.suggest || rest.includes(" ")) return null;
+  const pool =
+    cmd.suggest === "peer"
+      ? ctx.peers
+      : cmd.suggest === "room"
+        ? ctx.rooms
+        : [...ctx.peers, ...ctx.rooms];
+  const q = rest.toLowerCase().replace(/^#/, "");
   const items = [...new Set(pool)]
-    .filter((h) => h.toLowerCase().replace(/^#/, '').startsWith(q))
-    .map((h) => ({ insert: `/${cmd.name} ${h}`, name: h, arg: '', desc: cmd.suggest }));
+    .filter((h) => h.toLowerCase().replace(/^#/, "").startsWith(q))
+    .map((h) => ({
+      insert: `/${cmd.name} ${h}`,
+      name: h,
+      arg: "",
+      desc: cmd.suggest,
+    }));
 
-  return items.length ? { items, index: 0, kind: 'arg' } : null;
+  return items.length ? { items, index: 0, kind: "arg" } : null;
 }
 
 /**
@@ -250,7 +267,7 @@ export function enterShouldSend(suggest, value) {
   // 🛑 THE TOKEN INCLUDES THE "#". Comparing the bare name let "#gate" send
   // with a stray "#" when gate was a PEER, while "#clau" completed to
   // "claude1" with none. How much you had typed decided what got sent.
-  if (suggest.kind === 'mention') return suggest.typed === item.name;
+  if (suggest.kind === "mention") return suggest.typed === item.name;
 
   return item.insert === value;
 }
@@ -258,7 +275,7 @@ export function enterShouldSend(suggest, value) {
 /** Accepting only reopens for a command that TAKES an argument. "/help"
  *  reopening on itself is what left Enter unable to send. */
 export function acceptReopens(insert) {
-  return insert.endsWith(' ');
+  return insert.endsWith(" ");
 }
 
 /** Wrapping move through the suggestion list. */
@@ -276,7 +293,11 @@ export function moveIndex(index, delta, length) {
  * and nothing fails. The test below pins these three names so the rename at
  * least breaks a test; grep this file when renaming a command.
  */
-const MENU_COMMANDS = { dispatch: 'dispatch', broadcast: 'broadcast', alert: 'alert' };
+const MENU_COMMANDS = {
+  dispatch: "dispatch",
+  broadcast: "broadcast",
+  alert: "alert",
+};
 
 /**
  * What the `...` menu on a sidebar row offers.
@@ -299,30 +320,34 @@ const MENU_COMMANDS = { dispatch: 'dispatch', broadcast: 'broadcast', alert: 'al
  *             destructive?: boolean }[]}
  */
 export function menuEntriesFor(kind, label) {
-  if (kind === 'room') {
+  if (kind === "room") {
     return [
       {
-        text: 'Broadcast\u2026',
+        text: "Broadcast\u2026",
         title: `Hand a task to everyone in ${label}`,
-        action: 'prefill',
+        action: "prefill",
         prefill: `/${MENU_COMMANDS.broadcast} ${label} `,
       },
       {
-        text: 'Alert\u2026',
+        text: "Alert\u2026",
         title: `Send ${label} something urgent`,
-        action: 'prefill',
+        action: "prefill",
         prefill: `/${MENU_COMMANDS.alert} ${label} `,
       },
-      { text: 'Copy name', title: `Copy ${label} to the clipboard`, action: 'copyName' },
       {
-        text: 'Leave',
-        title: `Leave ${label}. It stays for everyone else.`,
-        action: 'leaveRoom',
+        text: "Copy name",
+        title: `Copy ${label} to the clipboard`,
+        action: "copyName",
       },
       {
-        text: 'Delete',
+        text: "Leave",
+        title: `Leave ${label}. It stays for everyone else.`,
+        action: "leaveRoom",
+      },
+      {
+        text: "Delete",
         title: `Delete ${label} for everyone`,
-        action: 'deleteRoom',
+        action: "deleteRoom",
         destructive: true,
       },
     ];
@@ -330,19 +355,28 @@ export function menuEntriesFor(kind, label) {
 
   return [
     {
-      text: 'Dispatch\u2026',
+      text: "Dispatch\u2026",
       title: `Hand a task to ${label}`,
-      action: 'prefill',
+      action: "prefill",
       prefill: `/${MENU_COMMANDS.dispatch} ${label} `,
     },
     {
-      text: 'Alert\u2026',
+      text: "Alert\u2026",
       title: `Send ${label} something urgent`,
-      action: 'prefill',
+      action: "prefill",
       prefill: `/${MENU_COMMANDS.alert} ${label} `,
     },
-    { text: 'Copy handle', title: `Copy ${label} to the clipboard`, action: 'copyName' },
-    { text: 'Kick', title: `Remove ${label} from the bus`, action: 'kickPeer', destructive: true },
+    {
+      text: "Copy handle",
+      title: `Copy ${label} to the clipboard`,
+      action: "copyName",
+    },
+    {
+      text: "Kick",
+      title: `Remove ${label} from the bus`,
+      action: "kickPeer",
+      destructive: true,
+    },
   ];
 }
 
@@ -368,15 +402,15 @@ const MENTION_BODY = /[A-Za-z0-9._-]/;
 export function mentionTokenAt(value, caret) {
   // A command line belongs to suggestionsFor, in full. Leaving this to the
   // caller let "/dm #clau" complete through the mention path instead.
-  if (value.startsWith('/') && !value.includes('\n')) return null;
+  if (value.startsWith("/") && !value.includes("\n")) return null;
 
   const pos = Math.max(0, Math.min(caret, value.length));
   const upto = value.slice(0, pos);
-  const at = upto.lastIndexOf('#');
+  const at = upto.lastIndexOf("#");
   if (at < 0) return null;
 
-  const before = at === 0 ? '' : upto[at - 1];
-  if (before !== '' && !/\s/.test(before)) return null;
+  const before = at === 0 ? "" : upto[at - 1];
+  if (before !== "" && !/\s/.test(before)) return null;
 
   let end = at + 1;
   while (end < value.length && MENTION_BODY.test(value[end])) end += 1;
@@ -404,7 +438,7 @@ export function mentionSuggestionsFor(value, caret, ctx) {
   const tail = value.slice(token.end);
   // Only pad when nothing follows, so completing before a space does not
   // leave two of them.
-  const pad = /^\s/.test(tail) ? '' : ' ';
+  const pad = /^\s/.test(tail) ? "" : " ";
 
   const sorted = (xs) => [...xs].sort((a, b) => a.localeCompare(b));
   // Rooms first, then peers. Deterministic inside each group so the top item
@@ -418,17 +452,19 @@ export function mentionSuggestionsFor(value, caret, ctx) {
         insert: head + tail,
         caret: head.length,
         name: h,
-        arg: '',
-        desc: h.startsWith('#') ? 'room' : 'peer',
+        arg: "",
+        desc: h.startsWith("#") ? "room" : "peer",
       };
     });
 
-  return items.length ? { items, index: 0, kind: 'mention', typed: `#${token.query}` } : null;
+  return items.length
+    ? { items, index: 0, kind: "mention", typed: `#${token.query}` }
+    : null;
 }
 
 /** A room's own "#" is part of its name; the trigger "#" is not. */
 function bareName(handle) {
-  return handle.replace(/^#/, '');
+  return handle.replace(/^#/, "");
 }
 
 /** The CLI's ring size, mirrored so both surfaces forget at the same point. */
@@ -442,7 +478,8 @@ export function pushHistory(entries, line, cap = HISTORY_CAP) {
   const trimmed = line.trim();
   if (!trimmed) return entries;
 
-  const next = entries[entries.length - 1] === trimmed ? entries : [...entries, trimmed];
+  const next =
+    entries[entries.length - 1] === trimmed ? entries : [...entries, trimmed];
 
   return next.length > cap ? next.slice(next.length - cap) : next;
 }
@@ -475,7 +512,8 @@ export function historyStep({ entries, index, draft }, delta, current) {
 
   if (index === null) return null;
   // Past the newest entry is the draft you were writing, not an entry.
-  if (index >= entries.length - 1) return { index: null, draft: null, value: draft ?? '' };
+  if (index >= entries.length - 1)
+    return { index: null, draft: null, value: draft ?? "" };
 
   return { index: index + 1, draft, value: entries[index + 1] };
 }
@@ -493,8 +531,8 @@ export function historyKeyApplies(value, caret, delta) {
   const pos = Math.max(0, Math.min(caret, value.length));
 
   return delta < 0
-    ? !value.slice(0, pos).includes('\n')
-    : !value.slice(pos).includes('\n');
+    ? !value.slice(0, pos).includes("\n")
+    : !value.slice(pos).includes("\n");
 }
 
 /**
@@ -510,7 +548,10 @@ export function historyKeyApplies(value, caret, delta) {
  * @param {{ from: string, time: string, body: string }} message
  * @param {{ attributed?: boolean }} [opts]
  */
-export function messageMarkdown({ from, time, body }, { attributed = false } = {}) {
+export function messageMarkdown(
+  { from, time, body },
+  { attributed = false } = {},
+) {
   // Plain copy is byte-exact on purpose: it is what the sender typed.
   if (!attributed) return body;
 
@@ -551,52 +592,70 @@ export function dashColumn(labels) {
  * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
  * @param {Record<string, string>} labels category key -> heading
  */
-export function commandBlock(commands, labels, { width, headingIndent = '  ' } = {}) {
+export function commandBlock(
+  commands,
+  labels,
+  { width, headingIndent = "  " } = {},
+) {
   const w = width ?? dashColumn(commands.map(commandUsage));
 
   return Object.keys(labels)
     .map((cat) => {
       const rows = commands
         .filter((c) => c.cat === cat)
-        .map((c) => '  ' + commandUsage(c).padEnd(w) + `— ${c.desc}`);
+        .map((c) => "  " + commandUsage(c).padEnd(w) + `— ${c.desc}`);
 
-      return rows.length ? [`${headingIndent}${labels[cat]}`, ...rows].join('\n') : null;
+      return rows.length
+        ? [`${headingIndent}${labels[cat]}`, ...rows].join("\n")
+        : null;
     })
     .filter(Boolean)
-    .join('\n\n');
+    .join("\n\n");
 }
 
 /** Gestures, as data, so one measurement can cover them and the commands. */
 const GESTURE_SECTIONS = [
-  ['COMPOSER', [
-    ['Enter', 'send'],
-    ['Shift-Enter', 'newline, without sending'],
-    ['#', 'complete a peer or room name'],
-    ['Tab or Enter', 'accept the highlighted completion'],
-    ['Up / Down', 'move through the completion list'],
-    ['Esc', 'dismiss the completion list'],
-    ['Up / Down', 'with no list open, step through lines you sent'],
-    ['drop a file on the window', 'insert its path at the caret'],
-    { cont: 'relative to the project folder, "~/" under home', pad: 2 },
-  ]],
-  ['MESSAGES', [
-    ['click the copy icon', 'copy the message markdown as typed'],
-    ['Shift-click it', 'copy it under the author and the time'],
-  ]],
-  ['SIDEBAR', [
-    ['click a row', 'open that peer or room'],
-    ['(3) beside a row', 'unread messages waiting there'],
-    ['... on a peer', 'Dispatch, Alert, Copy handle, Kick'],
-    ['... on a room', 'Broadcast, Alert, Copy name, Leave, Delete'],
-    ['an entry ending "..."', 'opens in the composer, sends nothing'],
-    ['the entry below the rule', 'destructive, and asks first'],
-  ]],
-  ['READING', [
-    ['End', 'jump to the newest message'],
-    { cont: 'only while the composer is empty, because End', pad: 0 },
-    { cont: 'otherwise moves the caret', pad: 0 },
-    ['the jump badge', 'appears when messages arrive below the view'],
-  ]],
+  [
+    "COMPOSER",
+    [
+      ["Enter", "send"],
+      ["Shift-Enter", "newline, without sending"],
+      ["#", "complete a peer or room name"],
+      ["Tab or Enter", "accept the highlighted completion"],
+      ["Up / Down", "move through the completion list"],
+      ["Esc", "dismiss the completion list"],
+      ["Up / Down", "with no list open, step through lines you sent"],
+      ["drop a file on the window", "insert its path at the caret"],
+      { cont: 'relative to the project folder, "~/" under home', pad: 2 },
+    ],
+  ],
+  [
+    "MESSAGES",
+    [
+      ["click the copy icon", "copy the message markdown as typed"],
+      ["Shift-click it", "copy it under the author and the time"],
+    ],
+  ],
+  [
+    "SIDEBAR",
+    [
+      ["click a row", "open that peer or room"],
+      ["(3) beside a row", "unread messages waiting there"],
+      ["... on a peer", "Dispatch, Alert, Copy handle, Kick"],
+      ["... on a room", "Broadcast, Alert, Copy name, Leave, Delete"],
+      ['an entry ending "..."', "opens in the composer, sends nothing"],
+      ["the entry below the rule", "destructive, and asks first"],
+    ],
+  ],
+  [
+    "READING",
+    [
+      ["End", "jump to the newest message"],
+      { cont: "only while the composer is empty, because End", pad: 0 },
+      { cont: "otherwise moves the caret", pad: 0 },
+      ["the jump badge", "appears when messages arrive below the view"],
+    ],
+  ],
 ];
 
 /**
@@ -613,26 +672,29 @@ const GESTURE_SECTIONS = [
  */
 export function cheatSheet(commands, labels) {
   const gestureLabels = GESTURE_SECTIONS.flatMap(([, rows]) =>
-    rows.filter(Array.isArray).map(([label]) => label));
+    rows.filter(Array.isArray).map(([label]) => label),
+  );
   const width = dashColumn([...commands.map(commandUsage), ...gestureLabels]);
 
   const gestures = GESTURE_SECTIONS.flatMap(([heading, rows]) => [
     heading,
-    ...rows.map((row) => Array.isArray(row)
-      ? '  ' + row[0].padEnd(width) + `— ${row[1]}`
-      : '  ' + ' '.repeat(width + 2 + row.pad) + row.cont),
-    '',
+    ...rows.map((row) =>
+      Array.isArray(row)
+        ? "  " + row[0].padEnd(width) + `— ${row[1]}`
+        : "  " + " ".repeat(width + 2 + row.pad) + row.cont,
+    ),
+    "",
   ]);
 
   return [
-    'CHEAT SHEET',
-    '',
-    'SLASH COMMANDS',
+    "CHEAT SHEET",
+    "",
+    "SLASH COMMANDS",
     commandBlock(commands, labels, { width }),
-    '',
+    "",
     ...gestures,
-    'This sheet is not saved. It disappears when you switch away.',
-  ].join('\n');
+    "This sheet is not saved. It disappears when you switch away.",
+  ].join("\n");
 }
 
 /** Path chars. Includes "/" and "~", which the "#" token deliberately excludes. */
@@ -655,15 +717,15 @@ const PATH_BODY_RUN = /[A-Za-z0-9._~\-/]+/g;
  * @returns {{ query: string, start: number, end: number } | null}
  */
 export function atTokenAt(value, caret) {
-  if (value.startsWith('/') && !value.includes('\n')) return null;
+  if (value.startsWith("/") && !value.includes("\n")) return null;
 
   const pos = Math.max(0, Math.min(caret, value.length));
   const upto = value.slice(0, pos);
-  const at = upto.lastIndexOf('@');
+  const at = upto.lastIndexOf("@");
   if (at < 0) return null;
 
-  const before = at === 0 ? '' : upto[at - 1];
-  if (before !== '' && !/\s/.test(before)) return null;
+  const before = at === 0 ? "" : upto[at - 1];
+  if (before !== "" && !/\s/.test(before)) return null;
 
   let end = at + 1;
   while (end < value.length && PATH_BODY.test(value[end])) end += 1;
@@ -684,8 +746,9 @@ export function atTokenAt(value, caret) {
     // Found by claude1 reviewing the first cut.
     const firstSpace = typed.search(/[ \t]/);
     const head = firstSpace < 0 ? typed : typed.slice(0, firstSpace);
-    if (!head.includes('/')) return null;
-    if (!/^[ \t]*$/.test(value.slice(end, pos).replace(PATH_BODY_RUN, ' '))) return null;
+    if (!head.includes("/")) return null;
+    if (!/^[ \t]*$/.test(value.slice(end, pos).replace(PATH_BODY_RUN, " ")))
+      return null;
 
     // The caret is the end. A path with spaces has no unambiguous end while
     // it is still being typed, so anything after the caret stays put.
@@ -715,8 +778,8 @@ export function pathSuggestionsFor(hints, value, caret) {
   const tail = value.slice(token.end);
 
   const items = hints.map((hint) => {
-    const dir = hint.kind === 'dir';
-    const pad = dir || /^\s/.test(tail) ? '' : ' ';
+    const dir = hint.kind === "dir";
+    const pad = dir || /^\s/.test(tail) ? "" : " ";
     const head = value.slice(0, token.start) + hint.value + pad;
 
     // 🛑 reopen is EXPLICIT, not sniffed from a trailing space. A directory
@@ -726,13 +789,13 @@ export function pathSuggestionsFor(hints, value, caret) {
       insert: head + tail,
       caret: head.length,
       name: hint.value,
-      arg: '',
+      arg: "",
       desc: hint.kind,
       reopen: dir,
     };
   });
 
-  return { items, index: 0, kind: 'path', typed: `@${token.query}` };
+  return { items, index: 0, kind: "path", typed: `@${token.query}` };
 }
 
 /**
@@ -752,17 +815,19 @@ export function pathSuggestionsFor(hints, value, caret) {
  * @returns {string[]} absolute paths, decoded
  */
 export function pathsFromUriList(uriList) {
-  return (uriList || '')
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    // 🛑 NO SEPARATE "#" COMMENT FILTER. RFC 2483 says a line opening with
-    // "#" is a comment, and one is unreachable here: a line cannot both open
-    // with "#" and open with "file://". A filter for it was written, could
-    // not be killed by any mutant, and was removed rather than kept as a
-    // guard that cannot fire.
-    .filter((line) => line.toLowerCase().startsWith('file://'))
-    .map(pathFromFileUri)
-    .filter((path) => path !== null);
+  return (
+    (uriList || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      // 🛑 NO SEPARATE "#" COMMENT FILTER. RFC 2483 says a line opening with
+      // "#" is a comment, and one is unreachable here: a line cannot both open
+      // with "#" and open with "file://". A filter for it was written, could
+      // not be killed by any mutant, and was removed rather than kept as a
+      // guard that cannot fire.
+      .filter((line) => line.toLowerCase().startsWith("file://"))
+      .map(pathFromFileUri)
+      .filter((path) => path !== null)
+  );
 }
 
 /**
@@ -772,12 +837,12 @@ export function pathsFromUriList(uriList) {
  * remote path and inserting it as a local one would be a lie.
  */
 function pathFromFileUri(uri) {
-  const rest = uri.slice('file://'.length);
-  const slash = rest.indexOf('/');
+  const rest = uri.slice("file://".length);
+  const slash = rest.indexOf("/");
   if (slash < 0) return null;
 
   const host = rest.slice(0, slash);
-  if (host !== '' && host.toLowerCase() !== 'localhost') return null;
+  if (host !== "" && host.toLowerCase() !== "localhost") return null;
 
   try {
     return decodeURIComponent(rest.slice(slash));
@@ -804,10 +869,10 @@ function pathFromFileUri(uri) {
  */
 export function droppedPathValue(abs, { cwd, home }) {
   const underCwd = relativeTo(abs, cwd);
-  if (underCwd !== null) return underCwd === '' ? '.' : underCwd;
+  if (underCwd !== null) return underCwd === "" ? "." : underCwd;
 
   const underHome = relativeTo(abs, home);
-  if (underHome !== null) return underHome === '' ? '~' : `~/${underHome}`;
+  if (underHome !== null) return underHome === "" ? "~" : `~/${underHome}`;
 
   return abs;
 }
@@ -815,8 +880,8 @@ export function droppedPathValue(abs, { cwd, home }) {
 /** The part of `abs` below `root`, or null when it is not under it. */
 function relativeTo(abs, root) {
   if (!root) return null;
-  const base = root.endsWith('/') ? root.slice(0, -1) : root;
-  if (abs === base) return '';
+  const base = root.endsWith("/") ? root.slice(0, -1) : root;
+  if (abs === base) return "";
   // 🛑 The trailing slash is what stops "/proj-other" matching "/proj".
   if (!abs.startsWith(`${base}/`)) return null;
 
@@ -849,18 +914,20 @@ function relativeTo(abs, root) {
  */
 export function dropNameText(names) {
   return names
-    .map((name) => (/\s|"/.test(name) ? `"${name.replace(/"/g, '\\"')}"` : name))
-    .join(' ');
+    .map((name) =>
+      /\s|"/.test(name) ? `"${name.replace(/"/g, '\\"')}"` : name,
+    )
+    .join(" ");
 }
 
 export function dropInsertText(paths, roots) {
-  return paths.map((p) => droppedPathValue(p, roots)).join(' ');
+  return paths.map((p) => droppedPathValue(p, roots)).join(" ");
 }
 
 // ── /clear ───────────────────────────────────────────────────────────────
 
 /** A `#` prefix is the only thing separating a room target from a DM peer. */
-const isRoomTarget = (target) => target.startsWith('#');
+const isRoomTarget = (target) => target.startsWith("#");
 
 /**
  * The browser confirms first; the server's 403 is the second line, not the
@@ -873,14 +940,18 @@ const isRoomTarget = (target) => target.startsWith('#');
  */
 export function clearConfirmText(target) {
   if (isRoomTarget(target)) {
-    return `Clear ${target}?\n\n`
-      + `Every message ever sent to ${target} is deleted for EVERYONE, not `
-      + 'just you, and every member\'s unread mark resets. The room and its '
-      + 'memberships stay. This cannot be undone.';
+    return (
+      `Clear ${target}?\n\n` +
+      `Every message ever sent to ${target} is deleted for EVERYONE, not ` +
+      "just you, and every member's unread mark resets. The room and its " +
+      "memberships stay. This cannot be undone."
+    );
   }
-  return `Clear your conversation with ${target}?\n\n`
-    + `Every message between you and ${target} is deleted, in both `
-    + 'directions, for BOTH of you. This cannot be undone.';
+  return (
+    `Clear your conversation with ${target}?\n\n` +
+    `Every message between you and ${target} is deleted, in both ` +
+    "directions, for BOTH of you. This cannot be undone."
+  );
 }
 
 /**
@@ -891,7 +962,7 @@ export function clearConfirmText(target) {
 export function clearResultText(count, target) {
   const where = isRoomTarget(target) ? `from ${target}` : `with ${target}`;
   if (count === 0) return `${target} was already empty`;
-  return `cleared ${count} message${count === 1 ? '' : 's'} ${where}`;
+  return `cleared ${count} message${count === 1 ? "" : "s"} ${where}`;
 }
 
 /**
@@ -905,11 +976,11 @@ export function clearResultText(count, target) {
  * markdown alongside it.
  */
 export function styleSelection(chosen, currentStyle) {
-  if (chosen === 'custom') {
-    return { action: 'edit', revertTo: currentStyle ?? '' };
+  if (chosen === "custom") {
+    return { action: "edit", revertTo: currentStyle ?? "" };
   }
 
-  return { action: 'save', style: chosen === '' ? null : chosen };
+  return { action: "save", style: chosen === "" ? null : chosen };
 }
 
 /**
@@ -921,7 +992,7 @@ export function styleSelection(chosen, currentStyle) {
  * change fired one.
  */
 export function styleEditAffordance(style) {
-  return style === 'custom';
+  return style === "custom";
 }
 
 /**
@@ -933,10 +1004,10 @@ export function styleEditAffordance(style) {
 export const STYLE_CUSTOM_MAX_BYTES = 65536;
 
 export function customStyleSubmission(markdown) {
-  const text = (markdown ?? '').trim();
+  const text = (markdown ?? "").trim();
 
-  if (text === '') {
-    return { ok: false, error: 'A custom style needs some markdown.' };
+  if (text === "") {
+    return { ok: false, error: "A custom style needs some markdown." };
   }
 
   // The server measures BYTES, not characters, so a style of emoji or accented
@@ -944,10 +1015,13 @@ export function customStyleSubmission(markdown) {
   const bytes = new TextEncoder().encode(text).length;
 
   if (bytes > STYLE_CUSTOM_MAX_BYTES) {
-    return { ok: false, error: `Too long: ${bytes} bytes, the cap is ${STYLE_CUSTOM_MAX_BYTES}.` };
+    return {
+      ok: false,
+      error: `Too long: ${bytes} bytes, the cap is ${STYLE_CUSTOM_MAX_BYTES}.`,
+    };
   }
 
-  return { ok: true, style: 'custom', custom: text };
+  return { ok: true, style: "custom", custom: text };
 }
 
 /**
@@ -971,14 +1045,19 @@ export function gaugeDisplay(peer) {
   const reported = used != null && total != null && total > 0;
 
   if (!reported) {
-    return { show: false, percent: null, band: 'none', title: 'Context usage not reported' };
+    return {
+      show: false,
+      percent: null,
+      band: "none",
+      title: "Context usage not reported",
+    };
   }
 
   if (peer.fresh !== true) {
     return {
       show: true,
       percent: null,
-      band: 'stale',
+      band: "stale",
       title: `Context usage is ${ageLabel(peer.age_ms)} old — the agent has stopped reporting`,
     };
   }
@@ -991,14 +1070,26 @@ export function gaugeDisplay(peer) {
   // The rule is the exclusion: 50 asks for a plan, and a plan is not an
   // escalation, so it earns no colour. Pinned by `the web gauge colours every
   // band EXCEPT the planning one` in test/shim/gauge-bands.test.ts.
-  const band = percent >= 95 ? 'crit' : percent >= 85 ? 'warn' : percent >= 70 ? 'soft' : 'ok';
+  const band =
+    percent >= 95
+      ? "crit"
+      : percent >= 85
+        ? "warn"
+        : percent >= 70
+          ? "soft"
+          : "ok";
 
-  return { show: true, percent, band, title: `Context ${percent}% — ${used.toLocaleString()} of ${total.toLocaleString()} tokens` };
+  return {
+    show: true,
+    percent,
+    band,
+    title: `Context ${percent}% — ${used.toLocaleString()} of ${total.toLocaleString()} tokens`,
+  };
 }
 
 /** A duration a human reads at a glance. Exported for its own test. */
 export function ageLabel(ms) {
-  if (ms == null) return 'never reported';
+  if (ms == null) return "never reported";
 
   const mins = Math.floor(ms / 60000);
   if (mins < 60) return `${mins}m`;
@@ -1057,7 +1148,7 @@ function durationLabel(mins) {
  * identical, and that ambiguity is the #103 incident in a different place.
  */
 export function claimsPanelEmpty() {
-  return '(nothing claimed)';
+  return "(nothing claimed)";
 }
 
 /**
@@ -1111,8 +1202,8 @@ export function nextMatchIndex(current, total, delta = 1) {
  * @param {number} total
  */
 export function matchPositionLabel(index, total) {
-  if (total <= 0) return '';
-  if (index < 0) return `${total} match${total === 1 ? '' : 'es'}`;
+  if (total <= 0) return "";
+  if (index < 0) return `${total} match${total === 1 ? "" : "es"}`;
 
   return `${index + 1} of ${total}`;
 }
@@ -1142,7 +1233,7 @@ export function messageHash(id) {
  * @returns {number|null}
  */
 export function messageIdFromHash(hash) {
-  const m = /^#?m([0-9]+)$/.exec(hash ?? '');
+  const m = /^#?m([0-9]+)$/.exec(hash ?? "");
 
   if (m === null) return null;
 
@@ -1165,7 +1256,7 @@ export function messageIdFromHash(hash) {
  * same defect `likePattern` exists to stop on the SQL side.
  */
 export function matchRanges(text, term) {
-  const needle = (term || '').trim().toLowerCase();
+  const needle = (term || "").trim().toLowerCase();
   if (needle.length === 0) return [];
 
   const hay = text.toLowerCase();
@@ -1229,12 +1320,12 @@ export function highlightSegments(text, term) {
  * which reads as a bug in the search.
  */
 export function messageMatchesSearch(body, term) {
-  return matchRanges(body || '', term).length > 0;
+  return matchRanges(body || "", term).length > 0;
 }
 
 /** What the message pane says when a filter hides everything. */
 export function searchFilterEmpty(term, scanned) {
-  return `no match for "${term}" in ${scanned} loaded message${scanned === 1 ? '' : 's'}`;
+  return `no match for "${term}" in ${scanned} loaded message${scanned === 1 ? "" : "s"}`;
 }
 
 /**
@@ -1268,18 +1359,18 @@ export function searchableText(text, hrefs = []) {
   const extra = [];
 
   for (const href of hrefs) {
-    if (typeof href !== 'string' || href.length === 0) continue;
+    if (typeof href !== "string" || href.length === 0) continue;
     // 🛑 `#` IS WHAT A NEUTERED LINK RENDERS AS, not a destination. `safeUrl`
     // turns a `javascript:` or `data:` target into `#`, and appending that made
     // the term "#" match every message holding a dead link. Found by claude1.
-    if (href === '#') continue;
+    if (href === "#") continue;
     // A bare URL is already its own label, so appending it would double it.
     if (text.includes(href)) continue;
     if (extra.includes(href)) continue;
     extra.push(href);
   }
 
-  return extra.length === 0 ? text : `${text}\n${extra.join('\n')}`;
+  return extra.length === 0 ? text : `${text}\n${extra.join("\n")}`;
 }
 
 /**
@@ -1300,7 +1391,7 @@ export function searchableText(text, hrefs = []) {
  * @param {boolean} isMac
  */
 export function focusSearchKeyApplies(e, isMac) {
-  if (typeof e?.key !== 'string' || e.key.toLowerCase() !== 'f') return false;
+  if (typeof e?.key !== "string" || e.key.toLowerCase() !== "f") return false;
   if (e.shiftKey || e.altKey) return false;
 
   return isMac
@@ -1327,7 +1418,7 @@ export function searchPlaceholder(isMac) {
 
 /** The combo both labels name, so they cannot disagree with each other. */
 function searchCombo(isMac) {
-  return isMac ? 'Cmd-F' : 'Ctrl-F';
+  return isMac ? "Cmd-F" : "Ctrl-F";
 }
 
 /**
@@ -1364,9 +1455,9 @@ export function searchAriaLabel(isMac) {
  * @param {{ member_count?: number, created_by?: string } | undefined} room
  */
 export function roomMetaLabel(room) {
-  if (room === undefined || room === null) return '';
+  if (room === undefined || room === null) return "";
 
-  const members = `${room.member_count ?? '?'} members`;
+  const members = `${room.member_count ?? "?"} members`;
 
   return room.created_by ? `${members} · owned by ${room.created_by}` : members;
 }
@@ -1402,14 +1493,15 @@ export function activityEvent(raw) {
     return null;
   }
 
-  if (data === null || typeof data !== 'object' || Array.isArray(data)) return null;
+  if (data === null || typeof data !== "object" || Array.isArray(data))
+    return null;
 
   const { handle, phase } = data;
 
-  if (typeof handle !== 'string' || handle.length === 0) return null;
+  if (typeof handle !== "string" || handle.length === 0) return null;
   // An enumerated set, mirroring server.ts's own check. A phase this file does
   // not know must not become a third state downstream.
-  if (phase !== 'tick' && phase !== 'end') return null;
+  if (phase !== "tick" && phase !== "end") return null;
 
   return { handle, phase };
 }
@@ -1431,7 +1523,7 @@ export function nextPulses(prev, event) {
 
   const { handle, phase } = event;
 
-  if (phase === 'tick') {
+  if (phase === "tick") {
     if (prev.has(handle)) return prev;
     return new Set(prev).add(handle);
   }
@@ -1466,7 +1558,7 @@ export function nextPulses(prev, event) {
 export function dotTitle({ kind, working }) {
   // Every room is passed `online: true` because the dot is decoration there.
   // A shared title would label each one "Online", which asserts nothing.
-  if (kind !== 'peer') return null;
+  if (kind !== "peer") return null;
 
   // 🛑 ONLY THE WORKING STATE IS NAMED. lee, 2026-11-14: "no title". Online and
   // offline stay as they have always been, carried by the dot's colour alone.
@@ -1474,5 +1566,5 @@ export function dotTitle({ kind, working }) {
   // work, so a reader who hovers an idle agent gets nothing rather than "idle".
   if (!working) return null;
 
-  return 'Working — producing output now';
+  return "Working — producing output now";
 }

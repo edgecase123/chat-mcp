@@ -1,5 +1,9 @@
-import { existsSync, unlinkSync, statSync } from 'node:fs';
-import { ensureNotifyDir, notifyPathFor, writePrivateFileSync } from '../util/paths.js';
+import { existsSync, unlinkSync, statSync } from "node:fs";
+import {
+  ensureNotifyDir,
+  notifyPathFor,
+  writePrivateFileSync,
+} from "../util/paths.js";
 
 type Callback = () => void;
 
@@ -33,7 +37,7 @@ export interface NotifyEnvelope {
    */
   approval?: {
     approvalId: number;
-    decision: 'approve' | 'deny';
+    decision: "approve" | "deny";
     requested: string;
     grant: string | null;
     grantForms?: readonly string[];
@@ -91,12 +95,12 @@ export function notifyPeer(handle: string, envelope?: NotifyEnvelope): void {
   // `deliverToSupervisor` resolves null on every failure rather than
   // rejecting, so there is nothing to reject here; the catch is belt and
   // braces against a throw from the filesystem probe.
-  void import('../supervise/socket.js')
+  void import("../supervise/socket.js")
     .then(({ deliverToSupervisor }) =>
       deliverToSupervisor(handle, {
         id: envelope?.id ?? 0,
         to: envelope?.to ?? handle,
-        from: envelope?.from ?? 'unknown',
+        from: envelope?.from ?? "unknown",
         ts: envelope?.ts ?? Date.now(),
         body: envelope?.body,
         kind: envelope?.kind,
@@ -150,7 +154,7 @@ export class NotifyBus {
     this.path = notifyPathFor(handle);
 
     try {
-      writePrivateFileSync(this.path, '', 'a');
+      writePrivateFileSync(this.path, "", "a");
     } catch {
       // Best-effort; subsequent touch() calls will create it
     }
@@ -217,7 +221,7 @@ export class NotifyBus {
 
       return `${s.mtimeMs}:${s.size}`;
     } catch {
-      return 'missing';
+      return "missing";
     }
   }
 
@@ -248,18 +252,18 @@ export class NotifyBus {
     };
   }
 
-  waitForNext(timeoutMs: number): Promise<'notified' | 'timeout'> {
+  waitForNext(timeoutMs: number): Promise<"notified" | "timeout"> {
     return new Promise((resolve) => {
       let done = false;
-      const finish = (result: 'notified' | 'timeout'): void => {
+      const finish = (result: "notified" | "timeout"): void => {
         if (done) return;
         done = true;
         unsubscribe();
         clearTimeout(timer);
         resolve(result);
       };
-      const unsubscribe = this.subscribe(() => finish('notified'));
-      const timer = setTimeout(() => finish('timeout'), timeoutMs);
+      const unsubscribe = this.subscribe(() => finish("notified"));
+      const timer = setTimeout(() => finish("timeout"), timeoutMs);
     });
   }
 

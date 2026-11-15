@@ -16,9 +16,9 @@ Prettier formats this repo, and the rule is Prettier's own default. There is no
 
 ## The two commands
 
-| Command | What it does |
-|---|---|
-| `npm run format` | Rewrites every file Prettier owns |
+| Command                | What it does                                          |
+| ---------------------- | ----------------------------------------------------- |
+| `npm run format`       | Rewrites every file Prettier owns                     |
 | `npm run format:check` | Lists the files that differ, exits non-zero if any do |
 
 CI runs `format:check` after `tsc --noEmit` and before `npm test`, so a
@@ -59,11 +59,11 @@ formatter across one edits a historical record instead of the codebase.
 
 ## Source files
 
-| File | Role |
-|---|---|
-| `package.json` | The `format` and `format:check` scripts, and the `prettier` devDependency |
-| `.prettierignore` | The four paths Prettier skips |
-| `.github/workflows/ci.yml` | Runs `format:check` on every push and pull request |
+| File                       | Role                                                                      |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `package.json`             | The `format` and `format:check` scripts, and the `prettier` devDependency |
+| `.prettierignore`          | The four paths Prettier skips                                             |
+| `.github/workflows/ci.yml` | Runs `format:check` on every push and pull request                        |
 
 ## Related docs
 

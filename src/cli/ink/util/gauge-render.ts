@@ -34,12 +34,21 @@ export function renderGauge(agent: GaugeInput): GaugeRender {
   const used = agent.context_used;
   const total = agent.context_total;
   if (used == null || total == null || total <= 0) {
-    return { label: '—', color: 'gray', bold: false, dim: true, reported: false };
+    return {
+      label: "—",
+      color: "gray",
+      bold: false,
+      dim: true,
+      reported: false,
+    };
   }
   const pct = Math.round((used / total) * 100);
   const label = `${pct}%`;
-  if (pct >= 95) return { label, color: 'red', bold: true, dim: false, reported: true };
-  if (pct >= 85) return { label, color: 'yellow', bold: true, dim: false, reported: true };
-  if (pct >= 70) return { label, color: 'yellow', bold: false, dim: false, reported: true };
-  return { label, color: 'green', bold: false, dim: true, reported: true };
+  if (pct >= 95)
+    return { label, color: "red", bold: true, dim: false, reported: true };
+  if (pct >= 85)
+    return { label, color: "yellow", bold: true, dim: false, reported: true };
+  if (pct >= 70)
+    return { label, color: "yellow", bold: false, dim: false, reported: true };
+  return { label, color: "green", bold: false, dim: true, reported: true };
 }

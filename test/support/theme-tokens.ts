@@ -8,10 +8,13 @@
  * Shared by the shimmer and the search-highlight floors — the second copy of
  * `block`/`token`/`rgb` is what moved them here.
  */
-import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
-export const CSS = readFileSync(new URL('../../web/assets/style.css', import.meta.url), 'utf8');
+export const CSS = readFileSync(
+  new URL("../../web/assets/style.css", import.meta.url),
+  "utf8",
+);
 
 /**
  * The body of a top-level rule, by its selector.
@@ -20,12 +23,14 @@ export const CSS = readFileSync(new URL('../../web/assets/style.css', import.met
  * in CSS, and no caller is asserting which quote the stylesheet uses.
  */
 export function block(selector: string): string {
-  const loose = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/['"]/g, `['"]`);
+  const loose = selector
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/['"]/g, `['"]`);
   const found = new RegExp(`${loose}\\s*\\{`).exec(CSS);
   assert.ok(found, `selector ${selector} is gone from style.css`);
 
   const start = found.index;
-  const end = CSS.indexOf('\n}', start);
+  const end = CSS.indexOf("\n}", start);
   assert.notEqual(end, -1, `selector ${selector} has no closing brace`);
 
   return CSS.slice(start, end);
@@ -63,7 +68,13 @@ export const MIN_THEMES = 2;
  * `[data-theme="dark"] .theme-icon::before` is not mistaken for the block.
  */
 export function themeSelectors(): string[] {
-  const found = [...new Set([...CSS.matchAll(/^(:root|\[data-theme="[a-z-]+"\])\s*\{/gm)].map((m) => m[1]!))];
+  const found = [
+    ...new Set(
+      [...CSS.matchAll(/^(:root|\[data-theme="[a-z-]+"\])\s*\{/gm)].map(
+        (m) => m[1]!,
+      ),
+    ),
+  ];
 
   // 🛑 THE DENOMINATOR LIVES HERE, NOT IN ONE TEST. Asserted in a dedicated
   // test only, it was not inherited: breaking this regex left 5 of 6 floors
@@ -73,12 +84,11 @@ export function themeSelectors(): string[] {
   // `appCssViews()` on leagues #2439.
   assert.ok(
     found.length >= MIN_THEMES,
-    `found ${found.length} theme blocks, expected at least ${MIN_THEMES}: ${found.join(', ') || '(none)'}`,
+    `found ${found.length} theme blocks, expected at least ${MIN_THEMES}: ${found.join(", ") || "(none)"}`,
   );
 
   return found;
 }
-
 
 /** The largest per-channel distance between two opaque colours. */
 export function channelDistance(a: string, b: string): number {

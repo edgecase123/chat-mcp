@@ -1,15 +1,17 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { readFileSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, basename, isAbsolute } from 'node:path';
-import { claudeArgs, writeClaudeMcpConfig } from '../../src/supervise/drivers/claude.js';
-import { availableBuiltins, builtinsFrom } from '../../src/supervise/grant.js';
-import { allowlistFor } from '../../src/supervise/allowlist.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync, rmSync, existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, basename, isAbsolute } from "node:path";
+import {
+  claudeArgs,
+  writeClaudeMcpConfig,
+} from "../../src/supervise/drivers/claude.js";
+import { availableBuiltins, builtinsFrom } from "../../src/supervise/grant.js";
+import { allowlistFor } from "../../src/supervise/allowlist.js";
 
-const TEST_DIRS = ['/Users/leejenkins/dev/chat-mcp2'];
+const TEST_DIRS = ["/Users/leejenkins/dev/chat-mcp2"];
 const DEFAULT_ALLOWED = allowlistFor(TEST_DIRS);
-
 
 /**
  * 🛑 A SUPERVISED AGENT THAT CANNOT ACT IS A DOORBELL, NOT A BUS.
@@ -25,7 +27,7 @@ const DEFAULT_ALLOWED = allowlistFor(TEST_DIRS);
  */
 
 function withTempHome<T>(fn: (home: string) => T): T {
-  const home = mkdtempSync(join(tmpdir(), 'chat-mcp-grant-'));
+  const home = mkdtempSync(join(tmpdir(), "chat-mcp-grant-"));
   const previous = process.env.CHAT_MCP_HOME;
   process.env.CHAT_MCP_HOME = home;
 
@@ -39,28 +41,42 @@ function withTempHome<T>(fn: (home: string) => T): T {
 }
 
 const grant = {
-  handle: 'sup-claude2',
-  configPath: '/tmp/x.json',
+  handle: "sup-claude2",
+  configPath: "/tmp/x.json",
   allowed: DEFAULT_ALLOWED,
   available: availableBuiltins(DEFAULT_ALLOWED),
   extraDirs: TEST_DIRS,
 };
 
-test('without a grant the child gets NONE of the four flags', () => {
+test("without a grant the child gets NONE of the four flags", () => {
   const args = claudeArgs({});
 
-  for (const flag of ['--mcp-config', '--strict-mcp-config', '--tools', '--allowedTools']) {
+  for (const flag of [
+    "--mcp-config",
+    "--strict-mcp-config",
+    "--tools",
+    "--allowedTools",
+  ]) {
     assert.ok(!args.includes(flag), `${flag} leaked into a plain spawn`);
   }
 });
 
-test('a grant passes all four flags, because any three of them do not work', () => {
+test("a grant passes all four flags, because any three of them do not work", () => {
   const args = claudeArgs({ grant });
 
-  assert.ok(args.includes('--mcp-config'), 'the child has no chat server at all');
-  assert.ok(args.includes('--strict-mcp-config'), 'the child inherits the project .mcp.json');
-  assert.ok(args.includes('--tools'), 'no built-in tool surface is declared');
-  assert.ok(args.includes('--allowedTools'), 'the tools exist but nothing is permitted');
+  assert.ok(
+    args.includes("--mcp-config"),
+    "the child has no chat server at all",
+  );
+  assert.ok(
+    args.includes("--strict-mcp-config"),
+    "the child inherits the project .mcp.json",
+  );
+  assert.ok(args.includes("--tools"), "no built-in tool surface is declared");
+  assert.ok(
+    args.includes("--allowedTools"),
+    "the tools exist but nothing is permitted",
+  );
 });
 
 /**
@@ -70,13 +86,13 @@ test('a grant passes all four flags, because any three of them do not work', () 
  * fights the live session. `WakeListener.bind` refuses a live socket rival;
  * MCP registration has no such guard. See chat-mcp#35.
  */
-test('--strict-mcp-config and --mcp-config travel together or not at all', () => {
+test("--strict-mcp-config and --mcp-config travel together or not at all", () => {
   const args = claudeArgs({ grant });
 
   assert.equal(
-    args.includes('--mcp-config'),
-    args.includes('--strict-mcp-config'),
-    'the two flags must travel together or the child steals a live handle',
+    args.includes("--mcp-config"),
+    args.includes("--strict-mcp-config"),
+    "the two flags must travel together or the child steals a live handle",
   );
 });
 
@@ -88,16 +104,22 @@ test('--strict-mcp-config and --mcp-config travel together or not at all', () =>
  *
  * The expected values are now LITERAL.
  */
-test('builtinsFrom strips the specifier and drops MCP tools — against fixed values', () => {
-  assert.deepEqual(builtinsFrom(['Read', 'Bash(git commit:*)', 'mcp__chat__send', 'Edit(/a/**)']), [
-    'Read',
-    'Bash',
-    'Edit',
-  ]);
+test("builtinsFrom strips the specifier and drops MCP tools — against fixed values", () => {
+  assert.deepEqual(
+    builtinsFrom([
+      "Read",
+      "Bash(git commit:*)",
+      "mcp__chat__send",
+      "Edit(/a/**)",
+    ]),
+    ["Read", "Bash", "Edit"],
+  );
 });
 
-test('builtinsFrom de-duplicates, so two Bash rules do not yield two Bash entries', () => {
-  assert.deepEqual(builtinsFrom(['Bash(git add:*)', 'Bash(git commit:*)']), ['Bash']);
+test("builtinsFrom de-duplicates, so two Bash rules do not yield two Bash entries", () => {
+  assert.deepEqual(builtinsFrom(["Bash(git add:*)", "Bash(git commit:*)"]), [
+    "Bash",
+  ]);
 });
 
 /**
@@ -108,15 +130,21 @@ test('builtinsFrom de-duplicates, so two Bash rules do not yield two Bash entrie
  * permit — but allowlisting them BARE is what made the scopes decorative and
  * let a supervised agent edit any file on the machine.
  */
-test('every built-in the allowlist implies is available, and Write/Edit are available too', () => {
+test("every built-in the allowlist implies is available, and Write/Edit are available too", () => {
   const available = availableBuiltins(DEFAULT_ALLOWED);
 
   for (const implied of builtinsFrom(DEFAULT_ALLOWED)) {
-    assert.ok(available.includes(implied), `allowlisted but not available: ${implied}`);
+    assert.ok(
+      available.includes(implied),
+      `allowlisted but not available: ${implied}`,
+    );
   }
 
-  for (const scoped of ['Write', 'Edit']) {
-    assert.ok(available.includes(scoped), `${scoped} must exist for Edit(<glob>) to permit it`);
+  for (const scoped of ["Write", "Edit"]) {
+    assert.ok(
+      available.includes(scoped),
+      `${scoped} must exist for Edit(<glob>) to permit it`,
+    );
   }
 });
 
@@ -132,16 +160,22 @@ test('every built-in the allowlist implies is available, and Write/Edit are avai
  * all. An earlier reading blamed the cwd alone and was comparing two runs
  * that differed in two variables.
  */
-test('no file-editing tool is allowlisted BARE — a bare entry reaches any path', () => {
-  for (const bare of ['Write', 'Edit']) {
-    assert.ok(!DEFAULT_ALLOWED.includes(bare), `a bare '${bare}' edited /tmp when measured`);
+test("no file-editing tool is allowlisted BARE — a bare entry reaches any path", () => {
+  for (const bare of ["Write", "Edit"]) {
+    assert.ok(
+      !DEFAULT_ALLOWED.includes(bare),
+      `a bare '${bare}' edited /tmp when measured`,
+    );
   }
 });
 
-test('the allowlist carries Edit scopes, or nothing can edit at all', () => {
-  const scopes = DEFAULT_ALLOWED.filter((t) => t.startsWith('Edit('));
+test("the allowlist carries Edit scopes, or nothing can edit at all", () => {
+  const scopes = DEFAULT_ALLOWED.filter((t) => t.startsWith("Edit("));
 
-  assert.ok(scopes.length > 0, 'file editing was asked for and no scope grants it');
+  assert.ok(
+    scopes.length > 0,
+    "file editing was asked for and no scope grants it",
+  );
 });
 
 /**
@@ -150,9 +184,9 @@ test('the allowlist carries Edit scopes, or nothing can edit at all', () => {
  * denied too. Either mismatch looks like "the agent cannot edit" with no clue
  * which half is wrong.
  */
-test('every Edit scope has a matching reachable directory, and vice versa', () => {
-  const scoped = DEFAULT_ALLOWED.filter((t) => t.startsWith('Edit(')).map((t) =>
-    t.slice('Edit('.length, -'/**)'.length),
+test("every Edit scope has a matching reachable directory, and vice versa", () => {
+  const scoped = DEFAULT_ALLOWED.filter((t) => t.startsWith("Edit(")).map((t) =>
+    t.slice("Edit(".length, -"/**)".length),
   );
 
   assert.deepEqual([...scoped].sort(), [...TEST_DIRS].sort());
@@ -163,49 +197,52 @@ test('every Edit scope has a matching reachable directory, and vice versa', () =
  * `--add-dir`; Cursor will spell it differently or not at all. A driver that
  * ignores them yields a NARROWER agent, never a wider one.
  */
-test('the grant carries directories and the driver renders the flag', () => {
+test("the grant carries directories and the driver renders the flag", () => {
   const args = claudeArgs({ grant });
-  const idx = args.indexOf('--add-dir');
+  const idx = args.indexOf("--add-dir");
 
-  assert.notEqual(idx, -1, 'the driver never renders the directories');
+  assert.notEqual(idx, -1, "the driver never renders the directories");
   assert.equal(args[idx + 1], TEST_DIRS[0]);
 
   for (const dir of grant.extraDirs) {
-    assert.ok(!dir.startsWith('-'), `a flag leaked into the path list: ${dir}`);
+    assert.ok(!dir.startsWith("-"), `a flag leaked into the path list: ${dir}`);
   }
 });
 
-test('a grant with no extra directories passes no --add-dir at all', () => {
+test("a grant with no extra directories passes no --add-dir at all", () => {
   const args = claudeArgs({ grant: { ...grant, extraDirs: [] } });
 
-  assert.ok(!args.includes('--add-dir'), 'an empty list emitted a valueless flag');
-});
-
-test('Bash is available, because the allowlist scopes Bash commands', () => {
   assert.ok(
-    DEFAULT_ALLOWED.some((t) => t.startsWith('Bash(')),
-    'no Bash(...) entries, so this test proves nothing',
+    !args.includes("--add-dir"),
+    "an empty list emitted a valueless flag",
   );
-  assert.ok(builtinsFrom(DEFAULT_ALLOWED).includes('Bash'));
 });
 
-test('an MCP tool is allowed but never declared as a built-in', () => {
+test("Bash is available, because the allowlist scopes Bash commands", () => {
+  assert.ok(
+    DEFAULT_ALLOWED.some((t) => t.startsWith("Bash(")),
+    "no Bash(...) entries, so this test proves nothing",
+  );
+  assert.ok(builtinsFrom(DEFAULT_ALLOWED).includes("Bash"));
+});
+
+test("an MCP tool is allowed but never declared as a built-in", () => {
   const builtins = builtinsFrom(DEFAULT_ALLOWED);
 
   assert.deepEqual(
-    builtins.filter((t) => t.startsWith('mcp__')),
+    builtins.filter((t) => t.startsWith("mcp__")),
     [],
-    '`--tools` governs built-ins only; an MCP tool there is meaningless',
+    "`--tools` governs built-ins only; an MCP tool there is meaningless",
   );
   assert.ok(
-    DEFAULT_ALLOWED.some((t) => t.startsWith('mcp__chat__')),
-    'the child cannot answer on the bus at all',
+    DEFAULT_ALLOWED.some((t) => t.startsWith("mcp__chat__")),
+    "the child cannot answer on the bus at all",
   );
 });
 
-test('the allowlist the child receives is the one it was given, verbatim', () => {
+test("the allowlist the child receives is the one it was given, verbatim", () => {
   const args = claudeArgs({ grant });
-  const allowed = args[args.indexOf('--allowedTools') + 1]!.split(',');
+  const allowed = args[args.indexOf("--allowedTools") + 1]!.split(",");
 
   assert.deepEqual(allowed, [...DEFAULT_ALLOWED]);
 });
@@ -227,31 +264,31 @@ test('the allowlist the child receives is the one it was given, verbatim', () =>
  * was ever blocked — which is why the approval path could not fire. The mode
  * is NAMED here so a revert is visible rather than silent.
  */
-test('a child with a grant defaults to manual, the mode that enforces the allowlist', () => {
+test("a child with a grant defaults to manual, the mode that enforces the allowlist", () => {
   const args = claudeArgs({ grant });
 
-  assert.equal(args[args.indexOf('--permission-mode') + 1], 'manual');
+  assert.equal(args[args.indexOf("--permission-mode") + 1], "manual");
 });
 
-test('an allowlisted MCP tool is still permitted under that mode', () => {
+test("an allowlisted MCP tool is still permitted under that mode", () => {
   // Measured live: `mcp__chat__send` landed on the bus under BOTH modes, so
   // manual does not mute the child. Recorded as the reason the switch is safe.
   assert.ok(
-    DEFAULT_ALLOWED.some((t) => t.startsWith('mcp__chat__')),
-    'the child has no bus tool at all, so the mode choice is moot',
+    DEFAULT_ALLOWED.some((t) => t.startsWith("mcp__chat__")),
+    "the child has no bus tool at all, so the mode choice is moot",
   );
 });
 
-test('a child with no grant still defaults to plan', () => {
+test("a child with no grant still defaults to plan", () => {
   const args = claudeArgs({});
 
-  assert.equal(args[args.indexOf('--permission-mode') + 1], 'plan');
+  assert.equal(args[args.indexOf("--permission-mode") + 1], "plan");
 });
 
-test('an explicit permission mode wins over both defaults', () => {
-  const args = claudeArgs({ permissionMode: 'plan', grant });
+test("an explicit permission mode wins over both defaults", () => {
+  const args = claudeArgs({ permissionMode: "plan", grant });
 
-  assert.equal(args[args.indexOf('--permission-mode') + 1], 'plan');
+  assert.equal(args[args.indexOf("--permission-mode") + 1], "plan");
 });
 
 /**
@@ -259,34 +296,44 @@ test('an explicit permission mode wins over both defaults', () => {
  * that spawned a child also calling itself `claude2` would have the child
  * consume the messages the supervisor is trying to deliver to it.
  */
-test('the written config registers the CHILD handle it was given', () => {
+test("the written config registers the CHILD handle it was given", () => {
   withTempHome(() => {
-    const path = writeClaudeMcpConfig('sup-claude2');
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+    const path = writeClaudeMcpConfig("sup-claude2");
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as {
       mcpServers: Record<string, { args: string[] }>;
     };
 
     const entry = parsed.mcpServers.chat;
-    assert.ok(entry, 'no chat server in the generated config');
+    assert.ok(entry, "no chat server in the generated config");
 
-    const handleIdx = entry.args.indexOf('--handle');
-    assert.notEqual(handleIdx, -1, 'the generated config names no handle at all');
-    assert.equal(entry.args[handleIdx + 1], 'sup-claude2');
+    const handleIdx = entry.args.indexOf("--handle");
+    assert.notEqual(
+      handleIdx,
+      -1,
+      "the generated config names no handle at all",
+    );
+    assert.equal(entry.args[handleIdx + 1], "sup-claude2");
   });
 });
 
-test('the config is written under the chat-mcp state dir, not into any repo', () => {
+test("the config is written under the chat-mcp state dir, not into any repo", () => {
   withTempHome((home) => {
-    const path = writeClaudeMcpConfig('sup-claude2');
+    const path = writeClaudeMcpConfig("sup-claude2");
 
     assert.ok(path.startsWith(home), `config escaped the state dir: ${path}`);
-    assert.ok(!path.endsWith('.mcp.json'), 'this is the filename the project uses');
+    assert.ok(
+      !path.endsWith(".mcp.json"),
+      "this is the filename the project uses",
+    );
   });
 });
 
-test('two handles get two different config files', () => {
+test("two handles get two different config files", () => {
   withTempHome(() => {
-    assert.notEqual(writeClaudeMcpConfig('sup-claude1'), writeClaudeMcpConfig('sup-claude2'));
+    assert.notEqual(
+      writeClaudeMcpConfig("sup-claude1"),
+      writeClaudeMcpConfig("sup-claude2"),
+    );
   });
 });
 
@@ -297,17 +344,22 @@ test('two handles get two different config files', () => {
  * "whatever script is running now". Found by the live harness, which was the
  * only thing that could — every other test here checked the handle.
  */
-test('the generated config launches a file that EXISTS', () => {
+test("the generated config launches a file that EXISTS", () => {
   withTempHome(() => {
-    const path = writeClaudeMcpConfig('sup-claude2');
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+    const path = writeClaudeMcpConfig("sup-claude2");
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as {
       mcpServers: { chat: { command: string; args: string[] } };
     };
 
-    const script = parsed.mcpServers.chat.args.find((a) => a.endsWith('.js') || a.endsWith('.ts'));
+    const script = parsed.mcpServers.chat.args.find(
+      (a) => a.endsWith(".js") || a.endsWith(".ts"),
+    );
 
-    assert.ok(script, 'the config names no script at all');
-    assert.ok(existsSync(script), `the child would launch a file that is not there: ${script}`);
+    assert.ok(script, "the config names no script at all");
+    assert.ok(
+      existsSync(script),
+      `the child would launch a file that is not there: ${script}`,
+    );
   });
 });
 
@@ -321,20 +373,23 @@ test('the generated config launches a file that EXISTS', () => {
  * Two live e2e runs were misdiagnosed before this was found. "Named like the
  * entry" is not "is the entry".
  */
-test('the generated config launches the CLI, not some other file called index', () => {
+test("the generated config launches the CLI, not some other file called index", () => {
   withTempHome(() => {
-    const path = writeClaudeMcpConfig('sup-claude2');
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+    const path = writeClaudeMcpConfig("sup-claude2");
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as {
       mcpServers: { chat: { args: string[] } };
     };
 
-    const script = parsed.mcpServers.chat.args.find((a) => a.endsWith('.js') || a.endsWith('.ts'))!;
-    const source = readFileSync(script, 'utf8');
+    const script = parsed.mcpServers.chat.args.find(
+      (a) => a.endsWith(".js") || a.endsWith(".ts"),
+    )!;
+    const source = readFileSync(script, "utf8");
 
     // The CLI registers subcommands and the shim fallback. The supervisor
     // does neither, so this distinguishes them by CONTENT, not by name.
     assert.ok(
-      source.includes('KNOWN_SUBCOMMANDS') || /command\(['"]supervise/.test(source),
+      source.includes("KNOWN_SUBCOMMANDS") ||
+        /command\(['"]supervise/.test(source),
       `that is not the chat-mcp CLI entry: ${script}`,
     );
     assert.ok(
@@ -346,36 +401,45 @@ test('the generated config launches the CLI, not some other file called index', 
 
 test("the generated config launches chat-mcp's ENTRY, not the running script", () => {
   withTempHome(() => {
-    const path = writeClaudeMcpConfig('sup-claude2');
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+    const path = writeClaudeMcpConfig("sup-claude2");
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as {
       mcpServers: { chat: { command: string; args: string[] } };
     };
 
-    const script = parsed.mcpServers.chat.args.find((a) => a.endsWith('.js') || a.endsWith('.ts'));
+    const script = parsed.mcpServers.chat.args.find(
+      (a) => a.endsWith(".js") || a.endsWith(".ts"),
+    );
 
     assert.match(
       basename(script!),
       /^index\.(js|ts)$/,
-      'the child is being pointed at something that is not the CLI entry',
+      "the child is being pointed at something that is not the CLI entry",
     );
-    assert.notEqual(script, process.argv[1], 'still using the running script as the entry');
+    assert.notEqual(
+      script,
+      process.argv[1],
+      "still using the running script as the entry",
+    );
   });
 });
 
-test('a TypeScript entry is launched with a loader, a JavaScript one is not', () => {
+test("a TypeScript entry is launched with a loader, a JavaScript one is not", () => {
   withTempHome(() => {
-    const path = writeClaudeMcpConfig('sup-claude2');
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+    const path = writeClaudeMcpConfig("sup-claude2");
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as {
       mcpServers: { chat: { command: string; args: string[] } };
     };
 
     const args = parsed.mcpServers.chat.args;
-    const script = args.find((a) => a.endsWith('.js') || a.endsWith('.ts'))!;
+    const script = args.find((a) => a.endsWith(".js") || a.endsWith(".ts"))!;
 
-    if (script.endsWith('.ts')) {
-      assert.ok(args.includes('--import'), 'a .ts entry needs a loader or the child dies at once');
+    if (script.endsWith(".ts")) {
+      assert.ok(
+        args.includes("--import"),
+        "a .ts entry needs a loader or the child dies at once",
+      );
     } else {
-      assert.ok(!args.includes('--import'), 'a .js entry needs no loader');
+      assert.ok(!args.includes("--import"), "a .js entry needs no loader");
     }
   });
 });
@@ -388,24 +452,30 @@ test('a TypeScript entry is launched with a loader, a JavaScript one is not', ()
  * no `node_modules` above it, so the chat server died with
  * ERR_MODULE_NOT_FOUND the instant it started.
  */
-test('every path in the generated command is absolute, because the child has a different cwd', () => {
+test("every path in the generated command is absolute, because the child has a different cwd", () => {
   withTempHome(() => {
-    const path = writeClaudeMcpConfig('sup-claude2');
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+    const path = writeClaudeMcpConfig("sup-claude2");
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as {
       mcpServers: { chat: { command: string; args: string[] } };
     };
 
     const { command, args } = parsed.mcpServers.chat;
 
-    assert.ok(isAbsolute(command), `the interpreter is not an absolute path: ${command}`);
+    assert.ok(
+      isAbsolute(command),
+      `the interpreter is not an absolute path: ${command}`,
+    );
 
-    const flags = new Set(['--import', '--handle']);
+    const flags = new Set(["--import", "--handle"]);
 
     for (const [i, a] of args.entries()) {
       if (flags.has(a)) continue;
-      if (args[i - 1] === '--handle') continue;
+      if (args[i - 1] === "--handle") continue;
 
-      assert.ok(isAbsolute(a), `argument ${i} is relative and resolves in the CHILD's cwd: ${a}`);
+      assert.ok(
+        isAbsolute(a),
+        `argument ${i} is relative and resolves in the CHILD's cwd: ${a}`,
+      );
     }
   });
 });
@@ -419,44 +489,48 @@ test('every path in the generated command is absolute, because the child has a d
  * template, through the vendor the CALLER resolves and injects — `supervise/`
  * itself never resolves a vendor NAME, to keep the layering rule intact.
  */
-test('the injected vendor is a real spawner with a real re-dispatch template', async () => {
-  const { resolveDriver } = await import('../../src/supervise/drivers/index.js');
-  const { spawnFor } = await import('../../src/adapters/index.js');
+test("the injected vendor is a real spawner with a real re-dispatch template", async () => {
+  const { resolveDriver } =
+    await import("../../src/supervise/drivers/index.js");
+  const { spawnFor } = await import("../../src/adapters/index.js");
 
   const selection = resolveDriver({});
-  assert.deepEqual(selection, { vendor: 'claude', mode: 'host' });
+  assert.deepEqual(selection, { vendor: "claude", mode: "host" });
 
   const vendor = spawnFor(selection.vendor);
 
   // 🛑 The re-dispatch wording travels WITH the vendor. A seam test caught it
   // living above the driver, where it named Claude Code's own flag.
-  assert.equal(typeof vendor.redispatchPrompt, 'function');
-  assert.equal(typeof vendor.argsFor, 'function');
+  assert.equal(typeof vendor.redispatchPrompt, "function");
+  assert.equal(typeof vendor.argsFor, "function");
 
   // 🛑 A silent fallback would mean asking for Cursor and getting Claude,
   // which looks exactly like Cursor working.
-  assert.throws(() => spawnFor('cursor'), /cursor/);
+  assert.throws(() => spawnFor("cursor"), /cursor/);
 });
 
 /**
  * 🛑 NOTHING ABOVE THE DRIVER DIRECTORY MAY NAME A CLI'S EVENT SHAPES OR FLAGS.
  * Read from the source text, because a type error cannot catch a string.
  */
-test('no module above drivers/ knows any CLI event shape or flag', async () => {
-  const { readFileSync, readdirSync } = await import('node:fs');
-  const { join } = await import('node:path');
+test("no module above drivers/ knows any CLI event shape or flag", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const { join } = await import("node:path");
 
-  const dir = new URL('../../src/supervise/', import.meta.url).pathname;
-  const files = readdirSync(dir).filter((f) => f.endsWith('.ts'));
+  const dir = new URL("../../src/supervise/", import.meta.url).pathname;
+  const files = readdirSync(dir).filter((f) => f.endsWith(".ts"));
 
-  assert.ok(files.length > 5, `expected the supervise modules, found ${files.length}`);
+  assert.ok(
+    files.length > 5,
+    `expected the supervise modules, found ${files.length}`,
+  );
 
   const forbidden = [
     "'rate_limit_event'",
     "'result'",
-    'Permission for this tool use was denied',
-    'stream-json',
-    '--allowedTools',
+    "Permission for this tool use was denied",
+    "stream-json",
+    "--allowedTools",
   ];
 
   const leaks: string[] = [];
@@ -464,16 +538,20 @@ test('no module above drivers/ knows any CLI event shape or flag', async () => {
   for (const file of files) {
     // Strip comments: the history of these bugs is documented in prose and
     // that prose is allowed to quote the shapes.
-    const code = readFileSync(join(dir, file), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/^\s*\/\/.*$/gm, '');
+    const code = readFileSync(join(dir, file), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
 
     for (const needle of forbidden) {
       if (code.includes(needle)) leaks.push(`${file}: ${needle}`);
     }
   }
 
-  assert.deepEqual(leaks, [], 'a CLI specific lives above the driver directory');
+  assert.deepEqual(
+    leaks,
+    [],
+    "a CLI specific lives above the driver directory",
+  );
 });
 
 /**
@@ -487,26 +565,36 @@ test('no module above drivers/ knows any CLI event shape or flag', async () => {
  * operator who has lived with it and wrong as a default for someone who has
  * not.
  */
-test('--auto is a shorthand, and an explicit --permission-mode still wins', async () => {
-  const { readFileSync } = await import('node:fs');
-  const src = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
+test("--auto is a shorthand, and an explicit --permission-mode still wins", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(
+    new URL("../../src/index.ts", import.meta.url),
+    "utf8",
+  );
 
-  assert.match(src, /\.option\(\s*['"]--auto['"]/, 'there is no opt-in flag');
+  assert.match(src, /\.option\(\s*['"]--auto['"]/, "there is no opt-in flag");
   assert.match(
     src,
     /permissionMode:\s*\n?\s*o\.permissionMode \?\?/,
-    'the flag overrides an explicitly named mode',
+    "the flag overrides an explicitly named mode",
   );
 });
 
-test('the help text says what --auto costs, not just what it does', async () => {
-  const { readFileSync } = await import('node:fs');
-  const src = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
+test("the help text says what --auto costs, not just what it does", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(
+    new URL("../../src/index.ts", import.meta.url),
+    "utf8",
+  );
 
   const flagAt = src.search(/['"]--auto['"]/);
-  assert.notEqual(flagAt, -1, 'the --auto flag is gone');
+  assert.notEqual(flagAt, -1, "the --auto flag is gone");
   const help = src.slice(flagAt, flagAt + 400);
 
-  assert.match(help, /allowlist/, 'the flag does not say what it replaces');
-  assert.match(help, /not written down|cannot read|second person/, 'it does not state the cost');
+  assert.match(help, /allowlist/, "the flag does not say what it replaces");
+  assert.match(
+    help,
+    /not written down|cannot read|second person/,
+    "it does not state the cost",
+  );
 });

@@ -19,7 +19,7 @@ export interface DockerLaneEnv {
 
 /** A var set to an empty string or `0` counts as unset. */
 function enabled(value: string | undefined): boolean {
-  return value !== undefined && value !== '' && value !== '0';
+  return value !== undefined && value !== "" && value !== "0";
 }
 
 /**
@@ -39,10 +39,10 @@ export function dockerLaneSkip(
   dockerPresent: () => boolean,
 ): string | false {
   if (enabled(env.CI) && !enabled(env.DOCKER_TESTS)) {
-    return 'the docker lane is local-only (#150); run `npm run test:docker`, or set DOCKER_TESTS=1';
+    return "the docker lane is local-only (#150); run `npm run test:docker`, or set DOCKER_TESTS=1";
   }
 
-  if (!dockerPresent()) return 'docker is not available here';
+  if (!dockerPresent()) return "docker is not available here";
 
   return false;
 }

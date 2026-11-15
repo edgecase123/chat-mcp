@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
-import type { Message } from '../../../storage/dao.js';
-import { stampOf as timeOf } from '../../../util/time.js';
+import React, { useState } from "react";
+import { Box, Text, useInput } from "ink";
+import type { Message } from "../../../storage/dao.js";
+import { stampOf as timeOf } from "../../../util/time.js";
 
 /**
  * Chrome-free view of the current message list, intended for mouse-selection
@@ -17,16 +17,24 @@ export interface CopyPaneProps {
   onExit: () => void;
 }
 
-export function CopyPane({ messages, viewportRows, onExit }: CopyPaneProps): React.ReactElement {
+export function CopyPane({
+  messages,
+  viewportRows,
+  onExit,
+}: CopyPaneProps): React.ReactElement {
   const [scrollOffset, setScrollOffset] = useState(0);
 
   useInput((_raw, key) => {
     if (key.escape) return onExit();
     const step = Math.max(1, viewportRows - 2);
-    if (key.pageUp) return setScrollOffset((o) => Math.min(Math.max(0, messages.length - viewportRows), o + step));
+    if (key.pageUp)
+      return setScrollOffset((o) =>
+        Math.min(Math.max(0, messages.length - viewportRows), o + step),
+      );
     if (key.pageDown) return setScrollOffset((o) => Math.max(0, o - step));
     const k = key as unknown as { home?: boolean; end?: boolean };
-    if (k.home) return setScrollOffset(Math.max(0, messages.length - viewportRows));
+    if (k.home)
+      return setScrollOffset(Math.max(0, messages.length - viewportRows));
     if (k.end) return setScrollOffset(0);
   });
 
@@ -44,8 +52,10 @@ export function CopyPane({ messages, viewportRows, onExit }: CopyPaneProps): Rea
       ) : (
         visible.map((m) => (
           <Box key={m.id} flexDirection="column">
-            <Text>{m.from_handle}  {timeOf(m.sent_at)}</Text>
-            <Text>  {m.body}</Text>
+            <Text>
+              {m.from_handle} {timeOf(m.sent_at)}
+            </Text>
+            <Text> {m.body}</Text>
           </Box>
         ))
       )}

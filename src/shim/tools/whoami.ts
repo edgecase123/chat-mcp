@@ -1,14 +1,14 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import * as dao from '../../storage/dao.js';
-import { gaugeFreshness } from '../gauge-freshness.js';
-import { notifyPathFor } from '../../util/paths.js';
-import type { ShimContext } from '../index.js';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import * as dao from "../../storage/dao.js";
+import { gaugeFreshness } from "../gauge-freshness.js";
+import { notifyPathFor } from "../../util/paths.js";
+import type { ShimContext } from "../index.js";
 
 export function installWhoami(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
-    'whoami',
+    "whoami",
     {
-      title: 'Who am I on the chat bus?',
+      title: "Who am I on the chat bus?",
       description:
         "Return this shim's handle, session_id, kind, and the current list of online peers. Cheap self-discovery — call this after your MCP client starts to confirm you're registered and see who else is available.",
       inputSchema: {},
@@ -17,7 +17,9 @@ export function installWhoami(server: McpServer, ctx: ShimContext): void {
       dao.touchLastSeen(ctx.db, ctx.handle);
       const me = dao.getAgent(ctx.db, ctx.handle);
       if (!me) throw new Error(`Agent row missing for handle=${ctx.handle}`);
-      const peers = dao.listAgents(ctx.db, false).filter((a) => a.handle !== ctx.handle);
+      const peers = dao
+        .listAgents(ctx.db, false)
+        .filter((a) => a.handle !== ctx.handle);
       // One clock reading for the whole response, so two agents in the same
       // payload are never aged against different "now"s.
       const now = Date.now();
@@ -55,7 +57,7 @@ export function installWhoami(server: McpServer, ctx: ShimContext): void {
         })),
       };
       return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       };
     },
   );

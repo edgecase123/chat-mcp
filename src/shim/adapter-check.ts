@@ -1,12 +1,12 @@
-import { existsSync } from 'node:fs';
-import { adapterScriptPath } from '../util/paths.js';
+import { existsSync } from "node:fs";
+import { adapterScriptPath } from "../util/paths.js";
 
 /**
  * Framework identifiers match the adapter installer names in
  * `src/adapters/` (e.g. `claude-code` → `src/adapters/claude-code.ts`).
  * Extend this union as new adapters ship.
  */
-export type Framework = 'claude-code';
+export type Framework = "claude-code";
 
 /**
  * Detect the framework hosting this shim via environment variables the
@@ -15,7 +15,7 @@ export type Framework = 'claude-code';
  * positives on frameworks that don't have an adapter yet (cursor, codex).
  */
 export function detectFramework(): Framework | null {
-  if (process.env.CLAUDECODE === '1') return 'claude-code';
+  if (process.env.CLAUDECODE === "1") return "claude-code";
   return null;
 }
 
@@ -52,7 +52,7 @@ export function checkWakeAdapter(handle: string): AdapterStatus {
     `Install once — auto-arms the wake watch on every session:`,
     `  npx -y github:edgecase123/chat-mcp install ${framework} --handle ${handle}`,
     `Then restart the client. Until installed, use the Manual Fallback below.`,
-  ].join('\n');
+  ].join("\n");
   return { installed: false, framework, hint };
 }
 
@@ -61,15 +61,18 @@ export function checkWakeAdapter(handle: string): AdapterStatus {
  * is missing. Kept short + high-signal so it lands even under context
  * pressure.
  */
-export function prependAdapterWarning(instructions: string, status: AdapterStatus): string {
+export function prependAdapterWarning(
+  instructions: string,
+  status: AdapterStatus,
+): string {
   if (status.installed || !status.hint) return instructions;
   const banner = [
-    '⚠️  WAKE ADAPTER NOT INSTALLED',
-    '',
+    "⚠️  WAKE ADAPTER NOT INSTALLED",
+    "",
     status.hint,
-    '',
-    '───────────────────────────────────────────────────────────────',
-    '',
-  ].join('\n');
+    "",
+    "───────────────────────────────────────────────────────────────",
+    "",
+  ].join("\n");
   return banner + instructions;
 }

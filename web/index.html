@@ -1,80 +1,149 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="color-scheme" content="light dark">
-  <title>chat-mcp</title>
-  <link rel="stylesheet" href="/assets/style.css">
-</head>
-<body>
-  <div id="app" class="app-shell" hidden>
-    <header class="topbar">
-      <div class="topbar__brand">chat-mcp</div>
-      <div class="topbar__handle" id="my-handle"></div>
-      <button id="theme-toggle" class="topbar__theme" type="button" aria-label="Toggle theme">
-        <span class="theme-icon" data-theme-icon></span>
-      </button>
-    </header>
-    <aside class="sidebar" id="sidebar" aria-label="Peers and rooms"></aside>
-    <main class="pane" id="pane">
-      <header class="pane__header">
-        <h1 class="pane__title" id="pane-title">select a peer or room</h1>
-        <div class="pane__meta" id="pane-meta"></div>
-        <!-- #102 — filter and highlight within the open conversation. A box
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>chat-mcp</title>
+    <link rel="stylesheet" href="/assets/style.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell" hidden>
+      <header class="topbar">
+        <div class="topbar__brand">chat-mcp</div>
+        <div class="topbar__handle" id="my-handle"></div>
+        <button
+          id="theme-toggle"
+          class="topbar__theme"
+          type="button"
+          aria-label="Toggle theme"
+        >
+          <span class="theme-icon" data-theme-icon></span>
+        </button>
+      </header>
+      <aside class="sidebar" id="sidebar" aria-label="Peers and rooms"></aside>
+      <main class="pane" id="pane">
+        <header class="pane__header">
+          <h1 class="pane__title" id="pane-title">select a peer or room</h1>
+          <div class="pane__meta" id="pane-meta"></div>
+          <!-- #102 — filter and highlight within the open conversation. A box
              rather than a command, because the term is edited repeatedly and a
              command would have to be retyped each time. -->
-        <input class="pane__search" id="pane-search" type="search" autocomplete="off"
-               placeholder="Search" aria-label="Filter and highlight messages in this conversation">
-        <!-- #92 — the conversation style agents must follow in this room.
+          <input
+            class="pane__search"
+            id="pane-search"
+            type="search"
+            autocomplete="off"
+            placeholder="Search"
+            aria-label="Filter and highlight messages in this conversation"
+          />
+          <!-- #92 — the conversation style agents must follow in this room.
              Hidden for DMs and for the empty state; shown only for a room. -->
-        <label class="pane__style" id="pane-style-wrap" hidden>
-          <span class="pane__style-label">style</span>
-          <select class="pane__style-select" id="pane-style">
-            <option value="">none</option>
-            <option value="succinct">succinct</option>
-            <option value="custom">custom</option>
-          </select>
-        </label>
-        <!-- Outside the label on purpose: a button inside one also activates
+          <label class="pane__style" id="pane-style-wrap" hidden>
+            <span class="pane__style-label">style</span>
+            <select class="pane__style-select" id="pane-style">
+              <option value="">none</option>
+              <option value="succinct">succinct</option>
+              <option value="custom">custom</option>
+            </select>
+          </label>
+          <!-- Outside the label on purpose: a button inside one also activates
              the select it wraps. -->
-        <button type="button" class="pane__style-edit" id="pane-style-edit" hidden
-                title="Edit this room's custom style">edit</button>
-      </header>
-      <!-- #92 — the custom-style editor. Opens when `custom` is chosen in the
+          <button
+            type="button"
+            class="pane__style-edit"
+            id="pane-style-edit"
+            hidden
+            title="Edit this room's custom style"
+          >
+            edit
+          </button>
+        </header>
+        <!-- #92 — the custom-style editor. Opens when `custom` is chosen in the
            selector, because an alert telling the operator to use an MCP tool is
            a dead end from a browser. -->
-      <section class="style-editor" id="style-editor" hidden>
-        <label class="style-editor__label" for="style-editor-text">
-          Custom style for <span id="style-editor-room"></span> — markdown, pushed to agents with every read
-        </label>
-        <textarea class="style-editor__text" id="style-editor-text" rows="8"
-                  placeholder="# House style&#10;&#10;Answer in the first line. No preamble."></textarea>
-        <div class="style-editor__actions">
-          <button type="button" class="style-editor__save" id="style-editor-save">Save</button>
-          <button type="button" class="style-editor__cancel" id="style-editor-cancel">Cancel</button>
-          <span class="style-editor__error" id="style-editor-error"></span>
-        </div>
-      </section>
-      <!-- Pending permission requests. Above the message list on purpose:
+        <section class="style-editor" id="style-editor" hidden>
+          <label class="style-editor__label" for="style-editor-text">
+            Custom style for <span id="style-editor-room"></span> — markdown,
+            pushed to agents with every read
+          </label>
+          <textarea
+            class="style-editor__text"
+            id="style-editor-text"
+            rows="8"
+            placeholder="# House style&#10;&#10;Answer in the first line. No preamble."
+          ></textarea>
+          <div class="style-editor__actions">
+            <button
+              type="button"
+              class="style-editor__save"
+              id="style-editor-save"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              class="style-editor__cancel"
+              id="style-editor-cancel"
+            >
+              Cancel
+            </button>
+            <span class="style-editor__error" id="style-editor-error"></span>
+          </div>
+        </section>
+        <!-- Pending permission requests. Above the message list on purpose:
            a supervised agent is STOPPED until one of these is answered, so it
            outranks anything being said. -->
-      <section class="approvals" id="approvals" aria-live="assertive" aria-label="Pending approvals" hidden></section>
-      <div class="pane__stream" id="messages-stream">
-        <ol class="messages" id="messages" aria-live="polite" aria-relevant="additions"></ol>
-        <!-- Overlaid, not a flex row: a row appearing would shift the history
+        <section
+          class="approvals"
+          id="approvals"
+          aria-live="assertive"
+          aria-label="Pending approvals"
+          hidden
+        ></section>
+        <div class="pane__stream" id="messages-stream">
+          <ol
+            class="messages"
+            id="messages"
+            aria-live="polite"
+            aria-relevant="additions"
+          ></ol>
+          <!-- Overlaid, not a flex row: a row appearing would shift the history
              the reader is in the middle of, which is the interruption this
              whole affordance exists to prevent. -->
-        <button id="jump-newest" class="jump-newest" type="button" hidden></button>
-      </div>
-      <form id="composer" class="composer">
-        <div id="composer-suggest" class="composer-suggest" role="listbox" hidden></div>
-        <textarea id="composer-input" class="composer__input" placeholder="Type a message. Shift-Enter for newline." rows="1" disabled></textarea>
-        <button type="submit" id="composer-send" class="composer__send" disabled>Send</button>
-      </form>
-    </main>
-  </div>
-  <div id="loading" class="loading">Loading…</div>
-  <script src="/assets/app.js" type="module"></script>
-</body>
+          <button
+            id="jump-newest"
+            class="jump-newest"
+            type="button"
+            hidden
+          ></button>
+        </div>
+        <form id="composer" class="composer">
+          <div
+            id="composer-suggest"
+            class="composer-suggest"
+            role="listbox"
+            hidden
+          ></div>
+          <textarea
+            id="composer-input"
+            class="composer__input"
+            placeholder="Type a message. Shift-Enter for newline."
+            rows="1"
+            disabled
+          ></textarea>
+          <button
+            type="submit"
+            id="composer-send"
+            class="composer__send"
+            disabled
+          >
+            Send
+          </button>
+        </form>
+      </main>
+    </div>
+    <div id="loading" class="loading">Loading…</div>
+    <script src="/assets/app.js" type="module"></script>
+  </body>
 </html>

@@ -1,7 +1,7 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { oneLine } from '../support/source-text.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { oneLine } from "../support/source-text.js";
 
 /**
  * 🛑 THE PREDICATE'S OWN TESTS PASS WITH NO HANDLER WIRED AT ALL.
@@ -16,60 +16,84 @@ import { oneLine } from '../support/source-text.js';
  * nothing, which is the failure this file exists to catch.
  */
 
-const APP = readFileSync(new URL('../../web/assets/app.js', import.meta.url), 'utf8');
+const APP = readFileSync(
+  new URL("../../web/assets/app.js", import.meta.url),
+  "utf8",
+);
 
 /** `app.js` with `//` comments removed, so prose cannot satisfy a code check. */
-const APP_CODE = APP.split('\n')
-  .filter((line) => !line.trimStart().startsWith('//'))
-  .join('\n');
+const APP_CODE = APP.split("\n")
+  .filter((line) => !line.trimStart().startsWith("//"))
+  .join("\n");
 
 /** The body of the `keydown` listener that owns the shortcut. */
 function handlerBody(): string {
-  const start = APP_CODE.indexOf('focusSearchKeyApplies(e,');
-  assert.notEqual(start, -1, 'no keydown handler calls focusSearchKeyApplies — the shortcut is not wired');
+  const start = APP_CODE.indexOf("focusSearchKeyApplies(e,");
+  assert.notEqual(
+    start,
+    -1,
+    "no keydown handler calls focusSearchKeyApplies — the shortcut is not wired",
+  );
 
   // Quote-agnostic, and the LAST registration before the call: prettier picks
   // the quote, so a literal lookup would read as "no handler wired".
   const opens = [
-    ...APP_CODE.slice(0, start).matchAll(/document\.addEventListener\(['"]keydown['"]/g),
+    ...APP_CODE.slice(0, start).matchAll(
+      /document\.addEventListener\(['"]keydown['"]/g,
+    ),
   ];
-  assert.notEqual(opens.length, 0, 'focusSearchKeyApplies is called outside a document keydown listener');
+  assert.notEqual(
+    opens.length,
+    0,
+    "focusSearchKeyApplies is called outside a document keydown listener",
+  );
   const open = opens[opens.length - 1]!.index!;
 
-  const end = APP_CODE.indexOf('\n});', start);
-  assert.notEqual(end, -1, 'the handler block is unterminated');
+  const end = APP_CODE.indexOf("\n});", start);
+  assert.notEqual(end, -1, "the handler block is unterminated");
 
   return APP_CODE.slice(open, end);
 }
 
-test('🛑 a document keydown handler calls the predicate', () => {
+test("🛑 a document keydown handler calls the predicate", () => {
   const body = handlerBody();
 
-  assert.match(body, /focusSearchKeyApplies\(e,\s*IS_MAC\)/, 'the platform flag is not passed');
+  assert.match(
+    body,
+    /focusSearchKeyApplies\(e,\s*IS_MAC\)/,
+    "the platform flag is not passed",
+  );
 });
 
-test('🛑 the handler suppresses the browser find-in-page', () => {
+test("🛑 the handler suppresses the browser find-in-page", () => {
   // Without this the box focuses AND Chrome's find bar opens over it, so the
   // next keystroke goes to whichever one won the race.
   assert.match(handlerBody(), /preventDefault\(\)/);
 });
 
-test('the handler focuses the filter box and selects what is in it', () => {
+test("the handler focuses the filter box and selects what is in it", () => {
   const body = handlerBody();
 
-  assert.match(body, /el\.paneSearch\.focus\(\)/, 'focus');
+  assert.match(body, /el\.paneSearch\.focus\(\)/, "focus");
   // A second press must replace the term rather than append to it.
-  assert.match(body, /el\.paneSearch\.select\(\)/, 'select');
+  assert.match(body, /el\.paneSearch\.select\(\)/, "select");
 });
 
-test('IS_MAC is derived from the platform, not hardcoded', () => {
+test("IS_MAC is derived from the platform, not hardcoded", () => {
   const found = APP_CODE.match(/const IS_MAC = [\s\S]*?;/);
 
-  assert.notEqual(found, null, 'IS_MAC is not declared');
-  assert.match(found![0], /navigator\./, `IS_MAC does not read navigator: ${oneLine(found![0])}`);
+  assert.notEqual(found, null, "IS_MAC is not declared");
+  assert.match(
+    found![0],
+    /navigator\./,
+    `IS_MAC does not read navigator: ${oneLine(found![0])}`,
+  );
 });
 
-const HTML = readFileSync(new URL('../../web/index.html', import.meta.url), 'utf8');
+const HTML = readFileSync(
+  new URL("../../web/index.html", import.meta.url),
+  "utf8",
+);
 
 /**
  * The filter box's own tag, however prettier wrapped its attributes.
@@ -79,54 +103,68 @@ const HTML = readFileSync(new URL('../../web/index.html', import.meta.url), 'utf
  */
 function searchTag(): string {
   const at = HTML.indexOf('id="pane-search"');
-  assert.notEqual(at, -1, 'the filter box is gone or renamed');
+  assert.notEqual(at, -1, "the filter box is gone or renamed");
 
-  const open = HTML.lastIndexOf('<', at);
-  const end = HTML.indexOf('>', at);
-  assert.ok(open !== -1 && end > open, 'the filter box tag is unterminated');
+  const open = HTML.lastIndexOf("<", at);
+  const end = HTML.indexOf(">", at);
+  assert.ok(open !== -1 && end > open, "the filter box tag is unterminated");
 
   return HTML.slice(open, end + 1);
 }
 
-test('🛑 app.js OVERWRITES the placeholder from the same platform flag', () => {
+test("🛑 app.js OVERWRITES the placeholder from the same platform flag", () => {
   // The markup is served to every platform, so a combo in the HTML would be
   // wrong for half of the readers. `searchPlaceholder` must read `IS_MAC`, the
   // same flag the binding reads, or the box can advertise a dead key.
   const found = APP_CODE.match(/el\.paneSearch\.placeholder = [\s\S]*?;/);
 
-  assert.notEqual(found, null, 'nothing sets the placeholder at boot');
+  assert.notEqual(found, null, "nothing sets the placeholder at boot");
   assert.match(found![0], /searchPlaceholder\(IS_MAC\)/, oneLine(found![0]));
 });
 
-test('🛑 THE STATIC PLACEHOLDER NAMES NO COMBO', () => {
+test("🛑 THE STATIC PLACEHOLDER NAMES NO COMBO", () => {
   // It is the no-JS fallback. A combo baked here is wrong on one platform and
   // can never be corrected, because nothing re-reads the attribute.
   const found = searchTag().match(/placeholder="([^"]*)"/);
 
-  assert.notEqual(found, null, 'the filter box has no placeholder attribute');
-  assert.doesNotMatch(found![1], /Cmd|Ctrl|⌘|-F\b/, `the static fallback hardcodes a combo: ${found![1]}`);
+  assert.notEqual(found, null, "the filter box has no placeholder attribute");
+  assert.doesNotMatch(
+    found![1],
+    /Cmd|Ctrl|⌘|-F\b/,
+    `the static fallback hardcodes a combo: ${found![1]}`,
+  );
 });
 
-test('🛑 app.js OVERWRITES THE ACCESSIBLE NAME TOO, from the same flag', () => {
+test("🛑 app.js OVERWRITES THE ACCESSIBLE NAME TOO, from the same flag", () => {
   // `aria-label` wins over `placeholder`, so setting only the placeholder
   // leaves a screen-reader user never told the key exists.
-  const found = APP_CODE.match(/el\.paneSearch\.setAttribute\(['"]aria-label['"][\s\S]*?;/);
+  const found = APP_CODE.match(
+    /el\.paneSearch\.setAttribute\(['"]aria-label['"][\s\S]*?;/,
+  );
 
-  assert.notEqual(found, null, 'nothing sets the aria-label ATTRIBUTE at boot');
+  assert.notEqual(found, null, "nothing sets the aria-label ATTRIBUTE at boot");
   assert.match(found![0], /searchAriaLabel\(IS_MAC\)/, oneLine(found![0]));
 });
 
-test('🛑 THE ACCESSIBLE NAME IS SET BY ATTRIBUTE, NEVER BY IDL REFLECTION', () => {
+test("🛑 THE ACCESSIBLE NAME IS SET BY ATTRIBUTE, NEVER BY IDL REFLECTION", () => {
   // `el.paneSearch.ariaLabel = …` is a silent no-op where the reflection is
   // unsupported: it creates a plain JS property and sets no attribute, and a
   // source grep cannot tell the two apart. Raised by claude1 on PR 124.
-  assert.doesNotMatch(APP_CODE, /\.ariaLabel\s*=/, 'an ariaLabel IDL assignment is back');
+  assert.doesNotMatch(
+    APP_CODE,
+    /\.ariaLabel\s*=/,
+    "an ariaLabel IDL assignment is back",
+  );
 });
 
-test('🛑 THE STATIC aria-label NAMES NO COMBO EITHER', () => {
+test("🛑 THE STATIC aria-label NAMES NO COMBO EITHER", () => {
   // Same reason as the placeholder: served to every platform, never re-read.
   const found = searchTag().match(/aria-label="([^"]*)"/);
 
-  assert.notEqual(found, null, 'the filter box has no aria-label attribute');
-  assert.doesNotMatch(found![1], /Cmd|Ctrl|⌘|-F\b/, `the static fallback hardcodes a combo: ${found![1]}`);
+  assert.notEqual(found, null, "the filter box has no aria-label attribute");
+  assert.doesNotMatch(
+    found![1],
+    /Cmd|Ctrl|⌘|-F\b/,
+    `the static fallback hardcodes a combo: ${found![1]}`,
+  );
 });

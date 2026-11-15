@@ -1,7 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve, join } from 'node:path';
-import { ensureStateDir, stateDir, writePrivateFileSync } from '../util/paths.js';
-import { assertProjectDirOutsideState } from './containment.js';
+import { existsSync, readFileSync } from "node:fs";
+import { resolve, join } from "node:path";
+import {
+  ensureStateDir,
+  stateDir,
+  writePrivateFileSync,
+} from "../util/paths.js";
+import { assertProjectDirOutsideState } from "./containment.js";
 
 /**
  * Extra read-write mounts a containerized agent gets, beyond its project
@@ -16,7 +20,7 @@ export interface MountConfig {
 const EMPTY: MountConfig = { agents: {} };
 
 export function mountsPath(): string {
-  return join(stateDir(), 'mounts.json');
+  return join(stateDir(), "mounts.json");
 }
 
 /** A malformed file reads as empty rather than throwing, same as `projects.ts`. */
@@ -26,7 +30,9 @@ export function readMounts(): MountConfig {
   if (!existsSync(path)) return EMPTY;
 
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<MountConfig>;
+    const parsed = JSON.parse(
+      readFileSync(path, "utf8"),
+    ) as Partial<MountConfig>;
 
     return { agents: parsed.agents ?? {} };
   } catch {
@@ -63,7 +69,10 @@ export function registerMount(
   const agents = { ...config.agents, [handle]: { ...existing, [key]: abs } };
 
   ensureStateDir();
-  writePrivateFileSync(mountsPath(), `${JSON.stringify({ agents }, null, 2)}\n`);
+  writePrivateFileSync(
+    mountsPath(),
+    `${JSON.stringify({ agents }, null, 2)}\n`,
+  );
 
   return agents[handle] as Record<string, string>;
 }

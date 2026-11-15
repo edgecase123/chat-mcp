@@ -1,7 +1,12 @@
-import type { DatabaseSync } from 'node:sqlite';
-import * as dao from '../storage/dao.js';
-import { notifyPeer } from '../notify/bus.js';
-import { nextGaugeState, warningBody, deliveryFor, type Threshold } from './gauge.js';
+import type { DatabaseSync } from "node:sqlite";
+import * as dao from "../storage/dao.js";
+import { notifyPeer } from "../notify/bus.js";
+import {
+  nextGaugeState,
+  warningBody,
+  deliveryFor,
+  type Threshold,
+} from "./gauge.js";
 
 export interface ContextReport {
   used: number;
@@ -50,9 +55,14 @@ export function applyContextReport(
     const body = warningBody(handle, transition.fire, percent);
     const delivery = deliveryFor(transition.fire);
 
-    if (delivery === 'dm') {
+    if (delivery === "dm") {
       // Soft warning: the peer's own inbox, no room chatter yet.
-      const result = dao.insertMessage(db, { from: dao.SYSTEM_HANDLE, to: handle, body, kind: 'chat' });
+      const result = dao.insertMessage(db, {
+        from: dao.SYSTEM_HANDLE,
+        to: handle,
+        body,
+        kind: "chat",
+      });
 
       notifyPeer(handle, {
         id: result.id,
@@ -60,16 +70,21 @@ export function applyContextReport(
         from: dao.SYSTEM_HANDLE,
         ts: result.sent_at,
         body,
-        kind: 'chat',
+        kind: "chat",
       });
       notified.dm = 1;
     } else {
       // 85 / 95: every room the peer is in, so co-agents and the human can
       // react. `alert` at 95 surfaces it in the alert lane.
-      const kind = delivery === 'alert' ? 'alert' : 'chat';
+      const kind = delivery === "alert" ? "alert" : "chat";
 
       for (const room of dao.myRooms(db, handle)) {
-        const result = dao.insertMessage(db, { from: dao.SYSTEM_HANDLE, to: room.name, body, kind });
+        const result = dao.insertMessage(db, {
+          from: dao.SYSTEM_HANDLE,
+          to: room.name,
+          body,
+          kind,
+        });
 
         for (const member of dao.roomMembers(db, room.name)) {
           notifyPeer(member, {
@@ -86,5 +101,12 @@ export function applyContextReport(
     }
   }
 
-  return { used, total, percent, warned: transition.next_warned, fired: transition.fire, notified };
+  return {
+    used,
+    total,
+    percent,
+    warned: transition.next_warned,
+    fired: transition.fire,
+    notified,
+  };
 }

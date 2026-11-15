@@ -1,6 +1,6 @@
-import type { RateLimitSnapshot, WindowState } from '../rate-limit.js';
-import type { ContextSnapshot } from '../context-gauge.js';
-import type { Denial } from '../denial.js';
+import type { RateLimitSnapshot, WindowState } from "../rate-limit.js";
+import type { ContextSnapshot } from "../context-gauge.js";
+import type { Denial } from "../denial.js";
 
 /**
  * Claude Code's event WORDING and SHAPES. Nothing else may import this.
@@ -13,34 +13,38 @@ import type { Denial } from '../denial.js';
  */
 
 /** Pull a snapshot out of a raw stream-json event, or null if it is not one. */
-export function parseClaudeRateLimit(event: Record<string, unknown>): RateLimitSnapshot | null {
-  if (event.type !== 'rate_limit_event') return null;
+export function parseClaudeRateLimit(
+  event: Record<string, unknown>,
+): RateLimitSnapshot | null {
+  if (event.type !== "rate_limit_event") return null;
 
   const info = event.rate_limit_info as Record<string, unknown> | undefined;
 
-  if (!info || typeof info !== 'object') return null;
+  if (!info || typeof info !== "object") return null;
 
-  const raw = (info.unifiedWindows ?? {}) as Record<string, { utilization?: unknown; resetsAt?: unknown }>;
+  const raw = (info.unifiedWindows ?? {}) as Record<
+    string,
+    { utilization?: unknown; resetsAt?: unknown }
+  >;
   const windows: Record<string, WindowState> = {};
 
   for (const [name, w] of Object.entries(raw)) {
-    if (typeof w?.utilization === 'number') {
+    if (typeof w?.utilization === "number") {
       windows[name] = {
         utilization: w.utilization,
-        resetsAt: typeof w.resetsAt === 'number' ? w.resetsAt : 0,
+        resetsAt: typeof w.resetsAt === "number" ? w.resetsAt : 0,
       };
     }
   }
 
   return {
-    status: typeof info.status === 'string' ? info.status : 'unknown',
+    status: typeof info.status === "string" ? info.status : "unknown",
     // Absent means we do not know, and we must not assume overage exists.
-    overageAvailable: info.overageStatus === 'allowed',
+    overageAvailable: info.overageStatus === "allowed",
     windows,
     observedAt: Date.now(),
   };
 }
-
 
 /**
  * The sentence every Claude Code denial opens with.
@@ -49,19 +53,23 @@ export function parseClaudeRateLimit(event: Record<string, unknown>): RateLimitS
  * relay stops firing and a supervised agent looks like it is quietly giving
  * up. Naming it here is what makes that failure findable.
  */
-export const DENIAL_PREFIX = 'Permission for this tool use was denied.';
+export const DENIAL_PREFIX = "Permission for this tool use was denied.";
 
 /** What the CLI says needed approval, e.g. `rm in '/path/to/file'`. */
 const REQUEST_CLAUSE = /What required approval:\s*(.+?)\s+was blocked\./;
 
 /** Pull the text out of a `tool_result` part, whether string or parts array. */
 function contentText(content: unknown): string | null {
-  if (typeof content === 'string') return content;
+  if (typeof content === "string") return content;
 
   if (Array.isArray(content)) {
     const joined = content
-      .map((p) => (p && typeof p === 'object' && 'text' in p ? String((p as { text: unknown }).text) : ''))
-      .join('');
+      .map((p) =>
+        p && typeof p === "object" && "text" in p
+          ? String((p as { text: unknown }).text)
+          : "",
+      )
+      .join("");
 
     return joined.length > 0 ? joined : null;
   }
@@ -88,21 +96,27 @@ const pendingCalls = new Map<string, { tool: string; invocation: string }>();
 
 /** Record a tool call so a later denial can be paired to it. */
 export function rememberClaudeToolUse(event: Record<string, unknown>): void {
-  if (event.type !== 'assistant') return;
+  if (event.type !== "assistant") return;
 
   const parts = (event.message as { content?: unknown } | undefined)?.content;
   if (!Array.isArray(parts)) return;
 
   for (const part of parts) {
-    if (!part || typeof part !== 'object') continue;
-    if ((part as { type?: unknown }).type !== 'tool_use') continue;
+    if (!part || typeof part !== "object") continue;
+    if ((part as { type?: unknown }).type !== "tool_use") continue;
 
-    const { id, name, input } = part as { id?: string; name?: string; input?: unknown };
+    const { id, name, input } = part as {
+      id?: string;
+      name?: string;
+      input?: unknown;
+    };
     if (!id || !name) continue;
 
     // Bash carries `command`; other tools are identified by name alone.
     const command =
-      input && typeof input === 'object' && typeof (input as { command?: unknown }).command === 'string'
+      input &&
+      typeof input === "object" &&
+      typeof (input as { command?: unknown }).command === "string"
         ? (input as { command: string }).command
         : null;
 
@@ -110,8 +124,10 @@ export function rememberClaudeToolUse(event: Record<string, unknown>): void {
   }
 }
 
-export function denialFromClaude(event: Record<string, unknown> | null | undefined): Denial | null {
-  if (!event || event.type !== 'user') return null;
+export function denialFromClaude(
+  event: Record<string, unknown> | null | undefined,
+): Denial | null {
+  if (!event || event.type !== "user") return null;
 
   const message = event.message as { content?: unknown } | undefined;
   const parts = message?.content;
@@ -119,17 +135,17 @@ export function denialFromClaude(event: Record<string, unknown> | null | undefin
   if (!Array.isArray(parts)) return null;
 
   for (const part of parts) {
-    if (!part || typeof part !== 'object') continue;
-    if ((part as { type?: unknown }).type !== 'tool_result') continue;
+    if (!part || typeof part !== "object") continue;
+    if ((part as { type?: unknown }).type !== "tool_result") continue;
 
     const text = contentText((part as { content?: unknown }).content);
     if (!text || !text.startsWith(DENIAL_PREFIX)) continue;
 
     const id = (part as { tool_use_id?: unknown }).tool_use_id;
-    const call = typeof id === 'string' ? pendingCalls.get(id) : undefined;
+    const call = typeof id === "string" ? pendingCalls.get(id) : undefined;
 
     // Paired and consumed: the map holds only calls still awaiting a result.
-    if (typeof id === 'string') pendingCalls.delete(id);
+    if (typeof id === "string") pendingCalls.delete(id);
 
     return {
       requested: REQUEST_CLAUSE.exec(text)?.[1] ?? null,
@@ -154,7 +170,7 @@ export const LOG_EXCERPT_LIMIT = 200;
 
 /** One line of `text`, safe to put in a log, with any cut declared. */
 export function excerptForLog(text: string): string {
-  const flat = text.replace(/\s*\n+\s*/g, ' ⏎ ').trim();
+  const flat = text.replace(/\s*\n+\s*/g, " ⏎ ").trim();
 
   if (flat.length <= LOG_EXCERPT_LIMIT) return flat;
 
@@ -179,8 +195,10 @@ export function excerptForLog(text: string): string {
  * input is the message body, and a `Bash` input is a command line — neither
  * belongs in a log that an operator pastes into a room.
  */
-export function describeChildOutput(event: Record<string, unknown>): string | undefined {
-  if (event.type !== 'assistant') return undefined;
+export function describeChildOutput(
+  event: Record<string, unknown>,
+): string | undefined {
+  if (event.type !== "assistant") return undefined;
 
   const message = event.message as { content?: unknown } | undefined;
   const content = message?.content;
@@ -192,16 +210,16 @@ export function describeChildOutput(event: Record<string, unknown>): string | un
   for (const block of content) {
     const b = block as { type?: unknown; text?: unknown; name?: unknown };
 
-    if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
+    if (b.type === "text" && typeof b.text === "string" && b.text.trim()) {
       parts.push(excerptForLog(b.text));
-    } else if (b.type === 'tool_use' && typeof b.name === 'string') {
+    } else if (b.type === "tool_use" && typeof b.name === "string") {
       parts.push(`[tool] ${b.name}`);
     }
   }
 
   if (parts.length === 0) return undefined;
 
-  return parts.join(' | ');
+  return parts.join(" | ");
 }
 
 /**
@@ -216,10 +234,12 @@ export function describeChildOutput(event: Record<string, unknown>): string | un
  * broke". This makes the outcome a positive statement. Raised by claude2 on
  * PR 209.
  */
-export function describeTurnResult(event: Record<string, unknown>): string | undefined {
-  if (event.type !== 'result') return undefined;
+export function describeTurnResult(
+  event: Record<string, unknown>,
+): string | undefined {
+  if (event.type !== "result") return undefined;
 
-  const subtype = typeof event.subtype === 'string' ? event.subtype : 'unknown';
+  const subtype = typeof event.subtype === "string" ? event.subtype : "unknown";
   const failed = event.is_error === true;
 
   return `subtype=${subtype} is_error=${failed}`;
@@ -267,7 +287,9 @@ export function usedFromUsage(usage: ClaudeUsage): number {
  * calls too — the claim that the two agree is pinned by
  * `claude-context.test.ts`, which feeds one entry through both paths.
  */
-export function parseClaudeContextUsed(event: Record<string, unknown>): number | null {
+export function parseClaudeContextUsed(
+  event: Record<string, unknown>,
+): number | null {
   const usage = claudeContextUsage(event);
 
   return usage === null ? null : usedFromUsage(usage);
@@ -294,7 +316,7 @@ export function claudeContextUsage(entry: unknown): ClaudeUsage | null {
     | null
     | undefined;
 
-  if (!e || e.type !== 'assistant') return null;
+  if (!e || e.type !== "assistant") return null;
 
   // 🛑 A SUBAGENT'S TURN IS NOT THE PARENT'S WINDOW. A Task child emits its own
   // `assistant` events on the same stream, carrying ITS small window. The gauge
@@ -308,7 +330,7 @@ export function claudeContextUsage(entry: unknown): ClaudeUsage | null {
 
   const usage = e.message?.usage;
 
-  if (!usage || typeof usage !== 'object') return null;
+  if (!usage || typeof usage !== "object") return null;
 
   // ⚠️ AN ALL-ZERO USAGE IS NOT A WINDOW OF ZERO. Claude Code emits synthetic
   // assistant entries — API errors, interrupts — whose usage sums to nothing.
@@ -327,16 +349,16 @@ export function claudeContextUsage(entry: unknown): ClaudeUsage | null {
  * logged and a wrong denominator would never surface.
  */
 export const CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
-  'claude-fable-5-1': 1_000_000,
-  'claude-fable-5': 1_000_000,
-  'claude-mythos-5-1': 1_000_000,
-  'claude-opus-5': 1_000_000,
-  'claude-opus-4-8': 1_000_000,
-  'claude-opus-4-7': 1_000_000,
-  'claude-opus-4-6': 1_000_000,
-  'claude-sonnet-5': 1_000_000,
-  'claude-sonnet-4-6': 1_000_000,
-  'claude-haiku-4-5': 200_000,
+  "claude-fable-5-1": 1_000_000,
+  "claude-fable-5": 1_000_000,
+  "claude-mythos-5-1": 1_000_000,
+  "claude-opus-5": 1_000_000,
+  "claude-opus-4-8": 1_000_000,
+  "claude-opus-4-7": 1_000_000,
+  "claude-opus-4-6": 1_000_000,
+  "claude-sonnet-5": 1_000_000,
+  "claude-sonnet-4-6": 1_000_000,
+  "claude-haiku-4-5": 200_000,
 };
 
 export function contextWindowForModel(model: string): number | null {
@@ -356,7 +378,9 @@ export function contextWindowForModel(model: string): number | null {
  * ⚠️ DERIVED FROM THE MAP so the two cannot drift. Adding a smaller model
  * moves the fallback with it, which is the intended behaviour.
  */
-export const FALLBACK_CONTEXT_WINDOW = Math.min(...Object.values(CONTEXT_WINDOWS));
+export const FALLBACK_CONTEXT_WINDOW = Math.min(
+  ...Object.values(CONTEXT_WINDOWS),
+);
 
 /**
  * The context reading in this event, or null if it carries none.
@@ -375,13 +399,15 @@ export const FALLBACK_CONTEXT_WINDOW = Math.min(...Object.values(CONTEXT_WINDOWS
  * vendor-specific as the event shape it came from, so the supervisor is handed
  * a finished snapshot and never learns a model name.
  */
-export function claudeContextSnapshot(event: Record<string, unknown>): ContextSnapshot | null {
+export function claudeContextSnapshot(
+  event: Record<string, unknown>,
+): ContextSnapshot | null {
   const usage = claudeContextUsage(event);
 
   if (usage === null) return null;
 
   const model = (event.message as { model?: unknown } | undefined)?.model;
-  const id = typeof model === 'string' && model.length > 0 ? model : null;
+  const id = typeof model === "string" && model.length > 0 ? model : null;
   const mapped = id === null ? null : contextWindowForModel(id);
 
   return {

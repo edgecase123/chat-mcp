@@ -1,11 +1,20 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // Point CHAT_MCP_HOME at a scratch dir BEFORE importing anything that reads it.
-process.env.CHAT_MCP_HOME = join(mkdtempSync(join(tmpdir(), 'chat-mcp-kids-')), 'state');
+process.env.CHAT_MCP_HOME = join(
+  mkdtempSync(join(tmpdir(), "chat-mcp-kids-")),
+  "state",
+);
 
 const {
   ensureAdaptersDir,
@@ -17,15 +26,18 @@ const {
   notifyDir,
   STATE_DIR_MODE,
   STATE_FILE_MODE,
-} = await import('../../src/util/paths.js');
-const { registerProject, projectsPath } = await import('../../src/supervise/projects.js');
-const { claudeCodeAdapter } = await import('../../src/adapters/claude-code.js');
-const { claudeCodeContextAdapter } = await import('../../src/adapters/claude-code-context.js');
-type Adapter = import('../../src/adapters/types.js').Adapter;
-const { writeClaudeMcpConfig } = await import('../../src/supervise/drivers/claude.js');
+} = await import("../../src/util/paths.js");
+const { registerProject, projectsPath } =
+  await import("../../src/supervise/projects.js");
+const { claudeCodeAdapter } = await import("../../src/adapters/claude-code.js");
+const { claudeCodeContextAdapter } =
+  await import("../../src/adapters/claude-code-context.js");
+type Adapter = import("../../src/adapters/types.js").Adapter;
+const { writeClaudeMcpConfig } =
+  await import("../../src/supervise/drivers/claude.js");
 
 // registerProject refuses a directory that does not exist, so give it a real one.
-const PROBE_DIR = mkdtempSync(join(tmpdir(), 'chat-mcp-probe-'));
+const PROBE_DIR = mkdtempSync(join(tmpdir(), "chat-mcp-probe-"));
 
 const modeOf = (p: string) => statSync(p).mode & 0o777;
 
@@ -42,16 +54,20 @@ const modeOf = (p: string) => statSync(p).mode & 0o777;
  */
 
 const DIRS: ReadonlyArray<[string, () => string, () => string]> = [
-  ['mcp config', ensureMcpConfigDir, mcpConfigDir],
-  ['notify', ensureNotifyDir, notifyDir],
-  ['adapters', ensureAdaptersDir, adaptersDir],
+  ["mcp config", ensureMcpConfigDir, mcpConfigDir],
+  ["notify", ensureNotifyDir, notifyDir],
+  ["adapters", ensureAdaptersDir, adaptersDir],
 ];
 
 for (const [label, ensure, path] of DIRS) {
   test(`🚨 an ALREADY EXISTING wide-open ${label} directory is tightened`, () => {
     mkdirSync(path(), { recursive: true });
     chmodSync(path(), 0o755);
-    assert.equal(modeOf(path()), 0o755, 'the fixture is actually loose before the call');
+    assert.equal(
+      modeOf(path()),
+      0o755,
+      "the fixture is actually loose before the call",
+    );
 
     ensure();
 
@@ -63,25 +79,33 @@ for (const [label, ensure, path] of DIRS) {
  * `projects.json` names every directory an agent is registered against, so it
  * maps handles to paths on this machine.
  */
-test('🚨 an ALREADY EXISTING world-readable projects.json is tightened', () => {
+test("🚨 an ALREADY EXISTING world-readable projects.json is tightened", () => {
   ensureMcpConfigDir();
   writeFileSync(projectsPath(), '{"agents":{}}\n');
   chmodSync(projectsPath(), 0o644);
-  assert.equal(modeOf(projectsPath()), 0o644, 'the fixture is actually loose before the call');
+  assert.equal(
+    modeOf(projectsPath()),
+    0o644,
+    "the fixture is actually loose before the call",
+  );
 
-  registerProject('probe', PROBE_DIR);
+  registerProject("probe", PROBE_DIR);
 
   assert.equal(modeOf(projectsPath()), STATE_FILE_MODE);
 });
 
 test("🚨 an ALREADY EXISTING world-readable mcp/<handle>.json is tightened", () => {
   ensureMcpConfigDir();
-  const path = mcpConfigPathFor('probe');
-  writeFileSync(path, '{}\n');
+  const path = mcpConfigPathFor("probe");
+  writeFileSync(path, "{}\n");
   chmodSync(path, 0o644);
-  assert.equal(modeOf(path), 0o644, 'the fixture is actually loose before the call');
+  assert.equal(
+    modeOf(path),
+    0o644,
+    "the fixture is actually loose before the call",
+  );
 
-  writeClaudeMcpConfig('probe');
+  writeClaudeMcpConfig("probe");
 
   assert.equal(modeOf(path), STATE_FILE_MODE);
 });
@@ -115,11 +139,11 @@ test("🚨 an ALREADY EXISTING world-readable mcp/<handle>.json is tightened", (
  * below governs the real argument. Holding it twice would let an edit to the
  * call bypass the guard.
  */
-const CWD_SCOPES: readonly string[] = ['local', 'project'];
+const CWD_SCOPES: readonly string[] = ["local", "project"];
 
 const INSTALLERS: ReadonlyArray<[string, Adapter, string]> = [
-  ['claude-code', claudeCodeAdapter, 'local'],
-  ['claude-code-context', claudeCodeContextAdapter, 'local'],
+  ["claude-code", claudeCodeAdapter, "local"],
+  ["claude-code-context", claudeCodeContextAdapter, "local"],
 ];
 
 for (const [label, adapter, scope] of INSTALLERS) {
@@ -131,7 +155,11 @@ for (const [label, adapter, scope] of INSTALLERS) {
 
     mkdirSync(adaptersDir(), { recursive: true });
     chmodSync(adaptersDir(), 0o755);
-    assert.equal(modeOf(adaptersDir()), 0o755, 'the fixture is actually loose before the call');
+    assert.equal(
+      modeOf(adaptersDir()),
+      0o755,
+      "the fixture is actually loose before the call",
+    );
 
     await adapter.install({
       handle: `probe-${label}`,

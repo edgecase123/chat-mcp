@@ -1,4 +1,4 @@
-import stringWidth from 'string-width';
+import stringWidth from "string-width";
 
 /**
  * Hard word-wrap `body` at `cols` columns, respecting existing newlines.
@@ -21,26 +21,30 @@ import stringWidth from 'string-width';
  * a code snippet).
  */
 export function rehydrateEscapedNewlines(body: string): string {
-  if (body.includes('\n')) return body;
-  if (!body.includes('\\n') && !body.includes('\\t') && !body.includes('\\r')) return body;
+  if (body.includes("\n")) return body;
+  if (!body.includes("\\n") && !body.includes("\\t") && !body.includes("\\r"))
+    return body;
   return body
-    .replace(/\\r\\n/g, '\n')
-    .replace(/\\n/g, '\n')
-    .replace(/\\r/g, '\n')
-    .replace(/\\t/g, '\t');
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\r/g, "\n")
+    .replace(/\\t/g, "\t");
 }
 
 export function wrapBody(body: string, cols: number): string {
   const budget = Math.max(1, Math.floor(cols));
-  return body.split('\n').map((line) => {
-    // Preserve markdown table rows verbatim so the Markdown tokenizer can
-    // recognize them — wrapping at whitespace would split rows mid-line and
-    // break the pipe count. Table row: starts + ends with `|`. Includes
-    // separator rows like `|---|---|`. Table renderer compresses widths
-    // downstream to fit the pane, so leaving these lines long is safe.
-    if (/^\s*\|.*\|\s*$/.test(line)) return line;
-    return wrapLine(line, budget);
-  }).join('\n');
+  return body
+    .split("\n")
+    .map((line) => {
+      // Preserve markdown table rows verbatim so the Markdown tokenizer can
+      // recognize them — wrapping at whitespace would split rows mid-line and
+      // break the pipe count. Table row: starts + ends with `|`. Includes
+      // separator rows like `|---|---|`. Table renderer compresses widths
+      // downstream to fit the pane, so leaving these lines long is safe.
+      if (/^\s*\|.*\|\s*$/.test(line)) return line;
+      return wrapLine(line, budget);
+    })
+    .join("\n");
 }
 
 /**
@@ -52,7 +56,7 @@ export function wrapBody(body: string, cols: number): string {
  */
 export function wrappedRowCount(body: string, cols: number): number {
   if (body.length === 0) return 1;
-  return wrapBody(body, cols).split('\n').length;
+  return wrapBody(body, cols).split("\n").length;
 }
 
 /**
@@ -63,7 +67,7 @@ export function wrappedRowCount(body: string, cols: number): number {
  * emoji into two broken halves.
  */
 function sliceToWidth(t: string, cols: number): string {
-  let out = '';
+  let out = "";
   for (const ch of t) {
     if (stringWidth(out + ch) > cols) break;
     out += ch;
@@ -74,20 +78,23 @@ function sliceToWidth(t: string, cols: number): string {
 
 /** The first code point, for the case where one glyph alone exceeds the budget. */
 function firstCodePoint(t: string): string {
-  return [...t][0] ?? '';
+  return [...t][0] ?? "";
 }
 
 function wrapLine(line: string, cols: number): string {
   if (stringWidth(line) <= cols) return line;
   const out: string[] = [];
-  let cur = '';
+  let cur = "";
   // Split on whitespace but KEEP the whitespace runs so we can restore them.
   const parts = line.split(/(\s+)/);
   for (const part of parts) {
     if (part.length === 0) continue;
     // A too-long single token — hard-break.
     if (stringWidth(part) > cols) {
-      if (cur) { out.push(cur); cur = ''; }
+      if (cur) {
+        out.push(cur);
+        cur = "";
+      }
       let remaining = part;
       while (stringWidth(remaining) > cols) {
         // 🛑 A GLYPH WIDER THAN THE WHOLE BUDGET CANNOT BE SPLIT. Emitting it
@@ -101,11 +108,11 @@ function wrapLine(line: string, cols: number): string {
     }
     if (stringWidth(cur + part) > cols) {
       out.push(cur.trimEnd());
-      cur = /^\s/.test(part) ? '' : part;
+      cur = /^\s/.test(part) ? "" : part;
     } else {
       cur += part;
     }
   }
   if (cur) out.push(cur);
-  return out.join('\n');
+  return out.join("\n");
 }

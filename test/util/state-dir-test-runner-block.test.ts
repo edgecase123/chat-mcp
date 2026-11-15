@@ -1,11 +1,11 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // This file deliberately does NOT redirect at module scope — the block under
 // test is what happens when a test has not redirected.
-const { stateDir } = await import('../../src/util/paths.js');
+const { stateDir } = await import("../../src/util/paths.js");
 
 /**
  * 🛑 A TEST THAT RESOLVES THE DEFAULT STATE DIR CAN SILENCE A LIVE AGENT.
@@ -21,7 +21,10 @@ const { stateDir } = await import('../../src/util/paths.js');
  */
 
 /** Run `fn` with the named env vars forced, then restore exactly. */
-function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
+function withEnv(
+  vars: Record<string, string | undefined>,
+  fn: () => void,
+): void {
   const saved = new Map(Object.keys(vars).map((k) => [k, process.env[k]]));
   try {
     for (const [k, v] of Object.entries(vars)) {
@@ -37,25 +40,33 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void): void
   }
 }
 
-test('🚨 under the test runner with no CHAT_MCP_HOME, stateDir THROWS', () => {
+test("🚨 under the test runner with no CHAT_MCP_HOME, stateDir THROWS", () => {
   // The premise: we really are under the runner.
-  assert.notEqual(process.env.NODE_TEST_CONTEXT, undefined, 'this file must run under node --test');
+  assert.notEqual(
+    process.env.NODE_TEST_CONTEXT,
+    undefined,
+    "this file must run under node --test",
+  );
 
   withEnv({ CHAT_MCP_HOME: undefined }, () => {
-    assert.throws(() => stateDir(), /CHAT_MCP_HOME/, 'the error must name the variable to set');
+    assert.throws(
+      () => stateDir(),
+      /CHAT_MCP_HOME/,
+      "the error must name the variable to set",
+    );
   });
 });
 
 /** An empty string already counted as absent, and must keep counting as absent. */
-test('🚨 an EMPTY CHAT_MCP_HOME is not a redirect either', () => {
-  withEnv({ CHAT_MCP_HOME: '' }, () => {
+test("🚨 an EMPTY CHAT_MCP_HOME is not a redirect either", () => {
+  withEnv({ CHAT_MCP_HOME: "" }, () => {
     assert.throws(() => stateDir(), /CHAT_MCP_HOME/);
   });
 });
 
-test('🚨 with CHAT_MCP_HOME set, stateDir returns it and does not throw', () => {
-  withEnv({ CHAT_MCP_HOME: '/tmp/chat-mcp-probe' }, () => {
-    assert.equal(stateDir(), '/tmp/chat-mcp-probe');
+test("🚨 with CHAT_MCP_HOME set, stateDir returns it and does not throw", () => {
+  withEnv({ CHAT_MCP_HOME: "/tmp/chat-mcp-probe" }, () => {
+    assert.equal(stateDir(), "/tmp/chat-mcp-probe");
   });
 });
 
@@ -64,8 +75,8 @@ test('🚨 with CHAT_MCP_HOME set, stateDir returns it and does not throw', () =
  * fired everywhere would pass every assertion above — and break every real
  * `chat-mcp` invocation, which has no `CHAT_MCP_HOME` and should not need one.
  */
-test('🚨 OUTSIDE the test runner, the default path still resolves', () => {
+test("🚨 OUTSIDE the test runner, the default path still resolves", () => {
   withEnv({ CHAT_MCP_HOME: undefined, NODE_TEST_CONTEXT: undefined }, () => {
-    assert.equal(stateDir(), join(homedir(), '.chat-mcp'));
+    assert.equal(stateDir(), join(homedir(), ".chat-mcp"));
   });
 });

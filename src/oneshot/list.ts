@@ -1,6 +1,6 @@
-import * as dao from '../storage/dao.js';
-import { openDb } from '../storage/db.js';
-import { timeOf } from './common.js';
+import * as dao from "../storage/dao.js";
+import { openDb } from "../storage/db.js";
+import { timeOf } from "./common.js";
 
 export interface ListOpts {
   all?: boolean;
@@ -25,12 +25,14 @@ export async function runList(opts: ListOpts): Promise<void> {
     }
 
     if (agents.length === 0) {
-      process.stdout.write(opts.all ? '(no known peers)\n' : '(no online peers)\n');
+      process.stdout.write(
+        opts.all ? "(no known peers)\n" : "(no online peers)\n",
+      );
       return;
     }
 
     for (const a of agents) {
-      const status = a.online ? 'online ' : 'offline';
+      const status = a.online ? "online " : "offline";
       process.stdout.write(
         `  ${a.handle.padEnd(20)} ${a.kind.padEnd(8)} ${status}  seen ${timeOf(a.last_seen_at)}\n`,
       );

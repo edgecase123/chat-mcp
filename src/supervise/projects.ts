@@ -1,8 +1,12 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { join } from 'node:path';
-import { ensureStateDir, stateDir, writePrivateFileSync } from '../util/paths.js';
-import { assertProjectDirOutsideState } from './containment.js';
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { join } from "node:path";
+import {
+  ensureStateDir,
+  stateDir,
+  writePrivateFileSync,
+} from "../util/paths.js";
+import { assertProjectDirOutsideState } from "./containment.js";
 
 /**
  * Which project directory each agent works in.
@@ -34,7 +38,7 @@ export interface ProjectConfig {
 const EMPTY: ProjectConfig = { agents: {} };
 
 export function projectsPath(): string {
-  return join(stateDir(), 'projects.json');
+  return join(stateDir(), "projects.json");
 }
 
 /**
@@ -51,7 +55,9 @@ export function readProjects(): ProjectConfig {
   if (!existsSync(path)) return EMPTY;
 
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<ProjectConfig>;
+    const parsed = JSON.parse(
+      readFileSync(path, "utf8"),
+    ) as Partial<ProjectConfig>;
 
     return { agents: parsed.agents ?? {} };
   } catch {
@@ -70,7 +76,9 @@ export function registerProject(handle: string, dir: string): string[] {
   const abs = resolve(dir);
 
   if (!existsSync(abs)) {
-    throw new Error(`cannot register "${dir}": no such directory (resolved to ${abs})`);
+    throw new Error(
+      `cannot register "${dir}": no such directory (resolved to ${abs})`,
+    );
   }
 
   // Refuse at REGISTRATION as well as at spawn, so the operator finds out when
@@ -79,10 +87,16 @@ export function registerProject(handle: string, dir: string): string[] {
 
   const config = readProjects();
   const existing = config.agents[handle] ?? [];
-  const agents = { ...config.agents, [handle]: [...new Set([...existing, abs])] };
+  const agents = {
+    ...config.agents,
+    [handle]: [...new Set([...existing, abs])],
+  };
 
   ensureStateDir();
-  writePrivateFileSync(projectsPath(), `${JSON.stringify({ agents }, null, 2)}\n`);
+  writePrivateFileSync(
+    projectsPath(),
+    `${JSON.stringify({ agents }, null, 2)}\n`,
+  );
 
   return agents[handle] as string[];
 }
@@ -94,7 +108,10 @@ export function unregisterProject(handle: string): void {
   delete agents[handle];
 
   ensureStateDir();
-  writePrivateFileSync(projectsPath(), `${JSON.stringify({ agents }, null, 2)}\n`);
+  writePrivateFileSync(
+    projectsPath(),
+    `${JSON.stringify({ agents }, null, 2)}\n`,
+  );
 }
 
 /**

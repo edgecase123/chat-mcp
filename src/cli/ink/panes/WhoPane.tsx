@@ -1,37 +1,37 @@
-import React from 'react';
-import { Box, Text } from 'ink';
-import type { Agent, AgentStatus } from '../../../storage/dao.js';
-import { renderGauge } from '../util/gauge-render.js';
-import { stampOf as timeOf } from '../../../util/time.js';
+import React from "react";
+import { Box, Text } from "ink";
+import type { Agent, AgentStatus } from "../../../storage/dao.js";
+import { renderGauge } from "../util/gauge-render.js";
+import { stampOf as timeOf } from "../../../util/time.js";
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
-  idle: 'green',
-  thinking: 'yellow',
-  tool: 'cyan',
-  blocked: 'red',
-  error: 'red',
-  offline: 'gray',
+  idle: "green",
+  thinking: "yellow",
+  tool: "cyan",
+  blocked: "red",
+  error: "red",
+  offline: "gray",
 };
 
 interface Column {
-  key: 'handle' | 'kind' | 'online' | 'status' | 'ctx' | 'focus' | 'seen';
+  key: "handle" | "kind" | "online" | "status" | "ctx" | "focus" | "seen";
   label: string;
   width: number;
 }
 
 const WHO_COLUMNS: Column[] = [
-  { key: 'handle', label: 'HANDLE', width: 14 },
-  { key: 'kind', label: 'KIND', width: 8 },
-  { key: 'online', label: 'ONLINE', width: 8 },
-  { key: 'status', label: 'STATUS', width: 10 },
-  { key: 'ctx', label: 'CTX', width: 8 },
-  { key: 'focus', label: 'FOCUS', width: 26 },
-  { key: 'seen', label: 'SEEN', width: 10 },
+  { key: "handle", label: "HANDLE", width: 14 },
+  { key: "kind", label: "KIND", width: 8 },
+  { key: "online", label: "ONLINE", width: 8 },
+  { key: "status", label: "STATUS", width: 10 },
+  { key: "ctx", label: "CTX", width: 8 },
+  { key: "focus", label: "FOCUS", width: 26 },
+  { key: "seen", label: "SEEN", width: 10 },
 ];
 
 function pad(v: string, n: number): string {
-  if (v.length >= n) return v.slice(0, Math.max(0, n - 1)) + ' ';
-  return v + ' '.repeat(n - v.length);
+  if (v.length >= n) return v.slice(0, Math.max(0, n - 1)) + " ";
+  return v + " ".repeat(n - v.length);
 }
 
 interface WhoPaneProps {
@@ -44,9 +44,10 @@ export function WhoPane({ peers, meHandle }: WhoPaneProps): React.ReactElement {
   return (
     <>
       <Text bold color="cyan">
-        who · {peers.length} peer{peers.length === 1 ? '' : 's'} (me: {meHandle})
+        who · {peers.length} peer{peers.length === 1 ? "" : "s"} (me: {meHandle}
+        )
       </Text>
-      <Text dimColor>{'─'.repeat(Math.min(totalWidth, 80))}</Text>
+      <Text dimColor>{"─".repeat(Math.min(totalWidth, 80))}</Text>
 
       {/* header row */}
       <Box>
@@ -56,35 +57,37 @@ export function WhoPane({ peers, meHandle }: WhoPaneProps): React.ReactElement {
           </Text>
         ))}
       </Box>
-      <Text dimColor>{'─'.repeat(Math.min(totalWidth, 80))}</Text>
+      <Text dimColor>{"─".repeat(Math.min(totalWidth, 80))}</Text>
 
       {peers.length === 0 ? (
         <Text dimColor>(no peers)</Text>
       ) : (
         peers.map((p) => {
           const s = p.status;
-          const dotColor = !p.online ? 'gray' : s ? STATUS_COLOR[s] : 'green';
+          const dotColor = !p.online ? "gray" : s ? STATUS_COLOR[s] : "green";
           const gauge = renderGauge(p);
           return (
             <Box key={p.handle}>
               <Box width={WHO_COLUMNS[0]!.width}>
                 <Text>
-                  <Text color={dotColor}>●</Text>{' '}
+                  <Text color={dotColor}>●</Text>{" "}
                   <Text bold>{pad(p.handle, WHO_COLUMNS[0]!.width - 2)}</Text>
                 </Text>
               </Box>
               <Text dimColor>{pad(p.kind, WHO_COLUMNS[1]!.width)}</Text>
-              <Text color={p.online ? 'green' : 'gray'}>
-                {pad(p.online ? 'yes' : 'no', WHO_COLUMNS[2]!.width)}
+              <Text color={p.online ? "green" : "gray"}>
+                {pad(p.online ? "yes" : "no", WHO_COLUMNS[2]!.width)}
               </Text>
               <Text color={s ? STATUS_COLOR[s] : undefined}>
-                {pad(s ?? '—', WHO_COLUMNS[3]!.width)}
+                {pad(s ?? "—", WHO_COLUMNS[3]!.width)}
               </Text>
               <Text color={gauge.color} bold={gauge.bold} dimColor={gauge.dim}>
                 {pad(gauge.label, WHO_COLUMNS[4]!.width)}
               </Text>
-              <Text>{pad(p.focus ?? '—', WHO_COLUMNS[5]!.width)}</Text>
-              <Text dimColor>{pad(timeOf(p.last_seen_at), WHO_COLUMNS[6]!.width)}</Text>
+              <Text>{pad(p.focus ?? "—", WHO_COLUMNS[5]!.width)}</Text>
+              <Text dimColor>
+                {pad(timeOf(p.last_seen_at), WHO_COLUMNS[6]!.width)}
+              </Text>
             </Box>
           );
         })

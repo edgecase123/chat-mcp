@@ -1,6 +1,6 @@
-import React from 'react';
-import { Text, useInput } from 'ink';
-import { appendFileSync } from 'node:fs';
+import React from "react";
+import { Text, useInput } from "ink";
+import { appendFileSync } from "node:fs";
 
 /** Opt-in keypress debug log. Set CHAT_MCP_DEBUG_KEYS=<path> in the env to
  *  capture every key event this Input receives — used to diagnose why a
@@ -14,10 +14,12 @@ function logKey(raw: string, key: unknown): void {
     const line = JSON.stringify({
       t: new Date().toISOString(),
       raw,
-      rawBytes: Array.from(raw).map((c) => c.charCodeAt(0).toString(16).padStart(2, '0')).join(' '),
+      rawBytes: Array.from(raw)
+        .map((c) => c.charCodeAt(0).toString(16).padStart(2, "0"))
+        .join(" "),
       key,
     });
-    appendFileSync(DEBUG_KEYS_PATH, line + '\n');
+    appendFileSync(DEBUG_KEYS_PATH, line + "\n");
   } catch {
     // Swallow — debug logging must never break the input.
   }
@@ -70,7 +72,7 @@ export function Input({
   onEsc,
   onUp,
   onDown,
-  prompt = '> ',
+  prompt = "> ",
   emptyBufferHotkeys,
 }: InputProps): React.ReactElement {
   useInput((raw, key) => {
@@ -89,10 +91,9 @@ export function Input({
     //     literal newline insert instead of submitting.
     // These checks MUST come before the plain `key.return` submit branch.
     const isNewlineChord =
-      (key.return && (key.shift || key.meta)) ||
-      raw === '\n';
+      (key.return && (key.shift || key.meta)) || raw === "\n";
     if (isNewlineChord) {
-      const next = value.slice(0, cursor) + '\n' + value.slice(cursor);
+      const next = value.slice(0, cursor) + "\n" + value.slice(cursor);
       return onChange(next, cursor + 1);
     }
     if (key.return) return onSubmit(value);
@@ -118,22 +119,25 @@ export function Input({
     // set — it arrives as `key.meta + raw === 'b'`. Same for Opt-Right → M-f.
     // Handle both aliases so the shortcut works without the user having to
     // change their terminal's Option-key encoding.
-    if (key.meta && raw === 'b') return onChange(value, prevWordBoundary(value, cursor));
-    if (key.meta && raw === 'f') return onChange(value, nextWordBoundary(value, cursor));
+    if (key.meta && raw === "b")
+      return onChange(value, prevWordBoundary(value, cursor));
+    if (key.meta && raw === "f")
+      return onChange(value, nextWordBoundary(value, cursor));
 
     // Cursor-to-line-start / -line-end. Ctrl-A / Ctrl-E is readline convention,
     // but some terminals (screen, tmux with default-a config, or emulators with
     // Select-All bound to Ctrl-A) intercept Ctrl-A. Home / End is the fallback
     // most terminals deliver even in those setups.
     const k = key as unknown as { home?: boolean; end?: boolean };
-    if ((key.ctrl && raw === 'a') || k.home) return onChange(value, 0);
-    if ((key.ctrl && raw === 'e') || k.end) return onChange(value, value.length);
-    if (key.ctrl && raw === 'u') return onChange(value.slice(cursor), 0);
-    if (key.ctrl && raw === 'w') {
+    if ((key.ctrl && raw === "a") || k.home) return onChange(value, 0);
+    if ((key.ctrl && raw === "e") || k.end)
+      return onChange(value, value.length);
+    if (key.ctrl && raw === "u") return onChange(value.slice(cursor), 0);
+    if (key.ctrl && raw === "w") {
       const start = prevWordBoundary(value, cursor);
       return onChange(value.slice(0, start) + value.slice(cursor), start);
     }
-    if (key.meta && raw === 'd') {
+    if (key.meta && raw === "d") {
       const end = nextWordBoundary(value, cursor);
       return onChange(value.slice(0, cursor) + value.slice(end), cursor);
     }
@@ -152,11 +156,17 @@ export function Input({
       }
       if (key.backspace) {
         if (cursor === 0) return;
-        return onChange(value.slice(0, cursor - 1) + value.slice(cursor), cursor - 1);
+        return onChange(
+          value.slice(0, cursor - 1) + value.slice(cursor),
+          cursor - 1,
+        );
       }
       if (key.delete) {
         if (cursor === value.length) return;
-        return onChange(value.slice(0, cursor) + value.slice(cursor + 1), cursor);
+        return onChange(
+          value.slice(0, cursor) + value.slice(cursor + 1),
+          cursor,
+        );
       }
     }
 
@@ -164,7 +174,12 @@ export function Input({
     if (raw && !key.ctrl && !key.meta) {
       // If buffer is empty and this char is claimed by the parent (e.g. sidebar
       // jump digits or ? / R hotkeys), skip the insert so it doesn't echo.
-      if (value.length === 0 && emptyBufferHotkeys && emptyBufferHotkeys.includes(raw)) return;
+      if (
+        value.length === 0 &&
+        emptyBufferHotkeys &&
+        emptyBufferHotkeys.includes(raw)
+      )
+        return;
       const next = value.slice(0, cursor) + raw + value.slice(cursor);
       return onChange(next, cursor + raw.length);
     }
@@ -172,23 +187,24 @@ export function Input({
 
   const before = value.slice(0, cursor);
   const atChar = value[cursor];
-  const after = atChar === undefined ? '' : value.slice(cursor + 1);
+  const after = atChar === undefined ? "" : value.slice(cursor + 1);
   // Emit as ONE ANSI-styled string, not nested <Text>. Ink's wrap works on
   // the string content, and nested <Text> children in a Text parent were
   // being measured as opaque segments — when `before` overflowed and Ink
   // wrapped it, the cursor `<Text>` stuck to the tail of the first visual
   // line rather than the tail of the logical string. Embedded ANSI escapes
   // are transparent to the wrap algorithm.
-  const CYAN = '\x1b[36m';
-  const RESET = '\x1b[39m';
-  const INV = '\x1b[7m';
-  const NOINV = '\x1b[27m';
-  const cursorAnsi = atChar === undefined
-    // Past end of buffer — render a solid block; some terminals collapse
-    // inverse-space to empty space, hiding the cursor.
-    ? `${CYAN}█${RESET}`
-    // On a real char — inverse the char in place.
-    : `${INV}${atChar}${NOINV}`;
+  const CYAN = "\x1b[36m";
+  const RESET = "\x1b[39m";
+  const INV = "\x1b[7m";
+  const NOINV = "\x1b[27m";
+  const cursorAnsi =
+    atChar === undefined
+      ? // Past end of buffer — render a solid block; some terminals collapse
+        // inverse-space to empty space, hiding the cursor.
+        `${CYAN}█${RESET}`
+      : // On a real char — inverse the char in place.
+        `${INV}${atChar}${NOINV}`;
   const line = `${CYAN}${prompt}${RESET}${before}${cursorAnsi}${after}`;
   return <Text>{line}</Text>;
 }

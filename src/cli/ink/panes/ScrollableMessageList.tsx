@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Box, Text, useInput } from 'ink';
-import type { Message } from '../../../storage/dao.js';
+import React, { useEffect, useRef, useState } from "react";
+import { Box, Text, useInput } from "ink";
+import type { Message } from "../../../storage/dao.js";
 
 export interface ScrollableMessageListProps {
   messages: Message[];
@@ -30,7 +30,7 @@ export interface ScrollableMessageListProps {
  */
 function estimateMessageRows(body: string, cols: number): number {
   const width = Math.max(20, cols);
-  const lines = body.length === 0 ? [''] : body.split('\n');
+  const lines = body.length === 0 ? [""] : body.split("\n");
   const bodyRows = lines.reduce(
     (sum, line) => sum + Math.max(1, Math.ceil(line.length / width)),
     0,
@@ -88,7 +88,9 @@ export function ScrollableMessageList({
   let usedRows = 0;
   while (start > 0) {
     const m = messages[start - 1]!;
-    const rows = rowsForMessage ? rowsForMessage(m) : estimateMessageRows(m.body, contentColumns);
+    const rows = rowsForMessage
+      ? rowsForMessage(m)
+      : estimateMessageRows(m.body, contentColumns);
     if (usedRows + rows > viewportRows && start !== end) break;
     usedRows += rows;
     start -= 1;
@@ -103,10 +105,13 @@ export function ScrollableMessageList({
     if (!focused) return;
     if (requireShift && !key.shift) return;
     // Ctrl-P / Ctrl-N — one message back / forward.
-    if (key.ctrl && raw === 'p') return setScrollOffset((o) => Math.min(maxOffset, o + 1));
-    if (key.ctrl && raw === 'n') return setScrollOffset((o) => Math.max(0, o - 1));
+    if (key.ctrl && raw === "p")
+      return setScrollOffset((o) => Math.min(maxOffset, o + 1));
+    if (key.ctrl && raw === "n")
+      return setScrollOffset((o) => Math.max(0, o - 1));
     // PgUp / PgDn — one page (whatever fits in the viewport).
-    if (key.pageUp) return setScrollOffset((o) => Math.min(maxOffset, o + pageStep));
+    if (key.pageUp)
+      return setScrollOffset((o) => Math.min(maxOffset, o + pageStep));
     if (key.pageDown) return setScrollOffset((o) => Math.max(0, o - pageStep));
     if (key.home) return setScrollOffset(maxOffset);
     if (key.end) return setScrollOffset(0);
@@ -119,16 +124,10 @@ export function ScrollableMessageList({
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {atTop && scrolled && (
-        <Text dimColor>— top of loaded history —</Text>
-      )}
-      {olderHidden > 0 && (
-        <Text dimColor>↑ {olderHidden} older</Text>
-      )}
+      {atTop && scrolled && <Text dimColor>— top of loaded history —</Text>}
+      {olderHidden > 0 && <Text dimColor>↑ {olderHidden} older</Text>}
       {visible.map((m) => renderRow(m, meHandle))}
-      {newerHidden > 0 && (
-        <Text dimColor>↓ {newerHidden} newer</Text>
-      )}
+      {newerHidden > 0 && <Text dimColor>↓ {newerHidden} newer</Text>}
     </Box>
   );
 }

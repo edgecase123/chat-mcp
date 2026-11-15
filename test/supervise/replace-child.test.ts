@@ -1,20 +1,20 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // 🛑 BEFORE any import that resolves a state path. Without this the supervisor
 // binds a socket and writes its MCP config into the OPERATOR'S LIVE
 // ~/.chat-mcp, and `bind()` unlinks what it judges to be a stale socket.
-process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-replace-'));
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-replace-"));
 
-const { migrate } = await import('../../src/storage/db.js');
-const { startSupervisor } = await import('../../src/supervise/index.js');
-const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
-const { claudeSpawn } = await import('../../src/adapters/claude-spawn.js');
-import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
+const { migrate } = await import("../../src/storage/db.js");
+const { startSupervisor } = await import("../../src/supervise/index.js");
+const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
+const { claudeSpawn } = await import("../../src/adapters/claude-spawn.js");
+import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
 
 /**
  * 🛑 THE APPROVAL PATH LOOKED FIXED AND WAS NOT.
@@ -40,7 +40,12 @@ interface FakeChild {
    * that drops a callback is testing a child that cannot exist, and onDenial
    * was the one still dropped — so nothing could exercise the producer.
    */
-  denial: (d: { requested: string | null; raw: string; tool: string | null; invocation: string | null }) => void;
+  denial: (d: {
+    requested: string | null;
+    raw: string;
+    tool: string | null;
+    invocation: string | null;
+  }) => void;
 }
 
 /**
@@ -79,7 +84,7 @@ function recordingChild(children: FakeChild[]) {
       onDenial: (cb) => {
         onDenial = cb as (d: unknown) => void;
       },
-      onSession: (cb) => cb('sess-from-fake'),
+      onSession: (cb) => cb("sess-from-fake"),
       onEvent: () => undefined,
       onStderr: () => undefined,
       onExit: (cb) => {
@@ -88,13 +93,13 @@ function recordingChild(children: FakeChild[]) {
       // 🛑 A REAL kill() ENDS THE PROCESS AND FIRES onExit. A fake that does
       // nothing hides exactly the bug where a dead child's exit handler
       // mutates the live queue.
-      kill: () => onExit?.(null, 'SIGTERM'),
+      kill: () => onExit?.(null, "SIGTERM"),
     };
   };
 }
 
 async function supervisorFor(handle: string, children: FakeChild[]) {
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(":memory:");
   migrate(db);
 
   return startSupervisor({
@@ -115,7 +120,7 @@ async function supervisorFor(handle: string, children: FakeChild[]) {
  * the second one can be read.
  */
 async function supervisorWithDb(handle: string, children: FakeChild[]) {
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(":memory:");
   migrate(db);
 
   const sup = await startSupervisor({
@@ -144,46 +149,50 @@ async function supervisorWithDb(handle: string, children: FakeChild[]) {
  *
  * Found by claude1 from the run output. #49.
  */
-test('a SECOND denial records the allowlist in force, not the one the child started with', async () => {
+test("a SECOND denial records the allowlist in force, not the one the child started with", async () => {
   const children: FakeChild[] = [];
   const handle = `rc-${process.pid}-live`;
   const { sup, db } = await supervisorWithDb(handle, children);
-  const GRANT = 'Bash(rm -f /tmp/second.txt)';
+  const GRANT = "Bash(rm -f /tmp/second.txt)";
 
   try {
     await deliverToSupervisor(handle, {
       id: 10,
       to: handle,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
       approval: {
         approvalId: 1,
-        decision: 'approve',
+        decision: "approve",
         requested: "rm in '/tmp/second.txt'",
         grant: GRANT,
-        sessionId: 'sess-1',
+        sessionId: "sess-1",
       },
     });
 
-    assert.equal(children.length, 2, 'the child was never replaced, so there is no second state to record');
+    assert.equal(
+      children.length,
+      2,
+      "the child was never replaced, so there is no second state to record",
+    );
     assert.ok(
       children[1]?.opts.grant?.allowed.includes(GRANT),
-      'the replacement child did not receive the grant, so this test cannot measure anything',
+      "the replacement child did not receive the grant, so this test cannot measure anything",
     );
 
     // Now the child is denied AGAIN, while that grant is in force.
     children[1]?.denial({
       requested: "rm in '/tmp/other.txt'",
       raw: "What required approval: rm in '/tmp/other.txt' was blocked.",
-      tool: 'Bash',
-      invocation: 'rm -f /tmp/other.txt',
+      tool: "Bash",
+      invocation: "rm -f /tmp/other.txt",
     });
 
     const row = db
-      .prepare('SELECT allowlist FROM approvals ORDER BY id DESC LIMIT 1')
+      .prepare("SELECT allowlist FROM approvals ORDER BY id DESC LIMIT 1")
       .get() as { allowlist: string | null } | undefined;
 
-    const recorded: string[] = JSON.parse(row?.allowlist ?? '[]');
+    const recorded: string[] = JSON.parse(row?.allowlist ?? "[]");
 
     assert.ok(
       recorded.includes(GRANT),
@@ -195,38 +204,42 @@ test('a SECOND denial records the allowlist in force, not the one the child star
   }
 });
 
-test('an APPROVAL respawns the child with the command added to its allowlist', async () => {
+test("an APPROVAL respawns the child with the command added to its allowlist", async () => {
   const children: FakeChild[] = [];
   const sup = await supervisorFor(`rc-${process.pid}-a`, children);
 
   try {
-    assert.equal(children.length, 1, 'the first child never spawned');
+    assert.equal(children.length, 1, "the first child never spawned");
     assert.ok(
-      !children[0]?.opts.grant?.allowed.includes('Bash(rm -f /tmp/x.txt)'),
-      'already granted before approval',
+      !children[0]?.opts.grant?.allowed.includes("Bash(rm -f /tmp/x.txt)"),
+      "already granted before approval",
     );
 
     await deliverToSupervisor(`rc-${process.pid}-a`, {
       id: 1,
       to: `rc-${process.pid}-a`,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
       approval: {
         approvalId: 1,
-        decision: 'approve',
+        decision: "approve",
         // 🛑 TWO FIELDS ON PURPOSE. `requested` is the prose a human read;
         // `grant` is what the allowlist understands. Sending the prose
         // granted nothing and looped — measured live.
         requested: "rm in '/tmp/x.txt'",
-        grant: 'Bash(rm -f /tmp/x.txt)',
-        sessionId: 'sess-1',
+        grant: "Bash(rm -f /tmp/x.txt)",
+        sessionId: "sess-1",
       },
     });
 
-    assert.equal(children.length, 2, 'the child was NOT replaced — the grant never reached it');
+    assert.equal(
+      children.length,
+      2,
+      "the child was NOT replaced — the grant never reached it",
+    );
     assert.ok(
-      children[1]?.opts.grant?.allowed.includes('Bash(rm -f /tmp/x.txt)'),
-      'the replacement child did not receive the granted command',
+      children[1]?.opts.grant?.allowed.includes("Bash(rm -f /tmp/x.txt)"),
+      "the replacement child did not receive the granted command",
     );
   } finally {
     await sup.stop();
@@ -238,7 +251,7 @@ test('an APPROVAL respawns the child with the command added to its allowlist', a
  * `--resume` works 3 of 3 with the explicit prompt, so a permission round
  * trip is not a restart.
  */
-test('the replacement RESUMES the session rather than starting a new one', async () => {
+test("the replacement RESUMES the session rather than starting a new one", async () => {
   const children: FakeChild[] = [];
   const sup = await supervisorFor(`rc-${process.pid}-b`, children);
 
@@ -246,18 +259,18 @@ test('the replacement RESUMES the session rather than starting a new one', async
     await deliverToSupervisor(`rc-${process.pid}-b`, {
       id: 2,
       to: `rc-${process.pid}-b`,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
       approval: {
         approvalId: 2,
-        decision: 'approve',
+        decision: "approve",
         requested: "rm in '/tmp/x.txt'",
-        grant: 'Bash(rm -f /tmp/x.txt)',
-        sessionId: 'x',
+        grant: "Bash(rm -f /tmp/x.txt)",
+        sessionId: "x",
       },
     });
 
-    assert.equal(children[1]?.opts.resumeSessionId, 'sess-from-fake');
+    assert.equal(children[1]?.opts.resumeSessionId, "sess-from-fake");
   } finally {
     await sup.stop();
   }
@@ -268,30 +281,36 @@ test('the replacement RESUMES the session rather than starting a new one', async
  * the agent already had, mid-task, and the symptom would be a second denial
  * for something that worked a minute earlier.
  */
-test('a grant keeps every tool the child already had', async () => {
+test("a grant keeps every tool the child already had", async () => {
   const children: FakeChild[] = [];
   const sup = await supervisorFor(`rc-${process.pid}-c`, children);
 
   try {
     const before = [...(children[0]?.opts.grant?.allowed ?? [])];
-    assert.ok(before.length > 0, 'the first child had no tools, so this proves nothing');
+    assert.ok(
+      before.length > 0,
+      "the first child had no tools, so this proves nothing",
+    );
 
     await deliverToSupervisor(`rc-${process.pid}-c`, {
       id: 3,
       to: `rc-${process.pid}-c`,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
       approval: {
         approvalId: 3,
-        decision: 'approve',
+        decision: "approve",
         requested: "rm in '/tmp/x.txt'",
-        grant: 'Bash(rm -f /tmp/x.txt)',
-        sessionId: 'x',
+        grant: "Bash(rm -f /tmp/x.txt)",
+        sessionId: "x",
       },
     });
 
     for (const tool of before) {
-      assert.ok(children[1]?.opts.grant?.allowed.includes(tool), `the grant revoked: ${tool}`);
+      assert.ok(
+        children[1]?.opts.grant?.allowed.includes(tool),
+        `the grant revoked: ${tool}`,
+      );
     }
   } finally {
     await sup.stop();
@@ -299,7 +318,7 @@ test('a grant keeps every tool the child already had', async () => {
 });
 
 /** A DENY must not replace anything — nothing changed, so nothing respawns. */
-test('a DENY does not respawn the child', async () => {
+test("a DENY does not respawn the child", async () => {
   const children: FakeChild[] = [];
   const sup = await supervisorFor(`rc-${process.pid}-d`, children);
 
@@ -307,18 +326,22 @@ test('a DENY does not respawn the child', async () => {
     await deliverToSupervisor(`rc-${process.pid}-d`, {
       id: 4,
       to: `rc-${process.pid}-d`,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
       approval: {
         approvalId: 4,
-        decision: 'deny',
+        decision: "deny",
         requested: "rm in '/tmp/x.txt'",
-        grant: 'Bash(rm -f /tmp/x.txt)',
-        sessionId: 'x',
+        grant: "Bash(rm -f /tmp/x.txt)",
+        sessionId: "x",
       },
     });
 
-    assert.equal(children.length, 1, 'a refusal replaced the child for no reason');
+    assert.equal(
+      children.length,
+      1,
+      "a refusal replaced the child for no reason",
+    );
   } finally {
     await sup.stop();
   }
@@ -329,11 +352,17 @@ test('a DENY does not respawn the child', async () => {
  * switch is a CALLER of the same operation, so what this asserts is that the
  * operation carries `model` through at all.
  */
-test('replaceChild carries a model change, so a switch is a caller not new machinery', () => {
-  const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
+test("replaceChild carries a model change, so a switch is a caller not new machinery", () => {
+  const src = readFileSync(
+    new URL("../../src/supervise/index.ts", import.meta.url),
+    "utf8",
+  );
 
   assert.match(src, /allowedTools\?: readonly string\[\]; model\?: string/);
-  assert.ok(src.includes('model: currentModel'), 'the replacement never passes a model');
+  assert.ok(
+    src.includes("model: currentModel"),
+    "the replacement never passes a model",
+  );
 });
 
 /**
@@ -346,7 +375,7 @@ test('replaceChild carries a model change, so a switch is a caller not new machi
  * claude1; the suite could not see it because the fake swallowed the
  * callback.
  */
-test('the REPLACEMENT child can end a turn, or the queue waits forever', async () => {
+test("the REPLACEMENT child can end a turn, or the queue waits forever", async () => {
   const children: FakeChild[] = [];
   const handle = `rc-${process.pid}-turn`;
   const sup = await supervisorFor(handle, children);
@@ -355,19 +384,19 @@ test('the REPLACEMENT child can end a turn, or the queue waits forever', async (
     await deliverToSupervisor(handle, {
       id: 10,
       to: handle,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
       approval: {
         approvalId: 10,
-        decision: 'approve',
+        decision: "approve",
         requested: "rm in '/tmp/x.txt'",
-        grant: 'Bash(rm -f /tmp/x.txt)',
-        sessionId: 'x',
+        grant: "Bash(rm -f /tmp/x.txt)",
+        sessionId: "x",
       },
     });
 
     const replacement = children[1];
-    assert.ok(replacement, 'no replacement child');
+    assert.ok(replacement, "no replacement child");
 
     // Its first prompt is the re-dispatch. Finish that turn, then a new
     // message must actually be delivered.
@@ -376,9 +405,9 @@ test('the REPLACEMENT child can end a turn, or the queue waits forever', async (
     await deliverToSupervisor(handle, {
       id: 11,
       to: handle,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
-      body: 'anything',
+      body: "anything",
     });
 
     assert.ok(
@@ -405,20 +434,24 @@ test("the old child's exit does not drain the NEW child's PENDING queue", async 
     await deliverToSupervisor(handle, {
       id: 12,
       to: handle,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
       approval: {
         approvalId: 12,
-        decision: 'approve',
+        decision: "approve",
         requested: "rm in '/tmp/x.txt'",
-        grant: 'Bash(rm -f /tmp/x.txt)',
-        sessionId: 'x',
+        grant: "Bash(rm -f /tmp/x.txt)",
+        sessionId: "x",
       },
     });
 
     const replacement = children[1];
-    assert.ok(replacement, 'no replacement child');
-    assert.equal(replacement.sent.length, 1, 'the re-dispatch prompt was not sent');
+    assert.ok(replacement, "no replacement child");
+    assert.equal(
+      replacement.sent.length,
+      1,
+      "the re-dispatch prompt was not sent",
+    );
 
     // 🛑 QUEUE WORK WHILE THE REPLACEMENT IS MID-TURN. This is the state the
     // bug destroys: the dead child's exit drains a queue that belongs to the
@@ -427,12 +460,16 @@ test("the old child's exit does not drain the NEW child's PENDING queue", async 
     await deliverToSupervisor(handle, {
       id: 13,
       to: handle,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
-      body: 'queued while busy',
+      body: "queued while busy",
     });
 
-    assert.equal(replacement.sent.length, 1, 'the second prompt should still be QUEUED');
+    assert.equal(
+      replacement.sent.length,
+      1,
+      "the second prompt should still be QUEUED",
+    );
 
     // The dead child's kill signal lands late.
     children[0]?.exit();
@@ -461,13 +498,21 @@ test("the old child's exit does not drain the NEW child's PENDING queue", async 
  *
  * A per-call check is something to forget. This asserts the wrapper instead.
  */
-test('EVERY child callback registration goes through the generation guard', () => {
-  const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
+test("EVERY child callback registration goes through the generation guard", () => {
+  const src = readFileSync(
+    new URL("../../src/supervise/index.ts", import.meta.url),
+    "utf8",
+  );
 
-  const body = src.slice(src.indexOf('function wireChild()'), src.indexOf('const replaceChild'));
-  assert.ok(body.length > 0, 'wireChild moved; this check is stale');
+  const body = src.slice(
+    src.indexOf("function wireChild()"),
+    src.indexOf("const replaceChild"),
+  );
+  assert.ok(body.length > 0, "wireChild moved; this check is stale");
 
-  const registrations = [...body.matchAll(/child\.(on[A-Za-z]+)\(\s*([\s\S]{0,30})/g)];
+  const registrations = [
+    ...body.matchAll(/child\.(on[A-Za-z]+)\(\s*([\s\S]{0,30})/g),
+  ];
 
   // 🛑 THE NAME SET, NOT A COUNT. An earlier version asserted
   // `length >= 4` with five present, so DELETING one stayed green — and the
@@ -486,23 +531,32 @@ test('EVERY child callback registration goes through the generation guard', () =
   // unguarded, arguing a dying child's stderr is the most useful kind. It is —
   // but a stale child keeps writing, and an unguarded line reads as the LIVE
   // child's error. `ifCurrent` reports the drop, so nothing goes silent.
-  const REQUIRED = ['onTurnEnd', 'onSession', 'onDenial', 'onUsage', 'onContext', 'onExit', 'onEvent', 'onStderr'];
+  const REQUIRED = [
+    "onTurnEnd",
+    "onSession",
+    "onDenial",
+    "onUsage",
+    "onContext",
+    "onExit",
+    "onEvent",
+    "onStderr",
+  ];
   const present = registrations.map(([, name]) => name);
 
   assert.deepEqual(
     [...present].sort(),
     [...REQUIRED].sort(),
-    'a required callback is missing, or an unexpected one was added',
+    "a required callback is missing, or an unexpected one was added",
   );
 
   const unguarded = registrations
-    .filter(([, , next]) => !next.includes('ifCurrent'))
+    .filter(([, , next]) => !next.includes("ifCurrent"))
     .map(([, name]) => name);
 
   assert.deepEqual(
     unguarded,
     [],
-    `these act on the LIVE child after being replaced: ${unguarded.join(', ')}`,
+    `these act on the LIVE child after being replaced: ${unguarded.join(", ")}`,
   );
 
   // ⚠️ THE LABEL IS A HAND-WRITTEN DUPLICATE OF THE METHOD NAME, so
@@ -514,7 +568,11 @@ test('EVERY child callback registration goes through the generation guard', () =
     .filter(([, name, next]) => !new RegExp(`['"]${name}['"]`).test(next))
     .map(([, name]) => name);
 
-  assert.deepEqual(mislabelled, [], `these log under the wrong name: ${mislabelled.join(', ')}`);
+  assert.deepEqual(
+    mislabelled,
+    [],
+    `these log under the wrong name: ${mislabelled.join(", ")}`,
+  );
 });
 
 /**
@@ -530,30 +588,38 @@ test("the old child's turn-end does not release the NEW child's queue", async ()
     await deliverToSupervisor(handle, {
       id: 20,
       to: handle,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
       approval: {
         approvalId: 20,
-        decision: 'approve',
+        decision: "approve",
         requested: "rm in '/tmp/x.txt'",
-        grant: 'Bash(rm -f /tmp/x.txt)',
-        sessionId: 'x',
+        grant: "Bash(rm -f /tmp/x.txt)",
+        sessionId: "x",
       },
     });
 
     const replacement = children[1];
-    assert.ok(replacement, 'no replacement child');
-    assert.equal(replacement.sent.length, 1, 'the re-dispatch prompt was not sent');
+    assert.ok(replacement, "no replacement child");
+    assert.equal(
+      replacement.sent.length,
+      1,
+      "the re-dispatch prompt was not sent",
+    );
 
     await deliverToSupervisor(handle, {
       id: 21,
       to: handle,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
-      body: 'queued while busy',
+      body: "queued while busy",
     });
 
-    assert.equal(replacement.sent.length, 1, 'the second prompt should still be QUEUED');
+    assert.equal(
+      replacement.sent.length,
+      1,
+      "the second prompt should still be QUEUED",
+    );
 
     // The DEAD child finishes its turn, late.
     children[0]?.finishTurn();
@@ -561,7 +627,7 @@ test("the old child's turn-end does not release the NEW child's queue", async ()
     assert.equal(
       replacement.sent.length,
       1,
-      'a stale turn-end released the queue into a child that is mid-turn',
+      "a stale turn-end released the queue into a child that is mid-turn",
     );
   } finally {
     await sup.stop();
@@ -578,7 +644,7 @@ test("the old child's turn-end does not release the NEW child's queue", async ()
  * The two fields are different languages. The allowlist argument already said
  * so; the prompt argument beside it still passed the prose.
  */
-test('the re-dispatch prompt names the GRANTED COMMAND, never the prose', async () => {
+test("the re-dispatch prompt names the GRANTED COMMAND, never the prose", async () => {
   const children: FakeChild[] = [];
   const handle = `rc-${process.pid}-prose`;
   const sup = await supervisorFor(handle, children);
@@ -587,22 +653,25 @@ test('the re-dispatch prompt names the GRANTED COMMAND, never the prose', async 
     await deliverToSupervisor(handle, {
       id: 9,
       to: handle,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
       approval: {
         approvalId: 9,
-        decision: 'approve',
+        decision: "approve",
         requested: "touch in '/tmp/x.txt'",
-        grant: 'Bash(touch /tmp/x.txt)',
-        sessionId: 'x',
+        grant: "Bash(touch /tmp/x.txt)",
+        sessionId: "x",
       },
     });
 
-    const prompt = children[1]?.sent.join('\n') ?? '';
+    const prompt = children[1]?.sent.join("\n") ?? "";
 
-    assert.ok(prompt.length > 0, 'the replacement child was sent nothing at all');
     assert.ok(
-      prompt.includes('touch /tmp/x.txt'),
+      prompt.length > 0,
+      "the replacement child was sent nothing at all",
+    );
+    assert.ok(
+      prompt.includes("touch /tmp/x.txt"),
       `the prompt never names the real command: ${prompt}`,
     );
     assert.ok(
@@ -631,9 +700,10 @@ function attemptedCommand(prompt: string): string | null {
   return m === null ? null : m[1];
 }
 
-test('the replacement child is sent something it could actually run', async () => {
-  const { grantFor, grantVariants } = await import('../../src/supervise/denial.js');
-  const { classify } = await import('../support/would-refuse.js');
+test("the replacement child is sent something it could actually run", async () => {
+  const { grantFor, grantVariants } =
+    await import("../../src/supervise/denial.js");
+  const { classify } = await import("../support/would-refuse.js");
 
   const children: FakeChild[] = [];
   const handle = `rc-${process.pid}-usable`;
@@ -642,30 +712,30 @@ test('the replacement child is sent something it could actually run', async () =
   // The shape run 12 filed: an MCP tool call carrying no `command`.
   const denial = {
     requested: null,
-    raw: 'denied',
-    tool: 'mcp__chat__set_status',
-    invocation: 'mcp__chat__set_status',
+    raw: "denied",
+    tool: "mcp__chat__set_status",
+    invocation: "mcp__chat__set_status",
   };
 
   try {
     await deliverToSupervisor(handle, {
       id: 11,
       to: handle,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
       approval: {
         approvalId: 11,
-        decision: 'approve',
+        decision: "approve",
         requested: denial.requested,
         grant: grantFor(denial),
         grantForms: grantVariants(denial),
-        sessionId: 'sess-1',
+        sessionId: "sess-1",
       },
     });
 
-    assert.equal(children.length, 2, 'the child was never replaced');
+    assert.equal(children.length, 2, "the child was never replaced");
 
-    const prompt = children[1]?.sent.join('\n') ?? '';
+    const prompt = children[1]?.sent.join("\n") ?? "";
     const attempted = attemptedCommand(prompt);
 
     assert.ok(attempted, `the prompt names no command to attempt: ${prompt}`);
@@ -678,11 +748,11 @@ test('the replacement child is sent something it could actually run', async () =
     // as good is what let five wrong answers read as green.
     assert.equal(
       verdict.kind,
-      'permitted',
+      "permitted",
       `the replacement child got a grant no run has shown to work: ` +
         `attempted ${JSON.stringify(attempted)} -> ${verdict.kind}. ` +
-        (verdict.kind === 'refused' ? verdict.record.refusal : '') +
-        (verdict.kind === 'unknown' ? verdict.reason : ''),
+        (verdict.kind === "refused" ? verdict.record.refusal : "") +
+        (verdict.kind === "unknown" ? verdict.reason : ""),
     );
   } finally {
     await sup.stop();
@@ -700,13 +770,13 @@ test('the replacement child is sent something it could actually run', async () =
  * ⚠️ ASSERTED ON THE ROW, NOT ON THE CALL. A dao-level test proves the column
  * accepts a value; only this proves the supervisor passes one.
  */
-test('a filed approval carries the allowlist the refused child actually had', async () => {
-  const { DatabaseSync } = await import('node:sqlite');
-  const { migrate } = await import('../../src/storage/db.js');
-  const dao = await import('../../src/storage/dao.js');
-  const { startSupervisor } = await import('../../src/supervise/index.js');
+test("a filed approval carries the allowlist the refused child actually had", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const { migrate } = await import("../../src/storage/db.js");
+  const dao = await import("../../src/storage/dao.js");
+  const { startSupervisor } = await import("../../src/supervise/index.js");
 
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(":memory:");
   migrate(db);
 
   const children: FakeChild[] = [];
@@ -724,22 +794,25 @@ test('a filed approval carries the allowlist the refused child actually had', as
   try {
     const granted = children[0]?.opts.grant?.allowed ?? [];
 
-    assert.ok(granted.length > 0, 'the child started with nothing allowed, so this proves nothing');
+    assert.ok(
+      granted.length > 0,
+      "the child started with nothing allowed, so this proves nothing",
+    );
 
     children[0]?.denial({
       requested: "rm in '/tmp/x'",
-      raw: 'Permission for this tool use was denied. What required approval: rm in /tmp/x',
-      tool: 'Bash',
-      invocation: 'rm /tmp/x',
+      raw: "Permission for this tool use was denied. What required approval: rm in /tmp/x",
+      tool: "Bash",
+      invocation: "rm /tmp/x",
     });
 
     const filed = dao.pendingApprovals(db);
 
-    assert.equal(filed.length, 1, 'the denial filed no approval at all');
+    assert.equal(filed.length, 1, "the denial filed no approval at all");
     assert.deepEqual(
       filed[0]?.allowlist,
       granted,
-      'the row does not carry what the child was actually allowed to use',
+      "the row does not carry what the child was actually allowed to use",
     );
   } finally {
     await sup.stop();

@@ -14,9 +14,9 @@ Pure-logic modules only. UI components smoked via `npm run smoke` and manual `np
 Two files start a real Docker container, and they are the only tests in the
 suite that need a live daemon.
 
-| file | what it needs |
-|---|---|
-| `test/supervise/drivers/container-removal.test.ts` | any image — it runs `alpine` |
+| file                                                 | what it needs                                    |
+| ---------------------------------------------------- | ------------------------------------------------ |
+| `test/supervise/drivers/container-removal.test.ts`   | any image — it runs `alpine`                     |
 | `test/supervise/drivers/container-toolchain.test.ts` | **`chat-mcp-agent:local` must already be BUILT** |
 
 🛑 **`container-toolchain.test.ts` SKIPS WHEN THE AGENT IMAGE IS ABSENT, and

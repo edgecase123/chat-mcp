@@ -1,6 +1,6 @@
-import { DatabaseSync } from 'node:sqlite';
-import { chmodSync, existsSync, statSync } from 'node:fs';
-import { dbPath, ensureStateDir, STATE_FILE_MODE } from '../util/paths.js';
+import { DatabaseSync } from "node:sqlite";
+import { chmodSync, existsSync, statSync } from "node:fs";
+import { dbPath, ensureStateDir, STATE_FILE_MODE } from "../util/paths.js";
 
 export type Db = DatabaseSync;
 
@@ -289,12 +289,12 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
 function tx(db: Db, fn: () => void): void {
-  db.exec('BEGIN');
+  db.exec("BEGIN");
   try {
     fn();
-    db.exec('COMMIT');
+    db.exec("COMMIT");
   } catch (e) {
-    db.exec('ROLLBACK');
+    db.exec("ROLLBACK");
     throw e;
   }
 }
@@ -305,12 +305,16 @@ function tx(db: Db, fn: () => void): void {
  * Lives here because `db.ts` owns the table — it creates it in `migrate()`.
  */
 export function currentSchemaVersion(db: Db): number | null {
-  const row = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as unknown as { v: number | null };
+  const row = db
+    .prepare("SELECT MAX(version) AS v FROM schema_version")
+    .get() as unknown as { v: number | null };
   return row.v ?? null;
 }
 
 export function migrate(db: Db): void {
-  db.exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)`);
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)`,
+  );
   const current = currentSchemaVersion(db) ?? 0;
   for (let i = current; i < MIGRATIONS.length; i++) {
     const version = i + 1;
@@ -318,7 +322,9 @@ export function migrate(db: Db): void {
     if (!migration) throw new Error(`Missing migration ${version}`);
     tx(db, () => {
       migration(db);
-      db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(version);
+      db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(
+        version,
+      );
     });
   }
 }
@@ -368,7 +374,7 @@ export function identityOf(path: string): FileIdentity | null {
     return { dev: found.dev, ino: found.ino };
   } catch (err) {
     const { code } = err as NodeJS.ErrnoException;
-    if (code === 'ENOENT' || code === 'ENOTDIR') return null;
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
     throw err;
   }
 }
@@ -391,15 +397,15 @@ export function openDb(): Db {
   // mark as UNREADABLE instead of as a divergence it cannot substantiate.
   if (opened) identities.set(db, opened);
 
-  db.exec('PRAGMA journal_mode = WAL');
-  db.exec('PRAGMA synchronous = NORMAL');
-  db.exec('PRAGMA foreign_keys = ON');
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA synchronous = NORMAL");
+  db.exec("PRAGMA foreign_keys = ON");
   migrate(db);
 
   // Opened eagerly, so an unusable database fails here rather than on the first
   // send. One file handle per process; a send pays nothing for it.
   const verifier = new DatabaseSync(dbPath());
-  verifier.exec('PRAGMA journal_mode = WAL');
+  verifier.exec("PRAGMA journal_mode = WAL");
   verifiers.set(db, verifier);
 
   // 🛑 `close()` HAS TO CLOSE BOTH. A second live connection keeps the WAL on
@@ -431,7 +437,7 @@ export function openDb(): Db {
  * after a checkpoint. The 0700 state directory is what actually holds.
  */
 function tightenDbFiles(): void {
-  for (const suffix of ['', '-wal', '-shm']) {
+  for (const suffix of ["", "-wal", "-shm"]) {
     const path = `${dbPath()}${suffix}`;
     if (existsSync(path)) chmodSync(path, STATE_FILE_MODE);
   }

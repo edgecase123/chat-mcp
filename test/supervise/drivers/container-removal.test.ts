@@ -1,13 +1,20 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { wireAgentChild } from '../../../src/supervise/drivers/wiring.js';
-import { containerNameFor, dockerStopFor } from '../../../src/supervise/drivers/containerized.js';
-import { dockerLaneSkip } from '../../support/docker-lane.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  execFileSync,
+  spawn,
+  type ChildProcessWithoutNullStreams,
+} from "node:child_process";
+import { wireAgentChild } from "../../../src/supervise/drivers/wiring.js";
+import {
+  containerNameFor,
+  dockerStopFor,
+} from "../../../src/supervise/drivers/containerized.js";
+import { dockerLaneSkip } from "../../support/docker-lane.js";
 
 function dockerAvailable(): boolean {
   try {
-    execFileSync('docker', ['version'], { stdio: 'ignore' });
+    execFileSync("docker", ["version"], { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -44,19 +51,19 @@ const STARTUP_BOUND_MS = 20000;
  * prove `spawnContainerized` is wired to call it (claude2, PR #147 review).
  */
 test(
-  '🛑 AgentChild.kill() on a containerized child removes the --rm container',
+  "🛑 AgentChild.kill() on a containerized child removes the --rm container",
   { skip: dockerLaneSkip(process.env, dockerAvailable) },
   async () => {
     const name = containerNameFor(`removal-test-${process.pid}`);
-    const rawChild = spawn('docker', [
-      'run',
-      '-i',
-      '--rm',
-      '--name',
+    const rawChild = spawn("docker", [
+      "run",
+      "-i",
+      "--rm",
+      "--name",
       name,
-      'alpine',
-      'sleep',
-      '300',
+      "alpine",
+      "sleep",
+      "300",
     ]) as ChildProcessWithoutNullStreams;
 
     // 🛑 THE EVIDENCE A BARE TIMEOUT THREW AWAY. A slow pull, a denied pull,
@@ -64,9 +71,9 @@ test(
     // `docker ps`, so the startup bound below cannot tell them apart on its
     // own. `docker run` says which one it was on stderr and in its exit code,
     // and nothing was reading either.
-    let runStderr = '';
-    rawChild.stderr.setEncoding('utf8');
-    rawChild.stderr.on('data', (chunk: string) => {
+    let runStderr = "";
+    rawChild.stderr.setEncoding("utf8");
+    rawChild.stderr.on("data", (chunk: string) => {
       runStderr += chunk;
     });
 
@@ -74,12 +81,13 @@ test(
     // as an exit code. Without this listener it surfaced as a bare
     // `spawn docker ENOENT` with no container name and no stage attached.
     let spawnError: Error | undefined;
-    rawChild.on('error', (err: Error) => {
+    rawChild.on("error", (err: Error) => {
       spawnError = err;
     });
 
-    let runExit: { code: number | null; signal: NodeJS.Signals | null } | undefined;
-    rawChild.on('exit', (code, signal) => {
+    let runExit:
+      { code: number | null; signal: NodeJS.Signals | null } | undefined;
+    rawChild.on("exit", (code, signal) => {
       runExit = { code, signal };
     });
 
@@ -90,10 +98,14 @@ test(
       lines.push(
         runExit
           ? `docker run exited: code=${runExit.code} signal=${runExit.signal}`
-          : 'docker run was still running',
+          : "docker run was still running",
       );
-      lines.push(runStderr.trim() ? `docker run stderr:\n${runStderr.trim()}` : 'stderr was empty');
-      return lines.join('\n');
+      lines.push(
+        runStderr.trim()
+          ? `docker run stderr:\n${runStderr.trim()}`
+          : "stderr was empty",
+      );
+      return lines.join("\n");
     };
 
     // 🛑 PID 1 INSIDE A CONTAINER IGNORES SIGTERM BY DEFAULT (the kernel's
@@ -105,7 +117,12 @@ test(
     // bound stays a bound, not a race.
     const agentChild = wireAgentChild(
       rawChild,
-      { routeEvent: () => undefined, encodeInput: (text) => text, reportsUsage: false, reportsContext: false },
+      {
+        routeEvent: () => undefined,
+        encodeInput: (text) => text,
+        reportsUsage: false,
+        reportsContext: false,
+      },
       { stop: dockerStopFor(name, 2) },
     );
 
@@ -115,7 +132,9 @@ test(
       await new Promise((resolve, reject) => {
         const started = Date.now();
         const poll = setInterval(() => {
-          const out = execFileSync('docker', ['ps', '-q', '-f', `name=${name}`]).toString().trim();
+          const out = execFileSync("docker", ["ps", "-q", "-f", `name=${name}`])
+            .toString()
+            .trim();
           if (out) {
             clearInterval(poll);
             resolve(undefined);
@@ -138,10 +157,11 @@ test(
       // fails loudly inside a minute instead of hanging.
       await new Promise((resolve, reject) => {
         const timer = setTimeout(
-          () => reject(new Error('docker run did not exit within 60s of kill()')),
+          () =>
+            reject(new Error("docker run did not exit within 60s of kill()")),
           60000,
         );
-        rawChild.on('exit', () => {
+        rawChild.on("exit", () => {
           clearTimeout(timer);
           resolve(undefined);
         });
@@ -151,7 +171,13 @@ test(
       const gone = await new Promise<boolean>((resolve) => {
         const started = Date.now();
         const poll = setInterval(() => {
-          const out = execFileSync('docker', ['ps', '-a', '-q', '-f', `name=${name}`])
+          const out = execFileSync("docker", [
+            "ps",
+            "-a",
+            "-q",
+            "-f",
+            `name=${name}`,
+          ])
             .toString()
             .trim();
           if (!out) {
@@ -164,12 +190,15 @@ test(
         }, 300);
       });
 
-      assert.ok(gone, `container ${name} was still listed by docker ps -a after kill()`);
+      assert.ok(
+        gone,
+        `container ${name} was still listed by docker ps -a after kill()`,
+      );
     } finally {
       // Belt and suspenders: whether the assertion above passed, failed, or
       // threw, make sure nothing with this name survives this test.
       try {
-        execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' });
+        execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
       } catch {
         // Already gone — the expected case when the test actually passed.
       }

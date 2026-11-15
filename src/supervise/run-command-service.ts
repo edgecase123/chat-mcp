@@ -1,20 +1,24 @@
-import { manifestPathFor } from '../util/paths.js';
+import { manifestPathFor } from "../util/paths.js";
 import {
   listCommands,
   readManifest,
   resolveArgv,
   type CommandManifest,
   type ListedCommand,
-} from './commands.js';
-import { commandLimits } from './command-limits.js';
-import { checkedScriptPath } from './containment.js';
-import { runScript, type ScriptResult, type ScriptRunner } from './run-script.js';
+} from "./commands.js";
+import { commandLimits } from "./command-limits.js";
+import { checkedScriptPath } from "./containment.js";
+import {
+  runScript,
+  type ScriptResult,
+  type ScriptRunner,
+} from "./run-script.js";
 
 export {
   DEFAULT_MAX_BUFFER,
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_TIMEOUT_MS,
-} from './command-limits.js';
+} from "./command-limits.js";
 
 /**
  * A refusal with two faces: what the caller is told, and what the operator can
@@ -30,8 +34,9 @@ export class Refusal extends Error {
 
   constructor(publicMessage: string, cause?: unknown) {
     super(publicMessage);
-    this.name = 'Refusal';
-    this.detail = cause instanceof Error ? cause.message : String(cause ?? publicMessage);
+    this.name = "Refusal";
+    this.detail =
+      cause instanceof Error ? cause.message : String(cause ?? publicMessage);
   }
 }
 
@@ -102,13 +107,16 @@ function releaseSlot(handle: string): void {
  * One manifest per handle gives one directory, so no candidate can conflict.
  * Pinned by `rewriting the registration does not move where a command runs`.
  */
-export function manifestFor(handle: string): { dir: string; manifest: CommandManifest } {
+export function manifestFor(handle: string): {
+  dir: string;
+  manifest: CommandManifest;
+} {
   let manifest: CommandManifest;
 
   try {
     manifest = readManifest(manifestPathFor(handle));
   } catch (err) {
-    throw new Refusal('this agent has no usable command manifest', err);
+    throw new Refusal("this agent has no usable command manifest", err);
   }
 
   return { dir: manifest.projectDir, manifest };
@@ -143,7 +151,7 @@ export async function runCommandFor(
     // `limits.json` by absolute path, and that path is inside the directory the
     // container boundary exists to hide. `manifestFor` below is the same shape:
     // a fixed public sentence, the detail in `Refusal.detail`.
-    throw new Refusal('the command limits on this host are not readable', err);
+    throw new Refusal("the command limits on this host are not readable", err);
   }
 
   const { dir, manifest } = manifestFor(handle);
@@ -155,7 +163,10 @@ export async function runCommandFor(
   try {
     resolved = resolveArgv(manifest, name, params as Record<string, string>);
   } catch (err) {
-    throw new Refusal(err instanceof Error ? err.message : 'the command was refused', err);
+    throw new Refusal(
+      err instanceof Error ? err.message : "the command was refused",
+      err,
+    );
   }
 
   // 🛑 THE ONLY WAY TO A PATH. `resolved.script` is an object, so reaching the
@@ -166,7 +177,10 @@ export async function runCommandFor(
   try {
     script = checkedScriptPath(dir, resolved.script);
   } catch (err) {
-    throw new Refusal('the command script is not inside the project directory', err);
+    throw new Refusal(
+      "the command script is not inside the project directory",
+      err,
+    );
   }
 
   // 🛑 AFTER AUTHORIZATION, NOT BEFORE. A command refused for its name or its
@@ -175,7 +189,10 @@ export async function runCommandFor(
   //
   // A limit below 1 is read as 1. Honouring a 0 would wait forever, and a
   // caller that passes one wants throttling, never a deadlock.
-  await acquireSlot(handle, Math.max(1, opts.maxConcurrent ?? limits.maxConcurrent));
+  await acquireSlot(
+    handle,
+    Math.max(1, opts.maxConcurrent ?? limits.maxConcurrent),
+  );
 
   try {
     return await runScript(
@@ -189,7 +206,10 @@ export async function runCommandFor(
       opts.run,
     );
   } catch (err) {
-    throw new Refusal(err instanceof Error ? err.message : 'the command failed to run', err);
+    throw new Refusal(
+      err instanceof Error ? err.message : "the command failed to run",
+      err,
+    );
   } finally {
     releaseSlot(handle);
   }

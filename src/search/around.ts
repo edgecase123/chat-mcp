@@ -19,17 +19,17 @@ export type AroundId = { ok: true; id: number } | { ok: false; reason: string };
  * silently resolve the wrong message or reach the DAO as NaN.
  */
 export function parseAroundId(raw: string | null | undefined): AroundId {
-  if (raw === null || raw === undefined || raw === '') {
-    return { ok: false, reason: 'around_id required' };
+  if (raw === null || raw === undefined || raw === "") {
+    return { ok: false, reason: "around_id required" };
   }
   if (!/^[0-9]+$/.test(raw)) {
-    return { ok: false, reason: 'around_id must be a positive integer' };
+    return { ok: false, reason: "around_id must be a positive integer" };
   }
 
   const id = Number(raw);
 
   if (!Number.isSafeInteger(id) || id <= 0) {
-    return { ok: false, reason: 'around_id must be a positive integer' };
+    return { ok: false, reason: "around_id must be a positive integer" };
   }
 
   return { ok: true, id };
@@ -46,8 +46,11 @@ export function parseAroundId(raw: string | null | undefined): AroundId {
  * @param msg the stored row's two handles
  * @param me the reader's handle
  */
-export function targetForMessage(msg: { from_handle: string; to_handle: string }, me: string): string {
-  if (msg.to_handle.startsWith('#')) return msg.to_handle;
+export function targetForMessage(
+  msg: { from_handle: string; to_handle: string },
+  me: string,
+): string {
+  if (msg.to_handle.startsWith("#")) return msg.to_handle;
 
   return msg.from_handle === me ? msg.to_handle : msg.from_handle;
 }
@@ -60,8 +63,11 @@ export function targetForMessage(msg: { from_handle: string; to_handle: string }
  * an id-based lookup that skipped the equivalent check would be a bypass of it.
  * Rooms are checked by the caller against `room_members`; a DM is checked here.
  */
-export function readerIsPartyToDm(msg: { from_handle: string; to_handle: string }, me: string): boolean {
-  if (msg.to_handle.startsWith('#')) return false;
+export function readerIsPartyToDm(
+  msg: { from_handle: string; to_handle: string },
+  me: string,
+): boolean {
+  if (msg.to_handle.startsWith("#")) return false;
 
   return msg.from_handle === me || msg.to_handle === me;
 }
@@ -100,12 +106,15 @@ export function parseMessageLimit(
   raw: string | null | undefined,
   fallback = 100,
 ): { ok: true; limit: number } | { ok: false; reason: string } {
-  if (raw === null || raw === undefined || raw === '') return { ok: true, limit: fallback };
-  if (!/^[0-9]+$/.test(raw)) return { ok: false, reason: 'limit must be a positive integer' };
+  if (raw === null || raw === undefined || raw === "")
+    return { ok: true, limit: fallback };
+  if (!/^[0-9]+$/.test(raw))
+    return { ok: false, reason: "limit must be a positive integer" };
 
   const n = Number(raw);
 
-  if (!Number.isSafeInteger(n) || n < 1) return { ok: false, reason: 'limit must be a positive integer' };
+  if (!Number.isSafeInteger(n) || n < 1)
+    return { ok: false, reason: "limit must be a positive integer" };
 
   return { ok: true, limit: Math.min(MAX_MESSAGE_LIMIT, n) };
 }

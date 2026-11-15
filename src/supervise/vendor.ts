@@ -1,9 +1,9 @@
-import type { SpawnOptions } from './child.js';
-import type { ChildGrant } from './grant.js';
-import type { Denial } from './denial.js';
-import type { RateLimitSnapshot } from './rate-limit.js';
-import type { ContextSnapshot } from './context-gauge.js';
-import type { RedispatchInput } from './drivers/claude-redispatch.js';
+import type { SpawnOptions } from "./child.js";
+import type { ChildGrant } from "./grant.js";
+import type { Denial } from "./denial.js";
+import type { RateLimitSnapshot } from "./rate-limit.js";
+import type { ContextSnapshot } from "./context-gauge.js";
+import type { RedispatchInput } from "./drivers/claude-redispatch.js";
 
 /**
  * The spawn contract, defined in the SUPERVISE layer rather than beside
@@ -17,7 +17,7 @@ import type { RedispatchInput } from './drivers/claude-redispatch.js';
  */
 
 /** Where a supervised child runs. */
-export type SandboxMode = 'host' | 'docker';
+export type SandboxMode = "host" | "docker";
 
 /**
  * Map ONE parsed CLI event onto the supervisor's semantic callbacks.

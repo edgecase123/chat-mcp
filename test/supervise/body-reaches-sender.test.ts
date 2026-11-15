@@ -1,7 +1,7 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * 🛑 THIS TEST IS SCOPED TO THE SURFACE, NOT TO A FIX, AND THAT IS THE POINT.
@@ -26,12 +26,12 @@ import { join } from 'node:path';
  */
 const ALLOWED = exempt([
   [
-    'src/cli/ink/App.tsx :: notifyPeer(member, { id: 0, to: member, from: dao.SYSTEM_HANDLE, ts: Date.now() });',
-    'presence ping, id 0, there is no message',
+    "src/cli/ink/App.tsx :: notifyPeer(member, { id: 0, to: member, from: dao.SYSTEM_HANDLE, ts: Date.now() });",
+    "presence ping, id 0, there is no message",
   ],
   [
-    'src/cli/ink/App.tsx :: notifyPeer(target, { id: 0, to: target, from: dao.SYSTEM_HANDLE, ts: Date.now() });',
-    'presence ping, id 0, there is no message',
+    "src/cli/ink/App.tsx :: notifyPeer(target, { id: 0, to: target, from: dao.SYSTEM_HANDLE, ts: Date.now() });",
+    "presence ping, id 0, there is no message",
   ],
 ]);
 
@@ -46,7 +46,7 @@ function sources(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
-const ROOT = new URL('../../', import.meta.url).pathname;
+const ROOT = new URL("../../", import.meta.url).pathname;
 
 /**
  * A STABLE identity for a call site: the file plus the call itself.
@@ -67,8 +67,8 @@ function siteKey(rel: string, call: string): string {
   // exemption read as a new violation. An exception is a claim about the
   // CODE, so editing a comment must not invalidate it.
   const code = call
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/\/\/[^\n]*/g, ' ')
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/\/\/[^\n]*/g, " ")
     .trim();
 
   return deformatted(`${rel} :: ${code}`);
@@ -84,8 +84,8 @@ function siteKey(rel: string, call: string): string {
  */
 function deformatted(site: string): string {
   return site
-    .replace(/\s+/g, ' ')
-    .replace(/,(\s*[}\])])/g, '$1')
+    .replace(/\s+/g, " ")
+    .replace(/,(\s*[}\])])/g, "$1")
     .trim();
 }
 
@@ -97,15 +97,18 @@ function exempt(entries: [string, string][]): Map<string, string> {
 function dropSites(): string[] {
   const dropped: string[] = [];
 
-  for (const file of sources(join(ROOT, 'src'))) {
+  for (const file of sources(join(ROOT, "src"))) {
     const rel = file.slice(ROOT.length);
 
     // bus.ts defines the envelope; socket.ts only mentions notifyPeer in prose.
-    if (rel.endsWith('notify/bus.ts') || rel.endsWith('supervise/socket.ts')) continue;
+    if (rel.endsWith("notify/bus.ts") || rel.endsWith("supervise/socket.ts"))
+      continue;
 
-    const source = readFileSync(file, 'utf8');
+    const source = readFileSync(file, "utf8");
 
-    for (const m of source.matchAll(/notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs)) {
+    for (const m of source.matchAll(
+      /notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs,
+    )) {
       // 🛑 A PROPERTY, not a token. `/\bbody\b/` matched `to: body.room` in
       // web/server.ts, so a room-join wake carrying no message read as
       // compliant. claude1 found the exception list was false; tightening this
@@ -119,27 +122,31 @@ function dropSites(): string[] {
   return dropped;
 }
 
-test('every notifyPeer call either carries the body or is a named exception', () => {
+test("every notifyPeer call either carries the body or is a named exception", () => {
   const unexplained = dropSites().filter((site) => !ALLOWED.has(site));
 
   assert.deepEqual(
     unexplained,
     [],
-    `these wakes drop the message body with no justification:\n  ${unexplained.join('\n  ')}\n`
-      + 'A woken agent then pays a tool round-trip calling inbox before it can act.',
+    `these wakes drop the message body with no justification:\n  ${unexplained.join("\n  ")}\n` +
+      "A woken agent then pays a tool round-trip calling inbox before it can act.",
   );
 });
 
-test('the exception list has no stale entries', () => {
+test("the exception list has no stale entries", () => {
   // An ALLOWED entry for a call that now passes a body is a lie that makes the
   // list look considered when it is not.
   const dropping = new Set(dropSites());
   const stale = [...ALLOWED.keys()].filter((site) => !dropping.has(site));
 
-  assert.deepEqual(stale, [], `these exceptions are no longer needed: ${stale.join(', ')}`);
+  assert.deepEqual(
+    stale,
+    [],
+    `these exceptions are no longer needed: ${stale.join(", ")}`,
+  );
 });
 
-test('the scan sees EVERY notifyPeer call — a regex blind spot would hide droppers', () => {
+test("the scan sees EVERY notifyPeer call — a regex blind spot would hide droppers", () => {
   // 🛑 This replaces an `assert.ok(total >= 5)` that tracked nothing real and
   // broke the moment the number of droppers fell. Both claude1 and I named the
   // same weakness: the structured regex handles one level of nesting, so a
@@ -151,22 +158,27 @@ test('the scan sees EVERY notifyPeer call — a regex blind spot would hide drop
   let occurrences = 0;
   let matched = 0;
 
-  for (const file of sources(join(ROOT, 'src'))) {
+  for (const file of sources(join(ROOT, "src"))) {
     const rel = file.slice(ROOT.length);
 
-    if (rel.endsWith('notify/bus.ts') || rel.endsWith('supervise/socket.ts')) continue;
+    if (rel.endsWith("notify/bus.ts") || rel.endsWith("supervise/socket.ts"))
+      continue;
 
-    const source = readFileSync(file, 'utf8');
+    const source = readFileSync(file, "utf8");
     occurrences += [...source.matchAll(/notifyPeer\(/g)].length;
-    matched += [...source.matchAll(/notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs)].length;
+    matched += [...source.matchAll(/notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs)]
+      .length;
   }
 
-  assert.ok(occurrences > 20, `expected to find the call sites, found ${occurrences}`);
+  assert.ok(
+    occurrences > 20,
+    `expected to find the call sites, found ${occurrences}`,
+  );
   assert.equal(
     matched,
     occurrences,
-    `the structured regex matched ${matched} of ${occurrences} calls — `
-      + 'the unmatched ones are invisible to every other test in this file',
+    `the structured regex matched ${matched} of ${occurrences} calls — ` +
+      "the unmatched ones are invisible to every other test in this file",
   );
 });
 
@@ -196,63 +208,66 @@ test('the scan sees EVERY notifyPeer call — a regex blind spot would hide drop
  */
 const KIND_EXEMPT = exempt([
   [
-    'src/cli/ink/App.tsx :: notifyPeer(member, { id: 0, to: member, from: dao.SYSTEM_HANDLE, ts: Date.now() });',
-    'presence ping, id 0, there is no message',
+    "src/cli/ink/App.tsx :: notifyPeer(member, { id: 0, to: member, from: dao.SYSTEM_HANDLE, ts: Date.now() });",
+    "presence ping, id 0, there is no message",
   ],
   [
-    'src/cli/ink/App.tsx :: notifyPeer(target, { id: 0, to: target, from: dao.SYSTEM_HANDLE, ts: Date.now() });',
-    'presence ping, id 0, there is no message',
+    "src/cli/ink/App.tsx :: notifyPeer(target, { id: 0, to: target, from: dao.SYSTEM_HANDLE, ts: Date.now() });",
+    "presence ping, id 0, there is no message",
   ],
   [
-    'src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body, });',
-    'room-join system notice, no caller kind',
+    "src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body, });",
+    "room-join system notice, no caller kind",
   ],
   [
-    'src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: name, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body, });',
-    'room-join system notice, no caller kind',
+    "src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: name, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body, });",
+    "room-join system notice, no caller kind",
   ],
   [
-    'src/cli/ink/App.tsx :: notifyPeer(member, { id: joinRes.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: joinRes.system_message.sent_at, body: joinRes.system_message.body });',
-    'room-join system notice, no caller kind',
+    "src/cli/ink/App.tsx :: notifyPeer(member, { id: joinRes.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: joinRes.system_message.sent_at, body: joinRes.system_message.body });",
+    "room-join system notice, no caller kind",
   ],
   [
-    'src/cli/ink/App.tsx :: notifyPeer(member, { id: r.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: r.system_message.sent_at, body: r.system_message.body });',
-    'room-join system notice, no caller kind',
+    "src/cli/ink/App.tsx :: notifyPeer(member, { id: r.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: r.system_message.sent_at, body: r.system_message.body });",
+    "room-join system notice, no caller kind",
   ],
   [
-    'src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: t.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });',
-    'room-join system notice, no caller kind',
+    "src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: t.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });",
+    "room-join system notice, no caller kind",
   ],
   [
-    'src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });',
-    'room-join system notice, no caller kind',
+    "src/cli/ink/App.tsx :: notifyPeer(member, { id: result.system_message.id, to: room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });",
+    "room-join system notice, no caller kind",
   ],
   [
-    'src/cli/web/server.ts :: notifyPeer(member, { id: result.system_message.id, to: body.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body, unread });',
-    'room-join system notice, no caller kind',
+    "src/cli/web/server.ts :: notifyPeer(member, { id: result.system_message.id, to: body.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body, unread });",
+    "room-join system notice, no caller kind",
   ],
   [
-    'src/cli/web/server.ts :: notifyPeer(request.supervisorHandle, { id, to: request.supervisorHandle, from: ctx.handle, ts: Date.now(), body: `approval ${id} ${decision}: ${request.requested ?? \'(unnamed)\'}`, approval: { approvalId: id, decision, requested: request.requested ?? \'\', grant: request.grant, grantForms: request.grantForms, sessionId: request.sessionId, }, });',
-    'approval answer; no caller kind exists, the body and the typed field carry it',
+    "src/cli/web/server.ts :: notifyPeer(request.supervisorHandle, { id, to: request.supervisorHandle, from: ctx.handle, ts: Date.now(), body: `approval ${id} ${decision}: ${request.requested ?? '(unnamed)'}`, approval: { approvalId: id, decision, requested: request.requested ?? '', grant: request.grant, grantForms: request.grantForms, sessionId: request.sessionId, }, });",
+    "approval answer; no caller kind exists, the body and the typed field carry it",
   ],
 ]);
 
-test('every file that hands a kind to insertMessage forwards it on the wake', () => {
+test("every file that hands a kind to insertMessage forwards it on the wake", () => {
   const unexplained: string[] = [];
 
-  for (const file of sources(join(ROOT, 'src'))) {
+  for (const file of sources(join(ROOT, "src"))) {
     const rel = file.slice(ROOT.length);
 
-    if (rel.endsWith('notify/bus.ts') || rel.endsWith('supervise/socket.ts')) continue;
+    if (rel.endsWith("notify/bus.ts") || rel.endsWith("supervise/socket.ts"))
+      continue;
 
-    const source = readFileSync(file, 'utf8');
-    const handsAKind = [...source.matchAll(/insertMessage\([^;]*?\)/gs)].some((m) =>
-      /(?:^|[{,\s])kind\s*[,:}]/.test(m[0]),
+    const source = readFileSync(file, "utf8");
+    const handsAKind = [...source.matchAll(/insertMessage\([^;]*?\)/gs)].some(
+      (m) => /(?:^|[{,\s])kind\s*[,:}]/.test(m[0]),
     );
 
     if (!handsAKind) continue;
 
-    for (const m of source.matchAll(/notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs)) {
+    for (const m of source.matchAll(
+      /notifyPeer\((?:[^()]|\([^()]*\))*?\);/gs,
+    )) {
       if (/(?:^|[{,\s])kind\s*[,:}]/.test(m[0])) continue;
 
       const site = siteKey(rel, m[0]);
@@ -264,7 +279,7 @@ test('every file that hands a kind to insertMessage forwards it on the wake', ()
   assert.deepEqual(
     unexplained,
     [],
-    `these wakes drop the kind with no justification:\n  ${unexplained.join('\n  ')}\n`
-      + 'An alert then arrives as ordinary chat.',
+    `these wakes drop the kind with no justification:\n  ${unexplained.join("\n  ")}\n` +
+      "An alert then arrives as ordinary chat.",
   );
 });

@@ -1,24 +1,28 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // 🛑 BEFORE any import that resolves a state path.
-process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-host-bus-'));
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-host-bus-"));
 
-const { openHostBus } = await import('../../src/supervise/host-bus.js');
-const { openDb } = await import('../../src/storage/db.js');
-const dao = await import('../../src/storage/dao.js');
+const { openHostBus } = await import("../../src/supervise/host-bus.js");
+const { openDb } = await import("../../src/storage/db.js");
+const dao = await import("../../src/storage/dao.js");
 
-const PROTOCOL = '2025-06-18';
+const PROTOCOL = "2025-06-18";
 
 function initialize(): string {
   return JSON.stringify({
-    jsonrpc: '2.0',
+    jsonrpc: "2.0",
     id: 1,
-    method: 'initialize',
-    params: { protocolVersion: PROTOCOL, capabilities: {}, clientInfo: { name: 't', version: '0' } },
+    method: "initialize",
+    params: {
+      protocolVersion: PROTOCOL,
+      capabilities: {},
+      clientInfo: { name: "t", version: "0" },
+    },
   });
 }
 
@@ -28,15 +32,15 @@ function initialize(): string {
  * `list_agents`, so a sibling reads it as never started — and `deleteAgent` on
  * teardown removes a row nobody wrote.
  */
-test('🚨 a session over the host bus REGISTERS the child on the bus', async (t) => {
-  const bus = await openHostBus('claude1-agent');
+test("🚨 a session over the host bus REGISTERS the child on the bus", async (t) => {
+  const bus = await openHostBus("claude1-agent");
   t.after(() => bus.close());
 
   const res = await fetch(bus.endpoint.url, {
-    method: 'POST',
+    method: "POST",
     headers: {
-      'content-type': 'application/json',
-      accept: 'application/json, text/event-stream',
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
       authorization: `Bearer ${bus.endpoint.token}`,
     },
     body: initialize(),
@@ -48,10 +52,10 @@ test('🚨 a session over the host bus REGISTERS the child on the bus', async (t
   const db = openDb();
   t.after(() => db.close());
 
-  const agent = dao.getAgent(db, 'claude1-agent');
+  const agent = dao.getAgent(db, "claude1-agent");
 
-  assert.ok(agent, 'the child never registered, so list_agents cannot see it');
-  assert.equal(agent.handle, 'claude1-agent');
+  assert.ok(agent, "the child never registered, so list_agents cannot see it");
+  assert.equal(agent.handle, "claude1-agent");
 });
 
 /**
@@ -64,15 +68,24 @@ test('🚨 a session over the host bus REGISTERS the child on the bus', async (t
  * kills the child and awaits its teardown first, so revoking here cannot race
  * a live child's own credential.
  */
-test('🚨 close() REVOKES the child token, so a dead container cannot come back', async () => {
-  const { authenticateToken } = await import('../../src/supervise/handle-tokens.js');
+test("🚨 close() REVOKES the child token, so a dead container cannot come back", async () => {
+  const { authenticateToken } =
+    await import("../../src/supervise/handle-tokens.js");
 
-  const bus = await openHostBus('claude1-gone');
+  const bus = await openHostBus("claude1-gone");
   const { token } = bus.endpoint;
 
-  assert.equal(authenticateToken(token), 'claude1-gone', 'the control: it worked while open');
+  assert.equal(
+    authenticateToken(token),
+    "claude1-gone",
+    "the control: it worked while open",
+  );
 
   await bus.close();
 
-  assert.equal(authenticateToken(token), null, 'the token still authenticates a dead container');
+  assert.equal(
+    authenticateToken(token),
+    null,
+    "the token still authenticates a dead container",
+  );
 });

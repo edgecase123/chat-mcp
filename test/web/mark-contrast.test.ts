@@ -1,5 +1,5 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
+import { test } from "node:test";
+import assert from "node:assert/strict";
 import {
   CSS,
   MIN_THEMES,
@@ -8,7 +8,7 @@ import {
   contrastRatio,
   themeSelectors,
   token,
-} from '../support/theme-tokens.js';
+} from "../support/theme-tokens.js";
 
 /**
  * 🛑 A SEARCH HIT HAS TWO JOBS AND THEY PULL AGAINST EACH OTHER.
@@ -43,30 +43,33 @@ const MIN_CONTRAST = 4.5;
  * It stays in the list as cheap insurance for the day a panel wraps messages,
  * NOT because a hit lands there now.
  */
-const GROUNDS = ['bg', 'bg-inset', 'bg-elevated'] as const;
+const GROUNDS = ["bg", "bg-inset", "bg-elevated"] as const;
 
 function popOnEveryGround(selector: string): { ground: string; pop: number }[] {
   return GROUNDS.map((ground) => ({
     ground,
-    pop: channelDistance(token(selector, 'mark-bg'), token(selector, ground)),
+    pop: channelDistance(token(selector, "mark-bg"), token(selector, ground)),
   }));
 }
 
 function contrastOn(selector: string): number {
-  return contrastRatio(token(selector, 'mark-bg'), token(selector, 'mark-fg'));
+  return contrastRatio(token(selector, "mark-bg"), token(selector, "mark-fg"));
 }
 
-test('🛑 the sweep found every theme block — the denominator, not just the result', () => {
+test("🛑 the sweep found every theme block — the denominator, not just the result", () => {
   const selectors = themeSelectors();
 
   assert.ok(
     selectors.length >= MIN_THEMES,
-    `found ${selectors.length} theme blocks, expected at least ${MIN_THEMES}: ${selectors.join(', ')}`,
+    `found ${selectors.length} theme blocks, expected at least ${MIN_THEMES}: ${selectors.join(", ")}`,
   );
-  assert.ok(selectors.includes(':root'), `:root is missing from ${selectors.join(', ')}`);
+  assert.ok(
+    selectors.includes(":root"),
+    `:root is missing from ${selectors.join(", ")}`,
+  );
 });
 
-test('🛑 the mark STANDS OUT from EVERY ground it can render on, in every theme', () => {
+test("🛑 the mark STANDS OUT from EVERY ground it can render on, in every theme", () => {
   const quiet = themeSelectors().flatMap((selector) =>
     popOnEveryGround(selector)
       .filter(({ pop }) => pop < MIN_POP)
@@ -76,11 +79,11 @@ test('🛑 the mark STANDS OUT from EVERY ground it can render on, in every them
   assert.deepEqual(
     quiet,
     [],
-    `below the ${MIN_POP} pop floor: ${quiet.map((q) => `${q.selector} on --${q.ground} at ${q.pop}`).join(', ')}`,
+    `below the ${MIN_POP} pop floor: ${quiet.map((q) => `${q.selector} on --${q.ground} at ${q.pop}`).join(", ")}`,
   );
 });
 
-test('🛑 the marked word stays READABLE, in every theme', () => {
+test("🛑 the marked word stays READABLE, in every theme", () => {
   const unreadable = themeSelectors()
     .map((selector) => ({ selector, contrast: contrastOn(selector) }))
     .filter(({ contrast }) => contrast < MIN_CONTRAST);
@@ -88,31 +91,41 @@ test('🛑 the marked word stays READABLE, in every theme', () => {
   assert.deepEqual(
     unreadable,
     [],
-    `below AA: ${unreadable.map((u) => `${u.selector} at ${u.contrast.toFixed(2)}`).join(', ')}`,
+    `below AA: ${unreadable.map((u) => `${u.selector} at ${u.contrast.toFixed(2)}`).join(", ")}`,
   );
 });
 
-test('⚠️ control — the OLD --accent-soft mark fails the pop floor everywhere', () => {
+test("⚠️ control — the OLD --accent-soft mark fails the pop floor everywhere", () => {
   // Proves the pop floor discriminates. A floor every value passes is no floor.
   const passing = themeSelectors().filter(
-    (s) => channelDistance(token(s, 'accent-soft'), token(s, 'bg')) >= MIN_POP,
+    (s) => channelDistance(token(s, "accent-soft"), token(s, "bg")) >= MIN_POP,
   );
 
-  assert.deepEqual(passing, [], `the old mark should be too quiet everywhere, but passed in ${passing.join(', ')}`);
+  assert.deepEqual(
+    passing,
+    [],
+    `the old mark should be too quiet everywhere, but passed in ${passing.join(", ")}`,
+  );
 });
 
-test('⚠️ control — full-strength --accent fails the CONTRAST floor in light mode', () => {
+test("⚠️ control — full-strength --accent fails the CONTRAST floor in light mode", () => {
   // The loudest option, and the reason loudness alone is not the test. Uses
   // --accent-fg because that is the text any accent-background element gets.
-  const light = contrastRatio(token(':root', 'accent'), token(':root', 'accent-fg'));
+  const light = contrastRatio(
+    token(":root", "accent"),
+    token(":root", "accent-fg"),
+  );
 
-  assert.ok(light < MIN_CONTRAST, `white-on-accent scored ${light.toFixed(2)}, which no longer fails AA`);
+  assert.ok(
+    light < MIN_CONTRAST,
+    `white-on-accent scored ${light.toFixed(2)}, which no longer fails AA`,
+  );
 });
 
-test('🛑 the mark reads its OWN colour, never inheriting the body text', () => {
+test("🛑 the mark reads its OWN colour, never inheriting the body text", () => {
   // ⚠️ SCOPED TO THE MARK RULE. An unscoped search would hit every other
   // `color: inherit` in the stylesheet, which this test does not govern.
-  const rule = block('.message__body mark');
+  const rule = block(".message__body mark");
 
   assert.match(rule, /background: var\(--mark-bg\)/);
   assert.match(rule, /color: var\(--mark-fg\)/);
@@ -121,12 +134,20 @@ test('🛑 the mark reads its OWN colour, never inheriting the body text', () =>
   assert.doesNotMatch(rule, /color:\s*inherit/);
 });
 
-test('the mark tokens are defined in every theme, not only the first', () => {
+test("the mark tokens are defined in every theme, not only the first", () => {
   // A token missing from a theme block falls back through the cascade to the
   // light value, which is the shape that makes one theme silently wrong.
   for (const selector of themeSelectors()) {
-    assert.match(token(selector, 'mark-bg'), /^#[0-9a-f]{6}$/i, `${selector} --mark-bg`);
-    assert.match(token(selector, 'mark-fg'), /^#[0-9a-f]{6}$/i, `${selector} --mark-fg`);
+    assert.match(
+      token(selector, "mark-bg"),
+      /^#[0-9a-f]{6}$/i,
+      `${selector} --mark-bg`,
+    );
+    assert.match(
+      token(selector, "mark-fg"),
+      /^#[0-9a-f]{6}$/i,
+      `${selector} --mark-fg`,
+    );
   }
-  assert.ok(CSS.includes('--mark-bg'), 'the token vanished entirely');
+  assert.ok(CSS.includes("--mark-bg"), "the token vanished entirely");
 });

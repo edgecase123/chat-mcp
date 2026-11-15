@@ -1,10 +1,14 @@
-import type { SpawnOptions } from '../supervise/child.js';
-import type { ChildGrant } from '../supervise/grant.js';
-import type { SandboxMode, VendorSpawn } from '../supervise/vendor.js';
-import { claudeArgs, claudeEncodeInput, routeClaudeEvent } from '../supervise/drivers/claude.js';
-import { redispatchPrompt } from '../supervise/drivers/claude-redispatch.js';
-import { containerMcpConfigPath } from '../supervise/drivers/containerized.js';
-import { IMAGE_TAG } from '../supervise/container.js';
+import type { SpawnOptions } from "../supervise/child.js";
+import type { ChildGrant } from "../supervise/grant.js";
+import type { SandboxMode, VendorSpawn } from "../supervise/vendor.js";
+import {
+  claudeArgs,
+  claudeEncodeInput,
+  routeClaudeEvent,
+} from "../supervise/drivers/claude.js";
+import { redispatchPrompt } from "../supervise/drivers/claude-redispatch.js";
+import { containerMcpConfigPath } from "../supervise/drivers/containerized.js";
+import { IMAGE_TAG } from "../supervise/container.js";
 
 /**
  * Claude Code's spawn contract: the only place this CLI's flag names live.
@@ -16,12 +20,12 @@ import { IMAGE_TAG } from '../supervise/container.js';
  */
 function containerArgs(opts: SpawnOptions): string[] {
   const args = [
-    '-p',
-    '--verbose',
-    '--output-format',
-    'stream-json',
-    '--input-format',
-    'stream-json',
+    "-p",
+    "--verbose",
+    "--output-format",
+    "stream-json",
+    "--input-format",
+    "stream-json",
     // 🛑 THE ACTIVATOR, NOT THE ENABLER. Claude Code ships two flags that
     // read as synonyms and are not:
     //
@@ -39,20 +43,20 @@ function containerArgs(opts: SpawnOptions): string[] {
     // A live container with this flag ALONE answered on the bus. Carrying a
     // second flag that demonstrably changes nothing is noise in the one arg
     // list where a reader must be able to tell what is load-bearing.
-    '--dangerously-skip-permissions',
+    "--dangerously-skip-permissions",
   ];
 
-  if (opts.model) args.push('--model', opts.model);
-  if (opts.resumeSessionId) args.push('--resume', opts.resumeSessionId);
+  if (opts.model) args.push("--model", opts.model);
+  if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
 
   return args;
 }
 
 export const claudeSpawn: VendorSpawn = {
-  binary: 'claude',
+  binary: "claude",
   image: IMAGE_TAG,
-  containerHome: '/root',
-  authEnvVar: 'CLAUDE_CODE_OAUTH_TOKEN',
+  containerHome: "/root",
+  authEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
 
   // `routeClaudeEvent` calls both sinks, so both are true here and nowhere
   // else. A vendor that routes neither declares `false` and still starts.
@@ -60,13 +64,13 @@ export const claudeSpawn: VendorSpawn = {
   reportsContext: true,
 
   argsFor: (opts: SpawnOptions, mode: SandboxMode): string[] =>
-    mode === 'docker' ? containerArgs(opts) : claudeArgs(opts),
+    mode === "docker" ? containerArgs(opts) : claudeArgs(opts),
 
   // Host: the grant already holds a host-side path, written at grant time.
   // Docker: a path that exists only INSIDE the container, written there by the
   // spawn prelude. Nothing is written on the host, and nothing is mounted.
   mcpConfigFor: (grant: ChildGrant, mode: SandboxMode): string =>
-    mode === 'docker' ? containerMcpConfigPath(claudeSpawn) : grant.configPath,
+    mode === "docker" ? containerMcpConfigPath(claudeSpawn) : grant.configPath,
 
   routeEvent: routeClaudeEvent,
 

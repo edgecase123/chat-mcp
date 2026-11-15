@@ -1,6 +1,6 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { carryOver } from '../support/carry-over.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { carryOver } from "../support/carry-over.js";
 
 /**
  * 🛑 THIS IS WHERE MEASUREMENTS GET LOST.
@@ -16,57 +16,78 @@ import { carryOver } from '../support/carry-over.js';
  */
 
 const permit = (attempted: string, entry: string) => ({
-  outcome: 'permitted' as const,
+  outcome: "permitted" as const,
   approvalId: 1,
   attempted,
   allowlistEntry: entry,
-  evidence: 'HISTORICAL',
+  evidence: "HISTORICAL",
 });
 
-const keyOf = (r: { attempted: string; allowlistEntry?: string }) => `${r.attempted}|${r.allowlistEntry}`;
+const keyOf = (r: { attempted: string; allowlistEntry?: string }) =>
+  `${r.attempted}|${r.allowlistEntry}`;
 
-test('a pending record replaces an existing one with the same key', () => {
-  const existing = [{ ...permit('rm x', 'Bash(rm x)'), approvalId: 1 }];
-  const pending = [{ ...permit('rm x', 'Bash(rm x)'), approvalId: 2 }];
+test("a pending record replaces an existing one with the same key", () => {
+  const existing = [{ ...permit("rm x", "Bash(rm x)"), approvalId: 1 }];
+  const pending = [{ ...permit("rm x", "Bash(rm x)"), approvalId: 2 }];
 
-  const merged = carryOver({ outcome: 'permitted', keyOf, existing, pending });
+  const merged = carryOver({ outcome: "permitted", keyOf, existing, pending });
 
   assert.equal(merged.length, 1);
-  assert.equal(merged[0].approvalId, 2, 'the older record won, which is how a fresh measurement gets discarded');
+  assert.equal(
+    merged[0].approvalId,
+    2,
+    "the older record won, which is how a fresh measurement gets discarded",
+  );
 });
 
-test('records of a different outcome are left out', () => {
-  const existing = [{ outcome: 'refused', approvalId: 9, attempted: 'rm x', allowlist: null, refusal: 'no' }];
+test("records of a different outcome are left out", () => {
+  const existing = [
+    {
+      outcome: "refused",
+      approvalId: 9,
+      attempted: "rm x",
+      allowlist: null,
+      refusal: "no",
+    },
+  ];
 
-  const merged = carryOver({ outcome: 'permitted', keyOf, existing, pending: [] });
+  const merged = carryOver({
+    outcome: "permitted",
+    keyOf,
+    existing,
+    pending: [],
+  });
 
   assert.deepEqual(merged, []);
 });
 
-test('two records with different keys both survive', () => {
+test("two records with different keys both survive", () => {
   const merged = carryOver({
-    outcome: 'permitted',
+    outcome: "permitted",
     keyOf,
-    existing: [permit('rm x', 'Bash(rm x)')],
-    pending: [permit('touch y', 'Bash(touch y)')],
+    existing: [permit("rm x", "Bash(rm x)")],
+    pending: [permit("touch y", "Bash(touch y)")],
   });
 
-  assert.equal(merged.length, 2, 'a second distinct record was swallowed');
+  assert.equal(merged.length, 2, "a second distinct record was swallowed");
 });
 
 // ⚠️ A PENDING FILE IS WRITTEN BY A HARNESS AND CAN HOLD A NULL. Throwing here
 // would abort the whole rebuild and take the valid records with it.
-test('a null entry in the pending list does not take the rebuild down', () => {
+test("a null entry in the pending list does not take the rebuild down", () => {
   const merged = carryOver({
-    outcome: 'permitted',
+    outcome: "permitted",
     keyOf,
-    existing: [permit('rm x', 'Bash(rm x)')],
-    pending: [null, permit('touch y', 'Bash(touch y)')],
+    existing: [permit("rm x", "Bash(rm x)")],
+    pending: [null, permit("touch y", "Bash(touch y)")],
   });
 
   assert.equal(merged.length, 2);
 });
 
-test('an empty merge returns an empty array rather than throwing', () => {
-  assert.deepEqual(carryOver({ outcome: 'permitted', keyOf, existing: [], pending: [] }), []);
+test("an empty merge returns an empty array rather than throwing", () => {
+  assert.deepEqual(
+    carryOver({ outcome: "permitted", keyOf, existing: [], pending: [] }),
+    [],
+  );
 });

@@ -34,9 +34,11 @@ export const DEFAULT_TTL_MINUTES = 240;
  * the moment it is made, and the symptom is "nothing is ever claimed" — which
  * reads as the feature not working rather than as a bad setting.
  */
-export function ttlMinutes(env: Record<string, string | undefined> = process.env): number {
+export function ttlMinutes(
+  env: Record<string, string | undefined> = process.env,
+): number {
   const raw = env.CHAT_MCP_CLAIM_TTL_MINUTES;
-  if (raw === undefined || raw === '') return DEFAULT_TTL_MINUTES;
+  if (raw === undefined || raw === "") return DEFAULT_TTL_MINUTES;
 
   const n = Number(raw);
 
@@ -69,7 +71,7 @@ export interface ClaimDecision {
    * `renewed` — the same holder extended their own live claim.
    * `conflict` — someone else holds it, and nothing was written.
    */
-  readonly outcome: 'granted' | 'renewed' | 'conflict';
+  readonly outcome: "granted" | "renewed" | "conflict";
   /** When the new or extended claim runs out. Absent on a conflict. */
   readonly expires_at?: number;
   /** On a conflict, who has it. A refusal nobody can act on is half a refusal. */
@@ -91,15 +93,16 @@ export function decideClaim(input: {
   const expires_at = input.now + input.ttlMinutes * 60_000;
   const { existing, now } = input;
 
-  if (existing === null) return { outcome: 'granted', expires_at };
+  if (existing === null) return { outcome: "granted", expires_at };
 
   if (isLive(existing, now)) {
     // 🛑 THE SAME HOLDER RENEWS. A retry must not read as a collision with
     // itself, or a transient failure turns a held lock into a refusal.
-    if (existing.holder === input.holder) return { outcome: 'renewed', expires_at };
+    if (existing.holder === input.holder)
+      return { outcome: "renewed", expires_at };
 
     return {
-      outcome: 'conflict',
+      outcome: "conflict",
       heldBy: existing.holder,
       remainingMs: remainingMs(existing, now),
     };
@@ -108,10 +111,10 @@ export function decideClaim(input: {
   // 🛑 AN EXPIRED CLAIM IS TAKEN OVER AUDIBLY. The failsafe firing means
   // somebody never released, and granting silently hides that.
   if (existing.released_at === null) {
-    return { outcome: 'granted', expires_at, tookOverFrom: existing.holder };
+    return { outcome: "granted", expires_at, tookOverFrom: existing.holder };
   }
 
-  return { outcome: 'granted', expires_at };
+  return { outcome: "granted", expires_at };
 }
 
 export interface ReleaseDecision {
@@ -120,7 +123,7 @@ export interface ReleaseDecision {
    * `not-yours` — someone else holds it and `force` was not given.
    * `not-held` — nothing live to release. A typo is not a success.
    */
-  readonly outcome: 'released' | 'not-yours' | 'not-held';
+  readonly outcome: "released" | "not-yours" | "not-held";
   readonly heldBy?: string;
   /** Set when `force` released someone else's live claim. */
   readonly forcedFrom?: string;
@@ -136,14 +139,15 @@ export function decideRelease(input: {
 
   // 🛑 LIVENESS IS CHECKED BEFORE OWNERSHIP, AND BEFORE `force`. Otherwise a
   // forced release reports success against a claim nobody held.
-  if (existing === null || !isLive(existing, now)) return { outcome: 'not-held' };
+  if (existing === null || !isLive(existing, now))
+    return { outcome: "not-held" };
 
-  if (existing.holder === input.by) return { outcome: 'released' };
+  if (existing.holder === input.by) return { outcome: "released" };
 
   // The override exists because an agent that died holding a claim leaves a
   // lock nobody else can clear. Same split `prune-test-agents.mjs` draws: the
   // guard about a live peer has an override, the structural ones do not.
-  if (input.force) return { outcome: 'released', forcedFrom: existing.holder };
+  if (input.force) return { outcome: "released", forcedFrom: existing.holder };
 
-  return { outcome: 'not-yours', heldBy: existing.holder };
+  return { outcome: "not-yours", heldBy: existing.holder };
 }

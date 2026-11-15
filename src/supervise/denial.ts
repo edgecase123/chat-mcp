@@ -1,5 +1,5 @@
-import { realpathSync } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { realpathSync } from "node:fs";
+import { basename, dirname } from "node:path";
 
 /**
  * The semantic shape of "the child was refused a tool".
@@ -90,7 +90,12 @@ export function grantVariants(denial: Denial): string[] {
   const whole = denial.invocation;
   const lead = leadingSegment(whole);
 
-  const forms = new Set([whole, canonicalisePaths(whole), lead, canonicalisePaths(lead)]);
+  const forms = new Set([
+    whole,
+    canonicalisePaths(whole),
+    lead,
+    canonicalisePaths(lead),
+  ]);
 
   return [...forms].map((form) => entryFor(tool, form));
 }
@@ -132,11 +137,14 @@ export function commandFromGrant(grant: string): string | null {
  * about it.
  */
 function canonicalisePaths(invocation: string): string {
-  return invocation.replace(/(^|\s)(\/[^\s'"]+)/g, (whole, lead: string, path: string) => {
-    const resolved = resolveDeepest(path);
+  return invocation.replace(
+    /(^|\s)(\/[^\s'"]+)/g,
+    (whole, lead: string, path: string) => {
+      const resolved = resolveDeepest(path);
 
-    return resolved === null ? whole : `${lead}${resolved}`;
-  });
+      return resolved === null ? whole : `${lead}${resolved}`;
+    },
+  );
 }
 
 /**
@@ -155,9 +163,9 @@ function resolveDeepest(path: string): string | null {
   const tail: string[] = [];
   let head = path;
 
-  while (head !== '/' && head !== '.') {
+  while (head !== "/" && head !== ".") {
     try {
-      return [realpathSync(head), ...tail].join('/');
+      return [realpathSync(head), ...tail].join("/");
     } catch {
       tail.unshift(basename(head));
       head = dirname(head);

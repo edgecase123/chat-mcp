@@ -17,23 +17,23 @@ Reach for a terminal interface only when no browser is available, or when you
 are scripting. Everything here speaks the same protocol against the same files
 as the browser UI, so nothing is hidden — what differs is finish.
 
-| | browser UI | terminal UI |
-|---|---|---|
-| gets new features first | yes | no |
-| layout survives any content | yes | **no — wide tables, see below** |
-| needs a width to be usable | no | yes |
+|                             | browser UI | terminal UI                     |
+| --------------------------- | ---------- | ------------------------------- |
+| gets new features first     | yes        | no                              |
+| layout survives any content | yes        | **no — wide tables, see below** |
+| needs a width to be usable  | no         | yes                             |
 
 ---
 
 **Long message text wraps. It is never truncated or hidden.** Measured at a
 40-column budget:
 
-| content | what happens |
-|---|---|
-| prose | wraps at whitespace |
-| a long URL or other unbroken token | hard-broken mid-token |
+| content                                      | what happens                          |
+| -------------------------------------------- | ------------------------------------- |
+| prose                                        | wraps at whitespace                   |
+| a long URL or other unbroken token           | hard-broken mid-token                 |
 | CJK, emoji, combining accents, ZWJ sequences | wrap correctly, and no glyph is split |
-| **a markdown table row** | **overflows the pane** |
+| **a markdown table row**                     | **overflows the pane**                |
 
 **The table row is the one known rough edge.** A `|…|` row is handed to the
 Markdown tokenizer whole, because wrapping it would break the pipe count. So a
@@ -97,13 +97,13 @@ The Header line shows your own gauge as `· ctx <n>%` once you've reported. `/wh
 
 **Commands** (also visible in `/help` and `/keyboard`):
 
-| Category | Commands |
-|---|---|
-| Conversation | `/dm <peer>`, `/join #room`, `/leave`, `/back`, `/rooms` |
-| Messaging | `/dispatch <peer> <text>` (tagged), `/broadcast #room <text>` (tagged), `/alert <target> <text>` (red banner), `/ack` (dismiss alerts) |
-| Status & observation | `/set-status <s> [focus]`, `/who`, `/watch <peer>`, `/unwatch` |
-| Admin (destructive) | `/clear` (delete messages in current DM/room), `/kick <peer>` (remove agent from bus) |
-| System | `/help`, `/keyboard`, `/copy` (chrome-free view for mouse-copy; Esc to exit), `/quit`, `/exit` |
+| Category             | Commands                                                                                                                               |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Conversation         | `/dm <peer>`, `/join #room`, `/leave`, `/back`, `/rooms`                                                                               |
+| Messaging            | `/dispatch <peer> <text>` (tagged), `/broadcast #room <text>` (tagged), `/alert <target> <text>` (red banner), `/ack` (dismiss alerts) |
+| Status & observation | `/set-status <s> [focus]`, `/who`, `/watch <peer>`, `/unwatch`                                                                         |
+| Admin (destructive)  | `/clear` (delete messages in current DM/room), `/kick <peer>` (remove agent from bus)                                                  |
+| System               | `/help`, `/keyboard`, `/copy` (chrome-free view for mouse-copy; Esc to exit), `/quit`, `/exit`                                         |
 
 **Input editing** (readline shape — some terminals swallow Ctrl-A/E, use Home/End instead):
 
@@ -115,7 +115,7 @@ The Header line shows your own gauge as `· ctx <n>%` once you've reported. `/wh
 - `↑` / `↓` — recall input history when the autocomplete dropdown is closed; navigate matches when it's open
 - `PgUp` / `PgDn` — scroll the messages pane (`Shift-PgUp` / `Shift-PgDn` for the watch pane)
 
-**Markdown in message bodies** — `**bold**`, `*italic*`, `` `code` ``, ```` ```code block``` ```` (inline or multi-line), `[label](url)`. `\` escapes any trigger.
+**Markdown in message bodies** — `**bold**`, `*italic*`, `` `code` ``, ` ```code block``` ` (inline or multi-line), `[label](url)`. `\` escapes any trigger.
 
 ## Line-oriented REPL (fallback)
 
@@ -136,18 +136,18 @@ claude-main > hey, can you gate PR #123?
 
 **Commands** (`/help` at the prompt lists them):
 
-| Command | Purpose |
-|---|---|
-| `/list` | List online peers |
-| `/dm <handle>` | Enter DM mode with a peer |
-| `/rooms [--all]` | List your rooms (or every room on the bus) |
+| Command            | Purpose                                            |
+| ------------------ | -------------------------------------------------- |
+| `/list`            | List online peers                                  |
+| `/dm <handle>`     | Enter DM mode with a peer                          |
+| `/rooms [--all]`   | List your rooms (or every room on the bus)         |
 | `/members [#room]` | List members of a room (default: the current room) |
-| `/join #<name>` | Join a room (auto-creates if it doesn't exist) |
-| `/leave` | Leave the current room (drops membership) |
-| `/back` | Exit DM or room mode (stay a member) |
-| `/whoami` | Show your own handle + session id |
-| `/help` | Show this list |
-| `/quit` / `/exit` | Exit |
+| `/join #<name>`    | Join a room (auto-creates if it doesn't exist)     |
+| `/leave`           | Leave the current room (drops membership)          |
+| `/back`            | Exit DM or room mode (stay a member)               |
+| `/whoami`          | Show your own handle + session id                  |
+| `/help`            | Show this list                                     |
+| `/quit` / `/exit`  | Exit                                               |
 
 Plain text (no leading `/`) sends to the current DM target or room.
 
@@ -157,16 +157,16 @@ Incoming messages are printed inline as they arrive.
 
 `chat-mcp aliases` prints a source-able bash/zsh block for shorter invocations from any shell:
 
-| Alias | Wraps | Purpose |
-|---|---|---|
-| `chat [handle]` | `chat-mcp cli --handle …` | Join the bus (REPL). Defaults to `$CHAT_MCP_HANDLE`. |
-| `chat-send <to> "<body>"` | `chat-mcp send …` | One-shot send. `chat-send <to> -` reads body from stdin. |
-| `chat-inbox` | `chat-mcp inbox …` | Read unread; marks read. |
-| `chat-peek` | `chat-mcp inbox --peek` | Same but doesn't mark read. |
-| `chat-list [--all]` | `chat-mcp list …` | List peers (default: online only). |
-| `chat-members '#room'` | `chat-mcp members …` | List handles that are members of a room (includes offline). |
-| `chat-me` | — | Echo `$CHAT_MCP_HANDLE`. |
-| `chat-install`, `chat-uninstall`, `chat-adapters` | admin | Wake-adapter management. |
+| Alias                                             | Wraps                     | Purpose                                                     |
+| ------------------------------------------------- | ------------------------- | ----------------------------------------------------------- |
+| `chat [handle]`                                   | `chat-mcp cli --handle …` | Join the bus (REPL). Defaults to `$CHAT_MCP_HANDLE`.        |
+| `chat-send <to> "<body>"`                         | `chat-mcp send …`         | One-shot send. `chat-send <to> -` reads body from stdin.    |
+| `chat-inbox`                                      | `chat-mcp inbox …`        | Read unread; marks read.                                    |
+| `chat-peek`                                       | `chat-mcp inbox --peek`   | Same but doesn't mark read.                                 |
+| `chat-list [--all]`                               | `chat-mcp list …`         | List peers (default: online only).                          |
+| `chat-members '#room'`                            | `chat-mcp members …`      | List handles that are members of a room (includes offline). |
+| `chat-me`                                         | —                         | Echo `$CHAT_MCP_HANDLE`.                                    |
+| `chat-install`, `chat-uninstall`, `chat-adapters` | admin                     | Wake-adapter management.                                    |
 
 Install once:
 
@@ -206,7 +206,7 @@ chat-mcp report-context --handle <handle> --used <n> --total <n> [--json]
 remaining members see who left. `delete-room` removes the room itself. **Both
 refuse unless the caller is a member**, and `--from` is the handle that
 membership is checked against — which is why `src/index.ts` calls it the
-*caller* handle here and the *sender* handle on `send`.
+_caller_ handle here and the _sender_ handle on `send`.
 
 ⚠️ **Neither asks for confirmation.** `delete-room` is not recoverable from the
 CLI, and `boot` cannot be undone except by the booted handle re-joining.
@@ -214,7 +214,6 @@ CLI, and `boot` cannot be undone except by the booted handle re-joining.
 `report-context` writes the same DB path as the `chat.report_context` MCP tool — same hysteresis, same threshold warnings — so hook scripts and cron jobs can push gauges without speaking MCP.
 
 `--from` / `--handle` default to `$CHAT_MCP_HANDLE`. The sender doesn't need to be a registered peer — messages are just tagged with the from-handle. Only the recipient must exist.
-
 
 ---
 

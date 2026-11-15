@@ -1,8 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
-import { stateDir as defaultStateDir } from '../util/paths.js';
-import { COOKIE_NAME, HANDSHAKE_PARAM } from '../cli/web/credential.js';
+import { stateDir as defaultStateDir } from "../util/paths.js";
+import { COOKIE_NAME, HANDSHAKE_PARAM } from "../cli/web/credential.js";
 
 /**
  * Telling the web UI that a supervised agent is WORKING, #240.
@@ -41,7 +41,7 @@ export const ACTIVITY_THROTTLE_MS = 250;
 export const PULSE_FAILSAFE_MS = 30_000;
 
 /** What the supervisor is announcing about a turn. */
-export type ActivityPhase = 'tick' | 'end';
+export type ActivityPhase = "tick" | "end";
 
 /** Where to post, and the credential to post with. */
 export interface ActivityTarget {
@@ -68,10 +68,12 @@ export interface ActivityTarget {
  * twin, so it can never produce a usable target — the handshake url carries
  * the origin as well as the credential.
  */
-export function activityTarget(dir: string = defaultStateDir()): ActivityTarget | null {
+export function activityTarget(
+  dir: string = defaultStateDir(),
+): ActivityTarget | null {
   const read = (name: string): string | null => {
     try {
-      const raw = readFileSync(join(dir, name), 'utf8').trim();
+      const raw = readFileSync(join(dir, name), "utf8").trim();
 
       return raw.length > 0 ? raw : null;
     } catch {
@@ -80,7 +82,7 @@ export function activityTarget(dir: string = defaultStateDir()): ActivityTarget 
     }
   };
 
-  const handshake = read('web-handshake');
+  const handshake = read("web-handshake");
 
   if (handshake === null) return null;
 
@@ -141,7 +143,7 @@ export function createActivityReporter(
     // 🛑 AN `end` IS NEVER THROTTLED. It is the signal that CLEARS the pulse,
     // so dropping one because a tick just went out leaves the dot pulsing
     // until the failsafe — which reads as an agent that never finished.
-    if (phase === 'tick') {
+    if (phase === "tick") {
       const at = clock();
 
       if (at - lastTickAt < ACTIVITY_THROTTLE_MS) return;
@@ -153,14 +155,15 @@ export function createActivityReporter(
 
     if (target === null) return;
 
-    const handle = typeof opts.handle === 'string' ? opts.handle : opts.handle();
+    const handle =
+      typeof opts.handle === "string" ? opts.handle : opts.handle();
     const body = JSON.stringify({ handle, phase });
 
     // Fire and forget. `void` is the contract: nothing upstream may wait.
     void fetch(`${target.origin}/api/activity`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'content-type': 'application/json',
+        "content-type": "application/json",
         // The supervisor has no cookie jar, so it presents the credential the
         // browser would have been handed at the handshake.
         //

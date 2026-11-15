@@ -1,10 +1,10 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-auth-'));
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-auth-"));
 
 const {
   setToken,
@@ -14,35 +14,35 @@ const {
   clearGhToken,
   hasGhToken,
   secretsEnvPath,
-} = await import('../../src/supervise/auth.js');
+} = await import("../../src/supervise/auth.js");
 
-test('no token on file reads as null, not a throw', () => {
+test("no token on file reads as null, not a throw", () => {
   assert.equal(readToken(), null);
 });
 
-test('a stored token round-trips', () => {
-  setToken('sk-ant-oat-example');
-  assert.equal(readToken(), 'sk-ant-oat-example');
+test("a stored token round-trips", () => {
+  setToken("sk-ant-oat-example");
+  assert.equal(readToken(), "sk-ant-oat-example");
 });
 
-test('the file is owner-only (0600)', () => {
-  setToken('sk-ant-oat-example');
+test("the file is owner-only (0600)", () => {
+  setToken("sk-ant-oat-example");
   assert.equal(statSync(secretsEnvPath()).mode & 0o777, 0o600);
 });
 
-test('leading/trailing whitespace on the token is trimmed before storing', () => {
-  setToken('  sk-ant-oat-ws  \n');
-  assert.equal(readToken(), 'sk-ant-oat-ws');
+test("leading/trailing whitespace on the token is trimmed before storing", () => {
+  setToken("  sk-ant-oat-ws  \n");
+  assert.equal(readToken(), "sk-ant-oat-ws");
 });
 
-test('an empty token is refused rather than stored', () => {
-  assert.throws(() => setToken('   '), /empty/);
+test("an empty token is refused rather than stored", () => {
+  assert.throws(() => setToken("   "), /empty/);
 });
 
-test('setting a new token replaces the old one, not appends', () => {
-  setToken('sk-ant-oat-first');
-  setToken('sk-ant-oat-second');
-  assert.equal(readToken(), 'sk-ant-oat-second');
+test("setting a new token replaces the old one, not appends", () => {
+  setToken("sk-ant-oat-first");
+  setToken("sk-ant-oat-second");
+  assert.equal(readToken(), "sk-ant-oat-second");
 });
 
 /**
@@ -51,33 +51,33 @@ test('setting a new token replaces the old one, not appends', () => {
  * because the storage is deliberately the same shape.
  */
 
-test('no gh token on file reads as null, not a throw', () => {
+test("no gh token on file reads as null, not a throw", () => {
   assert.equal(readGhToken(), null);
 });
 
-test('a stored gh token round-trips', () => {
-  setGhToken('ghp-example');
-  assert.equal(readGhToken(), 'ghp-example');
+test("a stored gh token round-trips", () => {
+  setGhToken("ghp-example");
+  assert.equal(readGhToken(), "ghp-example");
 });
 
-test('storing a gh token leaves the file owner-only (0600)', () => {
-  setGhToken('ghp-example');
+test("storing a gh token leaves the file owner-only (0600)", () => {
+  setGhToken("ghp-example");
   assert.equal(statSync(secretsEnvPath()).mode & 0o777, 0o600);
 });
 
-test('leading/trailing whitespace on the gh token is trimmed before storing', () => {
-  setGhToken('  ghp-ws  \n');
-  assert.equal(readGhToken(), 'ghp-ws');
+test("leading/trailing whitespace on the gh token is trimmed before storing", () => {
+  setGhToken("  ghp-ws  \n");
+  assert.equal(readGhToken(), "ghp-ws");
 });
 
-test('an empty gh token is refused rather than stored', () => {
-  assert.throws(() => setGhToken('   '), /empty/);
+test("an empty gh token is refused rather than stored", () => {
+  assert.throws(() => setGhToken("   "), /empty/);
 });
 
-test('setting a new gh token replaces the old one, not appends', () => {
-  setGhToken('ghp-first');
-  setGhToken('ghp-second');
-  assert.equal(readGhToken(), 'ghp-second');
+test("setting a new gh token replaces the old one, not appends", () => {
+  setGhToken("ghp-first");
+  setGhToken("ghp-second");
+  assert.equal(readGhToken(), "ghp-second");
 });
 
 /**
@@ -90,20 +90,20 @@ test('setting a new gh token replaces the old one, not appends', () => {
  * Both directions, because one writer fixed and the other not is the same
  * bug with half the blast radius.
  */
-test('setting the gh token does not wipe the Claude token', () => {
-  setToken('sk-ant-oat-keepme');
-  setGhToken('ghp-added-after');
+test("setting the gh token does not wipe the Claude token", () => {
+  setToken("sk-ant-oat-keepme");
+  setGhToken("ghp-added-after");
 
-  assert.equal(readToken(), 'sk-ant-oat-keepme');
-  assert.equal(readGhToken(), 'ghp-added-after');
+  assert.equal(readToken(), "sk-ant-oat-keepme");
+  assert.equal(readGhToken(), "ghp-added-after");
 });
 
-test('setting the Claude token does not wipe the gh token', () => {
-  setGhToken('ghp-keepme');
-  setToken('sk-ant-oat-added-after');
+test("setting the Claude token does not wipe the gh token", () => {
+  setGhToken("ghp-keepme");
+  setToken("sk-ant-oat-added-after");
 
-  assert.equal(readGhToken(), 'ghp-keepme');
-  assert.equal(readToken(), 'sk-ant-oat-added-after');
+  assert.equal(readGhToken(), "ghp-keepme");
+  assert.equal(readToken(), "sk-ant-oat-added-after");
 });
 
 /**
@@ -113,9 +113,9 @@ test('setting the Claude token does not wipe the gh token', () => {
  * rather than failing. Both tokens go through the same writer, so one test
  * covers both.
  */
-test('a token containing a newline is refused rather than splitting the file', () => {
-  assert.throws(() => setGhToken('ghp-head\nghp-tail'), /newline/);
-  assert.throws(() => setToken('sk-ant-oat-head\nsk-ant-oat-tail'), /newline/);
+test("a token containing a newline is refused rather than splitting the file", () => {
+  assert.throws(() => setGhToken("ghp-head\nghp-tail"), /newline/);
+  assert.throws(() => setToken("sk-ant-oat-head\nsk-ant-oat-tail"), /newline/);
 });
 
 /**
@@ -123,16 +123,16 @@ test('a token containing a newline is refused rather than splitting the file', (
  * newline is the NORMAL case — `pbpaste` and a heredoc both add one — so the
  * guard above must not reject it.
  */
-test('a single trailing newline is trimmed, not treated as an embedded one', () => {
-  setGhToken('ghp-trailing\n');
-  assert.equal(readGhToken(), 'ghp-trailing');
+test("a single trailing newline is trimmed, not treated as an embedded one", () => {
+  setGhToken("ghp-trailing\n");
+  assert.equal(readGhToken(), "ghp-trailing");
 });
 
-test('hasGhToken answers presence without the caller ever holding the value', () => {
+test("hasGhToken answers presence without the caller ever holding the value", () => {
   clearGhToken();
   assert.equal(hasGhToken(), false);
 
-  setGhToken('ghp-present');
+  setGhToken("ghp-present");
   assert.equal(hasGhToken(), true);
 });
 
@@ -141,11 +141,11 @@ test('hasGhToken answers presence without the caller ever holding the value', ()
  * `secrets.env.tmp` would be a second copy of both credentials at `0600`,
  * which is a credential sitting somewhere nobody looks.
  */
-test('the atomic write leaves no temp file behind', () => {
-  setGhToken('ghp-atomic');
+test("the atomic write leaves no temp file behind", () => {
+  setGhToken("ghp-atomic");
 
   assert.equal(existsSync(`${secretsEnvPath()}.tmp`), false);
-  assert.equal(readGhToken(), 'ghp-atomic');
+  assert.equal(readGhToken(), "ghp-atomic");
 });
 
 /**
@@ -154,10 +154,13 @@ test('the atomic write leaves no temp file behind', () => {
  * good — and a credential that vanished with no error at the moment of loss is
  * the failure this module is shaped to avoid.
  */
-test('an unparseable line is reported by LINE NUMBER, never by content', () => {
-  setGhToken('ghp-keep');
+test("an unparseable line is reported by LINE NUMBER, never by content", () => {
+  setGhToken("ghp-keep");
 
-  writeFileSync(secretsEnvPath(), `export GH_TOKEN=ghp-secret-in-a-bad-line\nGH_TOKEN=ghp-keep\n`);
+  writeFileSync(
+    secretsEnvPath(),
+    `export GH_TOKEN=ghp-secret-in-a-bad-line\nGH_TOKEN=ghp-keep\n`,
+  );
 
   const errors: string[] = [];
   const real = console.error;
@@ -169,9 +172,9 @@ test('an unparseable line is reported by LINE NUMBER, never by content', () => {
     console.error = real;
   }
 
-  assert.equal(errors.length, 1, 'the dropped line was not reported');
-  assert.match(errors[0] ?? '', /line 1/);
-  assert.doesNotMatch(errors[0] ?? '', /ghp-secret-in-a-bad-line/);
+  assert.equal(errors.length, 1, "the dropped line was not reported");
+  assert.match(errors[0] ?? "", /line 1/);
+  assert.doesNotMatch(errors[0] ?? "", /ghp-secret-in-a-bad-line/);
 });
 
 /**
@@ -179,7 +182,7 @@ test('an unparseable line is reported by LINE NUMBER, never by content', () => {
  * above on its first assertion and flood an operator's terminal with one
  * complaint per blank line.
  */
-test('a blank line is not reported as unparseable', () => {
+test("a blank line is not reported as unparseable", () => {
   writeFileSync(secretsEnvPath(), `GH_TOKEN=ghp-blanks\n\n\n`);
 
   const errors: string[] = [];
@@ -187,7 +190,7 @@ test('a blank line is not reported as unparseable', () => {
   console.error = (msg: unknown) => void errors.push(String(msg));
 
   try {
-    assert.equal(readGhToken(), 'ghp-blanks');
+    assert.equal(readGhToken(), "ghp-blanks");
   } finally {
     console.error = real;
   }

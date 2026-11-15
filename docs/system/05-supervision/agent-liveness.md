@@ -53,11 +53,11 @@ changed**. The field simply became true.
 
 Three properties make that safe, and each has a test:
 
-| property | why it matters |
-|---|---|
-| the row is **updated, not deleted** | the handle stays visible to `listAgents(db, true)` as offline, instead of vanishing |
-| `last_seen_at` is **not touched** | the child is gone, so its last real activity is the honest value |
-| a restart needs **no `force`** | `refuseLiveRival` returns early on a null incumbent pid, and the claim guard is `WHERE agents.pid IS @expected_pid` against the row's own value |
+| property                            | why it matters                                                                                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| the row is **updated, not deleted** | the handle stays visible to `listAgents(db, true)` as offline, instead of vanishing                                                             |
+| `last_seen_at` is **not touched**   | the child is gone, so its last real activity is the honest value                                                                                |
+| a restart needs **no `force`**      | `refuseLiveRival` returns early on a null incumbent pid, and the claim guard is `WHERE agents.pid IS @expected_pid` against the row's own value |
 
 ⚠️ **The handle cleared is the CHILD's, never the supervisor's.** They differ by
 the `-agent` suffix, or by the grant. Clearing `opts.handle` would take a live
@@ -69,10 +69,10 @@ one reader, and it is a function rather than a captured value because
 
 `room_send` returns two counts, and they answer different questions.
 
-| field | means | changes with liveness? |
-|---|---|---|
-| `notified` | members this call wrote a notify file for | **no**, always every member |
-| `online_members` | how many of those the bus believes are live | yes |
+| field            | means                                       | changes with liveness?      |
+| ---------------- | ------------------------------------------- | --------------------------- |
+| `notified`       | members this call wrote a notify file for   | **no**, always every member |
+| `online_members` | how many of those the bus believes are live | yes                         |
 
 **`notified` is not a lie and was never narrowed.** The write to an offline
 member is how it sees the message on its next `room_inbox`, so excluding them
@@ -100,11 +100,11 @@ zero is the #229 case: the send worked and nobody is there to read it.
 
 ## Source files
 
-| File | Role |
-|---|---|
-| `src/storage/dao.ts` | `isProcessAlive`, `hydrate`'s `online`, `clearAgentPid`, the claim guard |
-| `src/supervise/index.ts` | `childBusHandle()`, the `child.onExit` handler that clears the pid |
-| `src/supervise/host-bus.ts` | registers a containerized child's handle from inside the supervisor |
+| File                        | Role                                                                     |
+| --------------------------- | ------------------------------------------------------------------------ |
+| `src/storage/dao.ts`        | `isProcessAlive`, `hydrate`'s `online`, `clearAgentPid`, the claim guard |
+| `src/supervise/index.ts`    | `childBusHandle()`, the `child.onExit` handler that clears the pid       |
+| `src/supervise/host-bus.ts` | registers a containerized child's handle from inside the supervisor      |
 
 ## Related docs
 

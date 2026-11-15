@@ -1,6 +1,6 @@
-import { claudeSpawn } from '../../src/adapters/claude-spawn.js';
-import type { SupervisorOptions } from '../../src/supervise/index.js';
-import type { VendorSpawn } from '../../src/supervise/vendor.js';
+import { claudeSpawn } from "../../src/adapters/claude-spawn.js";
+import type { SupervisorOptions } from "../../src/supervise/index.js";
+import type { VendorSpawn } from "../../src/supervise/vendor.js";
 
 /**
  * `SupervisorOptions` with `vendor` filled in, for a test that does not care
@@ -16,7 +16,9 @@ import type { VendorSpawn } from '../../src/supervise/vendor.js';
  * default it never chose.
  */
 export function supervisorOptions(
-  overrides: Omit<SupervisorOptions, 'vendor'> & { readonly vendor?: VendorSpawn },
+  overrides: Omit<SupervisorOptions, "vendor"> & {
+    readonly vendor?: VendorSpawn;
+  },
 ): SupervisorOptions {
   // `??` rather than a spread order, so an explicit `vendor: undefined` cannot
   // make the return type a lie.

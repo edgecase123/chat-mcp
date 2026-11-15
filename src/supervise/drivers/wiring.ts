@@ -1,10 +1,10 @@
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import type { AgentChild } from '../child.js';
-import { createLineParser } from '../child.js';
-import type { RateLimitSnapshot } from '../rate-limit.js';
-import type { ContextSnapshot } from '../context-gauge.js';
-import type { Denial } from '../denial.js';
-import type { VendorSpawn } from '../vendor.js';
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { AgentChild } from "../child.js";
+import { createLineParser } from "../child.js";
+import type { RateLimitSnapshot } from "../rate-limit.js";
+import type { ContextSnapshot } from "../context-gauge.js";
+import type { Denial } from "../denial.js";
+import type { VendorSpawn } from "../vendor.js";
 
 /**
  * Turn a spawned process into an `AgentChild`.
@@ -26,7 +26,10 @@ export function wireAgentChild(
   // until the pass-through is added. Measured, by adding a fifth flag to both
   // contracts and omitting it here — `tsc` named this function's return.
   // Keep a new capability required on `AgentChild` and that stays true.
-  vendor: Pick<VendorSpawn, 'routeEvent' | 'encodeInput' | 'reportsUsage' | 'reportsContext'>,
+  vendor: Pick<
+    VendorSpawn,
+    "routeEvent" | "encodeInput" | "reportsUsage" | "reportsContext"
+  >,
   opts: {
     /**
      * Overrides how `kill()` ends the process.
@@ -80,8 +83,8 @@ export function wireAgentChild(
     });
   });
 
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', feed);
+  child.stdout.setEncoding("utf8");
+  child.stdout.on("data", feed);
 
   // 🛑 ATTACHED HERE, NOT PER DRIVER, so no driver can ship without it. A
   // containerized child died with its reason on this stream and nothing was
@@ -90,8 +93,8 @@ export function wireAgentChild(
   //
   // ⚠️ Buffered to a line break, because a chunk is not a line. `npm` emits
   // partial writes, and logging raw chunks splits one error across entries.
-  child.stderr.setEncoding('utf8');
-  let errBuffer = '';
+  child.stderr.setEncoding("utf8");
+  let errBuffer = "";
 
   const emitErrLine = (raw: string): void => {
     const line = raw.trim();
@@ -108,13 +111,13 @@ export function wireAgentChild(
   // thousands of characters long. Measured by claude2 on #229.
   const BREAK = /\r\n|[\n\r]/;
 
-  child.stderr.on('data', (chunk: string) => {
+  child.stderr.on("data", (chunk: string) => {
     errBuffer += chunk;
     for (;;) {
       const at = errBuffer.search(BREAK);
       if (at < 0) break;
 
-      const [sep] = BREAK.exec(errBuffer.slice(at)) ?? ['\n'];
+      const [sep] = BREAK.exec(errBuffer.slice(at)) ?? ["\n"];
       emitErrLine(errBuffer.slice(0, at));
       errBuffer = errBuffer.slice(at + sep.length);
     }
@@ -124,9 +127,9 @@ export function wireAgentChild(
   // closing break, so draining only on a break dropped the ONE line naming why
   // the container died. `end` is the only signal that no further break is
   // coming. Raised by claude2 on PR 238 with a failing repro.
-  child.stderr.on('end', () => {
+  child.stderr.on("end", () => {
     const residue = errBuffer;
-    errBuffer = '';
+    errBuffer = "";
     emitErrLine(residue);
   });
 
@@ -162,7 +165,7 @@ export function wireAgentChild(
       eventCbs.push(cb);
     },
     onExit(cb): void {
-      child.on('exit', (code, signal) => cb(code, signal));
+      child.on("exit", (code, signal) => cb(code, signal));
     },
     kill(): void {
       if (opts.stop) {

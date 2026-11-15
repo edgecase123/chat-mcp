@@ -33,11 +33,11 @@ A name missing from it cannot be run however it is spelled.
 
 ## The three limits
 
-| limit | default | set via | bounds |
-|---|---|---|---|
-| timeout | 15 min | `timeoutMinutes` | how LONG one command runs |
-| per-handle concurrency | 4 | `maxConcurrent` | how MANY of a handle's commands run at once |
-| output buffer | 8 MB | `maxBufferMb` | how MUCH a command may print before it is cut off |
+| limit                  | default | set via          | bounds                                            |
+| ---------------------- | ------- | ---------------- | ------------------------------------------------- |
+| timeout                | 15 min  | `timeoutMinutes` | how LONG one command runs                         |
+| per-handle concurrency | 4       | `maxConcurrent`  | how MANY of a handle's commands run at once       |
+| output buffer          | 8 MB    | `maxBufferMb`    | how MUCH a command may print before it is cut off |
 
 **The concurrency cap is per handle, by lee's ruling of 2026-11-15.** Without
 it an agent could start host processes as fast as it issued tool calls, because
@@ -98,16 +98,16 @@ at all, which is the bound this file exists to make configurable.
 
 ### What a bad value does
 
-| in the file | result |
-|---|---|
-| the file is absent | all three defaults. The normal case. |
-| the file is not readable JSON | **the command is REFUSED** |
-| the file is not a JSON object | **the command is REFUSED** |
-| a key is misspelled | **the command is REFUSED**, naming the key and the three real ones |
-| a key is not a finite number | **the command is REFUSED**, naming the key |
-| a key is above its ceiling | **the command is REFUSED**, naming the ceiling |
-| `timeoutMinutes` or `maxBufferMb` is zero or negative | **the command is REFUSED**, naming the key |
-| `maxConcurrent` is zero or negative | read as 1 |
+| in the file                                           | result                                                             |
+| ----------------------------------------------------- | ------------------------------------------------------------------ |
+| the file is absent                                    | all three defaults. The normal case.                               |
+| the file is not readable JSON                         | **the command is REFUSED**                                         |
+| the file is not a JSON object                         | **the command is REFUSED**                                         |
+| a key is misspelled                                   | **the command is REFUSED**, naming the key and the three real ones |
+| a key is not a finite number                          | **the command is REFUSED**, naming the key                         |
+| a key is above its ceiling                            | **the command is REFUSED**, naming the ceiling                     |
+| `timeoutMinutes` or `maxBufferMb` is zero or negative | **the command is REFUSED**, naming the key                         |
+| `maxConcurrent` is zero or negative                   | read as 1                                                          |
 
 🛑 **A BAD FILE REFUSES RATHER THAN FALLING BACK.** Falling back would hand the
 caller the PERMISSIVE default while the operator's tightened value sat in the
@@ -119,8 +119,8 @@ input that still parses, so ignoring it was the same silent fallback one step
 removed: `maxConcurent` with one `r` left the cap at 4 with the file reading
 correct at a glance.
 
-⚠️ **THE REFUSAL THE AGENT SEES DOES NOT NAME THE PATH.** It reads *"the command
-limits on this host are not readable"*. `limits.json` is inside the directory
+⚠️ **THE REFUSAL THE AGENT SEES DOES NOT NAME THE PATH.** It reads _"the command
+limits on this host are not readable"_. `limits.json` is inside the directory
 the container boundary exists to hide, so the path and the key ride in the
 host's log instead.
 
@@ -161,13 +161,13 @@ depend on that.
 
 ## Source files
 
-| File | Role |
-|---|---|
-| `src/supervise/run-command-service.ts` | Authorizes, caps and runs a named command |
-| `src/supervise/command-limits.ts` | Reads `limits.json` and refuses an unreadable one |
-| `src/supervise/run-script.ts` | Spawns the process and classifies how it ended |
-| `src/shim/tools/run_command.ts` | The `list_commands` and `run_command` tools |
-| `src/supervise/broker.ts` | The socket consumer, with its own `maxInFlight` |
+| File                                   | Role                                              |
+| -------------------------------------- | ------------------------------------------------- |
+| `src/supervise/run-command-service.ts` | Authorizes, caps and runs a named command         |
+| `src/supervise/command-limits.ts`      | Reads `limits.json` and refuses an unreadable one |
+| `src/supervise/run-script.ts`          | Spawns the process and classifies how it ended    |
+| `src/shim/tools/run_command.ts`        | The `list_commands` and `run_command` tools       |
+| `src/supervise/broker.ts`              | The socket consumer, with its own `maxInFlight`   |
 
 ## Related docs
 

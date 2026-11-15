@@ -1,19 +1,19 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // 🛑 BEFORE any import that resolves a state path.
-process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-replpid-'));
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-replpid-"));
 
-const { migrate } = await import('../../src/storage/db.js');
-const { startSupervisor } = await import('../../src/supervise/index.js');
-const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
-const { claudeSpawn } = await import('../../src/adapters/claude-spawn.js');
-const dao = await import('../../src/storage/dao.js');
-import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
+const { migrate } = await import("../../src/storage/db.js");
+const { startSupervisor } = await import("../../src/supervise/index.js");
+const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
+const { claudeSpawn } = await import("../../src/adapters/claude-spawn.js");
+const dao = await import("../../src/storage/dao.js");
+import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
 
 /**
  * 🛑 A REPLACED CHILD'S EXIT IS DROPPED, SO `onExit` CANNOT BE THE ONLY PLACE
@@ -54,11 +54,12 @@ interface Spawned {
 /** Every member, so a partial fake never fails a test for the wrong reason. */
 function deferredExitChild(spawned: Spawned[]) {
   return (opts: SpawnOptions): AgentChild => {
-    let onExit: ((code: number | null, signal: string | null) => void) | undefined;
+    let onExit:
+      ((code: number | null, signal: string | null) => void) | undefined;
     let wasKilled = false;
     spawned.push({
       opts,
-      fireExit: () => onExit?.(null, 'SIGTERM'),
+      fireExit: () => onExit?.(null, "SIGTERM"),
       killed: () => wasKilled,
     });
 
@@ -70,7 +71,7 @@ function deferredExitChild(spawned: Spawned[]) {
       onContext: () => undefined,
       onUsage: () => undefined,
       onDenial: () => undefined,
-      onSession: (cb) => cb('sess-from-fake'),
+      onSession: (cb) => cb("sess-from-fake"),
       onEvent: () => undefined,
       onStderr: () => undefined,
       onExit: (cb) => {
@@ -87,17 +88,21 @@ function deferredExitChild(spawned: Spawned[]) {
 }
 
 async function supervisorWithDb(handle: string, spawned: Spawned[]) {
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(":memory:");
   migrate(db);
   // The CHILD's row, registered with a LIVE pid as its own shim would.
   dao.upsertAgent(db, {
     handle: `${handle}-agent`,
     pid: process.pid,
-    session_id: 's',
+    session_id: "s",
     display_name: `${handle}-agent`,
     metadata: {},
   });
-  assert.equal(dao.getAgent(db, `${handle}-agent`)?.online, true, 'fixture must start online');
+  assert.equal(
+    dao.getAgent(db, `${handle}-agent`)?.online,
+    true,
+    "fixture must start online",
+  );
 
   const sup = await startSupervisor({
     handle,
@@ -115,19 +120,19 @@ function approve(handle: string) {
   return deliverToSupervisor(handle, {
     id: 10,
     to: handle,
-    from: 'lee',
+    from: "lee",
     ts: Date.now(),
     approval: {
       approvalId: 1,
-      decision: 'approve' as const,
+      decision: "approve" as const,
       requested: "rm in '/tmp/x.txt'",
-      grant: 'Bash(rm -f /tmp/x.txt)',
-      sessionId: 'sess-1',
+      grant: "Bash(rm -f /tmp/x.txt)",
+      sessionId: "sess-1",
     },
   });
 }
 
-test('🚨 a replaced child is taken offline even though its exit is dropped as stale', async () => {
+test("🚨 a replaced child is taken offline even though its exit is dropped as stale", async () => {
   const spawned: Spawned[] = [];
   const handle = `rp-${process.pid}-a`;
   const { sup, db } = await supervisorWithDb(handle, spawned);
@@ -135,8 +140,12 @@ test('🚨 a replaced child is taken offline even though its exit is dropped as 
   try {
     await approve(handle);
 
-    assert.equal(spawned.length, 2, 'the child was never replaced, so this test measures nothing');
-    assert.equal(spawned[0]!.killed(), true, 'the old child was never killed');
+    assert.equal(
+      spawned.length,
+      2,
+      "the child was never replaced, so this test measures nothing",
+    );
+    assert.equal(spawned[0]!.killed(), true, "the old child was never killed");
 
     // The old child's exit arrives LATE, after the generation moved.
     spawned[0]!.fireExit();
@@ -153,31 +162,39 @@ test('🚨 a replaced child is taken offline even though its exit is dropped as 
  * 🛑 THE CONTROL. Clearing on every stale signal would also pass the test
  * above, and it would take a LIVE child offline on each one.
  */
-test('🚨 a stale signal from the OLD child does not clear the NEW one', async () => {
+test("🚨 a stale signal from the OLD child does not clear the NEW one", async () => {
   const spawned: Spawned[] = [];
   const handle = `rp-${process.pid}-b`;
   const { sup, db } = await supervisorWithDb(handle, spawned);
 
   try {
     await approve(handle);
-    assert.equal(spawned.length, 2, 'the child was never replaced');
+    assert.equal(spawned.length, 2, "the child was never replaced");
 
     // The replacement re-registers its own pid, as its shim does on boot.
     dao.upsertAgent(db, {
       handle: `${handle}-agent`,
       pid: process.pid,
-      session_id: 's2',
+      session_id: "s2",
       display_name: `${handle}-agent`,
       metadata: {},
       force: true,
     });
-    assert.equal(dao.getAgent(db, `${handle}-agent`)?.online, true, 'the replacement is live');
+    assert.equal(
+      dao.getAgent(db, `${handle}-agent`)?.online,
+      true,
+      "the replacement is live",
+    );
 
     // 🛑 NOW the dead child's exit lands, AFTER the live replacement owns the
     // row. This is the ordering the mutant gets wrong.
     spawned[0]!.fireExit();
 
-    assert.equal(dao.getAgent(db, `${handle}-agent`)?.online, true, 'a stale exit cleared a LIVE child');
+    assert.equal(
+      dao.getAgent(db, `${handle}-agent`)?.online,
+      true,
+      "a stale exit cleared a LIVE child",
+    );
     assert.equal(dao.getAgent(db, `${handle}-agent`)?.pid, process.pid);
   } finally {
     await sup.stop();
@@ -186,7 +203,7 @@ test('🚨 a stale signal from the OLD child does not clear the NEW one', async 
 });
 
 /** The row must survive the replace, not be deleted out from under the new child. */
-test('🚨 a replace leaves the handle listed, so it can re-register', async () => {
+test("🚨 a replace leaves the handle listed, so it can re-register", async () => {
   const spawned: Spawned[] = [];
   const handle = `rp-${process.pid}-c`;
   const { sup, db } = await supervisorWithDb(handle, spawned);
@@ -196,7 +213,11 @@ test('🚨 a replace leaves the handle listed, so it can re-register', async () 
     spawned[0]!.fireExit();
 
     const listed = dao.listAgents(db, true).map((a) => a.handle);
-    assert.equal(listed.includes(`${handle}-agent`), true, 'the replace must not delete the row');
+    assert.equal(
+      listed.includes(`${handle}-agent`),
+      true,
+      "the replace must not delete the row",
+    );
   } finally {
     await sup.stop();
     db.close();

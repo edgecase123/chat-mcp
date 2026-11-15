@@ -1,18 +1,18 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { IMAGE_TAG } from '../../../src/supervise/container.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { IMAGE_TAG } from "../../../src/supervise/container.js";
 import {
   CONTAINER_PROJECT_DIR,
   CONTAINER_NODE_MODULES_DIR,
   nodeModulesInstallStep,
   prelude,
-} from '../../../src/supervise/drivers/containerized.js';
-import { claudeSpawn } from '../../../src/adapters/claude-spawn.js';
-import { dockerLaneSkip } from '../../support/docker-lane.js';
+} from "../../../src/supervise/drivers/containerized.js";
+import { claudeSpawn } from "../../../src/adapters/claude-spawn.js";
+import { dockerLaneSkip } from "../../support/docker-lane.js";
 
 /**
  * #233. `npm ci --ignore-scripts` means a dependency needing its postinstall
@@ -42,7 +42,7 @@ import { dockerLaneSkip } from '../../support/docker-lane.js';
 
 function dockerAvailable(): boolean {
   try {
-    execFileSync('docker', ['version'], { stdio: 'ignore' });
+    execFileSync("docker", ["version"], { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -58,7 +58,9 @@ function imageSkip(): string | false {
   const lane = dockerLaneSkip(process.env, dockerAvailable);
   if (lane !== false) return lane;
 
-  const found = spawnSync('docker', ['images', '-q', IMAGE_TAG], { encoding: 'utf8' });
+  const found = spawnSync("docker", ["images", "-q", IMAGE_TAG], {
+    encoding: "utf8",
+  });
   if (found.status !== 0 || !found.stdout.trim()) {
     return `${IMAGE_TAG} is not built here; run \`./scripts/agent start <handle>\` once`;
   }
@@ -74,7 +76,8 @@ const INSTALL_BOUND_MS = 600_000;
  * would load with no toolchain at all, and an empty `.ts` file is transformed
  * to nothing — so neither could fail.
  */
-const PROBE_SOURCE = 'const answer: number = 41 + 1;\nprocess.stdout.write(`TS_RAN:${answer}`);\n';
+const PROBE_SOURCE =
+  "const answer: number = 41 + 1;\nprocess.stdout.write(`TS_RAN:${answer}`);\n";
 
 interface ContainerRun {
   readonly status: number | null;
@@ -92,30 +95,34 @@ interface ContainerRun {
  */
 function inImage(volume: string, script: string): ContainerRun {
   const ran = spawnSync(
-    'docker',
+    "docker",
     [
-      'run',
-      '--rm',
-      '-v',
+      "run",
+      "--rm",
+      "-v",
       `${process.cwd()}:${CONTAINER_PROJECT_DIR}:ro`,
-      '-v',
+      "-v",
       `${volume}:${CONTAINER_PROJECT_DIR}/${CONTAINER_NODE_MODULES_DIR}`,
-      '-w',
+      "-w",
       CONTAINER_PROJECT_DIR,
       IMAGE_TAG,
-      'sh',
-      '-c',
+      "sh",
+      "-c",
       script,
     ],
-    { encoding: 'utf8', timeout: INSTALL_BOUND_MS },
+    { encoding: "utf8", timeout: INSTALL_BOUND_MS },
   );
 
-  return { status: ran.status, stdout: ran.stdout ?? '', stderr: ran.stderr ?? '' };
+  return {
+    status: ran.status,
+    stdout: ran.stdout ?? "",
+    stderr: ran.stderr ?? "",
+  };
 }
 
 function removeVolume(volume: string): void {
   try {
-    execFileSync('docker', ['volume', 'rm', '-f', volume], { stdio: 'ignore' });
+    execFileSync("docker", ["volume", "rm", "-f", volume], { stdio: "ignore" });
   } catch {
     // Never created, or already gone.
   }
@@ -129,18 +136,21 @@ function removeVolume(volume: string): void {
  * step and nowhere else.
  */
 test(
-  '🛑 the node_modules the install step builds can actually TRANSFORM TypeScript',
+  "🛑 the node_modules the install step builds can actually TRANSFORM TypeScript",
   { skip: imageSkip() },
   () => {
     const volume = `chat-mcp-toolchain-test-${process.pid}`;
-    const probeDir = mkdtempSync(join(tmpdir(), 'chat-mcp-toolchain-'));
-    const probe = join(probeDir, 'probe.ts');
+    const probeDir = mkdtempSync(join(tmpdir(), "chat-mcp-toolchain-"));
+    const probe = join(probeDir, "probe.ts");
 
     writeFileSync(probe, PROBE_SOURCE);
 
     try {
       // The real step, against the real lockfile, inside the real image.
-      const install = inImage(volume, prelude([nodeModulesInstallStep(claudeSpawn)]));
+      const install = inImage(
+        volume,
+        prelude([nodeModulesInstallStep(claudeSpawn)]),
+      );
 
       assert.equal(
         install.status,
@@ -151,7 +161,7 @@ test(
       const ran = inImage(
         volume,
         `cat > /tmp/probe.ts <<'PROBE'\n${PROBE_SOURCE}PROBE\n` +
-          'node --import tsx /tmp/probe.ts',
+          "node --import tsx /tmp/probe.ts",
       );
 
       assert.equal(
@@ -161,7 +171,11 @@ test(
           `a dependency needing its postinstall is the likely cause (#233)\n` +
           `stderr:\n${ran.stderr}`,
       );
-      assert.match(ran.stdout, /TS_RAN:42/, `the transform produced no output; stdout: ${ran.stdout}`);
+      assert.match(
+        ran.stdout,
+        /TS_RAN:42/,
+        `the transform produced no output; stdout: ${ran.stdout}`,
+      );
     } finally {
       removeVolume(volume);
     }
@@ -179,7 +193,7 @@ test(
  * install, and nothing else.
  */
 test(
-  '⚠️ control — with NO install, the same probe FAILS, so the check can say no',
+  "⚠️ control — with NO install, the same probe FAILS, so the check can say no",
   { skip: imageSkip() },
   () => {
     const volume = `chat-mcp-toolchain-control-${process.pid}`;
@@ -188,13 +202,13 @@ test(
       const ran = inImage(
         volume,
         `cat > /tmp/probe.ts <<'PROBE'\n${PROBE_SOURCE}PROBE\n` +
-          'node --import tsx /tmp/probe.ts',
+          "node --import tsx /tmp/probe.ts",
       );
 
       assert.notEqual(
         ran.status,
         0,
-        'the probe passed with an EMPTY node_modules, so it proves nothing about the install',
+        "the probe passed with an EMPTY node_modules, so it proves nothing about the install",
       );
     } finally {
       removeVolume(volume);
@@ -225,20 +239,31 @@ test(
  * toolchain still unusable for an unrelated reason.
  */
 test(
-  '🔴 nothing under /root in the agent image is owned by anyone but agent',
+  "🔴 nothing under /root in the agent image is owned by anyone but agent",
   { skip: imageSkip() },
   () => {
     const ran = spawnSync(
-      'docker',
-      ['run', '--rm', IMAGE_TAG, 'sh', '-c', 'find /root ! -user agent | head -20'],
-      { encoding: 'utf8', timeout: 120_000 },
+      "docker",
+      [
+        "run",
+        "--rm",
+        IMAGE_TAG,
+        "sh",
+        "-c",
+        "find /root ! -user agent | head -20",
+      ],
+      { encoding: "utf8", timeout: 120_000 },
     );
 
-    assert.equal(ran.status, 0, `could not inspect ${IMAGE_TAG}\nstderr:\n${ran.stderr}`);
+    assert.equal(
+      ran.status,
+      0,
+      `could not inspect ${IMAGE_TAG}\nstderr:\n${ran.stderr}`,
+    );
     assert.equal(
       ran.stdout.trim(),
-      '',
-      'a root-owned path under /root means a cold `npm ci` as agent can die EACCES, ' +
+      "",
+      "a root-owned path under /root means a cold `npm ci` as agent can die EACCES, " +
         `and the prelude's && chain then starts no agent (#242):\n${ran.stdout}`,
     );
   },

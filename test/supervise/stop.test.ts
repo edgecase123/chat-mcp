@@ -1,16 +1,16 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-stop-'));
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-stop-"));
 
-const { migrate } = await import('../../src/storage/db.js');
-const { startSupervisor } = await import('../../src/supervise/index.js');
-const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
-import { supervisorOptions } from '../support/supervisor-options.js';
+const { migrate } = await import("../../src/storage/db.js");
+const { startSupervisor } = await import("../../src/supervise/index.js");
+const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
+import { supervisorOptions } from "../support/supervisor-options.js";
 
 const DIRS = [process.cwd()];
 
@@ -51,7 +51,7 @@ function recordingChild(children: FakeChild[]) {
       onContext: () => undefined,
       onUsage: () => undefined,
       onDenial: () => undefined,
-      onSession: (cb: (id: string) => void) => cb('sess-1'),
+      onSession: (cb: (id: string) => void) => cb("sess-1"),
       onEvent: () => undefined,
       onStderr: () => undefined,
       onExit: () => undefined,
@@ -76,22 +76,24 @@ function recordingChild(children: FakeChild[]) {
 }
 
 async function supervisorFor(handle: string, children: FakeChild[]) {
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(":memory:");
   migrate(db);
-  return startSupervisor(supervisorOptions({
-    handle,
-    db,
-    extraDirs: DIRS,
-    spawnChild: recordingChild(children),
-    log: () => undefined,
-  }));
+  return startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: DIRS,
+      spawnChild: recordingChild(children),
+      log: () => undefined,
+    }),
+  );
 }
 
 async function settle(): Promise<void> {
   await new Promise((r) => setTimeout(r, 50));
 }
 
-test('a stop control kills the child without respawning it', async () => {
+test("a stop control kills the child without respawning it", async () => {
   const children: FakeChild[] = [];
   const handle = `stop-${process.pid}-now`;
   const sup = await supervisorFor(handle, children);
@@ -100,9 +102,9 @@ test('a stop control kills the child without respawning it', async () => {
     const ack = await deliverToSupervisor(handle, {
       id: 1,
       to: handle,
-      from: 'cli',
+      from: "cli",
       ts: Date.now(),
-      control: { kind: 'stop', mode: 'now' },
+      control: { kind: "stop", mode: "now" },
     });
 
     assert.equal(ack?.ok, true);
@@ -115,11 +117,11 @@ test('a stop control kills the child without respawning it', async () => {
     assert.equal(children[0].sent.length, 0);
   } finally {
     children[0]?.finishTeardown();
-    await sup.stop('now');
+    await sup.stop("now");
   }
 });
 
-test('a graceful stop warns the child before killing it', async () => {
+test("a graceful stop warns the child before killing it", async () => {
   const children: FakeChild[] = [];
   const handle = `stop-${process.pid}-graceful`;
   const sup = await supervisorFor(handle, children);
@@ -128,9 +130,9 @@ test('a graceful stop warns the child before killing it', async () => {
     const ack = await deliverToSupervisor(handle, {
       id: 2,
       to: handle,
-      from: 'cli',
+      from: "cli",
       ts: Date.now(),
-      control: { kind: 'stop', mode: 'graceful' },
+      control: { kind: "stop", mode: "graceful" },
     });
 
     assert.equal(ack?.ok, true);
@@ -148,11 +150,11 @@ test('a graceful stop warns the child before killing it', async () => {
     assert.equal(children.length, 1);
   } finally {
     children[0]?.finishTeardown();
-    await sup.stop('now');
+    await sup.stop("now");
   }
 });
 
-test('onStopped waits for the teardown rather than firing on the kill', async () => {
+test("onStopped waits for the teardown rather than firing on the kill", async () => {
   const children: FakeChild[] = [];
   const handle = `stop-${process.pid}-cb`;
   const sup = await supervisorFor(handle, children);
@@ -166,9 +168,9 @@ test('onStopped waits for the teardown rather than firing on the kill', async ()
     await deliverToSupervisor(handle, {
       id: 3,
       to: handle,
-      from: 'cli',
+      from: "cli",
       ts: Date.now(),
-      control: { kind: 'stop', mode: 'now' },
+      control: { kind: "stop", mode: "now" },
     });
 
     await settle();
@@ -188,15 +190,15 @@ test('onStopped waits for the teardown rather than firing on the kill', async ()
 
     // The SIGINT handler still calls stop() after a bus stop has landed. That
     // second call must not fire the exit callback again.
-    await sup.stop('now');
+    await sup.stop("now");
     assert.equal(stopped, 1);
   } finally {
     children[0]?.finishTeardown();
-    await sup.stop('now');
+    await sup.stop("now");
   }
 });
 
-test('a wake arriving during the teardown is refused, not delivered', async () => {
+test("a wake arriving during the teardown is refused, not delivered", async () => {
   const children: FakeChild[] = [];
   const handle = `stop-${process.pid}-window`;
   const sup = await supervisorFor(handle, children);
@@ -205,9 +207,9 @@ test('a wake arriving during the teardown is refused, not delivered', async () =
     await deliverToSupervisor(handle, {
       id: 5,
       to: handle,
-      from: 'cli',
+      from: "cli",
       ts: Date.now(),
-      control: { kind: 'stop', mode: 'now' },
+      control: { kind: "stop", mode: "now" },
     });
 
     await settle();
@@ -217,20 +219,20 @@ test('a wake arriving during the teardown is refused, not delivered', async () =
     const late = await deliverToSupervisor(handle, {
       id: 6,
       to: handle,
-      from: 'someone',
+      from: "someone",
       ts: Date.now(),
-      body: 'hello?',
+      body: "hello?",
     });
 
     assert.equal(late?.ok, false);
     assert.equal(children[0].sent.length, 0);
   } finally {
     children[0]?.finishTeardown();
-    await sup.stop('now');
+    await sup.stop("now");
   }
 });
 
-test('--now escalates a graceful stop still inside its grace period', async () => {
+test("--now escalates a graceful stop still inside its grace period", async () => {
   const children: FakeChild[] = [];
   const handle = `stop-${process.pid}-escalate`;
   const sup = await supervisorFor(handle, children);
@@ -239,9 +241,9 @@ test('--now escalates a graceful stop still inside its grace period', async () =
     await deliverToSupervisor(handle, {
       id: 7,
       to: handle,
-      from: 'cli',
+      from: "cli",
       ts: Date.now(),
-      control: { kind: 'stop', mode: 'graceful' },
+      control: { kind: "stop", mode: "graceful" },
     });
 
     await settle();
@@ -256,9 +258,9 @@ test('--now escalates a graceful stop still inside its grace period', async () =
     const escalation = await deliverToSupervisor(handle, {
       id: 8,
       to: handle,
-      from: 'cli',
+      from: "cli",
       ts: Date.now(),
-      control: { kind: 'stop', mode: 'now' },
+      control: { kind: "stop", mode: "now" },
     });
 
     assert.equal(escalation?.ok, true);
@@ -269,35 +271,37 @@ test('--now escalates a graceful stop still inside its grace period', async () =
     assert.equal(children.length, 1);
   } finally {
     children[0]?.finishTeardown();
-    await sup.stop('now');
+    await sup.stop("now");
   }
 });
 
-test('a stop ack carries the supervisor own grace, not the CLI default', async () => {
+test("a stop ack carries the supervisor own grace, not the CLI default", async () => {
   const children: FakeChild[] = [];
   const handle = `stop-${process.pid}-grace`;
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(":memory:");
   migrate(db);
 
   // A per-handle override is real and tested elsewhere. The CLI sizes its wait
   // from this number, so an ack that omitted it would make a healthy stop on a
   // long-grace handle report failure.
-  const sup = await startSupervisor(supervisorOptions({
-    handle,
-    db,
-    extraDirs: DIRS,
-    spawnChild: recordingChild(children),
-    shutdownGraceSeconds: 90,
-    log: () => undefined,
-  }));
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: DIRS,
+      spawnChild: recordingChild(children),
+      shutdownGraceSeconds: 90,
+      log: () => undefined,
+    }),
+  );
 
   try {
     const ack = await deliverToSupervisor(handle, {
       id: 9,
       to: handle,
-      from: 'cli',
+      from: "cli",
       ts: Date.now(),
-      control: { kind: 'stop', mode: 'now' },
+      control: { kind: "stop", mode: "now" },
     });
 
     assert.equal(ack?.ok, true);
@@ -305,11 +309,11 @@ test('a stop ack carries the supervisor own grace, not the CLI default', async (
   } finally {
     await settle();
     children[0]?.finishTeardown();
-    await sup.stop('now');
+    await sup.stop("now");
   }
 });
 
-test('a non-stop envelope IS refused once a stop has begun', async () => {
+test("a non-stop envelope IS refused once a stop has begun", async () => {
   const children: FakeChild[] = [];
   const handle = `stop-${process.pid}-refuse`;
   const sup = await supervisorFor(handle, children);
@@ -318,9 +322,9 @@ test('a non-stop envelope IS refused once a stop has begun', async () => {
     await deliverToSupervisor(handle, {
       id: 10,
       to: handle,
-      from: 'cli',
+      from: "cli",
       ts: Date.now(),
-      control: { kind: 'restart', mode: 'now' },
+      control: { kind: "restart", mode: "now" },
     });
 
     // 🛑 `now`, NOT `graceful`. A graceful stop here would sit on the real
@@ -329,9 +333,9 @@ test('a non-stop envelope IS refused once a stop has begun', async () => {
     await deliverToSupervisor(handle, {
       id: 11,
       to: handle,
-      from: 'cli',
+      from: "cli",
       ts: Date.now(),
-      control: { kind: 'stop', mode: 'now' },
+      control: { kind: "stop", mode: "now" },
     });
 
     await settle();
@@ -341,38 +345,40 @@ test('a non-stop envelope IS refused once a stop has begun', async () => {
     const late = await deliverToSupervisor(handle, {
       id: 12,
       to: handle,
-      from: 'cli',
+      from: "cli",
       ts: Date.now(),
-      control: { kind: 'restart', mode: 'now' },
+      control: { kind: "restart", mode: "now" },
     });
 
     assert.equal(late?.ok, false);
-    assert.equal(late?.error, 'supervisor is stopping');
+    assert.equal(late?.error, "supervisor is stopping");
   } finally {
     children.at(-1)?.finishTeardown();
-    await sup.stop('now');
+    await sup.stop("now");
   }
 });
 
-test('a driver with no awaitTeardown still stops', async () => {
+test("a driver with no awaitTeardown still stops", async () => {
   const children: FakeChild[] = [];
   const handle = `stop-${process.pid}-no-teardown`;
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(":memory:");
   migrate(db);
 
   // The seam is optional by contract. A driver that omits it must not hang the
   // stop waiting for a hook that was never there.
-  const sup = await startSupervisor(supervisorOptions({
-    handle,
-    db,
-    extraDirs: DIRS,
-    spawnChild: () => {
-      const base = recordingChild(children)();
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: DIRS,
+      spawnChild: () => {
+        const base = recordingChild(children)();
 
-      return { ...base, awaitTeardown: undefined };
-    },
-    log: () => undefined,
-  }));
+        return { ...base, awaitTeardown: undefined };
+      },
+      log: () => undefined,
+    }),
+  );
 
   let stopped = 0;
   sup.onStopped(() => {
@@ -382,9 +388,9 @@ test('a driver with no awaitTeardown still stops', async () => {
   await deliverToSupervisor(handle, {
     id: 4,
     to: handle,
-    from: 'cli',
+    from: "cli",
     ts: Date.now(),
-    control: { kind: 'stop', mode: 'now' },
+    control: { kind: "stop", mode: "now" },
   });
 
   await settle();

@@ -1,21 +1,28 @@
-import { activeWakeTransport } from '../notify/transport.js';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync, unlinkSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { activeWakeTransport } from "../notify/transport.js";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  chmodSync,
+  unlinkSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import {
   adapterScriptPath,
   ensureAdaptersDir,
   ensureStateDir,
-} from '../util/paths.js';
-import { detectChatHandleInCwd } from '../util/mcp-config.js';
-import type { Adapter, AdapterInstallOptions, AdapterResult } from './types.js';
-import { claudeSpawn } from './claude-spawn.js';
+} from "../util/paths.js";
+import { detectChatHandleInCwd } from "../util/mcp-config.js";
+import type { Adapter, AdapterInstallOptions, AdapterResult } from "./types.js";
+import { claudeSpawn } from "./claude-spawn.js";
 
-const ADAPTER_NAME = 'claude-code';
-const SCOPES = ['user', 'project', 'local'] as const;
+const ADAPTER_NAME = "claude-code";
+const SCOPES = ["user", "project", "local"] as const;
 type Scope = (typeof SCOPES)[number];
 
-const MARKER_PREFIX = 'chat-mcp adapter';
+const MARKER_PREFIX = "chat-mcp adapter";
 
 interface CommandHookEntry {
   type?: string;
@@ -40,12 +47,12 @@ function markerFor(handle: string): string {
 
 function settingsPathForScope(scope: Scope, cwd: string): string {
   switch (scope) {
-    case 'user':
-      return join(homedir(), '.claude', 'settings.json');
-    case 'project':
-      return join(cwd, '.claude', 'settings.json');
-    case 'local':
-      return join(cwd, '.claude', 'settings.local.json');
+    case "user":
+      return join(homedir(), ".claude", "settings.json");
+    case "project":
+      return join(cwd, ".claude", "settings.json");
+    case "local":
+      return join(cwd, ".claude", "settings.local.json");
   }
 }
 
@@ -68,41 +75,41 @@ export function buildAdditionalContext(handle: string): string {
   // about every adapter instead of a fact about the transport.
   const wake = activeWakeTransport().subscribe(handle);
   return [
-    '[chat-mcp Claude Code adapter — SessionStart wake bootstrap]',
-    '',
+    "[chat-mcp Claude Code adapter — SessionStart wake bootstrap]",
+    "",
     `This session is registered on the chat-mcp bus as handle "${handle}". ${activeWakeTransport().summary(handle)} — but the model's inference loop needs an external wake trigger to know they arrived.`,
-    '',
+    "",
     ...(wake.probeCommand
       ? [
           `FIRST, count the watchers already running: \`${wake.probeCommand}\`. 🛑 **A non-zero answer means one is ALREADY armed and you must NOT arm a second.** This hook re-fires on every /clear and does not kill the old watcher, so a duplicate doubles the inbox calls per message and the extra one always returns empty.`,
-          '',
-          'That count is your first tool call. If it is zero, then arm the watch next — before any text response, any other tool call, or any clarifying question — by calling the Monitor tool with these exact arguments:',
+          "",
+          "That count is your first tool call. If it is zero, then arm the watch next — before any text response, any other tool call, or any clarifying question — by calling the Monitor tool with these exact arguments:",
         ]
       : [
-          '🛑 FIRST, establish whether a watch for this handle is already armed in this session, and do NOT arm a second one if it is. This hook re-fires on every /clear and does not kill the old watcher.',
-          '',
-          'If none is armed, do that next — before any text response, any other tool call, or any clarifying question — by calling the Monitor tool with these exact arguments:',
+          "🛑 FIRST, establish whether a watch for this handle is already armed in this session, and do NOT arm a second one if it is. This hook re-fires on every /clear and does not kill the old watcher.",
+          "",
+          "If none is armed, do that next — before any text response, any other tool call, or any clarifying question — by calling the Monitor tool with these exact arguments:",
         ]),
-    '',
-    '```json',
-    '{',
-    `  ${JSON.stringify('command')}: ${JSON.stringify(wake.command)},`,
-    `  ${JSON.stringify('description')}: ${JSON.stringify(wake.description)},`,
+    "",
+    "```json",
+    "{",
+    `  ${JSON.stringify("command")}: ${JSON.stringify(wake.command)},`,
+    `  ${JSON.stringify("description")}: ${JSON.stringify(wake.description)},`,
     `  "timeout_ms": ${Math.min(wake.timeoutMs, MONITOR_MAX_TIMEOUT_MS)}`,
-    '}',
-    '```',
-    '',
-    'Each notification carries the message itself, so read it before deciding whether to fetch. Call mcp__chat__inbox when you need to act on it or to clear the unread watermark.',
-    '',
+    "}",
+    "```",
+    "",
+    "Each notification carries the message itself, so read it before deciding whether to fetch. Call mcp__chat__inbox when you need to act on it or to clear the unread watermark.",
+    "",
     'Do not ask permission or defer the arming itself — if no watcher is running, arm it. Skipping it means messages from sibling agents sit unread indefinitely and look identical to "the sibling never replied."',
-  ].join('\n');
+  ].join("\n");
 }
 
 function buildScript(handle: string): string {
   const payload = JSON.stringify(
     {
       hookSpecificOutput: {
-        hookEventName: 'SessionStart',
+        hookEventName: "SessionStart",
         additionalContext: buildAdditionalContext(handle),
       },
     },
@@ -111,24 +118,24 @@ function buildScript(handle: string): string {
   );
 
   return [
-    '#!/usr/bin/env bash',
+    "#!/usr/bin/env bash",
     `# ${markerFor(handle)}`,
     `# Auto-generated by: chat-mcp install ${ADAPTER_NAME} --handle ${handle}`,
-    '# Do not hand-edit — re-run install to change.',
-    '',
+    "# Do not hand-edit — re-run install to change.",
+    "",
     "cat <<'CHATMCP_HOOK_JSON'",
     payload,
-    'CHATMCP_HOOK_JSON',
-    '',
-  ].join('\n');
+    "CHATMCP_HOOK_JSON",
+    "",
+  ].join("\n");
 }
 
 function readSettings(path: string): Settings {
   if (!existsSync(path)) return {};
-  const raw = readFileSync(path, 'utf8').trim();
+  const raw = readFileSync(path, "utf8").trim();
   if (raw.length === 0) return {};
   const parsed = JSON.parse(raw) as unknown;
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error(`Expected an object in ${path}, got ${typeof parsed}`);
   }
   return parsed as Settings;
@@ -141,11 +148,15 @@ function writeSettings(path: string, settings: Settings): void {
 
 function isOurHookGroup(group: HookGroup, marker: string): boolean {
   return (group.hooks ?? []).some(
-    (h) => typeof h.statusMessage === 'string' && h.statusMessage === marker,
+    (h) => typeof h.statusMessage === "string" && h.statusMessage === marker,
   );
 }
 
-function upsertHook(settings: Settings, handle: string, script: string): boolean {
+function upsertHook(
+  settings: Settings,
+  handle: string,
+  script: string,
+): boolean {
   const marker = markerFor(handle);
   const hooks = settings.hooks ?? {};
   const sessionStart: HookGroup[] = hooks.SessionStart ?? [];
@@ -153,7 +164,7 @@ function upsertHook(settings: Settings, handle: string, script: string): boolean
   const entry: HookGroup = {
     hooks: [
       {
-        type: 'command',
+        type: "command",
         command: script,
         statusMessage: marker,
       },
@@ -162,7 +173,8 @@ function upsertHook(settings: Settings, handle: string, script: string): boolean
 
   const idx = sessionStart.findIndex((g) => isOurHookGroup(g, marker));
   if (idx >= 0) {
-    if (JSON.stringify(sessionStart[idx]) === JSON.stringify(entry)) return false;
+    if (JSON.stringify(sessionStart[idx]) === JSON.stringify(entry))
+      return false;
     sessionStart[idx] = entry;
   } else {
     sessionStart.push(entry);
@@ -177,7 +189,9 @@ function removeHook(settings: Settings, handle: string): boolean {
   const marker = markerFor(handle);
   if (!settings.hooks?.SessionStart) return false;
   const before = settings.hooks.SessionStart.length;
-  const kept = settings.hooks.SessionStart.filter((g) => !isOurHookGroup(g, marker));
+  const kept = settings.hooks.SessionStart.filter(
+    (g) => !isOurHookGroup(g, marker),
+  );
   if (kept.length === before) return false;
 
   if (kept.length === 0) {
@@ -192,10 +206,10 @@ function removeHook(settings: Settings, handle: string): boolean {
 }
 
 function assertScope(scope: string | undefined): Scope {
-  const s = (scope ?? 'local') as Scope;
+  const s = (scope ?? "local") as Scope;
   if (!SCOPES.includes(s)) {
     throw new Error(
-      `Unknown scope "${scope}" for ${ADAPTER_NAME}. Valid: ${SCOPES.join(', ')} (default: local)`,
+      `Unknown scope "${scope}" for ${ADAPTER_NAME}. Valid: ${SCOPES.join(", ")} (default: local)`,
     );
   }
   return s;
@@ -209,7 +223,7 @@ async function install(opts: AdapterInstallOptions): Promise<AdapterResult> {
   // notify/<opts.handle>. If the tree's .mcp.json launches the chat MCP with a
   // different handle, the two disagree silently — Monitor watches an empty
   // notify path forever. --force intentionally opts out.
-  if (!opts.force && (scope === 'local' || scope === 'project')) {
+  if (!opts.force && (scope === "local" || scope === "project")) {
     const detected = detectChatHandleInCwd(cwd);
     if (detected && detected.handle !== opts.handle) {
       throw new Error(
@@ -219,7 +233,7 @@ async function install(opts: AdapterInstallOptions): Promise<AdapterResult> {
           `  A "${scope}"-scope hook fires in this tree's Claude Code sessions, which register as "${detected.handle}", not "${opts.handle}".`,
           `  → to install for the tree's handle: re-run with --handle ${detected.handle}`,
           `  → to install anyway:                re-run with --force`,
-        ].join('\n'),
+        ].join("\n"),
       );
     }
   }
@@ -242,11 +256,15 @@ async function install(opts: AdapterInstallOptions): Promise<AdapterResult> {
     `Installed chat-mcp Claude Code adapter for handle "${opts.handle}".`,
     `  scope:    ${scope}`,
     `  hook:     ${script}`,
-    `  settings: ${settingsPath}${changed ? '' : ' (already up to date)'}`,
-    '',
-    'Restart Claude Code (or open a new session) to pick up the SessionStart hook.',
-    scope === 'local' ? 'Note: .claude/settings.local.json is user-local; add it to .gitignore if it is not already.' : '',
-  ].filter(Boolean).join('\n');
+    `  settings: ${settingsPath}${changed ? "" : " (already up to date)"}`,
+    "",
+    "Restart Claude Code (or open a new session) to pick up the SessionStart hook.",
+    scope === "local"
+      ? "Note: .claude/settings.local.json is user-local; add it to .gitignore if it is not already."
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return { changed: true, paths: [script, settingsPath], message: summary };
 }
@@ -282,7 +300,7 @@ async function uninstall(opts: AdapterInstallOptions): Promise<AdapterResult> {
     ? [
         `Removed chat-mcp Claude Code adapter for handle "${opts.handle}".`,
         ...paths.map((p) => `  removed: ${p}`),
-      ].join('\n')
+      ].join("\n")
     : `No chat-mcp Claude Code adapter entries found for handle "${opts.handle}" at scope ${scope}.`;
 
   return { changed, paths, message: summary };
@@ -290,10 +308,10 @@ async function uninstall(opts: AdapterInstallOptions): Promise<AdapterResult> {
 
 export const claudeCodeAdapter: Adapter = {
   name: ADAPTER_NAME,
-  vendor: 'claude',
-  description: 'Claude Code — SessionStart hook that primes the wake watch',
+  vendor: "claude",
+  description: "Claude Code — SessionStart hook that primes the wake watch",
   scopes: SCOPES,
-  defaultScope: 'local',
+  defaultScope: "local",
   install,
   uninstall,
   spawn: claudeSpawn,

@@ -22,7 +22,9 @@ export interface CarryOver<T> {
   readonly pending: readonly (T | null | undefined)[];
 }
 
-export function carryOver<T extends { outcome: string }>(input: CarryOver<T>): T[] {
+export function carryOver<T extends { outcome: string }>(
+  input: CarryOver<T>,
+): T[] {
   const byKey = new Map<string, T>();
 
   // ⚠️ PENDING LAST, SO IT WINS. A fresh measurement losing to the row it was

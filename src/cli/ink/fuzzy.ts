@@ -16,6 +16,10 @@ export function fuzzyMatch(needle: string, haystack: string): boolean {
 }
 
 /** Return items whose key matches `needle`, preserving input order. */
-export function fuzzyFilter<T>(needle: string, items: T[], key: (t: T) => string): T[] {
+export function fuzzyFilter<T>(
+  needle: string,
+  items: T[],
+  key: (t: T) => string,
+): T[] {
   return items.filter((t) => fuzzyMatch(needle, key(t)));
 }

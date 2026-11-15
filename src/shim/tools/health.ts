@@ -1,10 +1,10 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import * as dao from '../../storage/dao.js';
-import type { BusHealth } from '../../storage/dao.js';
-import { identityFor, identityOf, SCHEMA_VERSION } from '../../storage/db.js';
-import type { FileIdentity } from '../../storage/db.js';
-import { dbPath } from '../../util/paths.js';
-import type { ShimContext } from '../index.js';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import * as dao from "../../storage/dao.js";
+import type { BusHealth } from "../../storage/dao.js";
+import { identityFor, identityOf, SCHEMA_VERSION } from "../../storage/db.js";
+import type { FileIdentity } from "../../storage/db.js";
+import { dbPath } from "../../util/paths.js";
+import type { ShimContext } from "../index.js";
 
 /**
  * What the two marks mean, in a sentence.
@@ -18,7 +18,8 @@ export function healthReading(health: BusHealth): string {
   const { max_id, autoincrement_seq } = health;
 
   if (max_id === null) {
-    if (autoincrement_seq === null) return 'No message has ever been written to this database.';
+    if (autoincrement_seq === null)
+      return "No message has ever been written to this database.";
     return `The table is EMPTY, but the high-water mark is ${autoincrement_seq}, so ids up to there were written and every row is now gone. Deleting a room's or a DM's messages does this.`;
   }
 
@@ -55,7 +56,7 @@ export function identityReading(
       // Not a match and not a fault. Claiming either would be an instrument
       // that could not say no.
       reading:
-        'This connection did not record a file identity at open, so whether the file moved underneath it is UNREADABLE. Only a database opened through openDb carries the mark.',
+        "This connection did not record a file identity at open, so whether the file moved underneath it is UNREADABLE. Only a database opened through openDb carries the mark.",
     };
   }
 
@@ -135,9 +136,9 @@ export function healthResult(args: {
 
 export function installHealth(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
-    'health',
+    "health",
     {
-      title: 'Is the bus actually writing, and to the right file?',
+      title: "Is the bus actually writing, and to the right file?",
       description:
         "Report the database this shim resolved, the two id marks that say whether a reported message id is real (MAX(id) and the AUTOINCREMENT high-water mark), and whether the file this connection holds is still the file at that path. Call it when a send claimed an id you cannot find, when a peer's reply never arrives, or before concluding a sibling never answered. A send that reports success while the peer sees nothing is a known failure (#138) and has two shapes: the write never landed, which the id marks catch, or it landed in a replaced file at the same path, which only the device+inode comparison catches — lsof and PRAGMA database_list both report a path and cannot see it.",
       inputSchema: {},
@@ -159,7 +160,7 @@ export function installHealth(server: McpServer, ctx: ShimContext): void {
       });
 
       return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       };
     },
   );

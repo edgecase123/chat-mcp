@@ -23,18 +23,20 @@
  *   6  the command finally runs                     <- the grant REACHED it
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { startSupervisor } from '../src/supervise/index.ts';
-import { deliverToSupervisor } from '../src/supervise/socket.ts';
-import { openDb } from '../src/storage/db.ts';
-import * as dao from '../src/storage/dao.ts';
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { startSupervisor } from "../src/supervise/index.ts";
+import { deliverToSupervisor } from "../src/supervise/socket.ts";
+import { openDb } from "../src/storage/db.ts";
+import * as dao from "../src/storage/dao.ts";
 
 if (!process.env.CHAT_MCP_LIVE) {
-  console.error('Refusing to run: this spawns a real agent CLI and spends money.');
-  console.error('Set CHAT_MCP_LIVE=1 to opt in.');
+  console.error(
+    "Refusing to run: this spawns a real agent CLI and spends money.",
+  );
+  console.error("Set CHAT_MCP_LIVE=1 to opt in.");
   process.exit(2);
 }
 
@@ -59,7 +61,7 @@ const HANDLE = `e2e-${process.pid}`;
  * `set_status` stays the task because it is measured and cheap, NOT because
  * the filesystem is off limits.
  */
-const MODE = process.env.E2E_MODE ?? 'nameable';
+const MODE = process.env.E2E_MODE ?? "nameable";
 
 /**
  * Which permission path this mode exercises, named in the summary.
@@ -70,7 +72,8 @@ const MODE = process.env.E2E_MODE ?? 'nameable';
  * each time naming a directory the target already sat inside. A summary that
  * does not say which path ran reads as covering both.
  */
-const PATH_UNDER_TEST = MODE === 'nameable' ? 'MCP tool (mcp__chat__set_status)' : 'Bash (git push)';
+const PATH_UNDER_TEST =
+  MODE === "nameable" ? "MCP tool (mcp__chat__set_status)" : "Bash (git push)";
 const WAIT_MS = Number(process.env.APPROVAL_WAIT_SECONDS ?? 300) * 1000;
 
 /**
@@ -86,9 +89,9 @@ const WAIT_MS = Number(process.env.APPROVAL_WAIT_SECONDS ?? 300) * 1000;
  * no scope reaches it. The remote is a bare repo on disk, so a successful
  * push changes nothing outside this directory.
  */
-const root = mkdtempSync(join(tmpdir(), 'chat-mcp-e2e-'));
-const workdir = join(root, 'work');
-const remote = join(root, 'remote.git');
+const root = mkdtempSync(join(tmpdir(), "chat-mcp-e2e-"));
+const workdir = join(root, "work");
+const remote = join(root, "remote.git");
 
 /**
  * The sentinel the agent must publish with `set_status`.
@@ -103,23 +106,25 @@ const remote = join(root, 'remote.git');
  */
 const SENTINEL = `e2e-ok-${process.pid}`;
 
-const git = (args, cwd) => execFileSync('git', args, { cwd, stdio: 'pipe' });
+const git = (args, cwd) => execFileSync("git", args, { cwd, stdio: "pipe" });
 
-execFileSync('git', ['init', '--bare', '-q', remote]);
-execFileSync('git', ['init', '-q', '-b', 'main', workdir]);
-git(['config', 'user.email', 'e2e@example.com'], workdir);
-git(['config', 'user.name', 'e2e'], workdir);
-writeFileSync(join(workdir, 'README.md'), 'e2e\n', 'utf8');
-git(['add', '-A'], workdir);
-git(['commit', '-q', '-m', 'initial'], workdir);
-git(['remote', 'add', 'origin', remote], workdir);
+execFileSync("git", ["init", "--bare", "-q", remote]);
+execFileSync("git", ["init", "-q", "-b", "main", workdir]);
+git(["config", "user.email", "e2e@example.com"], workdir);
+git(["config", "user.name", "e2e"], workdir);
+writeFileSync(join(workdir, "README.md"), "e2e\n", "utf8");
+git(["add", "-A"], workdir);
+git(["commit", "-q", "-m", "initial"], workdir);
+git(["remote", "add", "origin", remote], workdir);
 
 /** Did the push land? The bare remote is the only honest answer. */
 const pushed = () => {
   try {
-    return execFileSync('git', ['log', '--oneline', '-1', 'main'], { cwd: remote })
+    return execFileSync("git", ["log", "--oneline", "-1", "main"], {
+      cwd: remote,
+    })
       .toString()
-      .includes('initial');
+      .includes("initial");
   } catch {
     return false;
   }
@@ -136,7 +141,7 @@ const db = openDb();
 const published = () => {
   const agent = dao.getAgent(db, `${HANDLE}-agent`);
 
-  return `${agent?.focus ?? ''} ${agent?.status ?? ''}`.includes(SENTINEL);
+  return `${agent?.focus ?? ""} ${agent?.status ?? ""}`.includes(SENTINEL);
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -148,7 +153,9 @@ async function until(pred, timeoutMs, label) {
     await sleep(1000);
   }
 
-  console.error(`  TIMEOUT after ${Math.round(timeoutMs / 1000)}s waiting for ${label}`);
+  console.error(
+    `  TIMEOUT after ${Math.round(timeoutMs / 1000)}s waiting for ${label}`,
+  );
 
   return false;
 }
@@ -156,7 +163,9 @@ async function until(pred, timeoutMs, label) {
 const checks = [];
 const record = (name, ok, detail) => {
   checks.push({ name, ok });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
+  console.log(
+    `${ok ? "PASS" : "FAIL"}  ${name}${detail ? `  — ${detail}` : ""}`,
+  );
 };
 
 const pending = () => dao.pendingApprovals(db, `${HANDLE}-agent`);
@@ -173,8 +182,8 @@ const sup = await startSupervisor({
   // No Edit scope: the target is REACHABLE but no rule covers editing it,
   // which is what makes `rm` name itself in the refusal.
   allowedTools:
-    MODE === 'nameable'
-      ? ['Read', 'Glob', 'Grep', 'mcp__chat__send', 'mcp__chat__room_send']
+    MODE === "nameable"
+      ? ["Read", "Glob", "Grep", "mcp__chat__send", "mcp__chat__room_send"]
       : undefined,
   log: (line) => console.log(`    ${line}`),
 });
@@ -184,23 +193,28 @@ try {
   const ack = await deliverToSupervisor(HANDLE, {
     id: 1,
     to: HANDLE,
-    from: 'e2e-harness',
+    from: "e2e-harness",
     ts: Date.now(),
     body:
-      MODE === 'nameable'
+      MODE === "nameable"
         ? `Please call set_status with focus set to exactly "${SENTINEL}". ` +
           `If you are blocked, say so and stop — do not work around it.`
         : `Please run \`git push -u origin main\` in ${workdir}. ` +
           `If you are blocked, say so and stop — do not work around it.`,
   });
 
-  record('the socket ACKs the delivery', ack?.ok === true, JSON.stringify(ack));
+  record("the socket ACKs the delivery", ack?.ok === true, JSON.stringify(ack));
 
   // ── 2. The denial must become a pending approval ───────────────────────
-  const asked = await until(() => pending().length > 0, 180_000, 'a pending approval');
-  record('the denial becomes a PENDING APPROVAL a human can see', asked);
+  const asked = await until(
+    () => pending().length > 0,
+    180_000,
+    "a pending approval",
+  );
+  record("the denial becomes a PENDING APPROVAL a human can see", asked);
 
-  if (!asked) throw new Error('no approval was ever filed; the producer is broken');
+  if (!asked)
+    throw new Error("no approval was ever filed; the producer is broken");
 
   const request = pending()[0];
 
@@ -213,9 +227,9 @@ try {
   // only be DENIED, and the run says so rather than waiting for an Approve
   // that is not offered.
   console.log(
-    `\n  🛑 APPROVAL ${request.id} IS WAITING: ${request.requested ?? '(the CLI named no command — Deny only)'}`,
+    `\n  🛑 APPROVAL ${request.id} IS WAITING: ${request.requested ?? "(the CLI named no command — Deny only)"}`,
   );
-  console.log('  Open `chat-mcp web` and click Approve, or run:');
+  console.log("  Open `chat-mcp web` and click Approve, or run:");
   console.log(
     `    curl -s -X POST http://127.0.0.1:<port>/api/approvals/answer ` +
       `-H 'Content-Type: application/json' -d '{"id":${request.id},"decision":"approve"}'\n`,
@@ -225,30 +239,38 @@ try {
   const answered = await until(
     () => dao.getApproval(db, request.id)?.decision != null,
     WAIT_MS,
-    'a human to answer',
+    "a human to answer",
   );
-  record('a human answered the request', answered);
+  record("a human answered the request", answered);
 
-  if (!answered) throw new Error('nobody answered; the run proves nothing past this point');
+  if (!answered)
+    throw new Error("nobody answered; the run proves nothing past this point");
 
   const decision = dao.getApproval(db, request.id)?.decision;
   console.log(`  decision: ${decision}\n`);
 
   // The check differs by mode, and the TARGET is the only honest answer in
   // both: asking the agent whether it succeeded asks the thing under test.
-  const succeeded = MODE === 'nameable' ? published : pushed;
+  const succeeded = MODE === "nameable" ? published : pushed;
 
   // 🛑 `grant`, NOT `requested`. `answerApproval` throws only when there is
   // nothing to allowlist, and run 8 approved a card whose prose was null.
   if (request.grant == null) {
-    record('an UNGRANTABLE request offers Deny only, and nothing happened', !succeeded());
-  } else if (decision !== 'approve') {
-    record('nothing happened after a DENY', !succeeded());
+    record(
+      "an UNGRANTABLE request offers Deny only, and nothing happened",
+      !succeeded(),
+    );
+  } else if (decision !== "approve") {
+    record("nothing happened after a DENY", !succeeded());
   } else {
     // ── 4. The grant must REACH the child, which is the bug that shipped ──
-    const done = await until(succeeded, 180_000, 'the approved command to run');
+    const done = await until(succeeded, 180_000, "the approved command to run");
 
-    record('the approved command actually RAN', done, done ? 'the target moved' : 'the target never moved');
+    record(
+      "the approved command actually RAN",
+      done,
+      done ? "the target moved" : "the target never moved",
+    );
   }
 } finally {
   await sup.stop();
@@ -256,11 +278,17 @@ try {
 }
 
 const failed = checks.filter((c) => !c.ok);
-console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);
-console.log(`path proven: ${failed.length === 0 ? PATH_UNDER_TEST : 'NONE — this run failed'}`);
+console.log(
+  `\n${checks.length - failed.length}/${checks.length} checks passed`,
+);
+console.log(
+  `path proven: ${failed.length === 0 ? PATH_UNDER_TEST : "NONE — this run failed"}`,
+);
 
-if (failed.length === 0 && MODE === 'nameable') {
-  console.log('NOT proven: the Bash path. Its working-directory gate is separate.');
+if (failed.length === 0 && MODE === "nameable") {
+  console.log(
+    "NOT proven: the Bash path. Its working-directory gate is separate.",
+  );
 }
 
 for (const f of failed) console.log(`  FAILED: ${f.name}`);

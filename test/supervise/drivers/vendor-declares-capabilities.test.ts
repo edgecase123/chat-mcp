@@ -1,9 +1,9 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { PassThrough } from 'node:stream';
-import { wireAgentChild } from '../../../src/supervise/drivers/wiring.js';
-import { assertDeclaresCapabilities } from '../../../src/supervise/child.js';
-import { claudeSpawn } from '../../../src/adapters/claude-spawn.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { PassThrough } from "node:stream";
+import { wireAgentChild } from "../../../src/supervise/drivers/wiring.js";
+import { assertDeclaresCapabilities } from "../../../src/supervise/child.js";
+import { claudeSpawn } from "../../../src/adapters/claude-spawn.js";
 
 /**
  * `wireAgentChild` used to hard-code `reportsUsage: true` and
@@ -30,7 +30,7 @@ function fakeProcess() {
 
 const INERT = { routeEvent: () => undefined, encodeInput: (t: string) => t };
 
-test('a vendor declaring it reports neither reading is wired as reporting neither', () => {
+test("a vendor declaring it reports neither reading is wired as reporting neither", () => {
   const agent = wireAgentChild(fakeProcess() as never, {
     ...INERT,
     reportsUsage: false,
@@ -41,7 +41,7 @@ test('a vendor declaring it reports neither reading is wired as reporting neithe
   assert.equal(agent.reportsContext, false);
 });
 
-test('a vendor declaring it reports both is wired as reporting both', () => {
+test("a vendor declaring it reports both is wired as reporting both", () => {
   // The positive control. Without it the test above passes against a wiring
   // that hard-codes `false`, which is the same defect pointed the other way.
   const agent = wireAgentChild(fakeProcess() as never, {
@@ -54,7 +54,7 @@ test('a vendor declaring it reports both is wired as reporting both', () => {
   assert.equal(agent.reportsContext, true);
 });
 
-test('🛑 the two declarations do not cross — each field carries its OWN vendor value', () => {
+test("🛑 the two declarations do not cross — each field carries its OWN vendor value", () => {
   // A wiring that read one field for both would pass every same-value case
   // above and still mislead an operator about exactly one gauge.
   for (const usage of [true, false]) {
@@ -69,7 +69,7 @@ test('🛑 the two declarations do not cross — each field carries its OWN vend
   }
 });
 
-test('🛑 a vendor omitting EITHER declaration is refused, naming the field it omitted', () => {
+test("🛑 a vendor omitting EITHER declaration is refused, naming the field it omitted", () => {
   // `tsconfig.json` includes `src/**` only, so a JavaScript vendor or a test
   // fake omitting a field compiles and runs. The hard-coded `true` used to
   // launder that omission into a confident declaration; now the omission
@@ -80,16 +80,25 @@ test('🛑 a vendor omitting EITHER declaration is refused, naming the field it 
   // `reportsContext: vendor.reportsContext ?? true` passed it. Said by
   // claude2-agent on PR 220, and the same thing claude2 said about PR 218 —
   // the table in `supervisor.test.ts` is the one this mirrors.
-  const OTHER = { reportsUsage: 'reportsContext', reportsContext: 'reportsUsage' } as const;
+  const OTHER = {
+    reportsUsage: "reportsContext",
+    reportsContext: "reportsUsage",
+  } as const;
 
-  for (const field of ['reportsUsage', 'reportsContext'] as const) {
-    const declared: Record<string, unknown> = { reportsUsage: true, reportsContext: true };
+  for (const field of ["reportsUsage", "reportsContext"] as const) {
+    const declared: Record<string, unknown> = {
+      reportsUsage: true,
+      reportsContext: true,
+    };
     delete declared[field];
 
-    const agent = wireAgentChild(fakeProcess() as never, {
-      ...INERT,
-      ...declared,
-    } as never);
+    const agent = wireAgentChild(
+      fakeProcess() as never,
+      {
+        ...INERT,
+        ...declared,
+      } as never,
+    );
 
     assert.throws(
       () => assertDeclaresCapabilities(agent),
@@ -105,17 +114,19 @@ test('🛑 a vendor omitting EITHER declaration is refused, naming the field it 
 });
 
 /** The message `assertDeclaresCapabilities` refuses this child with. */
-function agentError(agent: Parameters<typeof assertDeclaresCapabilities>[0]): string {
+function agentError(
+  agent: Parameters<typeof assertDeclaresCapabilities>[0],
+): string {
   try {
     assertDeclaresCapabilities(agent);
   } catch (err) {
     return (err as Error).message;
   }
 
-  return '';
+  return "";
 }
 
-test('the Claude Code vendor declares that it reports both readings', () => {
+test("the Claude Code vendor declares that it reports both readings", () => {
   // It genuinely routes both. This is the one vendor that exists, so it is
   // also the only place the production value of these fields is asserted.
   assert.equal(claudeSpawn.reportsUsage, true);
@@ -137,11 +148,11 @@ test('the Claude Code vendor declares that it reports both readings', () => {
 
 /** The live `rate_limit_event` payload, as `rate-limit.test.ts` records it. */
 const USAGE_EVENT = {
-  type: 'rate_limit_event',
+  type: "rate_limit_event",
   rate_limit_info: {
-    status: 'allowed',
+    status: "allowed",
     resetsAt: 1792192800,
-    rateLimitType: 'five_hour',
+    rateLimitType: "five_hour",
     unifiedWindows: {
       five_hour: { utilization: 0.52, resetsAt: 1792192800 },
       seven_day: { utilization: 0.33, resetsAt: 1792458000 },
@@ -151,12 +162,12 @@ const USAGE_EVENT = {
 
 /** An `assistant` turn carries the context-window figure. */
 const CONTEXT_EVENT = {
-  type: 'assistant',
+  type: "assistant",
   parent_tool_use_id: null,
-  message: { model: 'claude-opus-5', usage: { input_tokens: 40_000 } },
+  message: { model: "claude-opus-5", usage: { input_tokens: 40_000 } },
 };
 
-test('🛑 the Claude Code vendor ROUTES both readings it declares, not just declares them', () => {
+test("🛑 the Claude Code vendor ROUTES both readings it declares, not just declares them", () => {
   let usage = false;
   let context = false;
 
@@ -172,10 +183,14 @@ test('🛑 the Claude Code vendor ROUTES both readings it declares, not just dec
     });
   }
 
-  assert.equal(usage, claudeSpawn.reportsUsage, 'reportsUsage does not match what the router does');
+  assert.equal(
+    usage,
+    claudeSpawn.reportsUsage,
+    "reportsUsage does not match what the router does",
+  );
   assert.equal(
     context,
     claudeSpawn.reportsContext,
-    'reportsContext does not match what the router does',
+    "reportsContext does not match what the router does",
   );
 });

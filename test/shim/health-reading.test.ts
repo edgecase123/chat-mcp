@@ -1,6 +1,6 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { healthReading } from '../../src/shim/tools/health.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { healthReading } from "../../src/shim/tools/health.js";
 
 /**
  * #138 — the sentence that makes two bare numbers readable.
@@ -17,11 +17,14 @@ const health = (max_id: number | null, autoincrement_seq: number | null) => ({
   schema_version: 15,
 });
 
-test('an untouched database says nothing has ever been written', () => {
-  assert.match(healthReading(health(null, null)), /No message has ever been written/);
+test("an untouched database says nothing has ever been written", () => {
+  assert.match(
+    healthReading(health(null, null)),
+    /No message has ever been written/,
+  );
 });
 
-test('🛑 an EMPTIED table is not an untouched one — the sequence survives a DELETE', () => {
+test("🛑 an EMPTIED table is not an untouched one — the sequence survives a DELETE", () => {
   // `sqlite_sequence` keeps its row after `DELETE FROM messages`, with or
   // without a WHERE, so deleting every row leaves max_id null beside a live
   // mark. Reading that as "nothing was ever written" is the opposite of what
@@ -33,7 +36,7 @@ test('🛑 an EMPTIED table is not an untouched one — the sequence survives a 
   assert.match(reading, /every row is now gone/);
 });
 
-test('🛑 marks that agree name the id, so a HIGHER reported id is the fiction', () => {
+test("🛑 marks that agree name the id, so a HIGHER reported id is the fiction", () => {
   const reading = healthReading(health(13504, 13504));
 
   assert.match(reading, /13504/);
@@ -44,13 +47,13 @@ test('🛑 marks that agree name the id, so a HIGHER reported id is the fiction'
   assert.match(reading, /nothing about holes/);
 });
 
-test('🛑 max_id BELOW the sequence says the row was written and removed', () => {
+test("🛑 max_id BELOW the sequence says the row was written and removed", () => {
   const reading = healthReading(health(13503, 13504));
 
   assert.match(reading, /written and are now gone/);
 });
 
-test('🛑 max_id ABOVE the sequence blames the SEQUENCE, not the rows', () => {
+test("🛑 max_id ABOVE the sequence blames the SEQUENCE, not the rows", () => {
   // A restore from a dump that dropped sqlite_sequence. The first cut read
   // this as rows going missing, which is backwards.
   const reading = healthReading(health(13504, 13000));
@@ -59,7 +62,7 @@ test('🛑 max_id ABOVE the sequence blames the SEQUENCE, not the rows', () => {
   assert.doesNotMatch(reading, /now gone/);
 });
 
-test('🛑 rows with NO sequence row never render the word null', () => {
+test("🛑 rows with NO sequence row never render the word null", () => {
   // sqlite_sequence can be absent while messages has rows, again via a dump.
   const reading = healthReading(health(13504, null));
 

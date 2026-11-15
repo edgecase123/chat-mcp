@@ -1,7 +1,7 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { KNOWN_SUBCOMMANDS } from '../../src/util/subcommands.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { KNOWN_SUBCOMMANDS } from "../../src/util/subcommands.js";
 
 /**
  * 🛑 A verb registered with commander but missing from KNOWN_SUBCOMMANDS does
@@ -11,26 +11,48 @@ import { KNOWN_SUBCOMMANDS } from '../../src/util/subcommands.js';
  * Read from the source text rather than by importing src/index.ts, because
  * that module runs the CLI on import.
  */
-test('every commander verb is also in KNOWN_SUBCOMMANDS', () => {
-  const source = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
-  const registered = [...source.matchAll(/\.command\(['"]([^'"\s<[]+)/g)].map((m) => m[1]!);
+test("every commander verb is also in KNOWN_SUBCOMMANDS", () => {
+  const source = readFileSync(
+    new URL("../../src/index.ts", import.meta.url),
+    "utf8",
+  );
+  const registered = [...source.matchAll(/\.command\(['"]([^'"\s<[]+)/g)].map(
+    (m) => m[1]!,
+  );
 
-  assert.ok(registered.length > 10, `expected to find the verbs, found ${registered.length}`);
+  assert.ok(
+    registered.length > 10,
+    `expected to find the verbs, found ${registered.length}`,
+  );
 
   const missing = registered.filter((v) => !KNOWN_SUBCOMMANDS.has(v));
 
-  assert.deepEqual(missing, [], `these verbs fall through to shim mode: ${missing.join(', ')}`);
+  assert.deepEqual(
+    missing,
+    [],
+    `these verbs fall through to shim mode: ${missing.join(", ")}`,
+  );
 });
 
-test('supervise is registered and reachable', () => {
-  const source = readFileSync(new URL('../../src/index.ts', import.meta.url), 'utf8');
+test("supervise is registered and reachable", () => {
+  const source = readFileSync(
+    new URL("../../src/index.ts", import.meta.url),
+    "utf8",
+  );
 
-  assert.match(source, /\.command\(['"]supervise/, 'the verb is not registered');
-  assert.ok(KNOWN_SUBCOMMANDS.has('supervise'), 'the verb would fall through to shim mode');
+  assert.match(
+    source,
+    /\.command\(['"]supervise/,
+    "the verb is not registered",
+  );
+  assert.ok(
+    KNOWN_SUBCOMMANDS.has("supervise"),
+    "the verb would fall through to shim mode",
+  );
 });
 
-test('mount, auth and agents are registered, or they silently fall through to shim mode', () => {
-  assert.ok(KNOWN_SUBCOMMANDS.has('mount'));
-  assert.ok(KNOWN_SUBCOMMANDS.has('auth'));
-  assert.ok(KNOWN_SUBCOMMANDS.has('agents'));
+test("mount, auth and agents are registered, or they silently fall through to shim mode", () => {
+  assert.ok(KNOWN_SUBCOMMANDS.has("mount"));
+  assert.ok(KNOWN_SUBCOMMANDS.has("auth"));
+  assert.ok(KNOWN_SUBCOMMANDS.has("agents"));
 });

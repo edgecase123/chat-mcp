@@ -1,6 +1,10 @@
-import { existsSync, readFileSync, renameSync } from 'node:fs';
-import { join } from 'node:path';
-import { ensureStateDir, stateDir, writePrivateFileSync } from '../util/paths.js';
+import { existsSync, readFileSync, renameSync } from "node:fs";
+import { join } from "node:path";
+import {
+  ensureStateDir,
+  stateDir,
+  writePrivateFileSync,
+} from "../util/paths.js";
 
 /**
  * The credentials a containerized agent is spawned with, in ONE shared file.
@@ -15,10 +19,10 @@ import { ensureStateDir, stateDir, writePrivateFileSync } from '../util/paths.js
  * recorded on the ticket.
  */
 export function secretsEnvPath(): string {
-  return join(stateDir(), 'secrets.env');
+  return join(stateDir(), "secrets.env");
 }
 
-const CLAUDE_TOKEN_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
+const CLAUDE_TOKEN_KEY = "CLAUDE_CODE_OAUTH_TOKEN";
 
 /**
  * 🛑 THE STORAGE KEY AND THE INJECTED ENV VAR NAME ARE ONE STRING, NOT TWO
@@ -28,7 +32,7 @@ const CLAUDE_TOKEN_KEY = 'CLAUDE_CODE_OAUTH_TOKEN';
  * and the container would get an UNSET `GH_TOKEN` — which `gh` reports as a
  * bad credential rather than as no credential. Raised in review before merge.
  */
-export const GH_TOKEN_KEY = 'GH_TOKEN';
+export const GH_TOKEN_KEY = "GH_TOKEN";
 
 /** `KEY=value`, one per line. The value may contain `=`; the key may not. */
 const ENV_LINE = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
@@ -49,13 +53,13 @@ function readSecrets(): Map<string, string> {
 
   if (!existsSync(path)) return secrets;
 
-  const lines = readFileSync(path, 'utf8').split('\n');
+  const lines = readFileSync(path, "utf8").split("\n");
 
   for (const [index, line] of lines.entries()) {
     const match = ENV_LINE.exec(line);
 
     if (match?.[1]) {
-      secrets.set(match[1], match[2] ?? '');
+      secrets.set(match[1], match[2] ?? "");
       continue;
     }
 
@@ -67,7 +71,9 @@ function readSecrets(): Map<string, string> {
     //
     // ⚠️ THE LINE NUMBER, NEVER THE CONTENT. This file holds secrets.
     if (line.trim().length > 0) {
-      console.error(`chat-mcp: ${path}: ignoring unparseable line ${index + 1}`);
+      console.error(
+        `chat-mcp: ${path}: ignoring unparseable line ${index + 1}`,
+      );
     }
   }
 
@@ -84,11 +90,11 @@ function readSecrets(): Map<string, string> {
 function writeSecrets(secrets: Map<string, string>): void {
   ensureStateDir();
 
-  const body = [...secrets].map(([key, value]) => `${key}=${value}`).join('\n');
+  const body = [...secrets].map(([key, value]) => `${key}=${value}`).join("\n");
   const path = secretsEnvPath();
   const temp = `${path}.tmp`;
 
-  writePrivateFileSync(temp, body.length > 0 ? `${body}\n` : '');
+  writePrivateFileSync(temp, body.length > 0 ? `${body}\n` : "");
   renameSync(temp, path);
 }
 
@@ -96,7 +102,7 @@ function setSecret(key: string, token: string): void {
   const trimmed = token.trim();
 
   if (trimmed.length === 0) {
-    throw new Error('refusing to store an empty token');
+    throw new Error("refusing to store an empty token");
   }
 
   // 🛑 ONE LINE PER CREDENTIAL IS THE WHOLE FILE FORMAT. An embedded newline
@@ -104,7 +110,7 @@ function setSecret(key: string, token: string): void {
   // other key — so the next read returns a truncated credential rather than
   // failing. Refuse it at the door instead.
   if (/[\r\n]/.test(trimmed)) {
-    throw new Error('refusing to store a token containing a newline');
+    throw new Error("refusing to store a token containing a newline");
   }
 
   const secrets = readSecrets();

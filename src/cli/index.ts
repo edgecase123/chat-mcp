@@ -1,22 +1,22 @@
-import readline from 'node:readline';
-import { randomUUID } from 'node:crypto';
-import { openDb } from '../storage/db.js';
-import { NotifyBus, notifyPeer } from '../notify/bus.js';
-import { sendToRoom } from '../messaging/room-send.js';
-import { sendOrReason } from '../messaging/send-or-reason.js';
-import * as dao from '../storage/dao.js';
-import type { Message } from '../storage/dao.js';
-import { assertRoomName } from '../util/naming.js';
-import { stampOf as timeOf } from '../util/time.js';
-import { packageVersion } from '../util/version.js';
-import { bold, cyan, dim, green } from './color.js';
+import readline from "node:readline";
+import { randomUUID } from "node:crypto";
+import { openDb } from "../storage/db.js";
+import { NotifyBus, notifyPeer } from "../notify/bus.js";
+import { sendToRoom } from "../messaging/room-send.js";
+import { sendOrReason } from "../messaging/send-or-reason.js";
+import * as dao from "../storage/dao.js";
+import type { Message } from "../storage/dao.js";
+import { assertRoomName } from "../util/naming.js";
+import { stampOf as timeOf } from "../util/time.js";
+import { packageVersion } from "../util/version.js";
+import { bold, cyan, dim, green } from "./color.js";
 
 export interface CliOptions {
   handle: string;
 }
 
 interface Mode {
-  kind: 'top' | 'dm' | 'room';
+  kind: "top" | "dm" | "room";
   dmTarget?: string;
   roomName?: string;
 }
@@ -31,7 +31,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
     pid: process.pid,
     session_id,
     display_name: opts.handle,
-    metadata: { kind: 'human' },
+    metadata: { kind: "human" },
   });
 
   const rl = readline.createInterface({
@@ -40,15 +40,16 @@ export async function runCli(opts: CliOptions): Promise<void> {
     terminal: true,
   });
 
-  let mode: Mode = { kind: 'top' };
+  let mode: Mode = { kind: "top" };
   const promptFor = (): string => {
-    if (mode.kind === 'dm' && mode.dmTarget) return `${cyan(mode.dmTarget)} > `;
-    if (mode.kind === 'room' && mode.roomName) return `${cyan(mode.roomName)} > `;
-    return '> ';
+    if (mode.kind === "dm" && mode.dmTarget) return `${cyan(mode.dmTarget)} > `;
+    if (mode.kind === "room" && mode.roomName)
+      return `${cyan(mode.roomName)} > `;
+    return "> ";
   };
 
   console.log(
-    `${bold('chat-mcp')} ${dim(`v${packageVersion()}`)}  ·  handle: ${cyan(opts.handle)}  ·  ${dim('/help or Ctrl-C to quit')}`,
+    `${bold("chat-mcp")} ${dim(`v${packageVersion()}`)}  ·  handle: ${cyan(opts.handle)}  ·  ${dim("/help or Ctrl-C to quit")}`,
   );
   rl.setPrompt(promptFor());
   rl.prompt();
@@ -60,7 +61,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
   const printMessage = (m: Message, roomContext?: string): void => {
     // Two-line format. For room messages, insert cyan room name between
     // sender and timestamp so the channel is visible at a glance.
-    const ctx = roomContext ? `  ${cyan(roomContext)}` : '';
+    const ctx = roomContext ? `  ${cyan(roomContext)}` : "";
     const header = `  ${bold(m.from_handle)}${ctx}  ${dim(timeOf(m.sent_at))}`;
     process.stdout.write(`\r\x1b[K\n${header}\n    ${m.body}\n\n`);
     rl.prompt(true);
@@ -103,7 +104,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
   const cleanup = (): void => {
     if (closing) return;
     closing = true;
-    console.log(dim('bye'));
+    console.log(dim("bye"));
     rl.close();
     void notify.close().finally(() => {
       try {
@@ -117,48 +118,52 @@ export async function runCli(opts: CliOptions): Promise<void> {
 
   const doCommand = (line: string): void => {
     const parts = line.slice(1).split(/\s+/);
-    const cmd = parts[0] ?? '';
+    const cmd = parts[0] ?? "";
     const args = parts.slice(1);
     switch (cmd) {
-      case 'help':
-        console.log([
-          `  ${cyan('/list')}                    list online peers`,
-          `  ${cyan('/dm')} <handle>             enter DM mode with a peer`,
-          `  ${cyan('/rooms')} [--all]           list your rooms (or every room)`,
-          `  ${cyan('/rooms list')} [#room]      list participants of a room (default: current)`,
-          `  ${cyan('/rooms delete')} #<name>    delete a room (must be a member)`,
-          `  ${cyan('/rooms boot')} @<handle>    remove a participant from the current room`,
-          `  ${cyan('/join')} #<name>            join a room (auto-creates)`,
-          `  ${cyan('/leave')}                   leave the current room (removes membership)`,
-          `  ${cyan('/back')}                    exit DM or room mode (stay a member)`,
-          `  ${cyan('/whoami')}                  show your own handle`,
-          `  ${cyan('/quit')}                    exit`,
-          dim('  (plain text sends to the current DM target or room)'),
-        ].join('\n'));
+      case "help":
+        console.log(
+          [
+            `  ${cyan("/list")}                    list online peers`,
+            `  ${cyan("/dm")} <handle>             enter DM mode with a peer`,
+            `  ${cyan("/rooms")} [--all]           list your rooms (or every room)`,
+            `  ${cyan("/rooms list")} [#room]      list participants of a room (default: current)`,
+            `  ${cyan("/rooms delete")} #<name>    delete a room (must be a member)`,
+            `  ${cyan("/rooms boot")} @<handle>    remove a participant from the current room`,
+            `  ${cyan("/join")} #<name>            join a room (auto-creates)`,
+            `  ${cyan("/leave")}                   leave the current room (removes membership)`,
+            `  ${cyan("/back")}                    exit DM or room mode (stay a member)`,
+            `  ${cyan("/whoami")}                  show your own handle`,
+            `  ${cyan("/quit")}                    exit`,
+            dim("  (plain text sends to the current DM target or room)"),
+          ].join("\n"),
+        );
         break;
-      case 'list':
+      case "list":
         doList();
         break;
-      case 'dm':
+      case "dm":
         doDm(args[0]);
         break;
-      case 'rooms':
+      case "rooms":
         doRoomsDispatch(args);
         break;
-      case 'join':
+      case "join":
         doJoin(args[0]);
         break;
-      case 'leave':
+      case "leave":
         doLeave();
         break;
-      case 'back':
-        mode = { kind: 'top' };
+      case "back":
+        mode = { kind: "top" };
         break;
-      case 'whoami':
-        console.log(`  handle: ${cyan(opts.handle)}  ${dim(`session_id: ${session_id}`)}`);
+      case "whoami":
+        console.log(
+          `  handle: ${cyan(opts.handle)}  ${dim(`session_id: ${session_id}`)}`,
+        );
         break;
-      case 'quit':
-      case 'exit':
+      case "quit":
+      case "exit":
         cleanup();
         return;
       default:
@@ -167,15 +172,17 @@ export async function runCli(opts: CliOptions): Promise<void> {
   };
 
   const doList = (): void => {
-    const agents = dao.listAgents(db, false).filter((a) => a.handle !== opts.handle);
+    const agents = dao
+      .listAgents(db, false)
+      .filter((a) => a.handle !== opts.handle);
     if (agents.length === 0) {
-      console.log(dim('  (no peers online)'));
+      console.log(dim("  (no peers online)"));
       return;
     }
     for (const a of agents) {
       const name = bold(a.handle.padEnd(12));
       const kind = a.kind.padEnd(6);
-      const status = green('online');
+      const status = green("online");
       const seen = dim(`seen ${timeOf(a.last_seen_at)}`);
       console.log(`  ${name}  ${kind}  ${status}  ${seen}`);
     }
@@ -185,18 +192,18 @@ export async function runCli(opts: CliOptions): Promise<void> {
     // No subcommand → legacy "list your rooms" (preserves back-compat with
     // /rooms and /rooms --all).
     const sub = args[0];
-    if (!sub || sub === '--all') {
-      doRoomsIndex(args.includes('--all'));
+    if (!sub || sub === "--all") {
+      doRoomsIndex(args.includes("--all"));
       return;
     }
     switch (sub) {
-      case 'list':
+      case "list":
         doRoomsListMembers(args[1]);
         break;
-      case 'delete':
+      case "delete":
         doRoomsDelete(args[1]);
         break;
-      case 'boot':
+      case "boot":
         doRoomsBoot(args[1]);
         break;
       default:
@@ -208,21 +215,27 @@ export async function runCli(opts: CliOptions): Promise<void> {
     const rooms = includeAll ? dao.allRooms(db) : dao.myRooms(db, opts.handle);
     if (rooms.length === 0) {
       console.log(
-        dim(includeAll ? '  (no rooms exist)' : '  (not in any rooms — /rooms --all to discover)'),
+        dim(
+          includeAll
+            ? "  (no rooms exist)"
+            : "  (not in any rooms — /rooms --all to discover)",
+        ),
       );
       return;
     }
     for (const r of rooms) {
       const name = cyan(r.name.padEnd(16));
-      const members = dim(`${r.member_count} member${r.member_count === 1 ? '' : 's'}`);
+      const members = dim(
+        `${r.member_count} member${r.member_count === 1 ? "" : "s"}`,
+      );
       console.log(`  ${name}  ${members}`);
     }
   };
 
   const doRoomsListMembers = (roomArg: string | undefined): void => {
-    const name = roomArg ?? (mode.kind === 'room' ? mode.roomName : undefined);
+    const name = roomArg ?? (mode.kind === "room" ? mode.roomName : undefined);
     if (!name) {
-      console.log(dim('  usage: /rooms list #<room>  (or /join a room first)'));
+      console.log(dim("  usage: /rooms list #<room>  (or /join a room first)"));
       return;
     }
     try {
@@ -237,14 +250,14 @@ export async function runCli(opts: CliOptions): Promise<void> {
       return;
     }
     for (const handle of members) {
-      const marker = handle === opts.handle ? cyan('▸') : ' ';
+      const marker = handle === opts.handle ? cyan("▸") : " ";
       console.log(`  ${marker} ${handle}`);
     }
   };
 
   const doRoomsDelete = (roomArg: string | undefined): void => {
     if (!roomArg) {
-      console.log(dim('  usage: /rooms delete #<room>'));
+      console.log(dim("  usage: /rooms delete #<room>"));
       return;
     }
     try {
@@ -254,18 +267,22 @@ export async function runCli(opts: CliOptions): Promise<void> {
       return;
     }
     const result = dao.deleteRoom(db, roomArg, opts.handle);
-    if (!result.ok && result.reason === 'not-a-member') {
+    if (!result.ok && result.reason === "not-a-member") {
       console.log(dim(`  cannot delete ${roomArg}: you are not a member`));
       return;
     }
-    if (!result.ok && result.reason === 'owner-only') {
-      console.log(dim(`  cannot delete ${roomArg}: only ${result.owner} can, while they are a member`));
+    if (!result.ok && result.reason === "owner-only") {
+      console.log(
+        dim(
+          `  cannot delete ${roomArg}: only ${result.owner} can, while they are a member`,
+        ),
+      );
       return;
     }
     const deleted = result.ok;
     if (deleted) {
-      if (mode.kind === 'room' && mode.roomName === roomArg) {
-        mode = { kind: 'top' };
+      if (mode.kind === "room" && mode.roomName === roomArg) {
+        mode = { kind: "top" };
       }
       console.log(dim(`  deleted ${roomArg}`));
     } else {
@@ -274,18 +291,22 @@ export async function runCli(opts: CliOptions): Promise<void> {
   };
 
   const doRoomsBoot = (targetArg: string | undefined): void => {
-    if (mode.kind !== 'room' || !mode.roomName) {
-      console.log(dim('  usage: /rooms boot @<handle>  (must be in a room — /join first)'));
+    if (mode.kind !== "room" || !mode.roomName) {
+      console.log(
+        dim(
+          "  usage: /rooms boot @<handle>  (must be in a room — /join first)",
+        ),
+      );
       return;
     }
     if (!targetArg) {
-      console.log(dim('  usage: /rooms boot @<handle>'));
+      console.log(dim("  usage: /rooms boot @<handle>"));
       return;
     }
-    const target = targetArg.startsWith('@') ? targetArg.slice(1) : targetArg;
+    const target = targetArg.startsWith("@") ? targetArg.slice(1) : targetArg;
     const roomName = mode.roomName;
     if (target === opts.handle) {
-      console.log(dim('  cannot boot yourself — /leave instead'));
+      console.log(dim("  cannot boot yourself — /leave instead"));
       return;
     }
     if (!dao.isRoomMember(db, roomName, opts.handle)) {
@@ -300,9 +321,11 @@ export async function runCli(opts: CliOptions): Promise<void> {
 
     const now = Date.now();
     const body = `${opts.handle} booted ${target} from ${roomName}`;
-    const sysInfo = db.prepare(
-      `INSERT INTO messages (from_handle, to_handle, body, sent_at) VALUES (?, ?, ?, ?)`,
-    ).run(dao.SYSTEM_HANDLE, roomName, body, now);
+    const sysInfo = db
+      .prepare(
+        `INSERT INTO messages (from_handle, to_handle, body, sent_at) VALUES (?, ?, ?, ?)`,
+      )
+      .run(dao.SYSTEM_HANDLE, roomName, body, now);
     const sysId = Number(sysInfo.lastInsertRowid);
     // Advance the caller's watermark past the announcement so it doesn't
     // echo back to them on next flushInbox.
@@ -311,18 +334,24 @@ export async function runCli(opts: CliOptions): Promise<void> {
     const remaining = dao.roomMembers(db, roomName);
     for (const member of remaining) {
       if (member === opts.handle) continue;
-      notifyPeer(member, { id: sysId, to: roomName, from: dao.SYSTEM_HANDLE, ts: now, body });
+      notifyPeer(member, {
+        id: sysId,
+        to: roomName,
+        from: dao.SYSTEM_HANDLE,
+        ts: now,
+        body,
+      });
     }
     console.log(dim(`  booted ${target} from ${roomName}`));
   };
 
   const doDm = (target: string | undefined): void => {
     if (!target) {
-      console.log(dim('  usage: /dm <handle>'));
+      console.log(dim("  usage: /dm <handle>"));
       return;
     }
     if (target === opts.handle) {
-      console.log(dim('  cannot dm yourself'));
+      console.log(dim("  cannot dm yourself"));
       return;
     }
     const peer = dao.getAgent(db, target);
@@ -330,13 +359,15 @@ export async function runCli(opts: CliOptions): Promise<void> {
       console.log(dim(`  unknown peer: ${target}`));
       return;
     }
-    mode = { kind: 'dm', dmTarget: target };
-    console.log(`${cyan('▸')} dm with ${cyan(target)}  ${dim('(/back to leave)')}`);
+    mode = { kind: "dm", dmTarget: target };
+    console.log(
+      `${cyan("▸")} dm with ${cyan(target)}  ${dim("(/back to leave)")}`,
+    );
   };
 
   const doJoin = (name: string | undefined): void => {
     if (!name) {
-      console.log(dim('  usage: /join #<room-name>'));
+      console.log(dim("  usage: /join #<room-name>"));
       return;
     }
     try {
@@ -359,71 +390,96 @@ export async function runCli(opts: CliOptions): Promise<void> {
         });
       }
     }
-    mode = { kind: 'room', roomName: name };
+    mode = { kind: "room", roomName: name };
     console.log(
-      `${cyan('▸')} joined ${cyan(name)}  ${dim(
-        `(${result.room.member_count} member${result.room.member_count === 1 ? '' : 's'}, /leave to leave)`,
+      `${cyan("▸")} joined ${cyan(name)}  ${dim(
+        `(${result.room.member_count} member${result.room.member_count === 1 ? "" : "s"}, /leave to leave)`,
       )}`,
     );
   };
 
   const doLeave = (): void => {
-    if (mode.kind !== 'room' || !mode.roomName) {
-      console.log(dim('  not in a room. /rooms to list.'));
+    if (mode.kind !== "room" || !mode.roomName) {
+      console.log(dim("  not in a room. /rooms to list."));
       return;
     }
     const name = mode.roomName;
     dao.leaveRoom(db, name, opts.handle);
-    mode = { kind: 'top' };
+    mode = { kind: "top" };
     console.log(dim(`  left ${name}`));
   };
 
   const doText = (text: string): void => {
-    if (mode.kind === 'dm' && mode.dmTarget) {
+    if (mode.kind === "dm" && mode.dmTarget) {
       const peer = dao.getAgent(db, mode.dmTarget);
       if (!peer) {
-        console.log(dim(`  peer ${mode.dmTarget} no longer registered — /back and try again`));
+        console.log(
+          dim(
+            `  peer ${mode.dmTarget} no longer registered — /back and try again`,
+          ),
+        );
         return;
       }
       // The REPL has to stay up and say so, rather than exit on a send that
       // did not persist. The oneshot `send` verb still throws.
       const peerHandle = mode.dmTarget;
       const out = sendOrReason(() =>
-        dao.insertMessage(db, { from: opts.handle, to: peerHandle, body: text }),
+        dao.insertMessage(db, {
+          from: opts.handle,
+          to: peerHandle,
+          body: text,
+        }),
       );
-      if ('reason' in out) {
+      if ("reason" in out) {
         console.log(dim(`  ${out.reason}`));
         return;
       }
       const sent = out.sent;
-      notifyPeer(mode.dmTarget, { id: sent.id, to: mode.dmTarget, from: opts.handle, ts: sent.sent_at, body: text });
-      process.stdout.write(`${dim(`          → sent ${timeOf(sent.sent_at)}`)}\n`);
+      notifyPeer(mode.dmTarget, {
+        id: sent.id,
+        to: mode.dmTarget,
+        from: opts.handle,
+        ts: sent.sent_at,
+        body: text,
+      });
+      process.stdout.write(
+        `${dim(`          → sent ${timeOf(sent.sent_at)}`)}\n`,
+      );
       return;
     }
-    if (mode.kind === 'room' && mode.roomName) {
+    if (mode.kind === "room" && mode.roomName) {
       const roomName = mode.roomName;
       if (!dao.isRoomMember(db, roomName, opts.handle)) {
-        console.log(dim(`  no longer a member of ${roomName} — /back and /join again`));
+        console.log(
+          dim(`  no longer a member of ${roomName} — /back and /join again`),
+        );
         return;
       }
       // advanceOwnRead: true — the TUI reprints its own line immediately, so
       // the next flush must not repeat it.
       const out = sendOrReason(() =>
         sendToRoom(db, {
-          from: opts.handle, room: roomName, body: text, advanceOwnRead: true,
+          from: opts.handle,
+          room: roomName,
+          body: text,
+          advanceOwnRead: true,
         }),
       );
-      if ('reason' in out) {
+      if ("reason" in out) {
         console.log(dim(`  ${out.reason}`));
         return;
       }
-      process.stdout.write(`${dim(`          → sent ${timeOf(out.sent.sent_at)}`)}\n`);
+      process.stdout.write(
+        `${dim(`          → sent ${timeOf(out.sent.sent_at)}`)}\n`,
+      );
       return;
     }
-    console.log(dim('  Not in a DM or room. Use /dm <handle> or /join #<room>.'));
+    console.log(
+      dim("  Not in a DM or room. Use /dm <handle> or /join #<room>."),
+    );
   };
 
-  rl.on('line', (raw: string) => {
+  rl.on("line", (raw: string) => {
     const line = raw.trimEnd();
     if (line.length === 0) {
       rl.setPrompt(promptFor());
@@ -431,7 +487,7 @@ export async function runCli(opts: CliOptions): Promise<void> {
       return;
     }
     try {
-      if (line.startsWith('/')) {
+      if (line.startsWith("/")) {
         doCommand(line);
       } else {
         doText(line);
@@ -445,6 +501,6 @@ export async function runCli(opts: CliOptions): Promise<void> {
       rl.prompt();
     }
   });
-  rl.on('SIGINT', cleanup);
-  rl.on('close', cleanup);
+  rl.on("SIGINT", cleanup);
+  rl.on("close", cleanup);
 }

@@ -1,6 +1,11 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { activityEvent, nextPulses, dotTitle, PULSE_FAILSAFE_MS } from '../../web/assets/logic.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  activityEvent,
+  nextPulses,
+  dotTitle,
+  PULSE_FAILSAFE_MS,
+} from "../../web/assets/logic.js";
 
 /**
  * #240 — the browser half of the activity pulse. The supervisor already POSTs
@@ -13,14 +18,19 @@ import { activityEvent, nextPulses, dotTitle, PULSE_FAILSAFE_MS } from '../../we
 
 // ── activityEvent: parsing a frame the page did not produce ──────────────
 
-test('a tick frame parses to its handle and phase', () => {
-  const e = activityEvent(JSON.stringify({ handle: 'claude2-agent', phase: 'tick', ts: 1 }));
+test("a tick frame parses to its handle and phase", () => {
+  const e = activityEvent(
+    JSON.stringify({ handle: "claude2-agent", phase: "tick", ts: 1 }),
+  );
 
-  assert.deepEqual(e, { handle: 'claude2-agent', phase: 'tick' });
+  assert.deepEqual(e, { handle: "claude2-agent", phase: "tick" });
 });
 
-test('an end frame parses', () => {
-  assert.deepEqual(activityEvent('{"handle":"a","phase":"end"}'), { handle: 'a', phase: 'end' });
+test("an end frame parses", () => {
+  assert.deepEqual(activityEvent('{"handle":"a","phase":"end"}'), {
+    handle: "a",
+    phase: "end",
+  });
 });
 
 /**
@@ -28,14 +38,14 @@ test('an end frame parses', () => {
  * EventSource does not reconnect on a listener exception, so one malformed
  * frame would freeze the pulse for the rest of the page's life.
  */
-test('malformed JSON yields null rather than throwing', () => {
-  assert.equal(activityEvent('not json'), null);
-  assert.equal(activityEvent(''), null);
-  assert.equal(activityEvent('[]'), null);
-  assert.equal(activityEvent('null'), null);
+test("malformed JSON yields null rather than throwing", () => {
+  assert.equal(activityEvent("not json"), null);
+  assert.equal(activityEvent(""), null);
+  assert.equal(activityEvent("[]"), null);
+  assert.equal(activityEvent("null"), null);
 });
 
-test('a frame missing its handle yields null', () => {
+test("a frame missing its handle yields null", () => {
   assert.equal(activityEvent('{"phase":"tick"}'), null);
   assert.equal(activityEvent('{"handle":"","phase":"tick"}'), null);
   assert.equal(activityEvent('{"handle":42,"phase":"tick"}'), null);
@@ -46,32 +56,32 @@ test('a frame missing its handle yields null', () => {
  * against a future sender — but a phase this file does not know must not land
  * as a third state.
  */
-test('an unknown phase yields null', () => {
+test("an unknown phase yields null", () => {
   assert.equal(activityEvent('{"handle":"a","phase":"start"}'), null);
   assert.equal(activityEvent('{"handle":"a"}'), null);
 });
 
 // ── nextPulses: the reducer ──────────────────────────────────────────────
 
-test('a tick marks the handle as working', () => {
-  const next = nextPulses(new Set(), { handle: 'a', phase: 'tick' });
+test("a tick marks the handle as working", () => {
+  const next = nextPulses(new Set(), { handle: "a", phase: "tick" });
 
-  assert.deepEqual([...next], ['a']);
+  assert.deepEqual([...next], ["a"]);
 });
 
-test('an end clears it', () => {
-  const next = nextPulses(new Set(['a', 'b']), { handle: 'a', phase: 'end' });
+test("an end clears it", () => {
+  const next = nextPulses(new Set(["a", "b"]), { handle: "a", phase: "end" });
 
-  assert.deepEqual([...next], ['b']);
+  assert.deepEqual([...next], ["b"]);
 });
 
-test('two handles pulse independently', () => {
+test("two handles pulse independently", () => {
   let s: Set<string> = new Set();
-  s = nextPulses(s, { handle: 'a', phase: 'tick' });
-  s = nextPulses(s, { handle: 'b', phase: 'tick' });
-  s = nextPulses(s, { handle: 'a', phase: 'end' });
+  s = nextPulses(s, { handle: "a", phase: "tick" });
+  s = nextPulses(s, { handle: "b", phase: "tick" });
+  s = nextPulses(s, { handle: "a", phase: "end" });
 
-  assert.deepEqual([...s], ['b']);
+  assert.deepEqual([...s], ["b"]);
 });
 
 /**
@@ -80,20 +90,20 @@ test('two handles pulse independently', () => {
  * its DOM write on reference equality, so returning a fresh equal Set would
  * make the sidebar churn four times a second for no visible difference.
  */
-test('a repeated tick returns the SAME set, not an equal copy', () => {
-  const prev = new Set(['a']);
+test("a repeated tick returns the SAME set, not an equal copy", () => {
+  const prev = new Set(["a"]);
 
-  assert.equal(nextPulses(prev, { handle: 'a', phase: 'tick' }), prev);
+  assert.equal(nextPulses(prev, { handle: "a", phase: "tick" }), prev);
 });
 
-test('an end for a handle that was not working returns the same set', () => {
-  const prev = new Set(['a']);
+test("an end for a handle that was not working returns the same set", () => {
+  const prev = new Set(["a"]);
 
-  assert.equal(nextPulses(prev, { handle: 'b', phase: 'end' }), prev);
+  assert.equal(nextPulses(prev, { handle: "b", phase: "end" }), prev);
 });
 
-test('a null event returns the same set', () => {
-  const prev = new Set(['a']);
+test("a null event returns the same set", () => {
+  const prev = new Set(["a"]);
 
   assert.equal(nextPulses(prev, null), prev);
 });
@@ -105,7 +115,7 @@ test('a null event returns the same set', () => {
  * mid-turn blackout decision 3 on #240 removed, because a single long `Bash`
  * emits no event for its whole duration.
  */
-test('the failsafe outlasts a long silent tool call', () => {
+test("the failsafe outlasts a long silent tool call", () => {
   assert.equal(PULSE_FAILSAFE_MS, 30_000);
 });
 
@@ -122,12 +132,12 @@ test('the failsafe outlasts a long silent tool call', () => {
  * nothing about whether the motion can be stopped, which is 2.2.2 and lives in
  * `style.css`. Found by claude1.
  */
-test('a working peer says so in words, not only in motion', () => {
-  assert.match(dotTitle({ kind: 'peer', working: true }), /working/i);
+test("a working peer says so in words, not only in motion", () => {
+  assert.match(dotTitle({ kind: "peer", working: true }), /working/i);
 });
 
-test('🛑 an idle peer is given no title at all', () => {
-  assert.equal(dotTitle({ kind: 'peer', working: false }), null);
+test("🛑 an idle peer is given no title at all", () => {
+  assert.equal(dotTitle({ kind: "peer", working: false }), null);
 });
 
 /**
@@ -135,9 +145,9 @@ test('🛑 an idle peer is given no title at all', () => {
  * passes a room NAME as `target`, and before `data-kind` scoped the lookup a
  * pulse naming `#mcp` reached the room row. Found by claude1.
  */
-test('a room dot has no title, working or not', () => {
-  assert.equal(dotTitle({ kind: 'room', working: false }), null);
-  assert.equal(dotTitle({ kind: 'room', working: true }), null);
+test("a room dot has no title, working or not", () => {
+  assert.equal(dotTitle({ kind: "room", working: false }), null);
+  assert.equal(dotTitle({ kind: "room", working: true }), null);
 });
 
 /**
@@ -145,8 +155,12 @@ test('a room dot has no title, working or not', () => {
  * ruling made it unreadable, and a stale caller still passing it must not
  * change the answer.
  */
-test('an `online` flag a caller still passes changes nothing', () => {
-  const withFlag = dotTitle({ kind: 'peer', working: true, online: false } as never);
+test("an `online` flag a caller still passes changes nothing", () => {
+  const withFlag = dotTitle({
+    kind: "peer",
+    working: true,
+    online: false,
+  } as never);
 
-  assert.equal(withFlag, dotTitle({ kind: 'peer', working: true }));
+  assert.equal(withFlag, dotTitle({ kind: "peer", working: true }));
 });

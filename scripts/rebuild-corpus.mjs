@@ -13,20 +13,20 @@
  * It prints real coverage, because that number is what the fixture is worth.
  */
 
-import { writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { openDb } from '../src/storage/db.ts';
-import { normalise } from '../test/support/would-refuse.ts';
-import { carryOver } from '../test/support/carry-over.ts';
-import { corpusAge, maxAgeDays } from '../test/support/corpus-age.ts';
+import { writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { openDb } from "../src/storage/db.ts";
+import { normalise } from "../test/support/would-refuse.ts";
+import { carryOver } from "../test/support/carry-over.ts";
+import { corpusAge, maxAgeDays } from "../test/support/corpus-age.ts";
 
 const FIXTURE = join(
   dirname(fileURLToPath(import.meta.url)),
-  '..',
-  'test',
-  'fixtures',
-  'captured-refusals.json',
+  "..",
+  "test",
+  "fixtures",
+  "captured-refusals.json",
 );
 
 /** The command inside an allowlist entry: `Bash(rm x)` -> `rm x`. */
@@ -60,22 +60,28 @@ const rows = db
  */
 const capturedAtById = new Map(
   db
-    .prepare('SELECT id, created_at FROM approvals')
+    .prepare("SELECT id, created_at FROM approvals")
     .all()
     .map((r) => [r.id, new Date(Number(r.created_at)).toISOString()]),
 );
 
 /** Stamp one record from its own approval id(s), or leave it unstamped. */
 const stamp = (record) => {
-  const ids = record.approvalIds ?? (record.approvalId === undefined ? [] : [record.approvalId]);
-  const stamps = ids.map((id) => capturedAtById.get(id)).filter((s) => s !== undefined);
+  const ids =
+    record.approvalIds ??
+    (record.approvalId === undefined ? [] : [record.approvalId]);
+  const stamps = ids
+    .map((id) => capturedAtById.get(id))
+    .filter((s) => s !== undefined);
 
   // 🛑 THE EARLIEST OF THEM, NOT THE LATEST. A `refused_under_grant` answers
   // several approvals before its target is checked, and the measurement is
   // only as fresh as the OLDEST CLI behaviour it leans on. Taking the latest
   // was the same optimism as gating the ceiling on the newest record —
   // claude1's second finding on PR 112.
-  return stamps.length === 0 ? record : { ...record, capturedAt: stamps.sort()[0] };
+  return stamps.length === 0
+    ? record
+    : { ...record, capturedAt: stamps.sort()[0] };
 };
 
 const best = new Map();
@@ -85,7 +91,7 @@ for (const r of rows) {
   if (!m || !r.grant_entry) continue;
 
   const record = {
-    outcome: 'refused',
+    outcome: "refused",
     approvalId: r.id,
     attempted: normalise(inner(r.grant_entry)),
     allowlist: r.allowlist ? JSON.parse(r.allowlist) : null,
@@ -98,7 +104,8 @@ for (const r of rows) {
   // 🛑 PREFER A RECORD THAT CARRIES ITS ALLOWLIST. Keeping the first match is
   // the bug this script exists to prevent: a row with no allowlist is SILENT
   // in the fixture, so letting an older one win throws the record away.
-  if (!held || (held.allowlist === null && record.allowlist !== null)) best.set(key, record);
+  if (!held || (held.allowlist === null && record.allowlist !== null))
+    best.set(key, record);
 }
 
 const refused = [...best.values()];
@@ -120,19 +127,22 @@ const refused = [...best.values()];
  * already discarded a paid-for measurement twice.
  */
 const pendingPath = (name) =>
-  join(dirname(fileURLToPath(import.meta.url)), '..', 'test', 'fixtures', name);
+  join(dirname(fileURLToPath(import.meta.url)), "..", "test", "fixtures", name);
 
-const PENDING_PERMITS = pendingPath('captured-permits.pending.json');
-const PENDING_UNDER_GRANT = pendingPath('captured-refused-under-grant.pending.json');
+const PENDING_PERMITS = pendingPath("captured-permits.pending.json");
+const PENDING_UNDER_GRANT = pendingPath(
+  "captured-refused-under-grant.pending.json",
+);
 
-const readRows = (file) => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : []);
+const readRows = (file) =>
+  existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : [];
 
-const fixture = JSON.parse(readFileSync(FIXTURE, 'utf8'));
+const fixture = JSON.parse(readFileSync(FIXTURE, "utf8"));
 const pendingPermits = readRows(PENDING_PERMITS);
 const pendingUnderGrant = readRows(PENDING_UNDER_GRANT);
 
 const permits = carryOver({
-  outcome: 'permitted',
+  outcome: "permitted",
   keyOf: (r) => `${r.attempted}|${r.allowlistEntry}`,
   existing: fixture,
   pending: pendingPermits,
@@ -141,8 +151,8 @@ const permits = carryOver({
 // ⚠️ SORTED, BECAUSE `sameSet` IS ORDER-INSENSITIVE. Keying on the written
 // order would file one measurement twice under two spellings of one set.
 const underGrant = carryOver({
-  outcome: 'refused_under_grant',
-  keyOf: (r) => `${r.attempted}|${[...r.allowlist].sort().join('\u0000')}`,
+  outcome: "refused_under_grant",
+  keyOf: (r) => `${r.attempted}|${[...r.allowlist].sort().join("\u0000")}`,
   existing: fixture,
   pending: pendingUnderGrant,
 });
@@ -158,8 +168,12 @@ console.log(`wrote ${total} records`);
 console.log(`  refusals with a recorded allowlist : ${recorded.length}`);
 console.log(`  refused UNDER a grant              : ${underGrant.length}`);
 console.log(`  measured permits                   : ${permits.length}`);
-console.log(`  records present but SILENT         : ${refused.length - recorded.length}`);
-console.log(`\nreal coverage is ${recorded.length + underGrant.length + permits.length}, not ${total}.`);
+console.log(
+  `  records present but SILENT         : ${refused.length - recorded.length}`,
+);
+console.log(
+  `\nreal coverage is ${recorded.length + underGrant.length + permits.length}, not ${total}.`,
+);
 
 /**
  * 🛑 AGE IS PART OF WHAT THE FIXTURE IS WORTH, so it is printed beside
@@ -170,19 +184,25 @@ console.log(`\nreal coverage is ${recorded.length + underGrant.length + permits.
  */
 const age = corpusAge(records, Date.now());
 
-console.log(`\noldest capture is ${age.oldestAgeDays} day(s) old, newest ${age.newestAgeDays}, ceiling ${maxAgeDays()}.`);
+console.log(
+  `\noldest capture is ${age.oldestAgeDays} day(s) old, newest ${age.newestAgeDays}, ceiling ${maxAgeDays()}.`,
+);
 
 if (age.unstamped > 0) {
-  console.log(`  ⚠️ ${age.unstamped} of ${age.total} records carry NO date — their approval id is not in the database.`);
+  console.log(
+    `  ⚠️ ${age.unstamped} of ${age.total} records carry NO date — their approval id is not in the database.`,
+  );
 }
 
 // 🛑 CONSUMED, so a merged file cannot be merged twice or read as still waiting.
 for (const [file, rows, label] of [
-  [PENDING_PERMITS, pendingPermits, 'permit'],
-  [PENDING_UNDER_GRANT, pendingUnderGrant, 'refused-under-grant'],
+  [PENDING_PERMITS, pendingPermits, "permit"],
+  [PENDING_UNDER_GRANT, pendingUnderGrant, "refused-under-grant"],
 ]) {
   if (rows.length === 0) continue;
 
   rmSync(file, { force: true });
-  console.log(`merged ${rows.length} pending ${label} record(s) and removed the pending file.`);
+  console.log(
+    `merged ${rows.length} pending ${label} record(s) and removed the pending file.`,
+  );
 }

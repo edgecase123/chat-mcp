@@ -1,14 +1,14 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import type { ShimContext } from '../index.js';
-import type { ListedCommand } from '../../supervise/commands.js';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import type { ShimContext } from "../index.js";
+import type { ListedCommand } from "../../supervise/commands.js";
 import {
   Refusal,
   listCommandsFor,
   runCommandFor,
   type RunCommandOptions,
-} from '../../supervise/run-command-service.js';
-import type { ScriptResult } from '../../supervise/run-script.js';
+} from "../../supervise/run-command-service.js";
+import type { ScriptResult } from "../../supervise/run-script.js";
 
 /**
  * #133 slice 4 — the two tools an agent uses to run its project's own commands.
@@ -25,14 +25,14 @@ import type { ScriptResult } from '../../supervise/run-script.js';
  */
 
 const text = (payload: unknown) => ({
-  content: [{ type: 'text' as const, text: JSON.stringify(payload) }],
+  content: [{ type: "text" as const, text: JSON.stringify(payload) }],
 });
 
 /** What either tool resolves to when nothing refused it. Mirrors the broker's own dispatch. */
 type Answer = { commands: ListedCommand[] } | ScriptResult;
 
 /** Said to the caller when the failure is not a `Refusal` written for them. */
-export const COULD_NOT_RUN = 'the command could not be run';
+export const COULD_NOT_RUN = "the command could not be run";
 
 /**
  * One call, as the payload a tool returns.
@@ -53,12 +53,16 @@ export async function answerFor(
     return { ...(await work()), ok: true };
   } catch (err) {
     if (err instanceof Refusal) {
-      console.error(`run_command refused a request from "${handle}": ${err.detail}`);
+      console.error(
+        `run_command refused a request from "${handle}": ${err.detail}`,
+      );
 
       return { ok: false, error: err.message };
     }
 
-    console.error(`run_command failed a request from "${handle}": ${String(err)}`);
+    console.error(
+      `run_command failed a request from "${handle}": ${String(err)}`,
+    );
 
     return { ok: false, error: COULD_NOT_RUN };
   }
@@ -70,31 +74,41 @@ export function installRunCommand(
   opts: RunCommandOptions = {},
 ): void {
   server.registerTool(
-    'list_commands',
+    "list_commands",
     {
       title: "Which of this project's commands can I run?",
       description:
-        'Every command this agent may run, with the parameters each one takes. The list comes from a manifest the agent cannot edit, so a name missing from it cannot be run however it is spelled. Call this before run_command rather than guessing a name. An agent with no manifest gets ok false and an error saying so.',
+        "Every command this agent may run, with the parameters each one takes. The list comes from a manifest the agent cannot edit, so a name missing from it cannot be run however it is spelled. Call this before run_command rather than guessing a name. An agent with no manifest gets ok false and an error saying so.",
       inputSchema: {},
     },
-    async () => text(await answerFor(ctx.handle, () => listCommandsFor(ctx.handle))),
+    async () =>
+      text(await answerFor(ctx.handle, () => listCommandsFor(ctx.handle))),
   );
 
   server.registerTool(
-    'run_command',
+    "run_command",
     {
       title: "Run one of this project's commands",
       description:
         "Run a command from list_commands in the project directory, and return its exit code, stdout and stderr. A non-zero exit code is a RESULT: it comes back with ok true, because the command ran. ok false means the command did not run at all, and the error says why.",
       inputSchema: {
-        name: z.string().min(1).describe('The command name, exactly as list_commands reports it.'),
+        name: z
+          .string()
+          .min(1)
+          .describe("The command name, exactly as list_commands reports it."),
         params: z
           .record(z.string(), z.string())
           .optional()
-          .describe('The declared parameters for that command, by name. Omit when it takes none.'),
+          .describe(
+            "The declared parameters for that command, by name. Omit when it takes none.",
+          ),
       },
     },
     async ({ name, params }) =>
-      text(await answerFor(ctx.handle, () => runCommandFor(ctx.handle, name, params ?? {}, opts))),
+      text(
+        await answerFor(ctx.handle, () =>
+          runCommandFor(ctx.handle, name, params ?? {}, opts),
+        ),
+      ),
   );
 }

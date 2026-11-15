@@ -1,5 +1,5 @@
-import { test, type TestContext } from 'node:test';
-import assert from 'node:assert/strict';
+import { test, type TestContext } from "node:test";
+import assert from "node:assert/strict";
 import {
   existsSync,
   mkdtempSync,
@@ -8,17 +8,21 @@ import {
   realpathSync,
   symlinkSync,
   writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { spawn as realSpawn, spawnSync } from 'node:child_process';
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { spawn as realSpawn, spawnSync } from "node:child_process";
 
-process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-driver-'));
+process.env.CHAT_MCP_HOME = mkdtempSync(
+  join(tmpdir(), "chat-mcp-docker-driver-"),
+);
 
-const { setToken, setGhToken, clearGhToken } = await import('../../../src/supervise/auth.js');
-const { stateDir } = await import('../../../src/util/paths.js');
-const { registerMount, mountsPath } = await import('../../../src/supervise/mounts.js');
-const { claudeSpawn } = await import('../../../src/adapters/claude-spawn.js');
+const { setToken, setGhToken, clearGhToken } =
+  await import("../../../src/supervise/auth.js");
+const { stateDir } = await import("../../../src/util/paths.js");
+const { registerMount, mountsPath } =
+  await import("../../../src/supervise/mounts.js");
+const { claudeSpawn } = await import("../../../src/adapters/claude-spawn.js");
 const {
   dockerRunPlan,
   nodeModulesVolumeFor,
@@ -31,9 +35,9 @@ const {
   containerPathFor,
   containerMcpConfigPath,
   containerBusUrl,
-} = await import('../../../src/supervise/drivers/containerized.js');
+} = await import("../../../src/supervise/drivers/containerized.js");
 
-const PROJECT_DIR = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-project-'));
+const PROJECT_DIR = mkdtempSync(join(tmpdir(), "chat-mcp-docker-project-"));
 
 function dockerRunPlanFor(opts: Parameters<typeof dockerRunPlan>[1]) {
   return dockerRunPlan(claudeSpawn, opts);
@@ -68,11 +72,11 @@ function mockDocker(t: TestContext): {
   const stopInvocations: string[][] = [];
   let fakeDockerRun: ReturnType<typeof realSpawn> | undefined;
 
-  t.mock.module('node:child_process', {
+  t.mock.module("node:child_process", {
     namedExports: {
       spawn: (_cmd: string, args: string[]) => {
         calls.push(args);
-        if (args[0] === 'stop') {
+        if (args[0] === "stop") {
           stopInvocations.push(args);
           // `dockerStopFor` attaches an 'error' listener and calls `unref()`,
           // so the stub has to answer both or the code under test throws.
@@ -81,14 +85,17 @@ function mockDocker(t: TestContext): {
         // A real, controllable stand-in for the `docker run` CLI process:
         // long-lived with piped stdio, since spawnContainerized reads
         // child.stdout directly.
-        fakeDockerRun = realSpawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)']);
+        fakeDockerRun = realSpawn(process.execPath, [
+          "-e",
+          "setInterval(() => {}, 1000)",
+        ]);
         return fakeDockerRun;
       },
       // The pre-run `docker rm -f` is the one call that must still be
       // synchronous — the name has to be free before `docker run`.
       execFileSync: (_cmd: string, args: string[]) => {
         calls.push(args);
-        return Buffer.from('');
+        return Buffer.from("");
       },
     },
   });
@@ -107,16 +114,16 @@ function mockDocker(t: TestContext): {
   return { calls, stopInvocations, runningClient: () => fakeDockerRun };
 }
 
-test('with no token on file, building argv throws naming the fix', () => {
+test("with no token on file, building argv throws naming the fix", () => {
   assert.throws(
-    () => dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' }),
+    () => dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" }),
     /chat-mcp auth set-token/,
   );
 });
 
-test('the project dir is bind-mounted to the fixed in-container work dir', () => {
-  setToken('sk-ant-oat-x');
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+test("the project dir is bind-mounted to the fixed in-container work dir", () => {
+  setToken("sk-ant-oat-x");
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
   assert.ok(args.includes(`${PROJECT_DIR}:${CONTAINER_PROJECT_DIR}`));
 });
 
@@ -130,10 +137,10 @@ test('the project dir is bind-mounted to the fixed in-container work dir', () =>
  *
  * The bus is reached over HTTP now, so nothing in there is needed.
  */
-test('🚨 the chat-mcp state dir is NOT bind-mounted, so tokens and chat.db stay on the host', async () => {
-  const { stateDir } = await import('../../../src/util/paths.js');
-  setToken('sk-ant-oat-x');
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+test("🚨 the chat-mcp state dir is NOT bind-mounted, so tokens and chat.db stay on the host", async () => {
+  const { stateDir } = await import("../../../src/util/paths.js");
+  setToken("sk-ant-oat-x");
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
 
   for (const arg of args) {
     assert.ok(
@@ -147,9 +154,9 @@ test('🚨 the chat-mcp state dir is NOT bind-mounted, so tokens and chat.db sta
  * The paired control. An argv that mounted nothing at all would pass the test
  * above, and the agent would have no project to work on.
  */
-test('🚨 the project mount survives the state-dir removal', () => {
-  setToken('sk-ant-oat-x');
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+test("🚨 the project mount survives the state-dir removal", () => {
+  setToken("sk-ant-oat-x");
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
 
   assert.ok(args.includes(`${PROJECT_DIR}:${CONTAINER_PROJECT_DIR}`));
 });
@@ -167,14 +174,16 @@ test('🚨 the project mount survives the state-dir removal', () => {
  * runs on a handle's first container rather than on every one. A source side
  * that is a bare name, not an absolute path, is what makes it a volume.
  */
-test('🛑 a NAMED volume covers /work/node_modules, so the host platform build stays out', () => {
-  setToken('sk-ant-oat-x');
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
-  const spec = args.find((a) => a.endsWith(`:${CONTAINER_PROJECT_DIR}/node_modules`));
+test("🛑 a NAMED volume covers /work/node_modules, so the host platform build stays out", () => {
+  setToken("sk-ant-oat-x");
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
+  const spec = args.find((a) =>
+    a.endsWith(`:${CONTAINER_PROJECT_DIR}/node_modules`),
+  );
 
-  assert.ok(spec, `no node_modules overlay in ${args.join(' ')}`);
+  assert.ok(spec, `no node_modules overlay in ${args.join(" ")}`);
   assert.ok(
-    !spec.startsWith('/'),
+    !spec.startsWith("/"),
     `the source side is an absolute path, so this is a host bind, not a volume: ${spec}`,
   );
 });
@@ -190,12 +199,12 @@ test('🛑 a NAMED volume covers /work/node_modules, so the host platform build 
  * one's dependencies, across `--rm`, indefinitely. That is the "dependency
  * tree nobody declared" symptom reached from the other side.
  */
-test('🚨 one handle working in TWO project dirs gets two different volumes', () => {
-  const other = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-second-'));
+test("🚨 one handle working in TWO project dirs gets two different volumes", () => {
+  const other = mkdtempSync(join(tmpdir(), "chat-mcp-docker-second-"));
 
   assert.notEqual(
-    nodeModulesVolumeFor('claude1', PROJECT_DIR),
-    nodeModulesVolumeFor('claude1', other),
+    nodeModulesVolumeFor("claude1", PROJECT_DIR),
+    nodeModulesVolumeFor("claude1", other),
   );
 });
 
@@ -203,10 +212,10 @@ test('🚨 one handle working in TWO project dirs gets two different volumes', (
  * The paired control. Two handles on one tree must also differ, and a key
  * built from the project dir ALONE would pass the test above and fail this.
  */
-test('🛑 two handles in ONE project dir also get two different volumes', () => {
+test("🛑 two handles in ONE project dir also get two different volumes", () => {
   assert.notEqual(
-    nodeModulesVolumeFor('claude1', PROJECT_DIR),
-    nodeModulesVolumeFor('claude2', PROJECT_DIR),
+    nodeModulesVolumeFor("claude1", PROJECT_DIR),
+    nodeModulesVolumeFor("claude2", PROJECT_DIR),
   );
 });
 
@@ -214,10 +223,10 @@ test('🛑 two handles in ONE project dir also get two different volumes', () =>
  * 🛑 THE SAME INPUTS MUST GIVE THE SAME NAME, or the volume is anonymous in
  * all but spelling and the install runs on every spawn after all.
  */
-test('🛑 the volume name is STABLE across calls for one handle and dir', () => {
+test("🛑 the volume name is STABLE across calls for one handle and dir", () => {
   assert.equal(
-    nodeModulesVolumeFor('claude1', PROJECT_DIR),
-    nodeModulesVolumeFor('claude1', PROJECT_DIR),
+    nodeModulesVolumeFor("claude1", PROJECT_DIR),
+    nodeModulesVolumeFor("claude1", PROJECT_DIR),
   );
 });
 
@@ -226,12 +235,18 @@ test('🛑 the volume name is STABLE across calls for one handle and dir', () =>
  * volume and a second install. `realpathSync` collapses them, which is how
  * every other mount in this file is already resolved.
  */
-test('🚨 a project dir reached through a SYMLINK keys the SAME volume', () => {
-  const real = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-real-'));
-  const link = join(mkdtempSync(join(tmpdir(), 'chat-mcp-docker-link-')), 'alias');
+test("🚨 a project dir reached through a SYMLINK keys the SAME volume", () => {
+  const real = mkdtempSync(join(tmpdir(), "chat-mcp-docker-real-"));
+  const link = join(
+    mkdtempSync(join(tmpdir(), "chat-mcp-docker-link-")),
+    "alias",
+  );
   symlinkSync(real, link);
 
-  assert.equal(nodeModulesVolumeFor('claude1', link), nodeModulesVolumeFor('claude1', real));
+  assert.equal(
+    nodeModulesVolumeFor("claude1", link),
+    nodeModulesVolumeFor("claude1", real),
+  );
 });
 
 /**
@@ -239,8 +254,11 @@ test('🚨 a project dir reached through a SYMLINK keys the SAME volume', () => 
  * already keeps the handle narrower than that, but the digest is new, so the
  * COMPOSED name is what has to be checked.
  */
-test('🛑 the composed volume name is a legal docker volume name', () => {
-  assert.match(nodeModulesVolumeFor('claude1', PROJECT_DIR), /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/);
+test("🛑 the composed volume name is a legal docker volume name", () => {
+  assert.match(
+    nodeModulesVolumeFor("claude1", PROJECT_DIR),
+    /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/,
+  );
 });
 
 /**
@@ -249,20 +267,24 @@ test('🛑 the composed volume name is a legal docker volume name', () => {
  * run, for a different reason. Something has to populate it, and `/work`
  * carries the lockfile to do it from.
  */
-test('🛑 the container installs its own node_modules when the volume is empty', () => {
-  setToken('sk-ant-oat-x');
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
-  const prelude = args.find((a) => a.includes('npm ci'));
+test("🛑 the container installs its own node_modules when the volume is empty", () => {
+  setToken("sk-ant-oat-x");
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
+  const prelude = args.find((a) => a.includes("npm ci"));
 
-  assert.ok(prelude, `no install step in ${args.join(' ')}`);
+  assert.ok(prelude, `no install step in ${args.join(" ")}`);
   // Only that the argv CARRIES a guarded install. What the guard decides is
   // measured in a real `sh` further down, not read off this string.
   assert.match(
     prelude,
     new RegExp(`${CONTAINER_PROJECT_DIR}/package-lock\\.json`),
-    'the install is unconditional, so it reruns on every warm start',
+    "the install is unconditional, so it reruns on every warm start",
   );
-  assert.match(prelude, /node_modules\/\.lock-sha/, 'no lockfile-hash stamp to compare against');
+  assert.match(
+    prelude,
+    /node_modules\/\.lock-sha/,
+    "no lockfile-hash stamp to compare against",
+  );
 });
 
 /**
@@ -270,12 +292,15 @@ test('🛑 the container installs its own node_modules when the volume is empty'
  * write its MCP config, so an install step added only to that branch would
  * look right in every granted test and be absent from every plain one.
  */
-test('🛑 the install step is there on a NON-granted spawn too', () => {
-  setToken('sk-ant-oat-x');
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+test("🛑 the install step is there on a NON-granted spawn too", () => {
+  setToken("sk-ant-oat-x");
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
 
-  assert.ok(!args.includes('--mcp-config'), 'this fixture was supposed to be ungranted');
-  assert.ok(args.some((a) => a.includes('npm ci')));
+  assert.ok(
+    !args.includes("--mcp-config"),
+    "this fixture was supposed to be ungranted",
+  );
+  assert.ok(args.some((a) => a.includes("npm ci")));
 });
 
 /**
@@ -288,15 +313,15 @@ test('🛑 the install step is there on a NON-granted spawn too', () => {
  *
  * Every step `prelude` joins must therefore be atomic on its own.
  */
-test('🚨 a FAILED step stops the chain even when a later step contains ||', () => {
-  const script = prelude(['false', '[ -e /nonexistent-marker ] || true']);
-  const ran = spawnSync('sh', ['-c', script, 'sh', 'echo', 'AGENT_RAN'], {
-    encoding: 'utf8',
+test("🚨 a FAILED step stops the chain even when a later step contains ||", () => {
+  const script = prelude(["false", "[ -e /nonexistent-marker ] || true"]);
+  const ran = spawnSync("sh", ["-c", script, "sh", "echo", "AGENT_RAN"], {
+    encoding: "utf8",
   });
 
   assert.equal(
     ran.stdout.trim(),
-    '',
+    "",
     `the agent ran despite a failed first step; script was: ${script}`,
   );
 });
@@ -305,13 +330,13 @@ test('🚨 a FAILED step stops the chain even when a later step contains ||', ()
  * The paired control. A `prelude` that never reached `exec` would pass the
  * test above and start nothing at all.
  */
-test('🚨 an all-passing chain DOES reach the agent', () => {
-  const script = prelude(['true', '[ -e /nonexistent-marker ] || true']);
-  const ran = spawnSync('sh', ['-c', script, 'sh', 'echo', 'AGENT_RAN'], {
-    encoding: 'utf8',
+test("🚨 an all-passing chain DOES reach the agent", () => {
+  const script = prelude(["true", "[ -e /nonexistent-marker ] || true"]);
+  const ran = spawnSync("sh", ["-c", script, "sh", "echo", "AGENT_RAN"], {
+    encoding: "utf8",
   });
 
-  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+  assert.equal(ran.stdout.trim(), "AGENT_RAN");
 });
 
 /**
@@ -323,10 +348,15 @@ test('🚨 an all-passing chain DOES reach the agent', () => {
  * `requireSupervisorHandle` only ever checked truthiness, despite its docblock
  * calling itself the one place that validates the field.
  */
-test('🚨 a supervisor handle that could forge a mount spec REFUSES the plan', () => {
-  setToken('sk-ant-oat-x');
+test("🚨 a supervisor handle that could forge a mount spec REFUSES the plan", () => {
+  setToken("sk-ant-oat-x");
 
-  for (const bad of ['claude1:/etc', 'claude1:/work/node_modules:ro', '../claude1', 'Claude1']) {
+  for (const bad of [
+    "claude1:/etc",
+    "claude1:/work/node_modules:ro",
+    "../claude1",
+    "Claude1",
+  ]) {
     assert.throws(
       () => dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: bad }),
       /handle/i,
@@ -339,10 +369,12 @@ test('🚨 a supervisor handle that could forge a mount spec REFUSES the plan', 
  * The paired control. A `requireSupervisorHandle` that threw on everything
  * would pass the test above and spawn nothing at all.
  */
-test('🚨 a normal handle still builds a plan', () => {
-  setToken('sk-ant-oat-x');
+test("🚨 a normal handle still builds a plan", () => {
+  setToken("sk-ant-oat-x");
 
-  assert.ok(dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' }).length > 0);
+  assert.ok(
+    dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" }).length > 0,
+  );
 });
 
 /**
@@ -354,30 +386,32 @@ test('🚨 a normal handle still builds a plan', () => {
  * containment check and emitted exactly that spec. The `:ro` suffix is why an
  * `endsWith` check could not see it. `dockerRunPlan` must refuse instead.
  */
-test('🚨 a read-only path that collides with the node_modules volume REFUSES the spawn', () => {
-  setToken('sk-ant-oat-x');
+test("🚨 a read-only path that collides with the node_modules volume REFUSES the spawn", () => {
+  setToken("sk-ant-oat-x");
   // The declared path has to EXIST or `checkedProjectPath` refuses first, for
   // a reason that has nothing to do with the collision.
-  const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-nm-'));
-  mkdirSync(join(dir, 'node_modules'));
+  const dir = mkdtempSync(join(tmpdir(), "chat-mcp-docker-nm-"));
+  mkdirSync(join(dir, "node_modules"));
 
   assert.throws(
     () =>
       dockerArgsFor({
         cwd: dir,
-        supervisorHandle: 'claude1',
-        readOnlyPaths: ['node_modules'],
+        supervisorHandle: "claude1",
+        readOnlyPaths: ["node_modules"],
       }),
     /node_modules/,
   );
 });
 
-test('a registered extra mount appears at /mnt/<key>', () => {
-  const extraDir = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-extra-'));
-  setToken('sk-ant-oat-x');
-  registerMount('claude1', 'local-context', extraDir);
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
-  assert.ok(args.includes(`${extraDir}:${containerPathFor('local-context')}:ro`));
+test("a registered extra mount appears at /mnt/<key>", () => {
+  const extraDir = mkdtempSync(join(tmpdir(), "chat-mcp-docker-extra-"));
+  setToken("sk-ant-oat-x");
+  registerMount("claude1", "local-context", extraDir);
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
+  assert.ok(
+    args.includes(`${extraDir}:${containerPathFor("local-context")}:ro`),
+  );
 });
 
 /**
@@ -390,19 +424,19 @@ test('a registered extra mount appears at /mnt/<key>', () => {
  * substituted package runs later as the agent. #231's last comment carries the
  * probe and its `--network=none` control.
  */
-test('🔴 a registered extra mount is READ-ONLY, or the tree can write to the host dir', () => {
-  const extraDir = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-ro-extra-'));
-  setToken('sk-ant-oat-x');
-  registerMount('claude1', 'local-context', extraDir);
+test("🔴 a registered extra mount is READ-ONLY, or the tree can write to the host dir", () => {
+  const extraDir = mkdtempSync(join(tmpdir(), "chat-mcp-docker-ro-extra-"));
+  setToken("sk-ant-oat-x");
+  registerMount("claude1", "local-context", extraDir);
 
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
   const spec = args.find((a) => a.startsWith(`${extraDir}:`));
 
-  assert.ok(spec, `no mount spec for ${extraDir}; got ${args.join(' ')}`);
+  assert.ok(spec, `no mount spec for ${extraDir}; got ${args.join(" ")}`);
   // 🛑 THE WHOLE SPEC, NOT AN `endsWith(':ro')`. A spec can end in `:ro` and
   // still name the wrong destination, and the collision test above was written
   // because `endsWith` could not see a `:ro` suffix at all.
-  assert.equal(spec, `${extraDir}:${containerPathFor('local-context')}:ro`);
+  assert.equal(spec, `${extraDir}:${containerPathFor("local-context")}:ro`);
 });
 
 /**
@@ -412,16 +446,22 @@ test('🔴 a registered extra mount is READ-ONLY, or the tree can write to the h
  * container, and the thing `AGENTS.md` forbids in those words. The name is
  * what was right, so the body moved to meet it.
  */
-test('the token is injected by NAME via -e, and the value never appears as a bare arg', () => {
-  setToken('sk-ant-oat-secret-value');
-  const { args } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+test("the token is injected by NAME via -e, and the value never appears as a bare arg", () => {
+  setToken("sk-ant-oat-secret-value");
+  const { args } = dockerRunPlanFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
 
-  assert.ok(args.includes('-e'), 'no -e at all');
-  assert.ok(args.includes('CLAUDE_CODE_OAUTH_TOKEN'), 'the var is not passed by name');
+  assert.ok(args.includes("-e"), "no -e at all");
+  assert.ok(
+    args.includes("CLAUDE_CODE_OAUTH_TOKEN"),
+    "the var is not passed by name",
+  );
 
   for (const arg of args) {
     assert.ok(
-      !arg.includes('sk-ant-oat-secret-value'),
+      !arg.includes("sk-ant-oat-secret-value"),
       `the token value reached the docker argv as ${arg}`,
     );
   }
@@ -431,11 +471,14 @@ test('the token is injected by NAME via -e, and the value never appears as a bar
  * The paired control for the test above. An argv that simply dropped the token
  * would pass it, and the container would then start with no credential.
  */
-test('the token reaches the container through the spawn env instead', () => {
-  setToken('sk-ant-oat-secret-value');
-  const { env } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+test("the token reaches the container through the spawn env instead", () => {
+  setToken("sk-ant-oat-secret-value");
+  const { env } = dockerRunPlanFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
 
-  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, 'sk-ant-oat-secret-value');
+  assert.equal(env.CLAUDE_CODE_OAUTH_TOKEN, "sk-ant-oat-secret-value");
 });
 
 /**
@@ -450,44 +493,44 @@ test('the token reaches the container through the spawn env instead', () => {
  * fail, while an identical one stands, puts the next reader back where we
  * started.
  */
-test('the child command carries the ACTIVATING bypass flag, never --permission-mode', () => {
-  setToken('sk-ant-oat-x');
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+test("the child command carries the ACTIVATING bypass flag, never --permission-mode", () => {
+  setToken("sk-ant-oat-x");
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
 
   assert.ok(
-    args.includes('--dangerously-skip-permissions'),
-    'the bypass is available but never activated; every tool call will be denied',
+    args.includes("--dangerously-skip-permissions"),
+    "the bypass is available but never activated; every tool call will be denied",
   );
 
   // ⚠️ MEASURED, NOT ASSUMED. A live container with the activator ALONE
   // answered on the bus, so the enabler changes nothing and does not belong
   // in a security-sensitive arg list.
-  assert.ok(!args.includes('--allow-dangerously-skip-permissions'));
+  assert.ok(!args.includes("--allow-dangerously-skip-permissions"));
 
-  assert.ok(!args.includes('--permission-mode'));
-  assert.ok(!args.includes('--allowedTools'));
+  assert.ok(!args.includes("--permission-mode"));
+  assert.ok(!args.includes("--allowedTools"));
 });
 
-test('a resume id is forwarded as --resume', () => {
-  setToken('sk-ant-oat-x');
+test("a resume id is forwarded as --resume", () => {
+  setToken("sk-ant-oat-x");
   const args = dockerArgsFor({
     cwd: PROJECT_DIR,
-    supervisorHandle: 'claude1',
-    resumeSessionId: 'sess-123',
+    supervisorHandle: "claude1",
+    resumeSessionId: "sess-123",
   });
-  const i = args.indexOf('--resume');
+  const i = args.indexOf("--resume");
   assert.ok(i >= 0);
-  assert.equal(args[i + 1], 'sess-123');
+  assert.equal(args[i + 1], "sess-123");
 });
 
-test('the invocation runs the image with --rm, never leaving a stopped container behind', () => {
-  setToken('sk-ant-oat-x');
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
-  assert.ok(args.includes('--rm'));
+test("the invocation runs the image with --rm, never leaving a stopped container behind", () => {
+  setToken("sk-ant-oat-x");
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
+  assert.ok(args.includes("--rm"));
 });
 
-test('kill() stops the container by name via the daemon, not a raw signal to the docker-run client', async (t) => {
-  setToken('sk-ant-oat-x');
+test("kill() stops the container by name via the daemon, not a raw signal to the docker-run client", async (t) => {
+  setToken("sk-ant-oat-x");
   // 🛑 A RAW SIGTERM TO THE `docker run` CLIENT IS NOT THE CONTRACT. The
   // daemon ignores it (container-removal.test.ts, #148's real finding), so
   // `kill()` must shell out to `docker stop <name>` instead. This test
@@ -498,16 +541,19 @@ test('kill() stops the container by name via the daemon, not a raw signal to the
   const { spawnContainerized } = await import(
     `../../../src/supervise/drivers/containerized.js?kill-test=${Date.now()}`
   );
-  const agent = spawnContainerized(claudeSpawn, { cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  const agent = spawnContainerized(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
 
   agent.kill();
 
-  assert.deepEqual(stopInvocations, [['stop', '-t', '60', 'chat-mcp-claude1']]);
-  assert.ok(runningClient(), 'spawn mock was not invoked');
+  assert.deepEqual(stopInvocations, [["stop", "-t", "60", "chat-mcp-claude1"]]);
+  assert.ok(runningClient(), "spawn mock was not invoked");
 });
 
-test('a per-handle shutdownGraceSeconds overrides the -t default', async (t) => {
-  setToken('sk-ant-oat-x');
+test("a per-handle shutdownGraceSeconds overrides the -t default", async (t) => {
+  setToken("sk-ant-oat-x");
   const { stopInvocations } = mockDocker(t);
 
   const { spawnContainerized } = await import(
@@ -515,17 +561,17 @@ test('a per-handle shutdownGraceSeconds overrides the -t default', async (t) => 
   );
   const agent = spawnContainerized(claudeSpawn, {
     cwd: PROJECT_DIR,
-    supervisorHandle: 'claude1',
+    supervisorHandle: "claude1",
     shutdownGraceSeconds: 5,
   });
 
   agent.kill();
 
-  assert.deepEqual(stopInvocations, [['stop', '-t', '5', 'chat-mcp-claude1']]);
+  assert.deepEqual(stopInvocations, [["stop", "-t", "5", "chat-mcp-claude1"]]);
 });
 
-test('🛑 the container name is force-cleared BEFORE docker run, or a restart hits a name conflict', async (t) => {
-  setToken('sk-ant-oat-x');
+test("🛑 the container name is force-cleared BEFORE docker run, or a restart hits a name conflict", async (t) => {
+  setToken("sk-ant-oat-x");
   // The name is fixed per handle, and `kill()` no longer waits for the
   // teardown — so without this, restarting a handle inside the grace window
   // gets `Conflict. The container name is already in use` from the daemon.
@@ -535,10 +581,21 @@ test('🛑 the container name is force-cleared BEFORE docker run, or a restart h
   const { spawnContainerized } = await import(
     `../../../src/supervise/drivers/containerized.js?rm-test=${Date.now()}`
   );
-  spawnContainerized(claudeSpawn, { cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  spawnContainerized(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
 
-  assert.deepEqual(calls[0], ['rm', '-f', 'chat-mcp-claude1'], 'the first docker call must be rm -f');
-  assert.equal(calls[1]?.[0], 'run', 'docker run must follow the rm -f, not precede it');
+  assert.deepEqual(
+    calls[0],
+    ["rm", "-f", "chat-mcp-claude1"],
+    "the first docker call must be rm -f",
+  );
+  assert.equal(
+    calls[1]?.[0],
+    "run",
+    "docker run must follow the rm -f, not precede it",
+  );
 });
 
 // ── #133 slice 3b: the project's declared read-only paths ────────────────────
@@ -552,71 +609,82 @@ test('🛑 the container name is force-cleared BEFORE docker run, or a restart h
  * directory and fails for a reason that has nothing to do with the mount.
  */
 function projectWithScripts(): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'chat-mcp-ro-project-')));
-  mkdirSync(join(dir, 'scripts', 'lib'), { recursive: true });
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "chat-mcp-ro-project-")));
+  mkdirSync(join(dir, "scripts", "lib"), { recursive: true });
 
   return dir;
 }
 
-test('a declared read-only path is bind-mounted :ro at its path under the work dir', () => {
-  setToken('sk-ant-oat-x');
+test("a declared read-only path is bind-mounted :ro at its path under the work dir", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
   const args = dockerArgsFor({
     cwd: dir,
-    supervisorHandle: 'claude1',
-    readOnlyPaths: ['scripts'],
+    supervisorHandle: "claude1",
+    readOnlyPaths: ["scripts"],
   });
 
-  assert.ok(args.includes(`${dir}/scripts:${CONTAINER_PROJECT_DIR}/scripts:ro`));
+  assert.ok(
+    args.includes(`${dir}/scripts:${CONTAINER_PROJECT_DIR}/scripts:ro`),
+  );
 });
 
-test('🛑 the :ro mount comes AFTER the read-write project mount, or it is not layered over it', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 the :ro mount comes AFTER the read-write project mount, or it is not layered over it", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
   const args = dockerArgsFor({
     cwd: dir,
-    supervisorHandle: 'claude1',
-    readOnlyPaths: ['scripts'],
+    supervisorHandle: "claude1",
+    readOnlyPaths: ["scripts"],
   });
 
   // Nested bind precedence is what makes this work at all: the inner mount has
   // to be layered over the wider one. A `:ro` emitted first is a different
   // command with a different result.
   const outer = args.indexOf(`${dir}:${CONTAINER_PROJECT_DIR}`);
-  const inner = args.indexOf(`${dir}/scripts:${CONTAINER_PROJECT_DIR}/scripts:ro`);
+  const inner = args.indexOf(
+    `${dir}/scripts:${CONTAINER_PROJECT_DIR}/scripts:ro`,
+  );
 
-  assert.ok(outer >= 0, 'the read-write project mount is missing');
-  assert.ok(inner > outer, `expected the :ro mount at a later index than ${outer}, got ${inner}`);
+  assert.ok(outer >= 0, "the read-write project mount is missing");
+  assert.ok(
+    inner > outer,
+    `expected the :ro mount at a later index than ${outer}, got ${inner}`,
+  );
 });
 
-test('🛑 the project mount itself stays READ-WRITE, so the agent can still edit the repo', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 the project mount itself stays READ-WRITE, so the agent can still edit the repo", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
   const args = dockerArgsFor({
     cwd: dir,
-    supervisorHandle: 'claude1',
-    readOnlyPaths: ['scripts'],
+    supervisorHandle: "claude1",
+    readOnlyPaths: ["scripts"],
   });
 
   assert.ok(args.includes(`${dir}:${CONTAINER_PROJECT_DIR}`));
   assert.ok(!args.includes(`${dir}:${CONTAINER_PROJECT_DIR}:ro`));
 });
 
-test('every declared path gets its own mount, including a nested one', () => {
-  setToken('sk-ant-oat-x');
+test("every declared path gets its own mount, including a nested one", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
   const args = dockerArgsFor({
     cwd: dir,
-    supervisorHandle: 'claude1',
-    readOnlyPaths: ['scripts', 'scripts/lib'],
+    supervisorHandle: "claude1",
+    readOnlyPaths: ["scripts", "scripts/lib"],
   });
 
-  assert.ok(args.includes(`${dir}/scripts:${CONTAINER_PROJECT_DIR}/scripts:ro`));
-  assert.ok(args.includes(`${dir}/scripts/lib:${CONTAINER_PROJECT_DIR}/scripts/lib:ro`));
+  assert.ok(
+    args.includes(`${dir}/scripts:${CONTAINER_PROJECT_DIR}/scripts:ro`),
+  );
+  assert.ok(
+    args.includes(`${dir}/scripts/lib:${CONTAINER_PROJECT_DIR}/scripts/lib:ro`),
+  );
 });
 
-test('🛑 chat-mcp SHIPS NO DEFAULT: no declared paths means no :ro mount at all', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 chat-mcp SHIPS NO DEFAULT: no declared paths means no :ro mount at all", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
 
   // 🛑 A HANDLE WITH NO REGISTERED MOUNT, SO THE ASSERTION CAN STAY STRONG.
@@ -626,155 +694,198 @@ test('🛑 chat-mcp SHIPS NO DEFAULT: no declared paths means no :ro mount at al
   // first fix and it lost the broader claim: a shipped default mounted
   // anywhere else stopped failing. Raised by claude2 on PR 245.
   for (const opts of [
-    { cwd: dir, supervisorHandle: 'nodefault' },
-    { cwd: dir, supervisorHandle: 'nodefault', readOnlyPaths: [] },
+    { cwd: dir, supervisorHandle: "nodefault" },
+    { cwd: dir, supervisorHandle: "nodefault", readOnlyPaths: [] },
   ]) {
     const args = dockerArgsFor(opts);
     // Deriving `scripts/` from a script path is what lee objected to: it would
     // encode one consumer's layout into chat-mcp.
     assert.ok(
-      !args.some((arg) => arg.endsWith(':ro')),
-      `expected no :ro mount, got ${args.filter((a) => a.endsWith(':ro')).join(', ')}`,
+      !args.some((arg) => arg.endsWith(":ro")),
+      `expected no :ro mount, got ${args.filter((a) => a.endsWith(":ro")).join(", ")}`,
     );
   }
 });
 
-test('🛑 a declared path that is a SYMLINK OUT of the project REFUSES the spawn', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 a declared path that is a SYMLINK OUT of the project REFUSES the spawn", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
-  symlinkSync('/etc', join(dir, 'conf'));
+  symlinkSync("/etc", join(dir, "conf"));
 
   // Mounting it would expose a host directory the project does not own. A
   // LEXICAL check cannot see this, which is the whole reason the driver calls
   // `checkedProjectPath`.
   assert.throws(
-    () => dockerArgsFor({ cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: ['conf'] }),
+    () =>
+      dockerArgsFor({
+        cwd: dir,
+        supervisorHandle: "claude1",
+        readOnlyPaths: ["conf"],
+      }),
     /outside/,
   );
 });
 
-test('🛑 a declared path that is NOT ON DISK refuses, rather than letting docker create an empty one', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 a declared path that is NOT ON DISK refuses, rather than letting docker create an empty one", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
 
   // docker creates a missing host path as an empty directory, which would MASK
   // the real tree inside the container and read as "the gate script vanished".
   assert.throws(
-    () => dockerArgsFor({ cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: ['nope'] }),
+    () =>
+      dockerArgsFor({
+        cwd: dir,
+        supervisorHandle: "claude1",
+        readOnlyPaths: ["nope"],
+      }),
     /does not exist/,
   );
 });
 
-test('🛑 an ABSOLUTE declared path refuses', () => {
-  setToken('sk-ant-oat-x');
-  const dir = projectWithScripts();
-
-  assert.throws(
-    () => dockerArgsFor({ cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: ['/etc'] }),
-    /relative/,
-  );
-});
-
-test('🛑 a declared path that LEXICALLY escapes the project refuses', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 an ABSOLUTE declared path refuses", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
 
   assert.throws(
     () =>
       dockerArgsFor({
         cwd: dir,
-        supervisorHandle: 'claude1',
-        readOnlyPaths: ['scripts/../../etc'],
+        supervisorHandle: "claude1",
+        readOnlyPaths: ["/etc"],
+      }),
+    /relative/,
+  );
+});
+
+test("🛑 a declared path that LEXICALLY escapes the project refuses", () => {
+  setToken("sk-ant-oat-x");
+  const dir = projectWithScripts();
+
+  assert.throws(
+    () =>
+      dockerArgsFor({
+        cwd: dir,
+        supervisorHandle: "claude1",
+        readOnlyPaths: ["scripts/../../etc"],
       }),
     /inside the project/,
   );
 });
 
-test('🛑 a declared path containing a COLON refuses, rather than emitting a malformed mount spec', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 a declared path containing a COLON refuses, rather than emitting a malformed mount spec", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
-  mkdirSync(join(dir, 'odd:name'));
+  mkdirSync(join(dir, "odd:name"));
 
   // docker's own parser rejects the four-field spec this would build, so the
   // whole spawn dies at `docker run` with `too many colons` instead of here.
   assert.throws(
-    () => dockerArgsFor({ cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: ['odd:name'] }),
+    () =>
+      dockerArgsFor({
+        cwd: dir,
+        supervisorHandle: "claude1",
+        readOnlyPaths: ["odd:name"],
+      }),
     /colon/,
   );
 });
 
-test('🛑 a declared path that is a SYMLINK INSIDE the project REFUSES, or the real directory stays writable', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 a declared path that is a SYMLINK INSIDE the project REFUSES, or the real directory stays writable", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
-  mkdirSync(join(dir, 'real-scripts'));
-  symlinkSync('real-scripts', join(dir, 'linked'));
+  mkdirSync(join(dir, "real-scripts"));
+  symlinkSync("real-scripts", join(dir, "linked"));
 
   // Mounting `<dir>/real-scripts` at `/work/linked:ro` would leave
   // `/work/real-scripts` writable — the same host directory, under its real
   // name — and the broker resolves `linked/gate.sh` through the symlink too.
   assert.throws(
-    () => dockerArgsFor({ cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: ['linked'] }),
+    () =>
+      dockerArgsFor({
+        cwd: dir,
+        supervisorHandle: "claude1",
+        readOnlyPaths: ["linked"],
+      }),
     /symlink or sits under one/,
   );
 });
 
-test('🛑 a declared path UNDER a symlinked directory refuses for the same reason', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 a declared path UNDER a symlinked directory refuses for the same reason", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
-  mkdirSync(join(dir, 'real-scripts', 'lib'), { recursive: true });
-  symlinkSync('real-scripts', join(dir, 'linked'));
+  mkdirSync(join(dir, "real-scripts", "lib"), { recursive: true });
+  symlinkSync("real-scripts", join(dir, "linked"));
 
   assert.throws(
-    () => dockerArgsFor({ cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: ['linked/lib'] }),
+    () =>
+      dockerArgsFor({
+        cwd: dir,
+        supervisorHandle: "claude1",
+        readOnlyPaths: ["linked/lib"],
+      }),
     /symlink or sits under one/,
   );
 });
 
-test('🛑 EVERY spelling of the project ROOT refuses, not just the bare one', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 EVERY spelling of the project ROOT refuses, not just the bare one", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
 
   // All three normalise to the root. Mounting it would stop the agent editing
   // the repo it is working in, which is the cost lee explicitly did not accept.
-  for (const spelling of ['.', './', 'scripts/..']) {
+  for (const spelling of [".", "./", "scripts/.."]) {
     assert.throws(
-      () => dockerArgsFor({ cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: [spelling] }),
+      () =>
+        dockerArgsFor({
+          cwd: dir,
+          supervisorHandle: "claude1",
+          readOnlyPaths: [spelling],
+        }),
       /project root/,
       `"${spelling}" was accepted`,
     );
   }
 });
 
-test('the container side is the NORMALISED path, never the raw declared spelling', () => {
-  setToken('sk-ant-oat-x');
+test("the container side is the NORMALISED path, never the raw declared spelling", () => {
+  setToken("sk-ant-oat-x");
   const dir = projectWithScripts();
 
-  for (const spelling of ['scripts/./lib', 'scripts//lib', 'scripts/lib/']) {
+  for (const spelling of ["scripts/./lib", "scripts//lib", "scripts/lib/"]) {
     const args = dockerArgsFor({
       cwd: dir,
-      supervisorHandle: 'claude1',
+      supervisorHandle: "claude1",
       readOnlyPaths: [spelling],
     });
 
     assert.ok(
-      args.includes(`${dir}/scripts/lib:${CONTAINER_PROJECT_DIR}/scripts/lib:ro`),
-      `"${spelling}" emitted ${args.filter((a) => a.endsWith(':ro')).join(', ')}`,
+      args.includes(
+        `${dir}/scripts/lib:${CONTAINER_PROJECT_DIR}/scripts/lib:ro`,
+      ),
+      `"${spelling}" emitted ${args.filter((a) => a.endsWith(":ro")).join(", ")}`,
     );
   }
 });
 
-test('a project directory reached through a SYMLINK still mounts its real paths', () => {
-  setToken('sk-ant-oat-x');
+test("a project directory reached through a SYMLINK still mounts its real paths", () => {
+  setToken("sk-ant-oat-x");
   const real = projectWithScripts();
-  const link = join(mkdtempSync(join(tmpdir(), 'chat-mcp-ro-link-')), 'proj');
+  const link = join(mkdtempSync(join(tmpdir(), "chat-mcp-ro-link-")), "proj");
   symlinkSync(real, link);
 
   // `opts.cwd` is whatever the operator registered, and on macOS `mkdtemp`
   // alone hands back a path under the `/var` symlink. The project dir is
   // resolved before the comparison, so this is a mount and not a refusal.
-  const args = dockerArgsFor({ cwd: link, supervisorHandle: 'claude1', readOnlyPaths: ['scripts'] });
+  const args = dockerArgsFor({
+    cwd: link,
+    supervisorHandle: "claude1",
+    readOnlyPaths: ["scripts"],
+  });
 
-  assert.ok(args.includes(`${real}/scripts:${CONTAINER_PROJECT_DIR}/scripts:ro`));
+  assert.ok(
+    args.includes(`${real}/scripts:${CONTAINER_PROJECT_DIR}/scripts:ro`),
+  );
 });
 
 /**
@@ -785,15 +896,21 @@ test('a project directory reached through a SYMLINK still mounts its real paths'
  *
  * The argv is what mounts it, so this is the last place that can say no.
  */
-test('🛑 a project dir ABOVE the state directory refuses the spawn argv', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 a project dir ABOVE the state directory refuses the spawn argv", () => {
+  setToken("sk-ant-oat-x");
 
   // Positive control: the same call with an ordinary project dir succeeds, so
   // the refusal below is the containment check and not a missing token.
-  assert.ok(dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' }).length > 0);
+  assert.ok(
+    dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" }).length > 0,
+  );
 
   assert.throws(
-    () => dockerArgsFor({ cwd: dirname(realpathSync(stateDir())), supervisorHandle: 'claude1' }),
+    () =>
+      dockerArgsFor({
+        cwd: dirname(realpathSync(stateDir())),
+        supervisorHandle: "claude1",
+      }),
     /state directory/,
   );
 });
@@ -803,33 +920,38 @@ test('🛑 a project dir ABOVE the state directory refuses the spawn argv', () =
  * `mounts.json` is a file, so a key registered before the guard existed is
  * still live, and this loop is the last thing that can refuse it.
  */
-test('🛑 an extra mount ABOVE the state directory refuses the spawn argv', () => {
-  setToken('sk-ant-oat-x');
+test("🛑 an extra mount ABOVE the state directory refuses the spawn argv", () => {
+  setToken("sk-ant-oat-x");
 
   // 🛑 WRITTEN STRAIGHT TO THE FILE, because `registerMount` now refuses it.
   // That IS the case under test: a key registered before the guard existed.
   writeFileSync(
     mountsPath(),
-    JSON.stringify({ agents: { claude8: { evil: dirname(realpathSync(stateDir())) } } }),
+    JSON.stringify({
+      agents: { claude8: { evil: dirname(realpathSync(stateDir())) } },
+    }),
   );
 
   assert.throws(
-    () => dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude8' }),
+    () => dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude8" }),
     /state directory/,
   );
 });
 
-
-const BUS = { url: 'http://127.0.0.1:54321/mcp', token: 'bus-token-secret' };
+const BUS = { url: "http://127.0.0.1:54321/mcp", token: "bus-token-secret" };
 
 function dockerBusPlan() {
-  setToken('sk-ant-oat-x');
+  setToken("sk-ant-oat-x");
 
   return dockerRunPlanFor({
     cwd: PROJECT_DIR,
-    supervisorHandle: 'claude1',
+    supervisorHandle: "claude1",
     bus: BUS,
-    grant: { handle: 'claude1-agent', configPath: '/unused/host/path.json', tools: [] },
+    grant: {
+      handle: "claude1-agent",
+      configPath: "/unused/host/path.json",
+      tools: [],
+    },
   });
 }
 
@@ -841,12 +963,16 @@ function busConfig(): Record<string, any> {
   return JSON.parse(raw) as Record<string, any>;
 }
 
-test('🚨 the container config is an HTTP entry, not a command that opens the host database', () => {
+test("🚨 the container config is an HTTP entry, not a command that opens the host database", () => {
   const chat = busConfig().mcpServers.chat;
 
-  assert.equal(chat.type, 'http');
+  assert.equal(chat.type, "http");
   assert.equal(chat.headers.Authorization, `Bearer ${BUS.token}`);
-  assert.equal(chat.command, undefined, 'still launching a stdio shim inside the container');
+  assert.equal(
+    chat.command,
+    undefined,
+    "still launching a stdio shim inside the container",
+  );
 });
 
 /**
@@ -855,25 +981,37 @@ test('🚨 the container config is an HTTP entry, not a command that opens the h
  * url verbatim gives the agent a bus that is silently unreachable — it looks
  * configured and connects to nothing.
  */
-test('🚨 the config url points at the host, never at the container own loopback', () => {
+test("🚨 the config url points at the host, never at the container own loopback", () => {
   const { url } = busConfig().mcpServers.chat;
 
-  assert.equal(url, 'http://host.docker.internal:54321/mcp');
-  assert.ok(!url.includes('127.0.0.1'), `the container would dial itself: ${url}`);
+  assert.equal(url, "http://host.docker.internal:54321/mcp");
+  assert.ok(
+    !url.includes("127.0.0.1"),
+    `the container would dial itself: ${url}`,
+  );
 });
 
-test('🚨 containerBusUrl keeps the port and the path while moving only the host', () => {
-  assert.equal(containerBusUrl('http://127.0.0.1:9/mcp'), 'http://host.docker.internal:9/mcp');
+test("🚨 containerBusUrl keeps the port and the path while moving only the host", () => {
+  assert.equal(
+    containerBusUrl("http://127.0.0.1:9/mcp"),
+    "http://host.docker.internal:9/mcp",
+  );
 });
 
-test('🚨 the bearer token never appears in the docker argv', () => {
+test("🚨 the bearer token never appears in the docker argv", () => {
   const { args } = dockerBusPlan();
 
   for (const arg of args) {
-    assert.ok(!arg.includes(BUS.token), `the bus token reached the argv as ${arg}`);
+    assert.ok(
+      !arg.includes(BUS.token),
+      `the bus token reached the argv as ${arg}`,
+    );
   }
 
-  assert.ok(args.includes(CONTAINER_MCP_CONFIG_ENV), 'the config is not passed by name');
+  assert.ok(
+    args.includes(CONTAINER_MCP_CONFIG_ENV),
+    "the config is not passed by name",
+  );
 });
 
 /**
@@ -881,41 +1019,54 @@ test('🚨 the bearer token never appears in the docker argv', () => {
  * separate argv entries. `sh -c 'script' name args…` puts them in `"$@"`, so
  * nothing is re-quoted or re-split.
  */
-test('🚨 the command is wrapped so the config is written INSIDE the container', () => {
+test("🚨 the command is wrapped so the config is written INSIDE the container", () => {
   const { args } = dockerBusPlan();
-  const sh = args.indexOf('sh');
+  const sh = args.indexOf("sh");
 
-  assert.ok(sh > 0, 'no sh prelude');
-  assert.equal(args[sh + 1], '-c');
-  assert.ok(args[sh + 2]?.includes(containerMcpConfigPath(claudeSpawn)), 'writes the wrong path');
-  assert.ok(args[sh + 2]?.includes('exec "$@"'), 'never execs the real CLI');
-  assert.equal(args[sh + 3], 'sh', 'no $0 placeholder, so the first CLI arg is eaten');
-  assert.equal(args[sh + 4], 'claude');
-  assert.ok(args.includes('--dangerously-skip-permissions'), 'CLI flags did not survive');
+  assert.ok(sh > 0, "no sh prelude");
+  assert.equal(args[sh + 1], "-c");
+  assert.ok(
+    args[sh + 2]?.includes(containerMcpConfigPath(claudeSpawn)),
+    "writes the wrong path",
+  );
+  assert.ok(args[sh + 2]?.includes('exec "$@"'), "never execs the real CLI");
+  assert.equal(
+    args[sh + 3],
+    "sh",
+    "no $0 placeholder, so the first CLI arg is eaten",
+  );
+  assert.equal(args[sh + 4], "claude");
+  assert.ok(
+    args.includes("--dangerously-skip-permissions"),
+    "CLI flags did not survive",
+  );
 });
 
-test('🚨 a containerized spawn with no bus endpoint refuses rather than starting blind', () => {
-  setToken('sk-ant-oat-x');
+test("🚨 a containerized spawn with no bus endpoint refuses rather than starting blind", () => {
+  setToken("sk-ant-oat-x");
 
   assert.throws(
     () =>
       dockerRunPlanFor({
         cwd: PROJECT_DIR,
-        supervisorHandle: 'claude1',
-        grant: { handle: 'claude1-agent', configPath: '/unused.json', tools: [] },
+        supervisorHandle: "claude1",
+        grant: {
+          handle: "claude1-agent",
+          configPath: "/unused.json",
+          tools: [],
+        },
       }),
     /bus/i,
   );
 });
-
 
 /**
  * 🚨 `docker rm -f` SIGKILLs this handle's live container. Running it before
  * the plan is validated means a spawn that cannot possibly succeed still takes
  * the running agent down on its way to throwing.
  */
-test('🚨 a plan that cannot be built kills nothing', async (t) => {
-  setToken('sk-ant-oat-x');
+test("🚨 a plan that cannot be built kills nothing", async (t) => {
+  setToken("sk-ant-oat-x");
 
   const { calls } = mockDocker(t);
 
@@ -927,15 +1078,23 @@ test('🚨 a plan that cannot be built kills nothing', async (t) => {
     () =>
       spawnContainerized(claudeSpawn, {
         cwd: PROJECT_DIR,
-        supervisorHandle: 'claude1',
-        grant: { handle: 'claude1-agent', configPath: '/unused.json', tools: [] },
+        supervisorHandle: "claude1",
+        grant: {
+          handle: "claude1-agent",
+          configPath: "/unused.json",
+          tools: [],
+        },
       }),
     /bus/i,
   );
 
-  const removals = calls.filter((argv) => argv[0] === 'rm');
+  const removals = calls.filter((argv) => argv[0] === "rm");
 
-  assert.deepEqual(removals, [], `the live container was removed anyway: ${JSON.stringify(removals)}`);
+  assert.deepEqual(
+    removals,
+    [],
+    `the live container was removed anyway: ${JSON.stringify(removals)}`,
+  );
 });
 
 /**
@@ -943,17 +1102,20 @@ test('🚨 a plan that cannot be built kills nothing', async (t) => {
  * ticket, open a PR, or push. The token is injected exactly the way the Claude
  * token is — by NAME, so the value never reaches argv.
  */
-test('the gh token is injected by NAME via -e, and the value never appears as a bare arg', () => {
-  setToken('sk-ant-oat-x');
-  setGhToken('ghp-secret-value');
+test("the gh token is injected by NAME via -e, and the value never appears as a bare arg", () => {
+  setToken("sk-ant-oat-x");
+  setGhToken("ghp-secret-value");
 
-  const { args } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  const { args } = dockerRunPlanFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
 
-  assert.ok(args.includes('GH_TOKEN'), 'GH_TOKEN is not passed by name');
+  assert.ok(args.includes("GH_TOKEN"), "GH_TOKEN is not passed by name");
 
   for (const arg of args) {
     assert.ok(
-      !arg.includes('ghp-secret-value'),
+      !arg.includes("ghp-secret-value"),
       `the gh token value reached the docker argv as ${arg}`,
     );
   }
@@ -964,13 +1126,16 @@ test('the gh token is injected by NAME via -e, and the value never appears as a 
  * would pass the test above, and `gh` inside the container would still be
  * unauthenticated.
  */
-test('the gh token reaches the container through the spawn env instead', () => {
-  setToken('sk-ant-oat-x');
-  setGhToken('ghp-secret-value');
+test("the gh token reaches the container through the spawn env instead", () => {
+  setToken("sk-ant-oat-x");
+  setGhToken("ghp-secret-value");
 
-  const { env } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  const { env } = dockerRunPlanFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
 
-  assert.equal(env.GH_TOKEN, 'ghp-secret-value');
+  assert.equal(env.GH_TOKEN, "ghp-secret-value");
 });
 
 /**
@@ -981,13 +1146,19 @@ test('the gh token reaches the container through the spawn env instead', () => {
  * an empty `GH_TOKEN`, which `gh` reports as a bad credential rather than as
  * no credential at all.
  */
-test('no gh token on file means no -e GH_TOKEN, and the spawn still succeeds', () => {
-  setToken('sk-ant-oat-x');
+test("no gh token on file means no -e GH_TOKEN, and the spawn still succeeds", () => {
+  setToken("sk-ant-oat-x");
   clearGhToken();
 
-  const { args, env } = dockerRunPlanFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  const { args, env } = dockerRunPlanFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
 
-  assert.ok(!args.includes('GH_TOKEN'), 'GH_TOKEN was named with no token on file');
+  assert.ok(
+    !args.includes("GH_TOKEN"),
+    "GH_TOKEN was named with no token on file",
+  );
   assert.equal(env.GH_TOKEN, undefined);
 });
 
@@ -998,11 +1169,10 @@ test('no gh token on file means no -e GH_TOKEN, and the spawn still succeeds', (
  * an UNSET `GH_TOKEN` — which `gh` reports as a bad credential rather than as
  * no credential at all. Caught in review before merge; this is the guard.
  */
-test('the driver env var name IS the storage key, with no second literal to drift', async () => {
-  const { GH_TOKEN_KEY } = await import('../../../src/supervise/auth.js');
-  const { CONTAINER_GH_TOKEN_ENV } = await import(
-    '../../../src/supervise/drivers/containerized.js'
-  );
+test("the driver env var name IS the storage key, with no second literal to drift", async () => {
+  const { GH_TOKEN_KEY } = await import("../../../src/supervise/auth.js");
+  const { CONTAINER_GH_TOKEN_ENV } =
+    await import("../../../src/supervise/drivers/containerized.js");
 
   assert.equal(CONTAINER_GH_TOKEN_ENV, GH_TOKEN_KEY);
 });
@@ -1038,35 +1208,35 @@ interface InstallRig {
  * asserted nowhere, and that is the branch which stops the agent starting.
  */
 function installRig(lock?: string, npmExit = 0): InstallRig {
-  const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-install-'));
-  const bin = join(dir, 'bin');
-  const log = join(dir, 'npm.log');
+  const dir = mkdtempSync(join(tmpdir(), "chat-mcp-install-"));
+  const bin = join(dir, "bin");
+  const log = join(dir, "npm.log");
 
   mkdirSync(bin);
   // The volume's mount point exists from the moment docker creates it.
-  mkdirSync(join(dir, 'node_modules'));
+  mkdirSync(join(dir, "node_modules"));
   writeFileSync(
-    join(bin, 'npm'),
+    join(bin, "npm"),
     `#!/bin/sh\necho "NPM $*" >> '${log}'\nenv >> '${log}'\nexit ${npmExit}\n`,
     { mode: 0o755 },
   );
-  if (lock !== undefined) writeFileSync(join(dir, 'package-lock.json'), lock);
+  if (lock !== undefined) writeFileSync(join(dir, "package-lock.json"), lock);
 
   return { dir, log, bin };
 }
 
 /** The install guard's stamp, or undefined when the install never wrote one. */
 function stampFor(rig: InstallRig): string | undefined {
-  const stamp = join(rig.dir, 'node_modules', '.lock-sha');
+  const stamp = join(rig.dir, "node_modules", ".lock-sha");
 
-  return existsSync(stamp) ? readFileSync(stamp, 'utf8') : undefined;
+  return existsSync(stamp) ? readFileSync(stamp, "utf8") : undefined;
 }
 
 function runInstallStep(rig: InstallRig, extraEnv: NodeJS.ProcessEnv = {}) {
   const script = prelude([nodeModulesInstallStep(claudeSpawn, rig.dir)]);
 
-  return spawnSync('sh', ['-c', script, 'sh', 'echo', 'AGENT_RAN'], {
-    encoding: 'utf8',
+  return spawnSync("sh", ["-c", script, "sh", "echo", "AGENT_RAN"], {
+    encoding: "utf8",
     env: { PATH: `${rig.bin}:${process.env.PATH}`, ...extraEnv },
   });
 }
@@ -1075,9 +1245,9 @@ function runInstallStep(rig: InstallRig, extraEnv: NodeJS.ProcessEnv = {}) {
 function npmCalls(rig: InstallRig): number {
   if (!existsSync(rig.log)) return 0;
 
-  return readFileSync(rig.log, 'utf8')
-    .split('\n')
-    .filter((l) => l.startsWith('NPM ')).length;
+  return readFileSync(rig.log, "utf8")
+    .split("\n")
+    .filter((l) => l.startsWith("NPM ")).length;
 }
 
 /**
@@ -1087,12 +1257,16 @@ function npmCalls(rig: InstallRig): number {
  * The agent does not start at all. Every dir configured on 2026-11-13 had a
  * lockfile, so this was latent, one config edit from live.
  */
-test('🛑 a project with no lockfile skips the install and STILL starts its agent', () => {
+test("🛑 a project with no lockfile skips the install and STILL starts its agent", () => {
   const rig = installRig();
   const ran = runInstallStep(rig);
 
-  assert.equal(npmCalls(rig), 0, 'npm ci ran with no lockfile to install from');
-  assert.equal(ran.stdout.trim(), 'AGENT_RAN', `the agent never started; stderr: ${ran.stderr}`);
+  assert.equal(npmCalls(rig), 0, "npm ci ran with no lockfile to install from");
+  assert.equal(
+    ran.stdout.trim(),
+    "AGENT_RAN",
+    `the agent never started; stderr: ${ran.stderr}`,
+  );
 });
 
 /**
@@ -1101,12 +1275,12 @@ test('🛑 a project with no lockfile skips the install and STILL starts its age
  * leave the volume empty, which is the false-green suite this ticket exists
  * to stop.
  */
-test('⚠️ control — a project WITH a lockfile does install', () => {
+test("⚠️ control — a project WITH a lockfile does install", () => {
   const rig = installRig('{"lockfileVersion":3}');
   const ran = runInstallStep(rig);
 
-  assert.equal(npmCalls(rig), 1, 'npm ci did not run despite a lockfile');
-  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+  assert.equal(npmCalls(rig), 1, "npm ci did not run despite a lockfile");
+  assert.equal(ran.stdout.trim(), "AGENT_RAN");
 });
 
 /**
@@ -1115,29 +1289,40 @@ test('⚠️ control — a project WITH a lockfile does install', () => {
  * the container runs the suite against the OLD dependency tree and reports a
  * pass — the exact false green the `&&` chain exists to prevent.
  */
-test('🛑 a CHANGED lockfile reinstalls, because the volume outlives the --rm', () => {
+test("🛑 a CHANGED lockfile reinstalls, because the volume outlives the --rm", () => {
   const rig = installRig('{"lockfileVersion":3,"v":1}');
 
   runInstallStep(rig);
-  writeFileSync(join(rig.dir, 'package-lock.json'), '{"lockfileVersion":3,"v":2}');
+  writeFileSync(
+    join(rig.dir, "package-lock.json"),
+    '{"lockfileVersion":3,"v":2}',
+  );
   const ran = runInstallStep(rig);
 
-  assert.equal(npmCalls(rig), 2, 'the second spawn reused dependencies from the old lockfile');
-  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+  assert.equal(
+    npmCalls(rig),
+    2,
+    "the second spawn reused dependencies from the old lockfile",
+  );
+  assert.equal(ran.stdout.trim(), "AGENT_RAN");
 });
 
 /**
  * ⚠️ THE PAIRED CONTROL. A guard that reinstalled every spawn would pass the
  * test above and add a full `npm ci` to every warm start.
  */
-test('⚠️ control — an UNCHANGED lockfile does not reinstall', () => {
+test("⚠️ control — an UNCHANGED lockfile does not reinstall", () => {
   const rig = installRig('{"lockfileVersion":3}');
 
   runInstallStep(rig);
   const ran = runInstallStep(rig);
 
-  assert.equal(npmCalls(rig), 1, 'the install reran against an unchanged lockfile');
-  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+  assert.equal(
+    npmCalls(rig),
+    1,
+    "the install reran against an unchanged lockfile",
+  );
+  assert.equal(ran.stdout.trim(), "AGENT_RAN");
 });
 
 /**
@@ -1146,20 +1331,27 @@ test('⚠️ control — an UNCHANGED lockfile does not reinstall', () => {
  * token and the vendor auth key. Scrubbed rather than `--ignore-scripts`, so
  * esbuild's postinstall still resolves its platform binary.
  */
-test('🚨 the install cannot see the bus token, the GitHub token or the vendor key', () => {
+test("🚨 the install cannot see the bus token, the GitHub token or the vendor key", () => {
   const rig = installRig('{"lockfileVersion":3}');
   const secrets = {
-    [claudeSpawn.authEnvVar]: 'sk-ant-oat-SENTINEL',
-    [CONTAINER_GH_TOKEN_ENV]: 'ghp-SENTINEL',
+    [claudeSpawn.authEnvVar]: "sk-ant-oat-SENTINEL",
+    [CONTAINER_GH_TOKEN_ENV]: "ghp-SENTINEL",
     [CONTAINER_MCP_CONFIG_ENV]: '{"SENTINEL":true}',
   };
 
   runInstallStep(rig, secrets);
-  const seen = readFileSync(rig.log, 'utf8');
+  const seen = readFileSync(rig.log, "utf8");
 
   for (const [name, value] of Object.entries(secrets)) {
-    assert.ok(!seen.includes(value), `${name}'s VALUE reached a dependency install script`);
-    assert.doesNotMatch(seen, new RegExp(`^${name}=`, 'm'), `${name} was still in scope`);
+    assert.ok(
+      !seen.includes(value),
+      `${name}'s VALUE reached a dependency install script`,
+    );
+    assert.doesNotMatch(
+      seen,
+      new RegExp(`^${name}=`, "m"),
+      `${name} was still in scope`,
+    );
   }
 });
 
@@ -1168,14 +1360,22 @@ test('🚨 the install cannot see the bus token, the GitHub token or the vendor 
  * ENVIRONMENT. `env -i` would pass the test above and break the install, which
  * needs PATH and HOME.
  */
-test('⚠️ control — the install still has the ordinary environment it needs', () => {
+test("⚠️ control — the install still has the ordinary environment it needs", () => {
   const rig = installRig('{"lockfileVersion":3}');
 
-  runInstallStep(rig, { HOME: '/tmp/chat-mcp-rig-home' });
-  const seen = readFileSync(rig.log, 'utf8');
+  runInstallStep(rig, { HOME: "/tmp/chat-mcp-rig-home" });
+  const seen = readFileSync(rig.log, "utf8");
 
-  assert.match(seen, /^PATH=/m, 'the install lost PATH, so npm itself is unreachable');
-  assert.match(seen, /^HOME=\/tmp\/chat-mcp-rig-home$/m, 'the install lost HOME, where npm caches');
+  assert.match(
+    seen,
+    /^PATH=/m,
+    "the install lost PATH, so npm itself is unreachable",
+  );
+  assert.match(
+    seen,
+    /^HOME=\/tmp\/chat-mcp-rig-home$/m,
+    "the install lost HOME, where npm caches",
+  );
 });
 
 /**
@@ -1208,16 +1408,16 @@ test('⚠️ control — the install still has the ordinary environment it needs
  * ⚠️ IT DOES NOT NARROW #231. The credentials still reach PID 1, so a
  * lifecycle script that did run would recover them from `/proc/1/environ`.
  */
-test('🚨 the install cannot run a lifecycle script, including this project\'s own prepare', () => {
+test("🚨 the install cannot run a lifecycle script, including this project's own prepare", () => {
   const rig = installRig('{"lockfileVersion":3}');
   const ran = runInstallStep(rig);
 
   assert.match(
-    readFileSync(rig.log, 'utf8'),
+    readFileSync(rig.log, "utf8"),
     /^NPM .*--ignore-scripts/m,
     "npm ci may run this project's prepare, so the install writes dist/ in the host tree",
   );
-  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+  assert.equal(ran.stdout.trim(), "AGENT_RAN");
 });
 
 /**
@@ -1234,14 +1434,30 @@ test('🚨 the install cannot run a lifecycle script, including this project\'s 
  *   failed install makes every later spawn skip the install and run against an
  *   empty volume, which is worse than the failure it recorded.
  */
-test('🛑 a FAILING install starts no agent and leaves no stamp, so the next spawn retries', () => {
+test("🛑 a FAILING install starts no agent and leaves no stamp, so the next spawn retries", () => {
   const rig = installRig('{"lockfileVersion":3}', 1);
   const ran = runInstallStep(rig);
 
-  assert.equal(npmCalls(rig), 1, 'the install never ran, so this proves nothing about failing');
-  assert.equal(ran.stdout.trim(), '', `the agent started on a failed install; stderr: ${ran.stderr}`);
-  assert.equal(stampFor(rig), undefined, 'a failed install stamped the lockfile as installed');
-  assert.notEqual(ran.status, 0, 'the prelude reported success after a failed install');
+  assert.equal(
+    npmCalls(rig),
+    1,
+    "the install never ran, so this proves nothing about failing",
+  );
+  assert.equal(
+    ran.stdout.trim(),
+    "",
+    `the agent started on a failed install; stderr: ${ran.stderr}`,
+  );
+  assert.equal(
+    stampFor(rig),
+    undefined,
+    "a failed install stamped the lockfile as installed",
+  );
+  assert.notEqual(
+    ran.status,
+    0,
+    "the prelude reported success after a failed install",
+  );
 });
 
 /**
@@ -1249,12 +1465,16 @@ test('🛑 a FAILING install starts no agent and leaves no stamp, so the next sp
  * NEVER STAMPS. A step that dropped the `printf` entirely would pass the test
  * above and reinstall on every single spawn.
  */
-test('⚠️ control — a SUCCEEDING install writes the stamp and starts the agent', () => {
+test("⚠️ control — a SUCCEEDING install writes the stamp and starts the agent", () => {
   const rig = installRig('{"lockfileVersion":3}');
   const ran = runInstallStep(rig);
 
-  assert.match(String(stampFor(rig)), /^[0-9a-f]{64}$/, 'a successful install wrote no stamp');
-  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+  assert.match(
+    String(stampFor(rig)),
+    /^[0-9a-f]{64}$/,
+    "a successful install wrote no stamp",
+  );
+  assert.equal(ran.stdout.trim(), "AGENT_RAN");
   assert.equal(ran.status, 0);
 });
 
@@ -1280,7 +1500,7 @@ test('⚠️ control — a SUCCEEDING install writes the stamp and starts the ag
  * is always reachable. So the rig below rebuilds PATH as one directory holding
  * only the externals the step needs, and `shasum` is in it or it is not.
  */
-type ShasumState = 'absent' | 'working' | 'broken';
+type ShasumState = "absent" | "working" | "broken";
 
 function sealedBin(rig: InstallRig, shasum: ShasumState): string {
   const sealed = join(rig.dir, `sealed-${shasum}`);
@@ -1300,20 +1520,36 @@ function sealedBin(rig: InstallRig, shasum: ShasumState): string {
   // shell builtin, so `command -v echo` answers `echo` — not a path. Shimmed
   // from that answer, `exec 'echo'` re-resolves through this very directory and
   // execs the shim again, forever. It spawns processes until something dies.
-  for (const tool of ['cut', 'cat', 'env', 'echo', 'npm', ...(shasum === 'working' ? ['shasum'] : [])]) {
+  for (const tool of [
+    "cut",
+    "cat",
+    "env",
+    "echo",
+    "npm",
+    ...(shasum === "working" ? ["shasum"] : []),
+  ]) {
     const found =
-      tool === 'npm'
-        ? join(rig.bin, 'npm')
-        : ['/bin', '/usr/bin'].map((d) => join(d, tool)).find((c) => existsSync(c));
+      tool === "npm"
+        ? join(rig.bin, "npm")
+        : ["/bin", "/usr/bin"]
+            .map((d) => join(d, tool))
+            .find((c) => existsSync(c));
 
-    assert.ok(found, `this host has no ${tool}, so the rig cannot run the step at all`);
-    writeFileSync(join(sealed, tool), `#!/bin/sh\nexec '${found}' "$@"\n`, { mode: 0o755 });
+    assert.ok(
+      found,
+      `this host has no ${tool}, so the rig cannot run the step at all`,
+    );
+    writeFileSync(join(sealed, tool), `#!/bin/sh\nexec '${found}' "$@"\n`, {
+      mode: 0o755,
+    });
   }
 
   // 🛑 RESOLVES, AND CANNOT RUN. This is what dropping `perl` really leaves
   // behind, and it is the arm `command -v shasum` passed in silence.
-  if (shasum === 'broken') {
-    writeFileSync(join(sealed, 'shasum'), '#!/nonexistent/perl\n', { mode: 0o755 });
+  if (shasum === "broken") {
+    writeFileSync(join(sealed, "shasum"), "#!/nonexistent/perl\n", {
+      mode: 0o755,
+    });
   }
 
   return sealed;
@@ -1322,23 +1558,35 @@ function sealedBin(rig: InstallRig, shasum: ShasumState): string {
 function runInstallStepSealed(rig: InstallRig, shasum: ShasumState) {
   const script = prelude([nodeModulesInstallStep(claudeSpawn, rig.dir)]);
 
-  return spawnSync('/bin/sh', ['-c', script, 'sh', 'echo', 'AGENT_RAN'], {
-    encoding: 'utf8',
+  return spawnSync("/bin/sh", ["-c", script, "sh", "echo", "AGENT_RAN"], {
+    encoding: "utf8",
     env: { PATH: sealedBin(rig, shasum) },
   });
 }
 
-test('🛑 a missing shasum SAYS SO on stderr, and the agent still starts', () => {
+test("🛑 a missing shasum SAYS SO on stderr, and the agent still starts", () => {
   const rig = installRig('{"lockfileVersion":3}');
-  const ran = runInstallStepSealed(rig, 'absent');
+  const ran = runInstallStepSealed(rig, "absent");
 
   assert.ok(
     ran.stderr.includes(NO_LOCK_HASH_WARNING),
     `a perl-less image reinstalls every spawn with nothing saying why; stderr: ${ran.stderr}`,
   );
-  assert.equal(ran.stdout.trim(), 'AGENT_RAN', 'the check refused the spawn instead of reporting');
-  assert.equal(ran.status, 0, 'the check broke the && chain, so no agent starts');
-  assert.equal(npmCalls(rig), 1, 'the check stopped the install it is only meant to report on');
+  assert.equal(
+    ran.stdout.trim(),
+    "AGENT_RAN",
+    "the check refused the spawn instead of reporting",
+  );
+  assert.equal(
+    ran.status,
+    0,
+    "the check broke the && chain, so no agent starts",
+  );
+  assert.equal(
+    npmCalls(rig),
+    1,
+    "the check stopped the install it is only meant to report on",
+  );
 });
 
 /**
@@ -1359,16 +1607,24 @@ test('🛑 a missing shasum SAYS SO on stderr, and the agent still starts', () =
  * names the cause and the shell writes it either way. This asserts the line
  * that names the CONSEQUENCE, which is the one nobody else writes.
  */
-test('🔴 a shasum that RESOLVES but cannot run still says so, because the hash is empty', () => {
+test("🔴 a shasum that RESOLVES but cannot run still says so, because the hash is empty", () => {
   const rig = installRig('{"lockfileVersion":3}');
-  const ran = runInstallStepSealed(rig, 'broken');
+  const ran = runInstallStepSealed(rig, "broken");
 
   assert.ok(
     ran.stderr.includes(NO_LOCK_HASH_WARNING),
     `a resolvable but unrunnable shasum reinstalls in silence; stderr: ${ran.stderr}`,
   );
-  assert.equal(npmCalls(rig), 1, 'the empty hash did not reach the install branch');
-  assert.equal(ran.stdout.trim(), 'AGENT_RAN', 'a broken shasum stopped the agent starting');
+  assert.equal(
+    npmCalls(rig),
+    1,
+    "the empty hash did not reach the install branch",
+  );
+  assert.equal(
+    ran.stdout.trim(),
+    "AGENT_RAN",
+    "a broken shasum stopped the agent starting",
+  );
 });
 
 /**
@@ -1376,16 +1632,20 @@ test('🔴 a shasum that RESOLVES but cannot run still says so, because the hash
  * WARNS. A step that printed the line unconditionally would pass the test
  * above and put a permanent false warning in front of every operator.
  */
-test('⚠️ control — shasum PRESENT warns about nothing and stamps the lockfile', () => {
+test("⚠️ control — shasum PRESENT warns about nothing and stamps the lockfile", () => {
   const rig = installRig('{"lockfileVersion":3}');
-  const ran = runInstallStepSealed(rig, 'working');
+  const ran = runInstallStepSealed(rig, "working");
 
   assert.ok(
     !ran.stderr.includes(NO_LOCK_HASH_WARNING),
     `warned about a shasum that resolves; stderr: ${ran.stderr}`,
   );
-  assert.match(String(stampFor(rig)), /^[0-9a-f]{64}$/, 'the hash was unreadable WITH shasum');
-  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+  assert.match(
+    String(stampFor(rig)),
+    /^[0-9a-f]{64}$/,
+    "the hash was unreadable WITH shasum",
+  );
+  assert.equal(ran.stdout.trim(), "AGENT_RAN");
 });
 
 /**
@@ -1401,21 +1661,25 @@ test('⚠️ control — shasum PRESENT warns about nothing and stamps the lockf
  * taking down every spawn. The guard is here because nothing else would catch
  * it until a container refused to boot.
  */
-test('🛑 the warning carries no single quote, which would break the prelude it rides in', () => {
+test("🛑 the warning carries no single quote, which would break the prelude it rides in", () => {
   assert.ok(
     !NO_LOCK_HASH_WARNING.includes("'"),
     `an apostrophe closes the shell quote: ${NO_LOCK_HASH_WARNING}`,
   );
 });
 
-test('🛑 a missing shasum keeps REINSTALLING, which is the designed cheap failure', () => {
+test("🛑 a missing shasum keeps REINSTALLING, which is the designed cheap failure", () => {
   const rig = installRig('{"lockfileVersion":3}');
 
-  runInstallStepSealed(rig, 'absent');
-  const ran = runInstallStepSealed(rig, 'absent');
+  runInstallStepSealed(rig, "absent");
+  const ran = runInstallStepSealed(rig, "absent");
 
-  assert.equal(npmCalls(rig), 2, 'an unreadable hash skipped the install and ran on an empty tree');
-  assert.equal(ran.stdout.trim(), 'AGENT_RAN');
+  assert.equal(
+    npmCalls(rig),
+    2,
+    "an unreadable hash skipped the install and ran on an empty tree",
+  );
+  assert.equal(ran.stdout.trim(), "AGENT_RAN");
 });
 
 /**
@@ -1431,23 +1695,23 @@ test('🛑 a missing shasum keeps REINSTALLING, which is the designed cheap fail
  * credentials reach PID 1 regardless, so a lifecycle script recovers them from
  * `/proc/1/environ` whatever this asserts.
  */
-test('🛑 the install scrubs EVERY credential the plan names with -e', () => {
-  setToken('sk-ant-oat-x');
-  setGhToken('ghp-x');
+test("🛑 the install scrubs EVERY credential the plan names with -e", () => {
+  setToken("sk-ant-oat-x");
+  setGhToken("ghp-x");
 
   const args = dockerArgsFor({
     cwd: PROJECT_DIR,
-    supervisorHandle: 'claude1',
+    supervisorHandle: "claude1",
     bus: BUS,
-    grant: { handle: 'claude1-agent', configPath: '/unused.json', tools: [] },
+    grant: { handle: "claude1-agent", configPath: "/unused.json", tools: [] },
   });
-  const named = args.filter((_, i) => args[i - 1] === '-e');
-  const step = args.find((a) => a.includes('npm ci'));
+  const named = args.filter((_, i) => args[i - 1] === "-e");
+  const step = args.find((a) => a.includes("npm ci"));
 
-  assert.ok(step, `no install step in ${args.join(' ')}`);
+  assert.ok(step, `no install step in ${args.join(" ")}`);
   assert.ok(
     named.length >= 3,
-    `expected the granted plan to name every credential; got ${named.join(', ')}`,
+    `expected the granted plan to name every credential; got ${named.join(", ")}`,
   );
   for (const name of named) {
     assert.ok(

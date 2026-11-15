@@ -1,17 +1,16 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { createServer, request as httpRequest, type Server } from 'node:http';
-import { AddressInfo } from 'node:net';
-import { migrate } from '../../../src/storage/db.js';
-import * as dao from '../../../src/storage/dao.js';
-import { route, type RouteContext } from '../../../src/cli/web/server.js';
-import { ALL_CAPABILITIES } from '../../../src/cli/web/credential.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { createServer, request as httpRequest, type Server } from "node:http";
+import { AddressInfo } from "node:net";
+import { migrate } from "../../../src/storage/db.js";
+import * as dao from "../../../src/storage/dao.js";
+import { route, type RouteContext } from "../../../src/cli/web/server.js";
+import { ALL_CAPABILITIES } from "../../../src/cli/web/credential.js";
 
 /** The api credential every request below presents. Minted per process in production. */
-const TEST_TOKEN = 'test-token-for-route-tests';
+const TEST_TOKEN = "test-token-for-route-tests";
 const COOKIE = `chat_mcp_api=${TEST_TOKEN}`;
-
 
 /**
  * 🛑 THESE ENDPOINTS DESTROY DATA. /api/kick deletes an agent and every room
@@ -31,16 +30,31 @@ interface Harness {
   readonly origin: string;
 }
 
-async function harness(handle = 'operator'): Promise<Harness> {
-  const db = new DatabaseSync(':memory:');
+async function harness(handle = "operator"): Promise<Harness> {
+  const db = new DatabaseSync(":memory:");
   migrate(db);
-  for (const h of [handle, 'peer-a', 'peer-b']) {
-    dao.upsertAgent(db, { handle: h, pid: 1, session_id: h, display_name: h, metadata: {} });
+  for (const h of [handle, "peer-a", "peer-b"]) {
+    dao.upsertAgent(db, {
+      handle: h,
+      pid: 1,
+      session_id: h,
+      display_name: h,
+      metadata: {},
+    });
   }
   // Assigned after listen; every request is served after that.
-  const ctx: RouteContext = { handle, db, sseClients: new Set(), port: 0, token: TEST_TOKEN, capabilities: ALL_CAPABILITIES };
-  const server = createServer((req, res) => { void route(req, res, ctx); });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const ctx: RouteContext = {
+    handle,
+    db,
+    sseClients: new Set(),
+    port: 0,
+    token: TEST_TOKEN,
+    capabilities: ALL_CAPABILITIES,
+  };
+  const server = createServer((req, res) => {
+    void route(req, res, ctx);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   ctx.port = port;
 
@@ -62,7 +76,13 @@ function close(h: Harness): void {
  */
 function raw(
   h: Harness,
-  opts: { path: string; method?: string; host?: string; origin?: string; body?: string },
+  opts: {
+    path: string;
+    method?: string;
+    host?: string;
+    origin?: string;
+    body?: string;
+  },
 ): Promise<{ status: number; body: string }> {
   const { port } = new URL(h.origin);
   // The api credential, so these tests exercise the guard they are ABOUT
@@ -73,120 +93,159 @@ function raw(
 
   return new Promise((resolve, reject) => {
     const req = httpRequest(
-      { host: '127.0.0.1', port: Number(port), path: opts.path, method: opts.method ?? 'GET', headers },
+      {
+        host: "127.0.0.1",
+        port: Number(port),
+        path: opts.path,
+        method: opts.method ?? "GET",
+        headers,
+      },
       (res) => {
-        let text = '';
-        res.setEncoding('utf8');
-        res.on('data', (c: string) => { text += c; });
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: text }));
+        let text = "";
+        res.setEncoding("utf8");
+        res.on("data", (c: string) => {
+          text += c;
+        });
+        res.on("end", () =>
+          resolve({ status: res.statusCode ?? 0, body: text }),
+        );
       },
     );
-    req.on('error', reject);
+    req.on("error", reject);
     if (opts.body !== undefined) req.write(opts.body);
     req.end();
   });
 }
 
-async function post(h: Harness, path: string, body: unknown, origin?: string): Promise<Response> {
+async function post(
+  h: Harness,
+  path: string,
+  body: unknown,
+  origin?: string,
+): Promise<Response> {
   return fetch(`${h.origin}${path}`, {
-    method: 'POST',
-    headers: origin === undefined ? { Cookie: COOKIE } : { Cookie: COOKIE, Origin: origin },
+    method: "POST",
+    headers:
+      origin === undefined
+        ? { Cookie: COOKIE }
+        : { Cookie: COOKIE, Origin: origin },
     body: JSON.stringify(body),
   });
 }
 
 // ── The CSRF guard ───────────────────────────────────────────────────────
 
-test('a cross-site POST cannot kick, and the agent survives it', async () => {
+test("a cross-site POST cannot kick, and the agent survives it", async () => {
   const h = await harness();
-  const res = await post(h, '/api/kick', { handle: 'peer-a' }, 'https://evil.example');
+  const res = await post(
+    h,
+    "/api/kick",
+    { handle: "peer-a" },
+    "https://evil.example",
+  );
 
   assert.equal(res.status, 403);
-  assert.match((await res.json() as { error: string }).error, /cross-origin/);
+  assert.match(((await res.json()) as { error: string }).error, /cross-origin/);
   // THE POINT. A refusal that already deleted the row is not a refusal.
-  assert.notEqual(dao.getAgent(h.db, 'peer-a'), null);
+  assert.notEqual(dao.getAgent(h.db, "peer-a"), null);
   close(h);
 });
 
-test('a cross-site POST cannot delete a room, and the room survives it', async () => {
+test("a cross-site POST cannot delete a room, and the room survives it", async () => {
   const h = await harness();
-  dao.joinRoom(h.db, '#ops', 'operator');
+  dao.joinRoom(h.db, "#ops", "operator");
 
-  const res = await post(h, '/api/rooms/delete', { room: '#ops' }, 'https://evil.example');
+  const res = await post(
+    h,
+    "/api/rooms/delete",
+    { room: "#ops" },
+    "https://evil.example",
+  );
 
   assert.equal(res.status, 403);
-  assert.ok(dao.isRoomMember(h.db, '#ops', 'operator'), '#ops was deleted by a refused request');
+  assert.ok(
+    dao.isRoomMember(h.db, "#ops", "operator"),
+    "#ops was deleted by a refused request",
+  );
   close(h);
 });
 
-test('the guard reads Origin, not Content-Type: text/plain is refused too', async () => {
+test("the guard reads Origin, not Content-Type: text/plain is refused too", async () => {
   const h = await harness();
   const res = await fetch(`${h.origin}/api/kick`, {
-    method: 'POST',
+    method: "POST",
     // A CORS-simple request. No preflight, so the browser would send it.
-    headers: { 'Content-Type': 'text/plain', Origin: 'https://evil.example' },
-    body: JSON.stringify({ handle: 'peer-a' }),
+    headers: { "Content-Type": "text/plain", Origin: "https://evil.example" },
+    body: JSON.stringify({ handle: "peer-a" }),
   });
 
   assert.equal(res.status, 403);
-  assert.notEqual(dao.getAgent(h.db, 'peer-a'), null);
+  assert.notEqual(dao.getAgent(h.db, "peer-a"), null);
   close(h);
 });
 
-test('🚨 DNS REBINDING: a matching Host and Origin pair is still refused', async () => {
+test("🚨 DNS REBINDING: a matching Host and Origin pair is still refused", async () => {
   const h = await harness();
   // An attacker who points evil.example at 127.0.0.1 makes the browser send
   // BOTH headers as evil.example. Compared against each other they match,
   // and the request is genuinely same-origin, so replies are readable too.
   const evil = `evil.example:${new URL(h.origin).port}`;
   const res = await raw(h, {
-    path: '/api/kick', method: 'POST',
-    host: evil, origin: `http://${evil}`,
-    body: JSON.stringify({ handle: 'peer-a' }),
+    path: "/api/kick",
+    method: "POST",
+    host: evil,
+    origin: `http://${evil}`,
+    body: JSON.stringify({ handle: "peer-a" }),
   });
 
   assert.equal(res.status, 403);
   assert.match(res.body, /unexpected host/);
-  assert.notEqual(dao.getAgent(h.db, 'peer-a'), null, 'rebinding kicked the agent');
+  assert.notEqual(
+    dao.getAgent(h.db, "peer-a"),
+    null,
+    "rebinding kicked the agent",
+  );
   close(h);
 });
 
-test('a rebound GET is refused too, though it carries no Origin to check', async () => {
+test("a rebound GET is refused too, though it carries no Origin to check", async () => {
   const h = await harness();
   const evil = `evil.example:${new URL(h.origin).port}`;
   // An <img> or <script> load sends no Origin at all, so only the Host
   // check can stop this one.
-  const res = await raw(h, { path: '/api/whoami', host: evil });
+  const res = await raw(h, { path: "/api/whoami", host: evil });
 
   assert.equal(res.status, 403);
   close(h);
 });
 
-test('localhost is accepted as well as 127.0.0.1, since both reach the same server', async () => {
+test("localhost is accepted as well as 127.0.0.1, since both reach the same server", async () => {
   const h = await harness();
   const port = new URL(h.origin).port;
   const res = await raw(h, {
-    path: '/api/kick', method: 'POST',
-    host: `localhost:${port}`, origin: `http://localhost:${port}`,
-    body: JSON.stringify({ handle: 'nobody' }),
+    path: "/api/kick",
+    method: "POST",
+    host: `localhost:${port}`,
+    origin: `http://localhost:${port}`,
+    body: JSON.stringify({ handle: "nobody" }),
   });
 
-  assert.equal(res.status, 404, 'a legitimate localhost caller was blocked');
+  assert.equal(res.status, 404, "a legitimate localhost caller was blocked");
   close(h);
 });
 
-test('the page the server itself serves is not blocked', async () => {
+test("the page the server itself serves is not blocked", async () => {
   const h = await harness();
-  const res = await post(h, '/api/kick', { handle: 'peer-a' }, h.origin);
+  const res = await post(h, "/api/kick", { handle: "peer-a" }, h.origin);
 
   assert.equal(res.status, 200);
-  assert.equal(dao.getAgent(h.db, 'peer-a'), null);
+  assert.equal(dao.getAgent(h.db, "peer-a"), null);
   close(h);
 });
 
-test('a request with no Origin at all is not blocked', async () => {
+test("a request with no Origin at all is not blocked", async () => {
   const h = await harness();
-  const res = await post(h, '/api/kick', { handle: 'peer-a' });
+  const res = await post(h, "/api/kick", { handle: "peer-a" });
 
   assert.equal(res.status, 200);
   close(h);
@@ -194,80 +253,97 @@ test('a request with no Origin at all is not blocked', async () => {
 
 // ── Kick, mirroring the Ink CLI's three refusals ─────────────────────────
 
-test('kick refuses yourself, and you survive it', async () => {
+test("kick refuses yourself, and you survive it", async () => {
   const h = await harness();
-  const res = await post(h, '/api/kick', { handle: 'operator' }, h.origin);
+  const res = await post(h, "/api/kick", { handle: "operator" }, h.origin);
 
   assert.equal(res.status, 400);
-  assert.notEqual(dao.getAgent(h.db, 'operator'), null);
+  assert.notEqual(dao.getAgent(h.db, "operator"), null);
   close(h);
 });
 
-test('kick refuses the system handle', async () => {
+test("kick refuses the system handle", async () => {
   const h = await harness();
-  const res = await post(h, '/api/kick', { handle: dao.SYSTEM_HANDLE }, h.origin);
+  const res = await post(
+    h,
+    "/api/kick",
+    { handle: dao.SYSTEM_HANDLE },
+    h.origin,
+  );
 
   assert.equal(res.status, 400);
   close(h);
 });
 
-test('kick reports an unregistered handle rather than succeeding quietly', async () => {
+test("kick reports an unregistered handle rather than succeeding quietly", async () => {
   const h = await harness();
-  const res = await post(h, '/api/kick', { handle: 'nobody' }, h.origin);
+  const res = await post(h, "/api/kick", { handle: "nobody" }, h.origin);
 
   assert.equal(res.status, 404);
   close(h);
 });
 
-test('kick refuses a missing handle', async () => {
+test("kick refuses a missing handle", async () => {
   const h = await harness();
-  const res = await post(h, '/api/kick', {}, h.origin);
+  const res = await post(h, "/api/kick", {}, h.origin);
 
   assert.equal(res.status, 400);
   close(h);
 });
 
-test('kick removes the agent and its room memberships', async () => {
+test("kick removes the agent and its room memberships", async () => {
   const h = await harness();
-  dao.joinRoom(h.db, '#ops', 'peer-a');
+  dao.joinRoom(h.db, "#ops", "peer-a");
 
-  const res = await post(h, '/api/kick', { handle: 'peer-a' }, h.origin);
+  const res = await post(h, "/api/kick", { handle: "peer-a" }, h.origin);
 
   assert.equal(res.status, 200);
-  assert.equal(dao.getAgent(h.db, 'peer-a'), null);
-  assert.equal(dao.isRoomMember(h.db, '#ops', 'peer-a'), false);
+  assert.equal(dao.getAgent(h.db, "peer-a"), null);
+  assert.equal(dao.isRoomMember(h.db, "#ops", "peer-a"), false);
   close(h);
 });
 
 // ── Room delete ──────────────────────────────────────────────────────────
 
-test('deleting a room you are not in is refused, and the room survives', async () => {
+test("deleting a room you are not in is refused, and the room survives", async () => {
   const h = await harness();
-  dao.joinRoom(h.db, '#theirs', 'peer-a');
+  dao.joinRoom(h.db, "#theirs", "peer-a");
 
-  const res = await post(h, '/api/rooms/delete', { room: '#theirs' }, h.origin);
+  const res = await post(h, "/api/rooms/delete", { room: "#theirs" }, h.origin);
 
   assert.equal(res.status, 403);
-  assert.ok(dao.isRoomMember(h.db, '#theirs', 'peer-a'), 'a non-member deleted the room');
+  assert.ok(
+    dao.isRoomMember(h.db, "#theirs", "peer-a"),
+    "a non-member deleted the room",
+  );
   close(h);
 });
 
-test('a member can delete the room, and its messages go with it', async () => {
+test("a member can delete the room, and its messages go with it", async () => {
   const h = await harness();
-  dao.joinRoom(h.db, '#ops', 'operator');
-  dao.insertMessage(h.db, { from: 'operator', to: '#ops', body: 'a secret' });
+  dao.joinRoom(h.db, "#ops", "operator");
+  dao.insertMessage(h.db, { from: "operator", to: "#ops", body: "a secret" });
   // By body, not by room: joinRoom posts its own "joined" announcement, so a
   // room-wide count is 2 and asserting 1 fails for a reason that is not the
   // one under test.
-  const count = (): number => (h.db
-    .prepare('SELECT COUNT(*) AS n FROM messages WHERE to_handle = ? AND body = ?')
-    .get('#ops', 'a secret') as { n: number }).n;
-  assert.equal(count(), 1, 'fixture never stored the message, so its deletion proves nothing');
+  const count = (): number =>
+    (
+      h.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM messages WHERE to_handle = ? AND body = ?",
+        )
+        .get("#ops", "a secret") as { n: number }
+    ).n;
+  assert.equal(
+    count(),
+    1,
+    "fixture never stored the message, so its deletion proves nothing",
+  );
 
-  const res = await post(h, '/api/rooms/delete', { room: '#ops' }, h.origin);
+  const res = await post(h, "/api/rooms/delete", { room: "#ops" }, h.origin);
 
   assert.equal(res.status, 200);
-  assert.equal(dao.isRoomMember(h.db, '#ops', 'operator'), false);
+  assert.equal(dao.isRoomMember(h.db, "#ops", "operator"), false);
   assert.equal(count(), 0);
   close(h);
 });
@@ -289,67 +365,88 @@ test('a member can delete the room, and its messages go with it', async () => {
 
 /** The error string a refusal carries. Read ONCE; a Response body is single-use. */
 async function errorOf(res: Response): Promise<string> {
-  return (await res.json() as { error?: string }).error ?? '<no error field>';
+  return ((await res.json()) as { error?: string }).error ?? "<no error field>";
 }
 
-test('🛑 a member who does NOT own the room cannot delete it, and it survives', async () => {
+test("🛑 a member who does NOT own the room cannot delete it, and it survives", async () => {
   const h = await harness();
   try {
-    dao.joinRoom(h.db, '#ops', 'peer-a');      // peer-a owns it
-    dao.joinRoom(h.db, '#ops', 'operator');    // the caller is a member, not the owner
+    dao.joinRoom(h.db, "#ops", "peer-a"); // peer-a owns it
+    dao.joinRoom(h.db, "#ops", "operator"); // the caller is a member, not the owner
 
-    const res = await post(h, '/api/rooms/delete', { room: '#ops' }, h.origin);
+    const res = await post(h, "/api/rooms/delete", { room: "#ops" }, h.origin);
 
     assert.equal(res.status, 403);
     assert.match(await errorOf(res), /only peer-a can delete #ops/);
-    assert.equal(dao.roomOwner(h.db, '#ops'), 'peer-a', 'a non-owner member deleted the room');
+    assert.equal(
+      dao.roomOwner(h.db, "#ops"),
+      "peer-a",
+      "a non-owner member deleted the room",
+    );
   } finally {
     close(h);
   }
 });
 
-test('the owner can delete their own room', async () => {
+test("the owner can delete their own room", async () => {
   const h = await harness();
   try {
-    dao.joinRoom(h.db, '#ops', 'operator');    // operator owns it
-    dao.joinRoom(h.db, '#ops', 'peer-a');
-    assert.equal(dao.roomOwner(h.db, '#ops'), 'operator', 'fixture did not make the caller the owner');
+    dao.joinRoom(h.db, "#ops", "operator"); // operator owns it
+    dao.joinRoom(h.db, "#ops", "peer-a");
+    assert.equal(
+      dao.roomOwner(h.db, "#ops"),
+      "operator",
+      "fixture did not make the caller the owner",
+    );
 
-    const res = await post(h, '/api/rooms/delete', { room: '#ops' }, h.origin);
+    const res = await post(h, "/api/rooms/delete", { room: "#ops" }, h.origin);
 
     assert.equal(res.status, 200);
-    assert.equal(dao.roomOwner(h.db, '#ops'), undefined);
+    assert.equal(dao.roomOwner(h.db, "#ops"), undefined);
   } finally {
     close(h);
   }
 });
 
-test('🛑 ONCE THE OWNER HAS LEFT, ANY MEMBER CAN DELETE — no room is ever locked', async () => {
+test("🛑 ONCE THE OWNER HAS LEFT, ANY MEMBER CAN DELETE — no room is ever locked", async () => {
   const h = await harness();
   try {
-    dao.joinRoom(h.db, '#ops', 'peer-a');      // peer-a owns it
-    dao.joinRoom(h.db, '#ops', 'operator');
-    dao.leaveRoom(h.db, '#ops', 'peer-a');     // and walks out, leaving created_by behind
+    dao.joinRoom(h.db, "#ops", "peer-a"); // peer-a owns it
+    dao.joinRoom(h.db, "#ops", "operator");
+    dao.leaveRoom(h.db, "#ops", "peer-a"); // and walks out, leaving created_by behind
     // Both are denominators: if either were false this test would pass for a
     // reason that is not the one under test.
-    assert.equal(dao.roomOwner(h.db, '#ops'), 'peer-a', 'leaveRoom cleared created_by, so this case cannot arise');
-    assert.equal(dao.isRoomMember(h.db, '#ops', 'peer-a'), false, 'the owner is still a member, so nothing is being tested');
+    assert.equal(
+      dao.roomOwner(h.db, "#ops"),
+      "peer-a",
+      "leaveRoom cleared created_by, so this case cannot arise",
+    );
+    assert.equal(
+      dao.isRoomMember(h.db, "#ops", "peer-a"),
+      false,
+      "the owner is still a member, so nothing is being tested",
+    );
 
-    const res = await post(h, '/api/rooms/delete', { room: '#ops' }, h.origin);
+    const res = await post(h, "/api/rooms/delete", { room: "#ops" }, h.origin);
 
     assert.equal(res.status, 200, await errorOf(res));
-    assert.equal(dao.roomOwner(h.db, '#ops'), undefined);
+    assert.equal(dao.roomOwner(h.db, "#ops"), undefined);
   } finally {
     close(h);
   }
 });
 
-test('a non-member is still refused BEFORE ownership is considered', async () => {
+test("a non-member is still refused BEFORE ownership is considered", async () => {
   const h = await harness();
   try {
-    dao.joinRoom(h.db, '#theirs', 'peer-a');
+    dao.joinRoom(h.db, "#theirs", "peer-a");
 
-    const res = await post(h, '/api/rooms/delete', { room: '#theirs' }, h.origin);
+    const res = await post(
+      h,
+      "/api/rooms/delete",
+      { room: "#theirs" },
+      h.origin,
+    );
 
     assert.equal(res.status, 403);
     // The old message, not the ownership one: a stranger must not learn who
@@ -357,7 +454,7 @@ test('a non-member is still refused BEFORE ownership is considered', async () =>
     const err = await errorOf(res);
     assert.match(err, /not a member/);
     assert.doesNotMatch(err, /peer-a/, `the refusal leaked the owner: ${err}`);
-    assert.equal(dao.roomOwner(h.db, '#theirs'), 'peer-a');
+    assert.equal(dao.roomOwner(h.db, "#theirs"), "peer-a");
   } finally {
     close(h);
   }
@@ -372,48 +469,60 @@ test('a non-member is still refused BEFORE ownership is considered', async () =>
  */
 function countTo(h: Harness, target: string): number {
   const row = h.db
-    .prepare('SELECT COUNT(*) AS n FROM messages WHERE to_handle = ?')
+    .prepare("SELECT COUNT(*) AS n FROM messages WHERE to_handle = ?")
     .get(target) as { n: number };
   return row.n;
 }
 
-test('a member clears a room, gets the count, and the watermarks reset', async () => {
+test("a member clears a room, gets the count, and the watermarks reset", async () => {
   const h = await harness();
   try {
-    dao.joinRoom(h.db, '#ops', 'operator');
-    dao.insertMessage(h.db, { from: 'operator', to: '#ops', body: 'one' });
-    dao.insertMessage(h.db, { from: 'peer-a', to: '#ops', body: 'two' });
-    const before = countTo(h, '#ops');
+    dao.joinRoom(h.db, "#ops", "operator");
+    dao.insertMessage(h.db, { from: "operator", to: "#ops", body: "one" });
+    dao.insertMessage(h.db, { from: "peer-a", to: "#ops", body: "two" });
+    const before = countTo(h, "#ops");
 
-    const res = await post(h, '/api/messages/clear', { target: '#ops' }, h.origin);
+    const res = await post(
+      h,
+      "/api/messages/clear",
+      { target: "#ops" },
+      h.origin,
+    );
 
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { cleared: before });
-    assert.equal(countTo(h, '#ops'), 0);
+    assert.equal(countTo(h, "#ops"), 0);
     // deleteRoomMessages also zeroes read watermarks. Asserted so a route that
     // only deletes rows fails here rather than silently skipping every member
     // past a stale watermark.
     const read = h.db
-      .prepare('SELECT last_read_id AS n FROM room_reads WHERE room_name = ? AND handle = ?')
-      .get('#ops', 'operator') as { n: number } | undefined;
+      .prepare(
+        "SELECT last_read_id AS n FROM room_reads WHERE room_name = ? AND handle = ?",
+      )
+      .get("#ops", "operator") as { n: number } | undefined;
     assert.equal(read?.n ?? 0, 0);
   } finally {
     close(h);
   }
 });
 
-test('a NON-member cannot clear a room, and the messages survive', async () => {
+test("a NON-member cannot clear a room, and the messages survive", async () => {
   const h = await harness();
   try {
-    dao.joinRoom(h.db, '#ops', 'peer-a');
-    dao.insertMessage(h.db, { from: 'peer-a', to: '#ops', body: 'one' });
-    const before = countTo(h, '#ops');
+    dao.joinRoom(h.db, "#ops", "peer-a");
+    dao.insertMessage(h.db, { from: "peer-a", to: "#ops", body: "one" });
+    const before = countTo(h, "#ops");
 
-    const res = await post(h, '/api/messages/clear', { target: '#ops' }, h.origin);
+    const res = await post(
+      h,
+      "/api/messages/clear",
+      { target: "#ops" },
+      h.origin,
+    );
 
     assert.equal(res.status, 403);
     // THE POINT. A refusal that already deleted the rows is not a refusal.
-    assert.equal(countTo(h, '#ops'), before);
+    assert.equal(countTo(h, "#ops"), before);
   } finally {
     close(h);
   }
@@ -425,47 +534,69 @@ test('a NON-member cannot clear a room, and the messages survive', async () => {
  * that is specific to this endpoint, and the test is kept because it fails the
  * day somebody registers the route above the guard.
  */
-test('a cross-site POST cannot clear a room, and the messages survive', async () => {
+test("a cross-site POST cannot clear a room, and the messages survive", async () => {
   const h = await harness();
   try {
-    dao.joinRoom(h.db, '#ops', 'operator');
-    dao.insertMessage(h.db, { from: 'operator', to: '#ops', body: 'one' });
-    const before = countTo(h, '#ops');
+    dao.joinRoom(h.db, "#ops", "operator");
+    dao.insertMessage(h.db, { from: "operator", to: "#ops", body: "one" });
+    const before = countTo(h, "#ops");
 
-    const res = await post(h, '/api/messages/clear', { target: '#ops' }, 'https://evil.example');
+    const res = await post(
+      h,
+      "/api/messages/clear",
+      { target: "#ops" },
+      "https://evil.example",
+    );
 
     assert.equal(res.status, 403);
-    assert.equal(countTo(h, '#ops'), before);
+    assert.equal(countTo(h, "#ops"), before);
   } finally {
     close(h);
   }
 });
 
-test('clearing a DM takes both directions and leaves another peer alone', async () => {
+test("clearing a DM takes both directions and leaves another peer alone", async () => {
   const h = await harness();
   try {
     // No joinRoom, so no SYSTEM banner. These three are the only rows.
-    dao.insertMessage(h.db, { from: 'operator', to: 'peer-a', body: 'mine to a' });
-    dao.insertMessage(h.db, { from: 'peer-a', to: 'operator', body: 'a to me' });
-    dao.insertMessage(h.db, { from: 'operator', to: 'peer-b', body: 'mine to b' });
+    dao.insertMessage(h.db, {
+      from: "operator",
+      to: "peer-a",
+      body: "mine to a",
+    });
+    dao.insertMessage(h.db, {
+      from: "peer-a",
+      to: "operator",
+      body: "a to me",
+    });
+    dao.insertMessage(h.db, {
+      from: "operator",
+      to: "peer-b",
+      body: "mine to b",
+    });
 
-    const res = await post(h, '/api/messages/clear', { target: 'peer-a' }, h.origin);
+    const res = await post(
+      h,
+      "/api/messages/clear",
+      { target: "peer-a" },
+      h.origin,
+    );
 
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), { cleared: 2 });
-    assert.equal(countTo(h, 'peer-a'), 0);
-    assert.equal(countTo(h, 'operator'), 0);
+    assert.equal(countTo(h, "peer-a"), 0);
+    assert.equal(countTo(h, "operator"), 0);
     // A separate pair. Clearing one conversation must not reach another.
-    assert.equal(countTo(h, 'peer-b'), 1);
+    assert.equal(countTo(h, "peer-b"), 1);
   } finally {
     close(h);
   }
 });
 
-test('a clear with no target is refused', async () => {
+test("a clear with no target is refused", async () => {
   const h = await harness();
   try {
-    const res = await post(h, '/api/messages/clear', {}, h.origin);
+    const res = await post(h, "/api/messages/clear", {}, h.origin);
     assert.equal(res.status, 400);
   } finally {
     close(h);
@@ -478,21 +609,29 @@ test('a clear with no target is refused', async () => {
  * `isRoomName` is stricter, so a malformed name used to fall through to the
  * DM branch, skip the membership check and answer `cleared: 0` as success.
  */
-test('a malformed room name is refused, not quietly treated as a DM', async () => {
+test("a malformed room name is refused, not quietly treated as a DM", async () => {
   const h = await harness();
   try {
-    dao.joinRoom(h.db, '#ops', 'operator');
-    dao.insertMessage(h.db, { from: 'operator', to: '#ops', body: 'one' });
-    const before = countTo(h, '#ops');
+    dao.joinRoom(h.db, "#ops", "operator");
+    dao.insertMessage(h.db, { from: "operator", to: "#ops", body: "one" });
+    const before = countTo(h, "#ops");
 
-    const res = await post(h, '/api/messages/clear', { target: '#Ops' }, h.origin);
+    const res = await post(
+      h,
+      "/api/messages/clear",
+      { target: "#Ops" },
+      h.origin,
+    );
 
     assert.equal(res.status, 400);
     // ⚠️ The STATUS alone cannot tell the branches apart — `target required`
     // is also a 400. Without this, a regression routing `#Ops` to the
     // no-target branch stays green.
-    assert.match((await res.json() as { error: string }).error, /is not a valid room name/);
-    assert.equal(countTo(h, '#ops'), before);
+    assert.match(
+      ((await res.json()) as { error: string }).error,
+      /is not a valid room name/,
+    );
+    assert.equal(countTo(h, "#ops"), before);
   } finally {
     close(h);
   }
@@ -505,43 +644,55 @@ test('a malformed room name is refused, not quietly treated as a DM', async () =
  * overnight would render ages against a stale clock, and the UI already
  * carried one copy of a bus threshold that drifted (the gauge bands, PR 113).
  */
-test('a live claim is served with its holder and a server-side age', async () => {
+test("a live claim is served with its holder and a server-side age", async () => {
   const h = await harness();
   const now = Date.now();
   dao.insertClaim(h.db, {
-    resource: 'reset-and-test.sh',
-    holder: 'peer-a',
-    note: 'mode=all',
+    resource: "reset-and-test.sh",
+    holder: "peer-a",
+    note: "mode=all",
     claimed_at: now - 41 * 60_000,
     expires_at: now + 199 * 60_000,
   });
 
-  const res = await raw(h, { path: '/api/claims' });
-  const body = JSON.parse(res.body) as { claims: Array<Record<string, unknown>> };
+  const res = await raw(h, { path: "/api/claims" });
+  const body = JSON.parse(res.body) as {
+    claims: Array<Record<string, unknown>>;
+  };
 
   assert.equal(res.status, 200);
   assert.equal(body.claims.length, 1);
-  assert.equal(body.claims[0]?.resource, 'reset-and-test.sh');
-  assert.equal(body.claims[0]?.holder, 'peer-a');
-  assert.equal(body.claims[0]?.note, 'mode=all');
+  assert.equal(body.claims[0]?.resource, "reset-and-test.sh");
+  assert.equal(body.claims[0]?.holder, "peer-a");
+  assert.equal(body.claims[0]?.note, "mode=all");
   assert.equal(body.claims[0]?.held_for_minutes, 41);
   assert.equal(body.claims[0]?.expires_in_minutes, 199);
   close(h);
 });
 
-test('a released claim and an expired one are both absent', async () => {
+test("a released claim and an expired one are both absent", async () => {
   const h = await harness();
   const now = Date.now();
 
   const released = dao.insertClaim(h.db, {
-    resource: 'released-thing', holder: 'peer-a', note: null, claimed_at: now - 1000, expires_at: now + 60_000,
+    resource: "released-thing",
+    holder: "peer-a",
+    note: null,
+    claimed_at: now - 1000,
+    expires_at: now + 60_000,
   });
   dao.releaseClaim(h.db, released.id, now);
   dao.insertClaim(h.db, {
-    resource: 'expired-thing', holder: 'peer-b', note: null, claimed_at: now - 120_000, expires_at: now - 1,
+    resource: "expired-thing",
+    holder: "peer-b",
+    note: null,
+    claimed_at: now - 120_000,
+    expires_at: now - 1,
   });
 
-  const body = JSON.parse((await raw(h, { path: '/api/claims' })).body) as { claims: unknown[] };
+  const body = JSON.parse((await raw(h, { path: "/api/claims" })).body) as {
+    claims: unknown[];
+  };
 
   // 🛑 BOTH, IN ONE TEST. Either alone would pass against a query that
   // filtered on the other condition and ignored this one.
@@ -549,22 +700,24 @@ test('a released claim and an expired one are both absent', async () => {
   close(h);
 });
 
-test('an empty claims list is an empty array, never a missing key', async () => {
+test("an empty claims list is an empty array, never a missing key", async () => {
   // The panel renders "(nothing claimed)" from a length check, so a missing
   // key would throw in the browser rather than render the empty state.
   const h = await harness();
 
-  const body = JSON.parse((await raw(h, { path: '/api/claims' })).body) as { claims: unknown[] };
+  const body = JSON.parse((await raw(h, { path: "/api/claims" })).body) as {
+    claims: unknown[];
+  };
 
   assert.deepEqual(body.claims, []);
   close(h);
 });
 
-test('a rebound GET to /api/claims is refused like every other route', async () => {
+test("a rebound GET to /api/claims is refused like every other route", async () => {
   // It is a read, but it names who is running what on this machine.
   const h = await harness();
 
-  const res = await raw(h, { path: '/api/claims', host: 'evil.example.com' });
+  const res = await raw(h, { path: "/api/claims", host: "evil.example.com" });
 
   assert.equal(res.status, 403);
   close(h);
@@ -576,75 +729,151 @@ test('a rebound GET to /api/claims is refused like every other route', async () 
  * 🛑 A BLANK TERM MUST NOT RETURN THE TRANSCRIPT, and a wrong escape returns
  * results either way — so both halves are asserted with their denominators.
  */
-test('🛑 a blank search is 400, not the whole transcript', async () => {
+test("🛑 a blank search is 400, not the whole transcript", async () => {
   const h = await harness();
-  dao.insertMessage(h.db, { from: 'peer-a', to: 'peer-b', body: 'anything at all', kind: 'chat' });
+  dao.insertMessage(h.db, {
+    from: "peer-a",
+    to: "peer-b",
+    body: "anything at all",
+    kind: "chat",
+  });
 
-  for (const q of ['', '%20', '++']) {
+  for (const q of ["", "%20", "++"]) {
     const res = await raw(h, { path: `/api/search?q=${q}` });
-    if (q === '++') continue; // '+' decodes to a space, covered by the blanks above
+    if (q === "++") continue; // '+' decodes to a space, covered by the blanks above
     assert.equal(res.status, 400, `q=${JSON.stringify(q)} was not refused`);
-    assert.doesNotMatch(res.body, /anything at all/, 'a refused search returned a message body');
+    assert.doesNotMatch(
+      res.body,
+      /anything at all/,
+      "a refused search returned a message body",
+    );
   }
   close(h);
 });
 
-test('a search returns the match, newest first, with a snippet and an id', async () => {
+test("a search returns the match, newest first, with a snippet and an id", async () => {
   const h = await harness();
-  const first = dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: 'CLAIMING the gate', kind: 'chat' });
-  const second = dao.insertMessage(h.db, { from: 'peer-b', to: '#gate', body: 'DONE with the gate', kind: 'chat' });
-  dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: 'unrelated chatter', kind: 'chat' });
+  const first = dao.insertMessage(h.db, {
+    from: "peer-a",
+    to: "#gate",
+    body: "CLAIMING the gate",
+    kind: "chat",
+  });
+  const second = dao.insertMessage(h.db, {
+    from: "peer-b",
+    to: "#gate",
+    body: "DONE with the gate",
+    kind: "chat",
+  });
+  dao.insertMessage(h.db, {
+    from: "peer-a",
+    to: "#gate",
+    body: "unrelated chatter",
+    kind: "chat",
+  });
 
-  const body = JSON.parse((await raw(h, { path: '/api/search?q=gate' })).body) as {
-    returned: number; truncated: boolean; results: Array<Record<string, unknown>>;
+  const body = JSON.parse(
+    (await raw(h, { path: "/api/search?q=gate" })).body,
+  ) as {
+    returned: number;
+    truncated: boolean;
+    results: Array<Record<string, unknown>>;
   };
 
-  assert.equal(body.returned, 2, 'expected 2 of 3');
+  assert.equal(body.returned, 2, "expected 2 of 3");
   assert.equal(body.truncated, false);
-  assert.deepEqual(body.results.map((r) => r.id), [second.id, first.id]);
+  assert.deepEqual(
+    body.results.map((r) => r.id),
+    [second.id, first.id],
+  );
   assert.match(String(body.results[0]?.snippet), /gate/);
   close(h);
 });
 
-test('🛑 a percent in the query does not match every message', async () => {
+test("🛑 a percent in the query does not match every message", async () => {
   const h = await harness();
-  dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: 'the gauge read 100% again', kind: 'chat' });
-  dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: 'nothing numeric here', kind: 'chat' });
-  dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: 'nor here', kind: 'chat' });
+  dao.insertMessage(h.db, {
+    from: "peer-a",
+    to: "#gate",
+    body: "the gauge read 100% again",
+    kind: "chat",
+  });
+  dao.insertMessage(h.db, {
+    from: "peer-a",
+    to: "#gate",
+    body: "nothing numeric here",
+    kind: "chat",
+  });
+  dao.insertMessage(h.db, {
+    from: "peer-a",
+    to: "#gate",
+    body: "nor here",
+    kind: "chat",
+  });
 
-  const body = JSON.parse((await raw(h, { path: '/api/search?q=100%25' })).body) as { returned: number };
+  const body = JSON.parse(
+    (await raw(h, { path: "/api/search?q=100%25" })).body,
+  ) as { returned: number };
 
-  assert.equal(body.returned, 1, 'expected 1 of 3 — the % was treated as a wildcard');
+  assert.equal(
+    body.returned,
+    1,
+    "expected 1 of 3 — the % was treated as a wildcard",
+  );
   close(h);
 });
 
-test('truncated says so, so a capped list is not read as a total', async () => {
+test("truncated says so, so a capped list is not read as a total", async () => {
   const h = await harness();
   for (let i = 0; i < 4; i++) {
-    dao.insertMessage(h.db, { from: 'peer-a', to: '#gate', body: `gate ${i}`, kind: 'chat' });
+    dao.insertMessage(h.db, {
+      from: "peer-a",
+      to: "#gate",
+      body: `gate ${i}`,
+      kind: "chat",
+    });
   }
 
-  const body = JSON.parse((await raw(h, { path: '/api/search?q=gate&limit=2' })).body) as {
-    returned: number; limit: number; truncated: boolean;
+  const body = JSON.parse(
+    (await raw(h, { path: "/api/search?q=gate&limit=2" })).body,
+  ) as {
+    returned: number;
+    limit: number;
+    truncated: boolean;
   };
 
   assert.deepEqual([body.returned, body.limit, body.truncated], [2, 2, true]);
   close(h);
 });
 
-test('a search does not move any read watermark through the HTTP path either', async () => {
+test("a search does not move any read watermark through the HTTP path either", async () => {
   const h = await harness();
   try {
-    dao.joinRoom(h.db, '#gate', 'peer-a');
-    dao.insertMessage(h.db, { from: 'peer-b', to: '#gate', body: 'CLAIMING the gate', kind: 'chat' });
+    dao.joinRoom(h.db, "#gate", "peer-a");
+    dao.insertMessage(h.db, {
+      from: "peer-b",
+      to: "#gate",
+      body: "CLAIMING the gate",
+      kind: "chat",
+    });
 
     // ⚠️ NOT `gate`. `joinRoom` posts "<handle> joined <room>", so a term
     // drawn from the ROOM NAME matches that system message too and the guard
     // below reads 2. The term has to come from the planted body alone.
-    const before = h.db.prepare('SELECT handle, last_read_id FROM room_reads ORDER BY handle').all();
-    const body = JSON.parse((await raw(h, { path: '/api/search?q=CLAIMING' })).body) as { returned: number };
-    assert.equal(body.returned, 1, 'the fixture has to match or this proves nothing');
-    const after = h.db.prepare('SELECT handle, last_read_id FROM room_reads ORDER BY handle').all();
+    const before = h.db
+      .prepare("SELECT handle, last_read_id FROM room_reads ORDER BY handle")
+      .all();
+    const body = JSON.parse(
+      (await raw(h, { path: "/api/search?q=CLAIMING" })).body,
+    ) as { returned: number };
+    assert.equal(
+      body.returned,
+      1,
+      "the fixture has to match or this proves nothing",
+    );
+    const after = h.db
+      .prepare("SELECT handle, last_read_id FROM room_reads ORDER BY handle")
+      .all();
 
     assert.deepEqual(after, before);
   } finally {
@@ -655,10 +884,14 @@ test('a search does not move any read watermark through the HTTP path either', a
   }
 });
 
-test('a rebound GET to /api/search is refused — it reads every room', async () => {
+test("a rebound GET to /api/search is refused — it reads every room", async () => {
   const h = await harness();
 
-  assert.equal((await raw(h, { path: '/api/search?q=gate', host: 'evil.example.com' })).status, 403);
+  assert.equal(
+    (await raw(h, { path: "/api/search?q=gate", host: "evil.example.com" }))
+      .status,
+    403,
+  );
   close(h);
 });
 
@@ -671,15 +904,15 @@ test('a rebound GET to /api/search is refused — it reads every room', async ()
  * not wrap it, so the throw reached the `createServer` catch-all and the
  * client got a 500 for its own oversized request.
  */
-test('🚨 an over-cap room post is a 400, not a 500', async () => {
+test("🚨 an over-cap room post is a 400, not a 500", async () => {
   const h = await harness();
   try {
-    dao.joinRoom(h.db, '#ops', 'operator');
+    dao.joinRoom(h.db, "#ops", "operator");
 
     const res = await post(
       h,
-      '/api/messages',
-      { target: '#ops', body: 'a'.repeat(64 * 1024 + 1) },
+      "/api/messages",
+      { target: "#ops", body: "a".repeat(64 * 1024 + 1) },
       h.origin,
     );
 
@@ -691,15 +924,15 @@ test('🚨 an over-cap room post is a 400, not a 500', async () => {
 });
 
 /** ⚠️ The control. A body at the cap must still post, or the guard is just off. */
-test('🚨 control — a room post AT the cap still succeeds', async () => {
+test("🚨 control — a room post AT the cap still succeeds", async () => {
   const h = await harness();
   try {
-    dao.joinRoom(h.db, '#ops', 'operator');
+    dao.joinRoom(h.db, "#ops", "operator");
 
     const res = await post(
       h,
-      '/api/messages',
-      { target: '#ops', body: 'a'.repeat(64 * 1024) },
+      "/api/messages",
+      { target: "#ops", body: "a".repeat(64 * 1024) },
       h.origin,
     );
 

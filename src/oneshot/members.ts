@@ -1,6 +1,6 @@
-import * as dao from '../storage/dao.js';
-import { openDb } from '../storage/db.js';
-import { assertRoomName } from '../util/naming.js';
+import * as dao from "../storage/dao.js";
+import { openDb } from "../storage/db.js";
+import { assertRoomName } from "../util/naming.js";
 
 export interface MembersOpts {
   room: string;

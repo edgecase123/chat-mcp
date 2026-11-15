@@ -1,4 +1,4 @@
-import { isProcessAlive } from '../../src/storage/dao.js';
+import { isProcessAlive } from "../../src/storage/dao.js";
 
 /**
  * A pid that really is not running, found rather than assumed.
@@ -16,5 +16,5 @@ export function deadPid(): number {
     if (!isProcessAlive(pid)) return pid;
   }
 
-  throw new Error('no dead pid found above the usual pid_max — widen the scan');
+  throw new Error("no dead pid found above the usual pid_max — widen the scan");
 }
