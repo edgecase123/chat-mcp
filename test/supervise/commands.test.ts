@@ -555,7 +555,6 @@ test("a param name outside the allowed charset is refused", () => {
             },
           ],
         }),
-      undefined,
       `accepted param name ${JSON.stringify(bad)}`,
     );
   }

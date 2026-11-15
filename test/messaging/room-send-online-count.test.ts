@@ -56,11 +56,17 @@ const DEAD_PID = 4194303;
 /** `null`, which is what a dead child's row holds after PR 235's clear. */
 type Liveness = "live" | "dead" | "cleared";
 
-function pidFor(l: Liveness): number | null {
+/**
+ * 🛑 `cleared` IS REACHED THE WAY PRODUCTION REACHES IT. `RegisterInput.pid`
+ * is `number`, and nothing in `src/` passes null to `upsertAgent` — PR 235's
+ * clear is `clearAgentPid`, a separate UPDATE. Registering with a null pid
+ * built a row production cannot produce, and it type-checked only because
+ * nothing ever typechecked this file.
+ */
+function pidFor(l: Liveness): number {
   if (l === "live") return process.pid;
-  if (l === "dead") return DEAD_PID;
 
-  return null;
+  return DEAD_PID;
 }
 
 function roomWith(members: ReadonlyArray<readonly [string, Liveness]>) {
@@ -74,6 +80,12 @@ function roomWith(members: ReadonlyArray<readonly [string, Liveness]>) {
       display_name: handle,
       metadata: {},
     });
+    if (liveness === "cleared") {
+      assert.ok(
+        dao.clearAgentPid(db, handle),
+        `fixture ${handle}: clearAgentPid found no row`,
+      );
+    }
     dao.joinRoom(db, "#gate", handle);
     assert.equal(
       dao.getAgent(db, handle)?.online,

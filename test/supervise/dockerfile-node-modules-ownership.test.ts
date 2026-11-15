@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CONTAINER_PROJECT_DIR } from "../../src/supervise/drivers/containerized.ts";
+import { CONTAINER_PROJECT_DIR } from "../../src/supervise/drivers/containerized.js";
 
 /**
  * #221: the container-owned `node_modules` arrives as a named volume, and docker

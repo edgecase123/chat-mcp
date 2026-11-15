@@ -51,7 +51,12 @@ async function listener(
         adapterStatus: { installed: true, framework: null, hint: null },
       };
       open.push(ctx);
-      return buildServer(ctx);
+
+      // 🛑 A SESSION SERVER, NOT A BARE `McpServer`. The listener destructures
+      // `.server` off this, and an `McpServer` has a `.server` of its own —
+      // the low-level `Server`. Returning one duck-typed past the seam and
+      // connected a different object than production connects.
+      return { server: buildServer(ctx), close: async () => {} };
     },
   });
 

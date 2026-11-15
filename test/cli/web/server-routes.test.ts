@@ -681,6 +681,7 @@ test("a released claim and an expired one are both absent", async () => {
     claimed_at: now - 1000,
     expires_at: now + 60_000,
   });
+  assert.ok(released, "insertClaim refused released-thing");
   dao.releaseClaim(h.db, released.id, now);
   dao.insertClaim(h.db, {
     resource: "expired-thing",

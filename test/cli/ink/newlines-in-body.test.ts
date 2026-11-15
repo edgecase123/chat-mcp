@@ -11,12 +11,12 @@ function make(body: string): Message {
     id: 1,
     from_handle: "alice",
     to_handle: "bob",
-    to_room: null,
     kind: "chat",
     body,
     sent_at: 1_700_000_000,
+    delivered_at: null,
     read_at: null,
-  } as Message;
+  };
 }
 
 function renderPane(body: string, cols = 60): string[] {
