@@ -252,12 +252,13 @@ export class CommandBroker {
     envelope: Record<string, unknown>,
   ): Promise<{ commands: ListedCommand[] } | ScriptResult> {
     if (envelope.op === "list-commands") {
-      // 🛑 THIS IS THE CALL SITE THE BUG LIVED ON, NOT THE SHIM'S. `host-bus.ts`
-      // constructs this broker with `sandbox: "docker"` hardcoded, and a
-      // container reaches `list-commands` only through here — so the shim's own
-      // gate leaves the whole defect ungated. `runCommand` below already
-      // threads the same field; this line did not, and that asymmetry WAS the
-      // bug. #264.
+      // 🛑 GATED HERE FOR THE REASON `BrokerOptions.sandbox` IS REQUIRED, NOT
+      // because this path carries the defect. Nothing in `src/` constructs a
+      // `CommandBroker`, so a containerized agent never reaches this line
+      // today — it reaches the shim tool over the HTTP listener. `runCommand`
+      // below already threads the same field; this one did not, and an absent
+      // guard on an unwired listener is a guard missing on the day someone
+      // wires it. #264.
       return listCommandsFor(handle, { sandbox: this.options.sandbox });
     }
 

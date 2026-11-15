@@ -230,14 +230,12 @@ test("🚨 list-commands is REFUSED for a containerized agent, and names nothing
     false,
     "the manifest reached a containerized agent",
   );
-});
 
-/**
- * 🛑 THE PAIRED CONTROL FOR THE TEST ABOVE, SPELLED OUT. `list-commands returns
- * the command names` binds `sandbox: "host"` through `brokerFor`, so a guard
- * that refused every caller would turn it red. That is what keeps the refusal
- * above from being indistinguishable from a broken lister.
- */
+  // The paired control is `list-commands returns the command names`, which
+  // binds `sandbox: "host"` through `brokerFor`. A guard that refused every
+  // caller would turn it red, which is what stops this refusal from being
+  // indistinguishable from a broken lister.
+});
 
 /**
  * 🛑 THE KEY IS ABSENT, NOT FALSY. `assert.equal(script, undefined)` passes for

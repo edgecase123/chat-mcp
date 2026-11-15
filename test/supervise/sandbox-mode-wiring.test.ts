@@ -319,10 +319,12 @@ test("🚨 run_command over the STDIO SHIM runs the script on the host", async (
  * with something that lacks the sentence — only the absence of `mark` separates
  * "refused before reading the manifest" from "answered differently".
  *
- * 🛑 THE GATE THIS COVERS IS `broker.ts`'s, NOT THE SHIM'S. A container reaches
- * `list-commands` only through the broker, and `host-bus.ts` is the one line
- * that constructs it with `sandbox: "docker"`. Gating only the shim leaves this
- * test red.
+ * 🛑 THE GATE THIS COVERS IS THE SHIM TOOL'S. `host-bus.ts` is the one line
+ * that builds the context with `sandbox: "docker"`, and it binds an
+ * `McpHttpListener` over `buildServer(ctx)` — the shim tools, not a broker.
+ * Measured both ways: neutering the shim's gate turns this test red, and
+ * neutering `broker.ts`'s does not, because nothing in `src/` constructs a
+ * `CommandBroker`. `broker.test.ts` covers that one.
  */
 test("🚨 list_commands over the HOST BUS refuses, and names no command", async (t) => {
   const handle = `hostbus-list-${process.pid}`;
