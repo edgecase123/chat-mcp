@@ -1,8 +1,8 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { migrate } from '../../src/storage/db.js';
-import * as dao from '../../src/storage/dao.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { migrate } from "../../src/storage/db.js";
+import * as dao from "../../src/storage/dao.js";
 
 /**
  * 🛑 AN APPROVAL IS A MODAL WITH TWO OUTCOMES, NOT A SENTENCE.
@@ -14,25 +14,26 @@ import * as dao from '../../src/storage/dao.js';
  */
 
 function freshDb(): DatabaseSync {
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(":memory:");
   migrate(db);
 
   return db;
 }
 
 const REQUEST = {
-  agentHandle: 'claude2-agent',
-  supervisorHandle: 'claude2',
+  agentHandle: "claude2-agent",
+  supervisorHandle: "claude2",
   // 🛑 TWO FIELDS, DIFFERENT LANGUAGES. `requested` is the CLI's prose that
   // a human reads; `grant` is what `--allowedTools` understands. Approving
   // the prose granted nothing and looped — measured live.
   requested: "rm in '/tmp/target.txt'",
-  grant: 'Bash(rm -f /tmp/target.txt)',
-  reason: 'Permission for this tool use was denied. ... What required approval: rm',
-  sessionId: 'abc-123',
+  grant: "Bash(rm -f /tmp/target.txt)",
+  reason:
+    "Permission for this tool use was denied. ... What required approval: rm",
+  sessionId: "abc-123",
 };
 
-test('a pending approval is readable after it is written', () => {
+test("a pending approval is readable after it is written", () => {
   const db = freshDb();
   const id = dao.insertApproval(db, REQUEST);
 
@@ -47,14 +48,17 @@ test('a pending approval is readable after it is written', () => {
  * string, and that same string is what gets added to the allowlist. A
  * paraphrase means approving something the child never asked for.
  */
-test('the command survives the round trip byte for byte', () => {
+test("the command survives the round trip byte for byte", () => {
   const db = freshDb();
   dao.insertApproval(db, REQUEST);
 
-  assert.equal(dao.pendingApprovals(db)[0]?.requested, "rm in '/tmp/target.txt'");
+  assert.equal(
+    dao.pendingApprovals(db)[0]?.requested,
+    "rm in '/tmp/target.txt'",
+  );
 });
 
-test('the full denial reason is kept, so the UI can quote it', () => {
+test("the full denial reason is kept, so the UI can quote it", () => {
   const db = freshDb();
   dao.insertApproval(db, REQUEST);
 
@@ -65,27 +69,27 @@ test('the full denial reason is kept, so the UI can quote it', () => {
  * The session id is what makes `--resume` possible. Without it the only
  * recovery is a fresh child that has forgotten the task.
  */
-test('the session to resume is carried with the request', () => {
+test("the session to resume is carried with the request", () => {
   const db = freshDb();
   dao.insertApproval(db, REQUEST);
 
-  assert.equal(dao.pendingApprovals(db)[0]?.sessionId, 'abc-123');
+  assert.equal(dao.pendingApprovals(db)[0]?.sessionId, "abc-123");
 });
 
-test('an answered approval leaves the pending list', () => {
+test("an answered approval leaves the pending list", () => {
   const db = freshDb();
   const id = dao.insertApproval(db, REQUEST);
 
-  assert.equal(dao.answerApproval(db, id, 'approve', 'operator'), true);
+  assert.equal(dao.answerApproval(db, id, "approve", "operator"), true);
   assert.deepEqual(dao.pendingApprovals(db), []);
 });
 
-test('the decision is readable after answering', () => {
+test("the decision is readable after answering", () => {
   const db = freshDb();
   const id = dao.insertApproval(db, REQUEST);
-  dao.answerApproval(db, id, 'deny', 'operator');
+  dao.answerApproval(db, id, "deny", "operator");
 
-  assert.equal(dao.getApproval(db, id)?.decision, 'deny');
+  assert.equal(dao.getApproval(db, id)?.decision, "deny");
 });
 
 /**
@@ -94,28 +98,36 @@ test('the decision is readable after answering', () => {
  * compare-and-swap the handle claim needed: check-then-write is not atomic,
  * and a second grant for an already-denied request is the worst outcome.
  */
-test('an approval cannot be answered twice', () => {
+test("an approval cannot be answered twice", () => {
   const db = freshDb();
   const id = dao.insertApproval(db, REQUEST);
 
-  assert.equal(dao.answerApproval(db, id, 'deny', 'operator'), true);
-  assert.equal(dao.answerApproval(db, id, 'approve', 'operator'), false, 'the second answer was accepted');
+  assert.equal(dao.answerApproval(db, id, "deny", "operator"), true);
+  assert.equal(
+    dao.answerApproval(db, id, "approve", "operator"),
+    false,
+    "the second answer was accepted",
+  );
 });
 
-test('a second answer does not overwrite the first decision', () => {
+test("a second answer does not overwrite the first decision", () => {
   const db = freshDb();
   const id = dao.insertApproval(db, REQUEST);
 
-  dao.answerApproval(db, id, 'deny', 'operator');
-  dao.answerApproval(db, id, 'approve', 'operator');
+  dao.answerApproval(db, id, "deny", "operator");
+  dao.answerApproval(db, id, "approve", "operator");
 
-  assert.equal(dao.getApproval(db, id)?.decision, 'deny', 'a deny was upgraded to an approve');
+  assert.equal(
+    dao.getApproval(db, id)?.decision,
+    "deny",
+    "a deny was upgraded to an approve",
+  );
 });
 
-test('answering an id that does not exist returns false rather than throwing', () => {
+test("answering an id that does not exist returns false rather than throwing", () => {
   const db = freshDb();
 
-  assert.equal(dao.answerApproval(db, 999, 'approve', 'operator'), false);
+  assert.equal(dao.answerApproval(db, 999, "approve", "operator"), false);
 });
 
 /**
@@ -123,21 +135,21 @@ test('answering an id that does not exist returns false rather than throwing', (
  * indistinguishable from a hung agent. The store must at least make the age
  * visible so something above it can time out.
  */
-test('a pending approval carries its age', () => {
+test("a pending approval carries its age", () => {
   const db = freshDb();
   const before = Date.now();
   dao.insertApproval(db, REQUEST);
 
   const created = dao.pendingApprovals(db)[0]?.createdAt ?? 0;
 
-  assert.ok(created >= before, 'createdAt predates the insert');
-  assert.ok(created <= Date.now(), 'createdAt is in the future');
+  assert.ok(created >= before, "createdAt predates the insert");
+  assert.ok(created <= Date.now(), "createdAt is in the future");
 });
 
-test('pending approvals come back oldest first, because that is the answer order', () => {
+test("pending approvals come back oldest first, because that is the answer order", () => {
   const db = freshDb();
-  const first = dao.insertApproval(db, { ...REQUEST, requested: 'one' });
-  const second = dao.insertApproval(db, { ...REQUEST, requested: 'two' });
+  const first = dao.insertApproval(db, { ...REQUEST, requested: "one" });
+  const second = dao.insertApproval(db, { ...REQUEST, requested: "two" });
 
   const ids = dao.pendingApprovals(db).map((a) => a.id);
 
@@ -149,25 +161,29 @@ test('pending approvals come back oldest first, because that is the answer order
  * the web user's own handle, which wakes nobody. The request has to name its
  * supervisor.
  */
-test('the request names the supervisor to wake, not just the child', () => {
+test("the request names the supervisor to wake, not just the child", () => {
   const db = freshDb();
   dao.insertApproval(db, REQUEST);
 
-  assert.equal(dao.pendingApprovals(db)[0]?.supervisorHandle, 'claude2');
+  assert.equal(dao.pendingApprovals(db)[0]?.supervisorHandle, "claude2");
   assert.notEqual(
     dao.pendingApprovals(db)[0]?.supervisorHandle,
     dao.pendingApprovals(db)[0]?.agentHandle,
-    'the supervisor and its child must be distinguishable',
+    "the supervisor and its child must be distinguishable",
   );
 });
 
-test('approvals are scoped per agent, so two supervisors do not see each other', () => {
+test("approvals are scoped per agent, so two supervisors do not see each other", () => {
   const db = freshDb();
-  dao.insertApproval(db, { ...REQUEST, agentHandle: 'claude1-agent' });
-  dao.insertApproval(db, { ...REQUEST, agentHandle: 'claude2-agent' });
+  dao.insertApproval(db, { ...REQUEST, agentHandle: "claude1-agent" });
+  dao.insertApproval(db, { ...REQUEST, agentHandle: "claude2-agent" });
 
-  assert.equal(dao.pendingApprovals(db, 'claude2-agent').length, 1);
-  assert.equal(dao.pendingApprovals(db).length, 2, 'omitting the handle must return all');
+  assert.equal(dao.pendingApprovals(db, "claude2-agent").length, 1);
+  assert.equal(
+    dao.pendingApprovals(db).length,
+    2,
+    "omitting the handle must return all",
+  );
 });
 
 /**
@@ -182,7 +198,7 @@ test('approvals are scoped per agent, so two supervisors do not see each other',
  * restores the bug #39 exists to fix, because the child stops and nobody is
  * told. The row is filed; only Approve is refused.
  */
-test('an unnamed request is stored as NULL, not as a placeholder', () => {
+test("an unnamed request is stored as NULL, not as a placeholder", () => {
   const db = freshDb();
   dao.insertApproval(db, { ...REQUEST, requested: null, grant: null });
 
@@ -194,52 +210,88 @@ test('an unnamed request is stored as NULL, not as a placeholder', () => {
  * prose, so the card looked approvable — and there was no allowlist entry
  * behind it, so Approve granted nothing and the agent was denied again.
  */
-test('a row with prose but NO grant cannot be approved', () => {
+test("a row with prose but NO grant cannot be approved", () => {
   const db = freshDb();
   const id = dao.insertApproval(db, { ...REQUEST, grant: null });
 
-  assert.ok(dao.getApproval(db, id)?.requested, 'the prose is present, so the card looks fine');
-  assert.throws(() => dao.answerApproval(db, id, 'approve', 'operator'), dao.UnnameableApprovalError);
-  assert.equal(dao.answerApproval(db, id, 'deny', 'operator'), true, 'deny must still work');
+  assert.ok(
+    dao.getApproval(db, id)?.requested,
+    "the prose is present, so the card looks fine",
+  );
+  assert.throws(
+    () => dao.answerApproval(db, id, "approve", "operator"),
+    dao.UnnameableApprovalError,
+  );
+  assert.equal(
+    dao.answerApproval(db, id, "deny", "operator"),
+    true,
+    "deny must still work",
+  );
 });
 
-test('the grant survives the round trip exactly', () => {
+test("the grant survives the round trip exactly", () => {
   const db = freshDb();
   dao.insertApproval(db, REQUEST);
 
-  assert.equal(dao.pendingApprovals(db)[0]?.grant, 'Bash(rm -f /tmp/target.txt)');
+  assert.equal(
+    dao.pendingApprovals(db)[0]?.grant,
+    "Bash(rm -f /tmp/target.txt)",
+  );
 });
 
-test('the grant and the prose are DIFFERENT strings, by design', () => {
+test("the grant and the prose are DIFFERENT strings, by design", () => {
   const db = freshDb();
   dao.insertApproval(db, REQUEST);
   const a = dao.pendingApprovals(db)[0];
 
-  assert.notEqual(a?.grant, a?.requested, 'conflating them is the bug this split fixes');
+  assert.notEqual(
+    a?.grant,
+    a?.requested,
+    "conflating them is the bug this split fixes",
+  );
 });
 
-test('approving an unnamed request THROWS rather than granting a blank', () => {
+test("approving an unnamed request THROWS rather than granting a blank", () => {
   const db = freshDb();
-  const id = dao.insertApproval(db, { ...REQUEST, requested: null, grant: null });
+  const id = dao.insertApproval(db, {
+    ...REQUEST,
+    requested: null,
+    grant: null,
+  });
 
-  assert.throws(() => dao.answerApproval(db, id, 'approve', 'operator'), dao.UnnameableApprovalError);
+  assert.throws(
+    () => dao.answerApproval(db, id, "approve", "operator"),
+    dao.UnnameableApprovalError,
+  );
 });
 
 /** Stopping something you cannot name is always a safe answer. */
-test('an unnamed request CAN be denied', () => {
+test("an unnamed request CAN be denied", () => {
   const db = freshDb();
-  const id = dao.insertApproval(db, { ...REQUEST, requested: null, grant: null });
+  const id = dao.insertApproval(db, {
+    ...REQUEST,
+    requested: null,
+    grant: null,
+  });
 
-  assert.equal(dao.answerApproval(db, id, 'deny', 'operator'), true);
-  assert.equal(dao.getApproval(db, id)?.decision, 'deny');
+  assert.equal(dao.answerApproval(db, id, "deny", "operator"), true);
+  assert.equal(dao.getApproval(db, id)?.decision, "deny");
 });
 
-test('a refused approve leaves the request still pending, not half-answered', () => {
+test("a refused approve leaves the request still pending, not half-answered", () => {
   const db = freshDb();
-  const id = dao.insertApproval(db, { ...REQUEST, requested: null, grant: null });
+  const id = dao.insertApproval(db, {
+    ...REQUEST,
+    requested: null,
+    grant: null,
+  });
 
-  assert.throws(() => dao.answerApproval(db, id, 'approve', 'operator'));
-  assert.equal(dao.pendingApprovals(db).length, 1, 'the refusal consumed the request');
+  assert.throws(() => dao.answerApproval(db, id, "approve", "operator"));
+  assert.equal(
+    dao.pendingApprovals(db).length,
+    1,
+    "the refusal consumed the request",
+  );
 });
 
 /**
@@ -247,8 +299,8 @@ test('a refused approve leaves the request still pending, not half-answered', ()
  * first version of the guard threw "cannot be approved" for a missing id —
  * reporting "no such approval" as a different problem entirely.
  */
-test('approving an id that does not exist still returns false, not a throw', () => {
+test("approving an id that does not exist still returns false, not a throw", () => {
   const db = freshDb();
 
-  assert.equal(dao.answerApproval(db, 4242, 'approve', 'operator'), false);
+  assert.equal(dao.answerApproval(db, 4242, "approve", "operator"), false);
 });

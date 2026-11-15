@@ -1,14 +1,15 @@
-import type { Db } from './db.js';
+import type { Db } from "./db.js";
 // A value import: `db.ts` owns the schema_version table, and it imports only
 // `util/paths.js`, so this cannot cycle back.
-import { currentSchemaVersion, verifierFor } from './db.js';
-import type { ClaimRow } from '../claims/lifecycle.js';
+import { currentSchemaVersion, verifierFor } from "./db.js";
+import type { ClaimRow } from "../claims/lifecycle.js";
 // A value import, not a type: `searchMessages` has to tell a room target from
 // a peer target at runtime. `naming.ts` imports nothing, so this cannot cycle.
-import { isRoomName } from '../util/naming.js';
+import { isRoomName } from "../util/naming.js";
 
-export type AgentStatus = 'idle' | 'thinking' | 'tool' | 'blocked' | 'error' | 'offline';
-export type MessageKind = 'chat' | 'dispatch' | 'alert';
+export type AgentStatus =
+  "idle" | "thinking" | "tool" | "blocked" | "error" | "offline";
+export type MessageKind = "chat" | "dispatch" | "alert";
 
 export interface Agent {
   handle: string;
@@ -70,13 +71,20 @@ interface MessageRow {
 
 function coerceStatus(raw: string | null): AgentStatus | null {
   if (!raw) return null;
-  const allowed: AgentStatus[] = ['idle', 'thinking', 'tool', 'blocked', 'error', 'offline'];
+  const allowed: AgentStatus[] = [
+    "idle",
+    "thinking",
+    "tool",
+    "blocked",
+    "error",
+    "offline",
+  ];
   return (allowed as string[]).includes(raw) ? (raw as AgentStatus) : null;
 }
 
 function coerceKind(raw: string | null): MessageKind {
-  if (raw === 'dispatch' || raw === 'alert') return raw;
-  return 'chat';
+  if (raw === "dispatch" || raw === "alert") return raw;
+  return "chat";
 }
 
 /**
@@ -93,13 +101,15 @@ export function isProcessAlive(pid: number | null): boolean {
     return true;
   } catch (e: unknown) {
     const err = e as NodeJS.ErrnoException;
-    return err.code === 'EPERM';
+    return err.code === "EPERM";
   }
 }
 
 function hydrate(row: AgentRow): Agent {
-  const metadata = row.metadata_json ? (JSON.parse(row.metadata_json) as Record<string, unknown>) : {};
-  const kind = typeof metadata.kind === 'string' ? metadata.kind : 'agent';
+  const metadata = row.metadata_json
+    ? (JSON.parse(row.metadata_json) as Record<string, unknown>)
+    : {};
+  const kind = typeof metadata.kind === "string" ? metadata.kind : "agent";
   return {
     handle: row.handle,
     display_name: row.display_name,
@@ -131,14 +141,23 @@ export function setAgentStatus(
   ).run(status, focus, Date.now(), Date.now(), handle);
 }
 
-export function setAgentContext(db: Db, handle: string, used: number, total: number): void {
+export function setAgentContext(
+  db: Db,
+  handle: string,
+  used: number,
+  total: number,
+): void {
   const now = Date.now();
   db.prepare(
     `UPDATE agents SET context_used = ?, context_total = ?, context_reported_at = ?, last_seen_at = ? WHERE handle = ?`,
   ).run(used, total, now, now, handle);
 }
 
-export function setAgentContextWarned(db: Db, handle: string, threshold: number | null): void {
+export function setAgentContextWarned(
+  db: Db,
+  handle: string,
+  threshold: number | null,
+): void {
   db.prepare(
     `UPDATE agents SET context_warned_threshold = ? WHERE handle = ?`,
   ).run(threshold, handle);
@@ -177,12 +196,12 @@ export class HandleClaimedError extends Error {
     readonly heldByPid: number | null,
   ) {
     super(
-      `handle "${handle}" is already held by a live process (pid ${heldByPid ?? 'unknown'}). ` +
+      `handle "${handle}" is already held by a live process (pid ${heldByPid ?? "unknown"}). ` +
         `Refusing to take it: inbox marks messages read, so one of the two ` +
         `processes would silently consume the other's mail. ` +
         `Use a different --handle, or force the claim if that pid is stale.`,
     );
-    this.name = 'HandleClaimedError';
+    this.name = "HandleClaimedError";
   }
 }
 
@@ -224,10 +243,16 @@ function refuseLiveRival(input: RegisterInput, incumbent: Agent | null): void {
  * Returns false when the row moved under us, which the caller reports as the
  * conflict it is.
  */
-export function writeClaim(db: Db, input: RegisterInput, expectedPid: number | null): boolean {
+export function writeClaim(
+  db: Db,
+  input: RegisterInput,
+  expectedPid: number | null,
+): boolean {
   // A forced claim is "take it regardless", so it must not also lose the race
   // to the very row it is overriding.
-  const guard = input.force ? 'WHERE TRUE' : 'WHERE agents.pid IS @expected_pid';
+  const guard = input.force
+    ? "WHERE TRUE"
+    : "WHERE agents.pid IS @expected_pid";
   const now = Date.now();
   const metadata_json = input.metadata ? JSON.stringify(input.metadata) : null;
 
@@ -268,7 +293,10 @@ export function upsertAgent(db: Db, input: RegisterInput): Agent {
   if (!writeClaim(db, input, incumbent?.pid ?? null)) {
     // The row moved between the read and the write, so a rival claimed it in
     // the window. Report the conflict rather than overwriting it.
-    throw new HandleClaimedError(input.handle, getAgent(db, input.handle)?.pid ?? null);
+    throw new HandleClaimedError(
+      input.handle,
+      getAgent(db, input.handle)?.pid ?? null,
+    );
   }
 
   const agent = getAgent(db, input.handle);
@@ -278,18 +306,25 @@ export function upsertAgent(db: Db, input: RegisterInput): Agent {
 }
 
 export function getAgent(db: Db, handle: string): Agent | null {
-  const row = db.prepare(`SELECT * FROM agents WHERE handle = ?`).get(handle) as unknown as AgentRow | undefined;
+  const row = db
+    .prepare(`SELECT * FROM agents WHERE handle = ?`)
+    .get(handle) as unknown as AgentRow | undefined;
   return row ? hydrate(row) : null;
 }
 
 export function listAgents(db: Db, includeOffline = false): Agent[] {
-  const rows = db.prepare(`SELECT * FROM agents ORDER BY last_seen_at DESC`).all() as unknown as AgentRow[];
+  const rows = db
+    .prepare(`SELECT * FROM agents ORDER BY last_seen_at DESC`)
+    .all() as unknown as AgentRow[];
   const agents = rows.map(hydrate);
   return includeOffline ? agents : agents.filter((a) => a.online);
 }
 
 export function touchLastSeen(db: Db, handle: string): void {
-  db.prepare(`UPDATE agents SET last_seen_at = ? WHERE handle = ?`).run(Date.now(), handle);
+  db.prepare(`UPDATE agents SET last_seen_at = ? WHERE handle = ?`).run(
+    Date.now(),
+    handle,
+  );
 }
 
 export interface SendInput {
@@ -305,7 +340,7 @@ export interface SendResult {
 }
 
 /** Which check rejected the send. Each one is a different claim about what happened. */
-export type NotPersistedReason = 'no-rows-changed' | 'row-absent-on-reread';
+export type NotPersistedReason = "no-rows-changed" | "row-absent-on-reread";
 
 /**
  * #138 — a send reported an id for a row that was never written.
@@ -326,33 +361,45 @@ export class MessageNotPersistedError extends Error {
   ) {
     super(
       `Nothing was sent from ${from} to ${to}. ` +
-        (reason === 'no-rows-changed'
+        (reason === "no-rows-changed"
           ? `The INSERT into messages changed no rows, so id ${claimedId} belongs to another table.`
           : `A second connection cannot read id ${claimedId} back, so the row did not survive.`),
     );
-    this.name = 'MessageNotPersistedError';
+    this.name = "MessageNotPersistedError";
   }
 }
 
 export function insertMessage(db: Db, input: SendInput): SendResult {
   const sent_at = Date.now();
-  const kind: MessageKind = input.kind ?? 'chat';
-  const info = db.prepare(
-    `INSERT INTO messages (from_handle, to_handle, body, sent_at, kind) VALUES (?, ?, ?, ?, ?)`,
-  ).run(input.from, input.to, input.body, sent_at, kind);
+  const kind: MessageKind = input.kind ?? "chat";
+  const info = db
+    .prepare(
+      `INSERT INTO messages (from_handle, to_handle, body, sent_at, kind) VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(input.from, input.to, input.body, sent_at, kind);
   const id = Number(info.lastInsertRowid);
   if (Number(info.changes) !== 1) {
-    throw new MessageNotPersistedError('no-rows-changed', id, input.from, input.to);
+    throw new MessageNotPersistedError(
+      "no-rows-changed",
+      id,
+      input.from,
+      input.to,
+    );
   }
 
   // 🛑 THE WITNESS, NOT THE WRITER. `verifierFor` is undefined only for a
   // `:memory:` database, which no second connection can reach — a guard test
   // keeps `openDb` the single place production opens one.
   const witness = verifierFor(db) ?? db;
-  if (!witness.prepare('SELECT id FROM messages WHERE id = ?').get(id)) {
+  if (!witness.prepare("SELECT id FROM messages WHERE id = ?").get(id)) {
     // Rejected alternative: returning the id anyway when only the witness is
     // unhappy. A retry that double-posts is recoverable; a false receipt is not.
-    throw new MessageNotPersistedError('row-absent-on-reread', id, input.from, input.to);
+    throw new MessageNotPersistedError(
+      "row-absent-on-reread",
+      id,
+      input.from,
+      input.to,
+    );
   }
 
   return { id, sent_at };
@@ -373,12 +420,14 @@ export interface BusHealth {
  * INSERT was ever attempted. #138 could only be diagnosed by the pair.
  */
 export function busHealth(db: Db): BusHealth {
-  const max = db.prepare('SELECT MAX(id) AS v FROM messages').get() as unknown as { v: number | null };
+  const max = db
+    .prepare("SELECT MAX(id) AS v FROM messages")
+    .get() as unknown as { v: number | null };
   // sqlite_sequence holds no row for a table until its first insert, so `.get()`
   // is undefined on a database nobody has sent on yet.
-  const seq = db.prepare("SELECT seq AS v FROM sqlite_sequence WHERE name = 'messages'").get() as unknown as
-    | { v: number | null }
-    | undefined;
+  const seq = db
+    .prepare("SELECT seq AS v FROM sqlite_sequence WHERE name = 'messages'")
+    .get() as unknown as { v: number | null } | undefined;
   return {
     max_id: max.v ?? null,
     autoincrement_seq: seq?.v ?? null,
@@ -395,12 +444,14 @@ export interface InboxQuery {
 export function pendingInbox(db: Db, query: InboxQuery): Message[] {
   const since = query.sinceId ?? 0;
   const limit = Math.min(Math.max(query.limit ?? 50, 1), 500);
-  const rows = db.prepare(
-    `SELECT * FROM messages
+  const rows = db
+    .prepare(
+      `SELECT * FROM messages
      WHERE to_handle = ? AND read_at IS NULL AND id > ?
      ORDER BY id ASC
      LIMIT ?`,
-  ).all(query.to, since, limit) as unknown as MessageRow[];
+    )
+    .all(query.to, since, limit) as unknown as MessageRow[];
   return rows.map(toMessage);
 }
 
@@ -413,9 +464,11 @@ export function pendingInbox(db: Db, query: InboxQuery): Message[] {
  * looking for a message that is not there.
  */
 export function pendingInboxCount(db: Db, to: string): number {
-  const row = db.prepare(
-    `SELECT COUNT(*) AS n FROM messages WHERE to_handle = ? AND read_at IS NULL`,
-  ).get(to) as unknown as { n: number };
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM messages WHERE to_handle = ? AND read_at IS NULL`,
+    )
+    .get(to) as unknown as { n: number };
 
   return Number(row.n);
 }
@@ -443,27 +496,27 @@ export function totalUnreadFor(db: Db, handle: string): number {
 export function markRead(db: Db, ids: number[]): void {
   if (ids.length === 0) return;
   const now = Date.now();
-  const placeholders = ids.map(() => '?').join(',');
-  db.prepare(`UPDATE messages SET read_at = ? WHERE id IN (${placeholders}) AND read_at IS NULL`).run(
-    now,
-    ...ids,
-  );
+  const placeholders = ids.map(() => "?").join(",");
+  db.prepare(
+    `UPDATE messages SET read_at = ? WHERE id IN (${placeholders}) AND read_at IS NULL`,
+  ).run(now, ...ids);
 }
 
 export function markDelivered(db: Db, ids: number[]): void {
   if (ids.length === 0) return;
   const now = Date.now();
-  const placeholders = ids.map(() => '?').join(',');
-  db.prepare(`UPDATE messages SET delivered_at = ? WHERE id IN (${placeholders}) AND delivered_at IS NULL`).run(
-    now,
-    ...ids,
-  );
+  const placeholders = ids.map(() => "?").join(",");
+  db.prepare(
+    `UPDATE messages SET delivered_at = ? WHERE id IN (${placeholders}) AND delivered_at IS NULL`,
+  ).run(now, ...ids);
 }
 
 export function undeliveredFor(db: Db, handle: string): Message[] {
-  const rows = db.prepare(
-    `SELECT * FROM messages WHERE to_handle = ? AND delivered_at IS NULL ORDER BY id ASC`,
-  ).all(handle) as unknown as MessageRow[];
+  const rows = db
+    .prepare(
+      `SELECT * FROM messages WHERE to_handle = ? AND delivered_at IS NULL ORDER BY id ASC`,
+    )
+    .all(handle) as unknown as MessageRow[];
   return rows.map(toMessage);
 }
 
@@ -508,7 +561,7 @@ export interface JoinResult {
 }
 
 /** Reserved from_handle used for room lifecycle announcements (joins etc.). */
-export const SYSTEM_HANDLE = 'system';
+export const SYSTEM_HANDLE = "system";
 
 interface RoomRow {
   name: string;
@@ -535,9 +588,11 @@ export function joinRoom(db: Db, room: string, handle: string): JoinResult {
      ON CONFLICT(name) DO NOTHING`,
   ).run(room, now, handle);
 
-  const existing = db.prepare(
-    `SELECT joined_at FROM room_members WHERE room_name = ? AND handle = ?`,
-  ).get(room, handle) as unknown as { joined_at: number } | undefined;
+  const existing = db
+    .prepare(
+      `SELECT joined_at FROM room_members WHERE room_name = ? AND handle = ?`,
+    )
+    .get(room, handle) as unknown as { joined_at: number } | undefined;
 
   if (existing) {
     return { room: hydrateRoom(db, room), was_new_member: false };
@@ -548,9 +603,11 @@ export function joinRoom(db: Db, room: string, handle: string): JoinResult {
   ).run(room, handle, now);
 
   const body = `${handle} joined ${room}`;
-  const sysInfo = db.prepare(
-    `INSERT INTO messages (from_handle, to_handle, body, sent_at) VALUES (?, ?, ?, ?)`,
-  ).run(SYSTEM_HANDLE, room, body, now);
+  const sysInfo = db
+    .prepare(
+      `INSERT INTO messages (from_handle, to_handle, body, sent_at) VALUES (?, ?, ?, ?)`,
+    )
+    .run(SYSTEM_HANDLE, room, body, now);
   const sysId = Number(sysInfo.lastInsertRowid);
 
   // Anchor the new joiner's watermark AT the system message so they don't
@@ -569,14 +626,15 @@ export function joinRoom(db: Db, room: string, handle: string): JoinResult {
 }
 
 export function leaveRoom(db: Db, room: string, handle: string): boolean {
-  const info = db.prepare(
-    `DELETE FROM room_members WHERE room_name = ? AND handle = ?`,
-  ).run(room, handle);
+  const info = db
+    .prepare(`DELETE FROM room_members WHERE room_name = ? AND handle = ?`)
+    .run(room, handle);
   // Drop the read watermark too — a subsequent rejoin will re-anchor at
   // whatever the current max_id is at that time.
-  db.prepare(
-    `DELETE FROM room_reads WHERE room_name = ? AND handle = ?`,
-  ).run(room, handle);
+  db.prepare(`DELETE FROM room_reads WHERE room_name = ? AND handle = ?`).run(
+    room,
+    handle,
+  );
   return info.changes > 0;
 }
 
@@ -592,7 +650,7 @@ export function leaveRoom(db: Db, room: string, handle: string): boolean {
  *
  * Decided by lee, 2026-11-04, over a label alone and over an inheritance rule.
  */
-export type RoomDeleteVerdict = 'allow' | 'not-a-member' | 'owner-only';
+export type RoomDeleteVerdict = "allow" | "not-a-member" | "owner-only";
 
 export function roomDeleteVerdict(opts: {
   readonly caller: string;
@@ -600,18 +658,22 @@ export function roomDeleteVerdict(opts: {
   readonly callerIsMember: boolean;
   readonly ownerIsMember: boolean;
 }): RoomDeleteVerdict {
-  if (!opts.callerIsMember) return 'not-a-member';
-  if (opts.owner === undefined) return 'allow';
-  if (opts.owner === opts.caller) return 'allow';
+  if (!opts.callerIsMember) return "not-a-member";
+  if (opts.owner === undefined) return "allow";
+  if (opts.owner === opts.caller) return "allow";
 
-  return opts.ownerIsMember ? 'owner-only' : 'allow';
+  return opts.ownerIsMember ? "owner-only" : "allow";
 }
 
 export type RoomDeleteResult =
   | { readonly ok: true }
-  | { readonly ok: false; readonly reason: 'not-found' }
-  | { readonly ok: false; readonly reason: 'not-a-member' }
-  | { readonly ok: false; readonly reason: 'owner-only'; readonly owner: string };
+  | { readonly ok: false; readonly reason: "not-found" }
+  | { readonly ok: false; readonly reason: "not-a-member" }
+  | {
+      readonly ok: false;
+      readonly reason: "owner-only";
+      readonly owner: string;
+    };
 
 /**
  * Delete a room entirely, if `caller` is allowed to. `rooms → room_members`
@@ -632,10 +694,14 @@ export type RoomDeleteResult =
  * unknown room; it now returns `not-found`, because a caller that cannot tell
  * "gone" from "refused" cannot report either one.
  */
-export function deleteRoom(db: Db, room: string, caller: string): RoomDeleteResult {
+export function deleteRoom(
+  db: Db,
+  room: string,
+  caller: string,
+): RoomDeleteResult {
   const owner = roomOwner(db, room);
 
-  if (owner === undefined) return { ok: false, reason: 'not-found' };
+  if (owner === undefined) return { ok: false, reason: "not-found" };
 
   const verdict = roomDeleteVerdict({
     caller,
@@ -644,8 +710,9 @@ export function deleteRoom(db: Db, room: string, caller: string): RoomDeleteResu
     ownerIsMember: isRoomMember(db, room, owner),
   });
 
-  if (verdict === 'not-a-member') return { ok: false, reason: 'not-a-member' };
-  if (verdict === 'owner-only') return { ok: false, reason: 'owner-only', owner };
+  if (verdict === "not-a-member") return { ok: false, reason: "not-a-member" };
+  if (verdict === "owner-only")
+    return { ok: false, reason: "owner-only", owner };
 
   db.prepare(`DELETE FROM room_reads WHERE room_name = ?`).run(room);
   db.prepare(`DELETE FROM messages WHERE to_handle = ?`).run(room);
@@ -661,19 +728,22 @@ export function deleteRoom(db: Db, room: string, caller: string): RoomDeleteResu
  * and isn't booting themselves).
  */
 export function bootFromRoom(db: Db, room: string, handle: string): boolean {
-  const info = db.prepare(
-    `DELETE FROM room_members WHERE room_name = ? AND handle = ?`,
-  ).run(room, handle);
-  db.prepare(
-    `DELETE FROM room_reads WHERE room_name = ? AND handle = ?`,
-  ).run(room, handle);
+  const info = db
+    .prepare(`DELETE FROM room_members WHERE room_name = ? AND handle = ?`)
+    .run(room, handle);
+  db.prepare(`DELETE FROM room_reads WHERE room_name = ? AND handle = ?`).run(
+    room,
+    handle,
+  );
   return info.changes > 0;
 }
 
 export function isRoomMember(db: Db, room: string, handle: string): boolean {
-  const row = db.prepare(
-    `SELECT 1 AS x FROM room_members WHERE room_name = ? AND handle = ?`,
-  ).get(room, handle) as unknown as { x: number } | undefined;
+  const row = db
+    .prepare(
+      `SELECT 1 AS x FROM room_members WHERE room_name = ? AND handle = ?`,
+    )
+    .get(room, handle) as unknown as { x: number } | undefined;
   return row !== undefined;
 }
 
@@ -687,52 +757,60 @@ export function isRoomMember(db: Db, room: string, handle: string): boolean {
  * lock such a room for everyone.
  */
 export function roomOwner(db: Db, room: string): string | undefined {
-  const row = db.prepare(
-    `SELECT created_by FROM rooms WHERE name = ?`,
-  ).get(room) as unknown as { created_by: string } | undefined;
+  const row = db
+    .prepare(`SELECT created_by FROM rooms WHERE name = ?`)
+    .get(room) as unknown as { created_by: string } | undefined;
   return row?.created_by;
 }
 
 /** Members of a room, in join order. Includes offline members. */
 export function roomMembers(db: Db, room: string): string[] {
-  const rows = db.prepare(
-    `SELECT handle FROM room_members WHERE room_name = ? ORDER BY joined_at ASC`,
-  ).all(room) as unknown as { handle: string }[];
+  const rows = db
+    .prepare(
+      `SELECT handle FROM room_members WHERE room_name = ? ORDER BY joined_at ASC`,
+    )
+    .all(room) as unknown as { handle: string }[];
   return rows.map((r) => r.handle);
 }
 
 /** Rooms the caller is a member of. */
 export function myRooms(db: Db, handle: string): Room[] {
-  const rows = db.prepare(
-    `SELECT r.name, r.created_at, r.created_by, r.style, r.style_custom
+  const rows = db
+    .prepare(
+      `SELECT r.name, r.created_at, r.created_by, r.style, r.style_custom
      FROM rooms r
      JOIN room_members m ON m.room_name = r.name
      WHERE m.handle = ?
      ORDER BY r.name ASC`,
-  ).all(handle) as unknown as RoomRow[];
+    )
+    .all(handle) as unknown as RoomRow[];
   return rows.map((r) => hydrateRoomFromRow(db, r));
 }
 
 /** All rooms known to the bus (for /rooms --all). */
 export function allRooms(db: Db): Room[] {
-  const rows = db.prepare(
-    `SELECT name, created_at, created_by, style, style_custom FROM rooms ORDER BY name ASC`,
-  ).all() as unknown as RoomRow[];
+  const rows = db
+    .prepare(
+      `SELECT name, created_at, created_by, style, style_custom FROM rooms ORDER BY name ASC`,
+    )
+    .all() as unknown as RoomRow[];
   return rows.map((r) => hydrateRoomFromRow(db, r));
 }
 
 function hydrateRoom(db: Db, name: string): Room {
-  const row = db.prepare(
-    `SELECT name, created_at, created_by, style, style_custom FROM rooms WHERE name = ?`,
-  ).get(name) as unknown as RoomRow | undefined;
+  const row = db
+    .prepare(
+      `SELECT name, created_at, created_by, style, style_custom FROM rooms WHERE name = ?`,
+    )
+    .get(name) as unknown as RoomRow | undefined;
   if (!row) throw new Error(`Room ${name} does not exist`);
   return hydrateRoomFromRow(db, row);
 }
 
 function hydrateRoomFromRow(db: Db, row: RoomRow): Room {
-  const count = db.prepare(
-    `SELECT COUNT(*) AS n FROM room_members WHERE room_name = ?`,
-  ).get(row.name) as unknown as { n: number };
+  const count = db
+    .prepare(`SELECT COUNT(*) AS n FROM room_members WHERE room_name = ?`)
+    .get(row.name) as unknown as { n: number };
   return {
     name: row.name,
     created_at: row.created_at,
@@ -753,9 +831,11 @@ function hydrateRoomFromRow(db: Db, row: RoomRow): Room {
  * an agent got its own message back as unread and paid to read it again.
  */
 export function roomWatermark(db: Db, room: string, handle: string): number {
-  const read = db.prepare(
-    `SELECT last_read_id FROM room_reads WHERE room_name = ? AND handle = ?`,
-  ).get(room, handle) as unknown as { last_read_id: number } | undefined;
+  const read = db
+    .prepare(
+      `SELECT last_read_id FROM room_reads WHERE room_name = ? AND handle = ?`,
+    )
+    .get(room, handle) as unknown as { last_read_id: number } | undefined;
 
   return read?.last_read_id ?? 0;
 }
@@ -766,7 +846,12 @@ export function roomWatermark(db: Db, room: string, handle: string): number {
  * 🛑 A MAX, NEVER A REPLACEMENT. A stale `sinceId` below the watermark would
  * otherwise resurrect messages the caller already consumed.
  */
-function readFloor(db: Db, room: string, handle: string, sinceId?: number): number {
+function readFloor(
+  db: Db,
+  room: string,
+  handle: string,
+  sinceId?: number,
+): number {
   return Math.max(roomWatermark(db, room, handle), sinceId ?? 0);
 }
 
@@ -785,7 +870,8 @@ export function safeRoomAdvanceId(
   sinceId: number | undefined,
   returnedIds: number[],
 ): number | undefined {
-  if (sinceId !== undefined && sinceId > roomWatermark(db, room, handle)) return undefined;
+  if (sinceId !== undefined && sinceId > roomWatermark(db, room, handle))
+    return undefined;
   if (returnedIds.length === 0) return undefined;
 
   return Math.max(...returnedIds);
@@ -798,10 +884,13 @@ export function safeRoomAdvanceId(
  * caller is served messages from rooms it never named. A per-room gap test
  * would only make that waste correct — a known id belongs to one known room.
  */
-export function assertRoomInboxQuery(room: string | undefined, sinceId: number | undefined): void {
+export function assertRoomInboxQuery(
+  room: string | undefined,
+  sinceId: number | undefined,
+): void {
   if (sinceId !== undefined && room === undefined) {
     throw new Error(
-      'since_id requires room. Message ids are global but watermarks are per room, so an unscoped since_id returns messages from rooms you did not ask about and marks none of them read.',
+      "since_id requires room. Message ids are global but watermarks are per room, so an unscoped since_id returns messages from rooms you did not ask about and marks none of them read.",
     );
   }
 }
@@ -814,12 +903,19 @@ export function roomUnread(
   sinceId?: number,
 ): Message[] {
   const since = readFloor(db, room, handle, sinceId);
-  const rows = db.prepare(
-    `SELECT * FROM messages
+  const rows = db
+    .prepare(
+      `SELECT * FROM messages
      WHERE to_handle = ? AND id > ? AND from_handle != ?
      ORDER BY id ASC
      LIMIT ?`,
-  ).all(room, since, handle, Math.min(Math.max(limit, 1), 500)) as unknown as MessageRow[];
+    )
+    .all(
+      room,
+      since,
+      handle,
+      Math.min(Math.max(limit, 1), 500),
+    ) as unknown as MessageRow[];
   return rows.map(toMessage);
 }
 
@@ -835,12 +931,14 @@ export function roomUnreadCount(
   sinceId?: number,
 ): number {
   const since = readFloor(db, room, handle, sinceId);
-  const row = db.prepare(
-    // Must carry the SAME filter as `roomUnread`, or the sidebar badge reads
-    // one number and opening the room produces another.
-    `SELECT COUNT(*) AS n FROM messages
+  const row = db
+    .prepare(
+      // Must carry the SAME filter as `roomUnread`, or the sidebar badge reads
+      // one number and opening the room produces another.
+      `SELECT COUNT(*) AS n FROM messages
      WHERE to_handle = ? AND id > ? AND from_handle != ?`,
-  ).get(room, since, handle) as unknown as { n: number };
+    )
+    .get(room, since, handle) as unknown as { n: number };
 
   return Number(row.n);
 }
@@ -930,9 +1028,9 @@ export function pruneAgents(db: Db, handles: readonly string[]): string[] {
  * No-op (returns false) if the handle isn't registered.
  */
 export function deleteAgent(db: Db, handle: string): boolean {
-  const info = db.prepare('DELETE FROM agents WHERE handle = ?').run(handle);
-  db.prepare('DELETE FROM room_members WHERE handle = ?').run(handle);
-  db.prepare('DELETE FROM room_reads WHERE handle = ?').run(handle);
+  const info = db.prepare("DELETE FROM agents WHERE handle = ?").run(handle);
+  db.prepare("DELETE FROM room_members WHERE handle = ?").run(handle);
+  db.prepare("DELETE FROM room_reads WHERE handle = ?").run(handle);
   return Number(info.changes) > 0;
 }
 
@@ -957,7 +1055,9 @@ export function deleteAgent(db: Db, handle: string): boolean {
  * Returns false if the handle isn't registered.
  */
 export function clearAgentPid(db: Db, handle: string): boolean {
-  const info = db.prepare('UPDATE agents SET pid = NULL WHERE handle = ?').run(handle);
+  const info = db
+    .prepare("UPDATE agents SET pid = NULL WHERE handle = ?")
+    .run(handle);
   return Number(info.changes) > 0;
 }
 
@@ -966,11 +1066,13 @@ export function clearAgentPid(db: Db, handle: string): boolean {
  * number of rows deleted.
  */
 export function deleteDmMessages(db: Db, a: string, b: string): number {
-  const info = db.prepare(
-    `DELETE FROM messages
+  const info = db
+    .prepare(
+      `DELETE FROM messages
      WHERE (from_handle = ? AND to_handle = ?)
         OR (from_handle = ? AND to_handle = ?)`,
-  ).run(a, b, b, a);
+    )
+    .run(a, b, b, a);
   return Number(info.changes);
 }
 
@@ -981,8 +1083,10 @@ export function deleteDmMessages(db: Db, a: string, b: string): number {
  * deleted.
  */
 export function deleteRoomMessages(db: Db, room: string): number {
-  const info = db.prepare('DELETE FROM messages WHERE to_handle = ?').run(room);
-  db.prepare('UPDATE room_reads SET last_read_id = 0 WHERE room_name = ?').run(room);
+  const info = db.prepare("DELETE FROM messages WHERE to_handle = ?").run(room);
+  db.prepare("UPDATE room_reads SET last_read_id = 0 WHERE room_name = ?").run(
+    room,
+  );
   return Number(info.changes);
 }
 
@@ -1054,7 +1158,7 @@ export interface Approval {
    * already on this row, and a second copy drifts from the first.
    */
   readonly answeredBy: string | null;
-  readonly decision: 'approve' | 'deny' | null;
+  readonly decision: "approve" | "deny" | null;
 }
 
 export interface ApprovalInput {
@@ -1095,7 +1199,8 @@ function parseForms(raw: string | null, fallback: string | null): string[] {
   if (raw) {
     try {
       const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) return parsed.filter((x): x is string => typeof x === 'string');
+      if (Array.isArray(parsed))
+        return parsed.filter((x): x is string => typeof x === "string");
     } catch {
       // A corrupt value must not make the row unreadable.
     }
@@ -1112,13 +1217,17 @@ function toApproval(row: ApprovalRow): Approval {
     requested: row.requested,
     grant: row.grant_entry,
     grantForms: parseForms(row.grant_forms, row.grant_entry),
-    allowlist: row.allowlist === null ? null : (JSON.parse(row.allowlist) as string[]),
+    allowlist:
+      row.allowlist === null ? null : (JSON.parse(row.allowlist) as string[]),
     reason: row.reason,
     sessionId: row.session_id,
     createdAt: row.created_at,
     answeredAt: row.answered_at,
     answeredBy: row.answered_by,
-    decision: row.decision === 'approve' || row.decision === 'deny' ? row.decision : null,
+    decision:
+      row.decision === "approve" || row.decision === "deny"
+        ? row.decision
+        : null,
   };
 }
 
@@ -1139,7 +1248,9 @@ export function insertApproval(db: Db, input: ApprovalInput): number {
       // ⚠️ UNDEFINED STAYS NULL. An omitted allowlist is unrecorded, and an
       // empty one is a real state a caller may want to record, so the two
       // must not collapse.
-      input.allowlist === undefined ? null : JSON.stringify([...input.allowlist]),
+      input.allowlist === undefined
+        ? null
+        : JSON.stringify([...input.allowlist]),
       input.reason,
       input.sessionId ?? null,
       Date.now(),
@@ -1161,15 +1272,19 @@ export function pendingApprovals(db: Db, agentHandle?: string): Approval[] {
           `SELECT * FROM approvals WHERE answered_at IS NULL AND agent_handle = ? ORDER BY id ASC`,
         )
         .all(agentHandle)
-    : db.prepare(`SELECT * FROM approvals WHERE answered_at IS NULL ORDER BY id ASC`).all();
+    : db
+        .prepare(
+          `SELECT * FROM approvals WHERE answered_at IS NULL ORDER BY id ASC`,
+        )
+        .all();
 
   return (rows as unknown as ApprovalRow[]).map(toApproval);
 }
 
 export function getApproval(db: Db, id: number): Approval | null {
-  const row = db.prepare(`SELECT * FROM approvals WHERE id = ?`).get(id) as unknown as
-    | ApprovalRow
-    | undefined;
+  const row = db
+    .prepare(`SELECT * FROM approvals WHERE id = ?`)
+    .get(id) as unknown as ApprovalRow | undefined;
 
   return row ? toApproval(row) : null;
 }
@@ -1194,23 +1309,23 @@ export class UnnameableApprovalError extends Error {
   constructor(readonly id: number) {
     super(
       `approval ${id} cannot be approved: no allowlist entry could be derived from the ` +
-        'refusal, so approving it would permit nothing. It can be denied.',
+        "refusal, so approving it would permit nothing. It can be denied.",
     );
-    this.name = 'UnnameableApprovalError';
+    this.name = "UnnameableApprovalError";
   }
 }
 
 export function answerApproval(
   db: Db,
   id: number,
-  decision: 'approve' | 'deny',
+  decision: "approve" | "deny",
   answeredBy: string,
 ): boolean {
   // ⚠️ ONLY WHEN THE ROW EXISTS. `?.requested == null` is also true for an
   // approval that is not there, so the first version threw
   // UnnameableApprovalError for a missing id instead of returning false —
   // "no such approval" would have been reported as "cannot be approved".
-  const existing = decision === 'approve' ? getApproval(db, id) : null;
+  const existing = decision === "approve" ? getApproval(db, id) : null;
 
   // 🛑 THE TEST IS `grant`, NOT `requested`. A row can name a command in
   // prose and still carry no allowlist entry — approving that permits
@@ -1244,14 +1359,14 @@ export const STYLE_PRESETS: Record<string, string> = {
   // guide injected into EVERY message by a hook. Dropped on lee's call: "drop
   // normal". `none` already means "no instruction".
   succinct:
-    'Answer in the first line. One idea per sentence. Rank rather than list. No preamble. Keep it under ten lines.',
+    "Answer in the first line. One idea per sentence. Rank rather than list. No preamble. Keep it under ten lines.",
 };
 
 export type ResolvedStyle = { style: string; text: string };
 
 export function assertStyleName(style: string): void {
-  if (style !== 'custom' && STYLE_PRESETS[style] === undefined) {
-    const known = [...Object.keys(STYLE_PRESETS), 'custom'].join(', ');
+  if (style !== "custom" && STYLE_PRESETS[style] === undefined) {
+    const known = [...Object.keys(STYLE_PRESETS), "custom"].join(", ");
     throw new Error(`Unknown style "${style}". Known styles: ${known}`);
   }
 }
@@ -1273,7 +1388,7 @@ export function assertStyleName(style: string): void {
  * accident.
  */
 export function assertStyleTarget(target: string): void {
-  if (target.startsWith('#')) return;
+  if (target.startsWith("#")) return;
 
   throw new Error(
     `Conversation styles are per-room only. "${target}" is a peer, and a peer style would be stored and never delivered. Set the style on a #room, or govern the agent through its own skill.`,
@@ -1283,39 +1398,52 @@ export function assertStyleTarget(target: string): void {
 /** 64 KB matches the message body cap, so a style cannot outgrow a post. */
 export const STYLE_CUSTOM_MAX_BYTES = 65536;
 
-export function assertStyleCustom(style: string, custom: string | undefined): void {
-  if (style === 'custom') {
-    if (custom === undefined || custom.trim() === '') {
-      throw new Error('style "custom" requires non-empty markdown in `custom`.');
+export function assertStyleCustom(
+  style: string,
+  custom: string | undefined,
+): void {
+  if (style === "custom") {
+    if (custom === undefined || custom.trim() === "") {
+      throw new Error(
+        'style "custom" requires non-empty markdown in `custom`.',
+      );
     }
-    if (Buffer.byteLength(custom, 'utf8') > STYLE_CUSTOM_MAX_BYTES) {
+    if (Buffer.byteLength(custom, "utf8") > STYLE_CUSTOM_MAX_BYTES) {
       throw new Error(`Custom style exceeds ${STYLE_CUSTOM_MAX_BYTES} bytes.`);
     }
   }
 }
 
 export function roomExists(db: Db, room: string): boolean {
-  const row = db.prepare('SELECT 1 AS ok FROM rooms WHERE name = ?').get(room) as unknown as
-    | { ok: number }
-    | undefined;
+  const row = db
+    .prepare("SELECT 1 AS ok FROM rooms WHERE name = ?")
+    .get(room) as unknown as { ok: number } | undefined;
 
   return row !== undefined;
 }
 
-export function setRoomStyle(db: Db, room: string, style: string | null, custom?: string): void {
-  db.prepare('UPDATE rooms SET style = ?, style_custom = ? WHERE name = ?').run(
+export function setRoomStyle(
+  db: Db,
+  room: string,
+  style: string | null,
+  custom?: string,
+): void {
+  db.prepare("UPDATE rooms SET style = ?, style_custom = ? WHERE name = ?").run(
     style,
-    style === 'custom' ? (custom ?? null) : null,
+    style === "custom" ? (custom ?? null) : null,
     room,
   );
 }
 
-export function setAgentStyle(db: Db, handle: string, style: string | null, custom?: string): void {
-  db.prepare('UPDATE agents SET style = ?, style_custom = ? WHERE handle = ?').run(
-    style,
-    style === 'custom' ? (custom ?? null) : null,
-    handle,
-  );
+export function setAgentStyle(
+  db: Db,
+  handle: string,
+  style: string | null,
+  custom?: string,
+): void {
+  db.prepare(
+    "UPDATE agents SET style = ?, style_custom = ? WHERE handle = ?",
+  ).run(style, style === "custom" ? (custom ?? null) : null, handle);
 }
 
 /**
@@ -1325,20 +1453,25 @@ export function setAgentStyle(db: Db, handle: string, style: string | null, cust
  * instructions that can contradict, and the operator writing custom markdown is
  * already saying exactly what they want.
  */
-export function resolveStyle(db: Db, table: 'rooms' | 'agents', key: string): ResolvedStyle | undefined {
-  const column = table === 'rooms' ? 'name' : 'handle';
+export function resolveStyle(
+  db: Db,
+  table: "rooms" | "agents",
+  key: string,
+): ResolvedStyle | undefined {
+  const column = table === "rooms" ? "name" : "handle";
   const row = db
     .prepare(`SELECT style, style_custom FROM ${table} WHERE ${column} = ?`)
-    .get(key) as unknown as { style: string | null; style_custom: string | null } | undefined;
+    .get(key) as unknown as
+    { style: string | null; style_custom: string | null } | undefined;
 
   if (!row || row.style === null) return undefined;
 
-  if (row.style === 'custom') {
+  if (row.style === "custom") {
     // A 'custom' row with no markdown is a half-written setting, not a style.
     // Pushing an empty instruction reads as "no preference" and is worse than
     // pushing nothing, because the row says one is configured.
-    if (!row.style_custom || row.style_custom.trim() === '') return undefined;
-    return { style: 'custom', text: row.style_custom };
+    if (!row.style_custom || row.style_custom.trim() === "") return undefined;
+    return { style: "custom", text: row.style_custom };
   }
 
   const preset = STYLE_PRESETS[row.style];
@@ -1356,15 +1489,18 @@ export function resolveStyle(db: Db, table: 'rooms' | 'agents', key: string): Re
  * Empty for rooms with no style, which is every room on every existing
  * database — so the unset response stays byte-identical.
  */
-export function styleBlocksForRooms(db: Db, rooms: string[]): { type: 'text'; text: string }[] {
-  const blocks: { type: 'text'; text: string }[] = [];
+export function styleBlocksForRooms(
+  db: Db,
+  rooms: string[],
+): { type: "text"; text: string }[] {
+  const blocks: { type: "text"; text: string }[] = [];
 
   for (const room of rooms) {
-    const resolved = resolveStyle(db, 'rooms', room);
+    const resolved = resolveStyle(db, "rooms", room);
 
     if (resolved) {
       blocks.push({
-        type: 'text',
+        type: "text",
         text: `Conversation style for ${room} (${resolved.style}) — follow it in this room:\n\n${resolved.text}`,
       });
     }
@@ -1383,17 +1519,22 @@ export function styleBlocksForRooms(db: Db, rooms: string[]): { type: 'text'; te
  */
 /** Whether a room has custom markdown stored, which is what makes `custom` reachable in the CLI cycle. */
 export function hasCustomStyle(db: Db, room: string): boolean {
-  const row = db.prepare('SELECT style_custom FROM rooms WHERE name = ?').get(room) as unknown as
-    | { style_custom: string | null }
-    | undefined;
+  const row = db
+    .prepare("SELECT style_custom FROM rooms WHERE name = ?")
+    .get(room) as unknown as { style_custom: string | null } | undefined;
 
-  return typeof row?.style_custom === 'string' && row.style_custom.trim() !== '';
+  return (
+    typeof row?.style_custom === "string" && row.style_custom.trim() !== ""
+  );
 }
 
-export function nextStyle(current: string | null, hasCustom: boolean): string | null {
-  const order: (string | null)[] = [null, 'succinct'];
+export function nextStyle(
+  current: string | null,
+  hasCustom: boolean,
+): string | null {
+  const order: (string | null)[] = [null, "succinct"];
 
-  if (hasCustom) order.push('custom');
+  if (hasCustom) order.push("custom");
 
   const at = order.indexOf(current);
 
@@ -1422,7 +1563,7 @@ export function nextStyle(current: string | null, hasCustom: boolean): string | 
  */
 export function latestClaim(db: Db, resource: string): ClaimRow | null {
   const row = db
-    .prepare('SELECT * FROM claims WHERE resource = ? ORDER BY id DESC LIMIT 1')
+    .prepare("SELECT * FROM claims WHERE resource = ? ORDER BY id DESC LIMIT 1")
     .get(resource) as unknown as ClaimRow | undefined;
 
   return row ?? null;
@@ -1463,7 +1604,13 @@ export function liveClaims(db: Db, now: number): ClaimRow[] {
  */
 export function insertClaim(
   db: Db,
-  input: { resource: string; holder: string; note: string | null; claimed_at: number; expires_at: number },
+  input: {
+    resource: string;
+    holder: string;
+    note: string | null;
+    claimed_at: number;
+    expires_at: number;
+  },
 ): ClaimRow | null {
   const info = db
     .prepare(
@@ -1510,15 +1657,20 @@ export function renewClaim(
 /** Mark a claim released. Returns false if the row was already released. */
 export function releaseClaim(db: Db, id: number, released_at: number): boolean {
   const info = db
-    .prepare('UPDATE claims SET released_at = ? WHERE id = ? AND released_at IS NULL')
+    .prepare(
+      "UPDATE claims SET released_at = ? WHERE id = ? AND released_at IS NULL",
+    )
     .run(released_at, id);
 
   return Number(info.changes) > 0;
 }
 
 function latestClaimById(db: Db, id: number): ClaimRow {
-  const row = db.prepare('SELECT * FROM claims WHERE id = ?').get(id) as unknown as ClaimRow | undefined;
-  if (row === undefined) throw new Error(`claim ${id} vanished immediately after being written`);
+  const row = db
+    .prepare("SELECT * FROM claims WHERE id = ?")
+    .get(id) as unknown as ClaimRow | undefined;
+  if (row === undefined)
+    throw new Error(`claim ${id} vanished immediately after being written`);
 
   return row;
 }
@@ -1596,10 +1748,10 @@ export function searchMessages(
     // `to_handle` for a peer returned the caller's own half of the thread and
     // dropped everything the peer said. Raised by claude1 on #102.
     if (isRoomName(input.target)) {
-      clauses.push('AND to_handle = ?');
+      clauses.push("AND to_handle = ?");
       args.push(input.target);
     } else {
-      clauses.push('AND (to_handle = ? OR from_handle = ?)');
+      clauses.push("AND (to_handle = ? OR from_handle = ?)");
       args.push(input.target, input.target);
     }
   }
@@ -1609,12 +1761,15 @@ export function searchMessages(
   // truncated.
   const sql = `SELECT id, from_handle, to_handle, body, sent_at
                  FROM messages
-                WHERE body LIKE ? ESCAPE '\\' ${clauses.join(' ')}
+                WHERE body LIKE ? ESCAPE '\\' ${clauses.join(" ")}
                 ORDER BY id DESC
                 LIMIT ?`;
   args.push(input.limit + 1);
 
   const rows = db.prepare(sql).all(...args) as unknown as SearchHit[];
 
-  return { hits: rows.slice(0, input.limit), truncated: rows.length > input.limit };
+  return {
+    hits: rows.slice(0, input.limit),
+    truncated: rows.length > input.limit,
+  };
 }

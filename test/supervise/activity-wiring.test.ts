@@ -1,24 +1,24 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { createServer, type Server } from 'node:http';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createServer, type Server } from "node:http";
 
 // 🛑 BEFORE any import that resolves a state path. See replace-child.test.ts.
-process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-actwire-'));
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-actwire-"));
 
-const { migrate } = await import('../../src/storage/db.js');
-const dao = await import('../../src/storage/dao.js');
-const { startSupervisor } = await import('../../src/supervise/index.js');
-const { childHandleFor } = await import('../../src/supervise/grant.js');
-const { deliverToSupervisor } = await import('../../src/supervise/socket.js');
-const { HANDSHAKE_PARAM } = await import('../../src/cli/web/credential.js');
-const { stateDir } = await import('../../src/util/paths.js');
-const { deadPid } = await import('../support/dead-pid.js');
-import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
-import { supervisorOptions } from '../support/supervisor-options.js';
+const { migrate } = await import("../../src/storage/db.js");
+const dao = await import("../../src/storage/dao.js");
+const { startSupervisor } = await import("../../src/supervise/index.js");
+const { childHandleFor } = await import("../../src/supervise/grant.js");
+const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
+const { HANDSHAKE_PARAM } = await import("../../src/cli/web/credential.js");
+const { stateDir } = await import("../../src/util/paths.js");
+const { deadPid } = await import("../support/dead-pid.js");
+import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
+import { supervisorOptions } from "../support/supervisor-options.js";
 
 /**
  * #240 — the supervisor half of the activity pulse is WIRED here, and PR 244
@@ -39,19 +39,24 @@ async function recordingServer(): Promise<{
   const seen: { handle: string; phase: string }[] = [];
 
   const server: Server = createServer((req, res) => {
-    let body = '';
-    req.on('data', (c) => (body += c));
-    req.on('end', () => {
-      if (req.url === '/api/activity') seen.push(JSON.parse(body));
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      if (req.url === "/api/activity") seen.push(JSON.parse(body));
       res.statusCode = 204;
       res.end();
     });
   });
 
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  await new Promise<void>((resolve) =>
+    server.listen(0, "127.0.0.1", () => resolve()),
+  );
 
   const addr = server.address();
-  assert.ok(addr && typeof addr === 'object', 'the rig server did not bind a port');
+  assert.ok(
+    addr && typeof addr === "object",
+    "the rig server did not bind a port",
+  );
 
   return {
     port: addr.port,
@@ -67,7 +72,7 @@ async function recordingServer(): Promise<{
  */
 function publishWebServer(port: number): void {
   writeFileSync(
-    join(stateDir(), 'web-handshake'),
+    join(stateDir(), "web-handshake"),
     `http://127.0.0.1:${String(port)}/?${HANDSHAKE_PARAM}=tok\n`,
   );
 }
@@ -91,7 +96,7 @@ function harness() {
       onUsage: () => undefined,
       onContext: () => undefined,
       onDenial: () => undefined,
-      onSession: (cb) => cb('sess'),
+      onSession: (cb) => cb("sess"),
       onEvent: (cb) => {
         slot.event = cb as (e: unknown) => void;
       },
@@ -109,7 +114,7 @@ function settle(ms = 150): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const ASSISTANT = { type: 'assistant', parent_tool_use_id: null, message: {} };
+const ASSISTANT = { type: "assistant", parent_tool_use_id: null, message: {} };
 
 /**
  * 🛑 THE CHILD HANDLE, NOT THE SUPERVISOR'S. `context-gauge.test.ts` pinned
@@ -117,30 +122,38 @@ const ASSISTANT = { type: 'assistant', parent_tool_use_id: null, message: {} };
  * `<handle>-agent` and the supervisor handle is not listed at all. A pulse on
  * `opts.handle` would address a row the web UI never renders.
  */
-test('🔴 a child event PULSES, and it pulses on the CHILD handle', async () => {
-  const db = new DatabaseSync(':memory:');
+test("🔴 a child event PULSES, and it pulses on the CHILD handle", async () => {
+  const db = new DatabaseSync(":memory:");
   migrate(db);
 
   const handle = `actwire-${process.pid}`;
-  dao.upsertAgent(db, { handle: childHandleFor(handle), pid: deadPid(), session_id: 'child' });
+  dao.upsertAgent(db, {
+    handle: childHandleFor(handle),
+    pid: deadPid(),
+    session_id: "child",
+  });
 
   const web = await recordingServer();
   publishWebServer(web.port);
 
   const h = harness();
-  const sup = await startSupervisor(supervisorOptions({
-    handle,
-    db,
-    extraDirs: [process.cwd()],
-    spawnChild: h.spawnChild,
-    log: () => undefined,
-  }));
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: [process.cwd()],
+      spawnChild: h.spawnChild,
+      log: () => undefined,
+    }),
+  );
 
   try {
     h.children[0]?.event?.(ASSISTANT);
     await settle();
 
-    assert.deepEqual(web.seen, [{ handle: childHandleFor(handle), phase: 'tick' }]);
+    assert.deepEqual(web.seen, [
+      { handle: childHandleFor(handle), phase: "tick" },
+    ]);
   } finally {
     await sup.stop();
     await web.close();
@@ -151,24 +164,30 @@ test('🔴 a child event PULSES, and it pulses on the CHILD handle', async () =>
  * 🛑 AN `end` IS WHAT CLEARS THE PULSE. Without this the dot runs to the 30s
  * failsafe on every turn, which reads as an agent that never finished.
  */
-test('🔴 a turn end pulses `end`, and it is not swallowed by the tick throttle', async () => {
-  const db = new DatabaseSync(':memory:');
+test("🔴 a turn end pulses `end`, and it is not swallowed by the tick throttle", async () => {
+  const db = new DatabaseSync(":memory:");
   migrate(db);
 
   const handle = `actend-${process.pid}`;
-  dao.upsertAgent(db, { handle: childHandleFor(handle), pid: deadPid(), session_id: 'child' });
+  dao.upsertAgent(db, {
+    handle: childHandleFor(handle),
+    pid: deadPid(),
+    session_id: "child",
+  });
 
   const web = await recordingServer();
   publishWebServer(web.port);
 
   const h = harness();
-  const sup = await startSupervisor(supervisorOptions({
-    handle,
-    db,
-    extraDirs: [process.cwd()],
-    spawnChild: h.spawnChild,
-    log: () => undefined,
-  }));
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: [process.cwd()],
+      spawnChild: h.spawnChild,
+      log: () => undefined,
+    }),
+  );
 
   try {
     // Back to back, so the `end` arrives inside the tick's 250ms window.
@@ -178,8 +197,8 @@ test('🔴 a turn end pulses `end`, and it is not swallowed by the tick throttle
 
     assert.deepEqual(
       web.seen.map((s) => s.phase),
-      ['tick', 'end'],
-      'the end was swallowed by the tick throttle',
+      ["tick", "end"],
+      "the end was swallowed by the tick throttle",
     );
   } finally {
     await sup.stop();
@@ -204,7 +223,7 @@ function deferredExitHarness() {
   const spawnChild = (_opts: SpawnOptions): AgentChild => {
     let onExit: ((c: number | null, s: string | null) => void) | undefined;
 
-    children.push({ exitLate: () => onExit?.(null, 'SIGTERM') });
+    children.push({ exitLate: () => onExit?.(null, "SIGTERM") });
 
     return {
       reportsUsage: false,
@@ -214,7 +233,7 @@ function deferredExitHarness() {
       onUsage: () => undefined,
       onContext: () => undefined,
       onDenial: () => undefined,
-      onSession: (cb) => cb('sess'),
+      onSession: (cb) => cb("sess"),
       onEvent: () => undefined,
       onStderr: () => undefined,
       onExit: (cb) => {
@@ -234,30 +253,38 @@ function deferredExitHarness() {
  * the failsafe was the only thing that cleared it — and for those 30 seconds a
  * working agent and a dead one still looked identical. Raised by claude1.
  */
-test('🔴 a child that EXITS clears the dot, rather than leaving it to the 30s failsafe', async () => {
-  const db = new DatabaseSync(':memory:');
+test("🔴 a child that EXITS clears the dot, rather than leaving it to the 30s failsafe", async () => {
+  const db = new DatabaseSync(":memory:");
   migrate(db);
 
   const handle = `actexit-${process.pid}`;
-  dao.upsertAgent(db, { handle: childHandleFor(handle), pid: deadPid(), session_id: 'child' });
+  dao.upsertAgent(db, {
+    handle: childHandleFor(handle),
+    pid: deadPid(),
+    session_id: "child",
+  });
 
   const web = await recordingServer();
   publishWebServer(web.port);
 
   const h = deferredExitHarness();
-  const sup = await startSupervisor(supervisorOptions({
-    handle,
-    db,
-    extraDirs: [process.cwd()],
-    spawnChild: h.spawnChild,
-    log: () => undefined,
-  }));
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: [process.cwd()],
+      spawnChild: h.spawnChild,
+      log: () => undefined,
+    }),
+  );
 
   try {
     h.children[0]?.exitLate();
     await settle();
 
-    assert.deepEqual(web.seen, [{ handle: childHandleFor(handle), phase: 'end' }]);
+    assert.deepEqual(web.seen, [
+      { handle: childHandleFor(handle), phase: "end" },
+    ]);
   } finally {
     await sup.stop();
     await web.close();
@@ -273,47 +300,53 @@ test('🔴 a child that EXITS clears the dot, rather than leaving it to the 30s 
  *
  * `clearAgentPid` is called from both sites for exactly this reason.
  */
-test('🔴 a REPLACED child clears its dot, because its own exit arrives stale and is dropped', async () => {
-  const db = new DatabaseSync(':memory:');
+test("🔴 a REPLACED child clears its dot, because its own exit arrives stale and is dropped", async () => {
+  const db = new DatabaseSync(":memory:");
   migrate(db);
 
   const handle = `actrepl-${process.pid}`;
-  dao.upsertAgent(db, { handle: childHandleFor(handle), pid: deadPid(), session_id: 'child' });
+  dao.upsertAgent(db, {
+    handle: childHandleFor(handle),
+    pid: deadPid(),
+    session_id: "child",
+  });
 
   const web = await recordingServer();
   publishWebServer(web.port);
 
   const h = deferredExitHarness();
-  const sup = await startSupervisor(supervisorOptions({
-    handle,
-    db,
-    extraDirs: [process.cwd()],
-    spawnChild: h.spawnChild,
-    log: () => undefined,
-  }));
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: [process.cwd()],
+      spawnChild: h.spawnChild,
+      log: () => undefined,
+    }),
+  );
 
   try {
     // An approval is the only caller of `replaceChild`.
     await deliverToSupervisor(handle, {
       id: 1,
       to: handle,
-      from: 'lee',
+      from: "lee",
       ts: Date.now(),
       approval: {
         approvalId: 1,
-        decision: 'approve',
+        decision: "approve",
         requested: "rm in '/tmp/x.txt'",
-        grant: 'Bash(rm -f /tmp/x.txt)',
-        sessionId: 'sess',
+        grant: "Bash(rm -f /tmp/x.txt)",
+        sessionId: "sess",
       },
     });
     await settle();
 
-    assert.equal(h.children.length, 2, 'no replacement child was spawned');
+    assert.equal(h.children.length, 2, "no replacement child was spawned");
     assert.deepEqual(
       web.seen,
-      [{ handle: childHandleFor(handle), phase: 'end' }],
-      'the replaced child never cleared its dot',
+      [{ handle: childHandleFor(handle), phase: "end" }],
+      "the replaced child never cleared its dot",
     );
 
     // ⚠️ THE CONTROL: the outgoing child's exit arrives LATE and must change
@@ -322,7 +355,11 @@ test('🔴 a REPLACED child clears its dot, because its own exit arrives stale a
     h.children[0]?.exitLate();
     await settle();
 
-    assert.equal(web.seen.length, 1, 'a stale exit pulsed again after the replacement');
+    assert.equal(
+      web.seen.length,
+      1,
+      "a stale exit pulsed again after the replacement",
+    );
   } finally {
     await sup.stop();
     await web.close();

@@ -87,14 +87,14 @@ Rooms, room membership, and presence pings are later-slice tables; the slice-1 s
 
 ### Tools (6)
 
-| Tool | Args | Returns |
-|---|---|---|
-| `register` | `display_name?`, `metadata?` | `{ handle, session_id }` — idempotent, called automatically on shim boot from CLI arg. Rarely called directly by the agent; use `whoami` for self-discovery. |
-| `whoami` | — | `{ handle, display_name, session_id, kind, online_peers: [{ handle, display_name, kind }] }` — cheap self-discovery. Use to confirm registration and see who's currently on the bus. |
-| `list_agents` | `include_offline?=false` | `[{ handle, display_name, last_seen_at, online, kind }]` — `online` = shim process is still alive (verified via `kill -0 pid`); by default filters to online only |
-| `send` | `to`, `body` | `{ message_id, sent_at }` |
-| `inbox` | `since_id?`, `limit?=50` | `[{ id, from, body, sent_at }]` — sets `read_at` on returned rows |
-| `wait_for_message` | `timeout_s?=25`, `since_id?` | Same shape as `inbox`; blocks on `fs.watch(notify)` until a matching message arrives or timeout expires |
+| Tool               | Args                         | Returns                                                                                                                                                                              |
+| ------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `register`         | `display_name?`, `metadata?` | `{ handle, session_id }` — idempotent, called automatically on shim boot from CLI arg. Rarely called directly by the agent; use `whoami` for self-discovery.                         |
+| `whoami`           | —                            | `{ handle, display_name, session_id, kind, online_peers: [{ handle, display_name, kind }] }` — cheap self-discovery. Use to confirm registration and see who's currently on the bus. |
+| `list_agents`      | `include_offline?=false`     | `[{ handle, display_name, last_seen_at, online, kind }]` — `online` = shim process is still alive (verified via `kill -0 pid`); by default filters to online only                    |
+| `send`             | `to`, `body`                 | `{ message_id, sent_at }`                                                                                                                                                            |
+| `inbox`            | `since_id?`, `limit?=50`     | `[{ id, from, body, sent_at }]` — sets `read_at` on returned rows                                                                                                                    |
+| `wait_for_message` | `timeout_s?=25`, `since_id?` | Same shape as `inbox`; blocks on `fs.watch(notify)` until a matching message arrives or timeout expires                                                                              |
 
 `wait_for_message` defaults to 25 s to stay under most MCP client tool-call timeouts (Claude Desktop caps at 30 s; Claude Code and Cursor allow more but 25 s is a safe universal default).
 
@@ -122,6 +122,7 @@ Baked into MCP client config:
 ```
 
 On boot, the shim:
+
 1. Opens `~/.chat-mcp/chat.db` (creates + migrates if missing).
 2. `INSERT OR REPLACE INTO agents` with a fresh `session_id` and its own pid.
 3. Starts `fs.watch(~/.chat-mcp/notify)`.
@@ -132,6 +133,7 @@ If two shims boot with the same `--handle`, the later one wins the `agents` row 
 ## Realtime engine
 
 ### Send path (`send` tool)
+
 ```
 BEGIN
   INSERT INTO messages(...)
@@ -140,6 +142,7 @@ touch(~/.chat-mcp/notify)
 ```
 
 ### Receive path (every shim, always running)
+
 ```
 fs.watch(notify) fires
   → SELECT unread messages for my handle
@@ -149,6 +152,7 @@ fs.watch(notify) fires
 ```
 
 ### Latency budget
+
 - Sender → recipient shim: **~1–5 ms** (fs event round trip).
 - Recipient shim → model: **instant** if the recipient is currently in `wait_for_message`; otherwise **client-dependent** — Claude Code surfaces `resources/updated` on the next turn boundary, ambient awareness rather than push.
 
@@ -156,12 +160,12 @@ fs.watch(notify) fires
 
 Every peer wakes on every notify, so per-send work is O(N) across the whole bus: one INSERT + one touch + N shims doing a SELECT to see if they're addressed. Each of those SELECTs is a few microseconds against the `ix_messages_to_read` index, so:
 
-| N peers | Per-message overhead | Bottleneck when it matters |
-|---:|---|---|
-| 2–10 | Undetectable (~sub-ms fan-out) | None. Slice-1 target range. |
-| 10–100 | ~1–5 ms fan-out on top of the fs event | SQLite WAL contention starts to show for send-heavy workloads. Consider WAL checkpoint tuning. |
-| 100–500 | ~10–50 ms fan-out; visible but usable | `fs.watch` fan-out becomes the dominant cost on macOS (FSEvents fine; Linux `inotify` fine; Windows `ReadDirectoryChangesW` needs review). |
-| 500+ | Not designed for | Would want a pub/sub broker or moving each recipient's inbox to its own notify file. Out of scope. |
+| N peers | Per-message overhead                   | Bottleneck when it matters                                                                                                                 |
+| ------: | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+|    2–10 | Undetectable (~sub-ms fan-out)         | None. Slice-1 target range.                                                                                                                |
+|  10–100 | ~1–5 ms fan-out on top of the fs event | SQLite WAL contention starts to show for send-heavy workloads. Consider WAL checkpoint tuning.                                             |
+| 100–500 | ~10–50 ms fan-out; visible but usable  | `fs.watch` fan-out becomes the dominant cost on macOS (FSEvents fine; Linux `inotify` fine; Windows `ReadDirectoryChangesW` needs review). |
+|    500+ | Not designed for                       | Would want a pub/sub broker or moving each recipient's inbox to its own notify file. Out of scope.                                         |
 
 **Slice 1 does not impose a hard cap.** The design permits arbitrary N; if the practical ceiling ever needs to move, the shift is from "everyone watches one notify file" to "per-handle notify files" — a mechanical change to the shim, not the schema or MCP surface.
 
@@ -193,14 +197,14 @@ claude2  · Cursor      · online · seen 12s ago
 
 ### Slice 1 CLI command surface
 
-| Command | Effect |
-|---|---|
-| `/list` | List all known agents with online/offline + kind + last-seen (equivalent to `list_agents(include_offline=true)`) |
-| `/dm <handle>` | Enter DM mode with `<handle>` — plain lines become messages to them |
-| `/back` | Leave DM mode; back to the top-level prompt |
-| `/quit` (or Ctrl-C) | Exit |
-| plain text (in DM mode) | Sent as a message to the current DM target |
-| plain text (top-level) | Error: "Not in a DM. Use /dm <handle> first." |
+| Command                 | Effect                                                                                                           |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `/list`                 | List all known agents with online/offline + kind + last-seen (equivalent to `list_agents(include_offline=true)`) |
+| `/dm <handle>`          | Enter DM mode with `<handle>` — plain lines become messages to them                                              |
+| `/back`                 | Leave DM mode; back to the top-level prompt                                                                      |
+| `/quit` (or Ctrl-C)     | Exit                                                                                                             |
+| plain text (in DM mode) | Sent as a message to the current DM target                                                                       |
+| plain text (top-level)  | Error: "Not in a DM. Use /dm <handle> first."                                                                    |
 
 ### Slice 2+ CLI command surface (documented here as forward compat, NOT built in slice 1)
 
@@ -224,7 +228,12 @@ Two modes from the same package, selected by the first positional arg:
     "mcpServers": {
       "chat": {
         "command": "npx",
-        "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "claude1"]
+        "args": [
+          "-y",
+          "github:edgecase123/chat-mcp#v0.1.0",
+          "--handle",
+          "claude1"
+        ]
       }
     }
   }
@@ -246,17 +255,24 @@ One-time setup, performed by the human operator once per agent they want on the 
 **2. Add the MCP server to the client's config.** Location and syntax depend on the client:
 
 **Claude Code** — global `~/.claude.json`, project-scoped `.mcp.json` in the working directory, or via the CLI:
+
 ```bash
 claude mcp add chat -- npx -y github:edgecase123/chat-mcp#v0.1.0 --handle claude-main
 ```
 
 **Cursor** — `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project):
+
 ```json
 {
   "mcpServers": {
     "chat": {
       "command": "npx",
-      "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "cursor-work"]
+      "args": [
+        "-y",
+        "github:edgecase123/chat-mcp#v0.1.0",
+        "--handle",
+        "cursor-work"
+      ]
     }
   }
 }
@@ -266,7 +282,7 @@ claude mcp add chat -- npx -y github:edgecase123/chat-mcp#v0.1.0 --handle claude
 
 **3. Restart the MCP client.** First launch clones + npm-installs (~2–5 s — no native builds, uses Node's built-in `node:sqlite`); subsequent launches ~200 ms.
 
-**4. Verify registration.** In the client, ask the agent: *"Call the `chat.whoami` tool."* It should return `{ handle: "claude-main", session_id, online_peers: […] }`. Also confirm `chat.list_agents`, `chat.send`, `chat.inbox`, `chat.wait_for_message` appear in its tool list. MCP clients namespace tools by server name — hence the `chat.` prefix.
+**4. Verify registration.** In the client, ask the agent: _"Call the `chat.whoami` tool."_ It should return `{ handle: "claude-main", session_id, online_peers: […] }`. Also confirm `chat.list_agents`, `chat.send`, `chat.inbox`, `chat.wait_for_message` appear in its tool list. MCP clients namespace tools by server name — hence the `chat.` prefix.
 
 **5. Give the agent context (optional but recommended).** Add a line to `CLAUDE.md`, `.cursorrules`, or the equivalent system prompt:
 
@@ -290,16 +306,13 @@ The same pattern works for concurrent Cursor windows via `.cursor/mcp.json` per 
 Three terminals — Claude Code as `claude1`, Cursor (or a second Claude Code) as `claude2`, plain shell running `chat-mcp cli` as `user`:
 
 **Agent ↔ agent:**
+
 1. In terminal 1: "Who's online?" → agent lists `claude2` and `user`.
 2. In terminal 1: "Message claude2 saying 'hi'." → `send` succeeds.
 3. In terminal 2, next turn: agent notices new mail (via resource notification) or when asked "check inbox", returns the message.
 4. In terminal 2, ask the agent to wait for a reply: it calls `wait_for_message(30)`. In terminal 1 send another message. Terminal 2 returns within ~1 s.
 
-**User CLI ↔ agent:**
-5. In terminal 3: `/list` shows `claude1` and `claude2` online.
-6. In terminal 3: `/dm claude1` then type `ping` → agent 1 sees the message.
-7. In terminal 1: agent 1 sends a reply to `user`. Terminal 3 prints the reply inline within ~1 s without any user input.
-8. In terminal 3: `/back` then `/dm claude2` — same round-trip works with the second agent.
+**User CLI ↔ agent:** 5. In terminal 3: `/list` shows `claude1` and `claude2` online. 6. In terminal 3: `/dm claude1` then type `ping` → agent 1 sees the message. 7. In terminal 1: agent 1 sends a reply to `user`. Terminal 3 prints the reply inline within ~1 s without any user input. 8. In terminal 3: `/back` then `/dm claude2` — same round-trip works with the second agent.
 
 ## Deferred decisions carried in schema
 
@@ -332,7 +345,12 @@ Prerequisites: Node 22.5+ (for built-in `node:sqlite`) and Git.
   "mcpServers": {
     "chat": {
       "command": "npx",
-      "args": ["-y", "github:edgecase123/chat-mcp#v0.1.0", "--handle", "claude1"]
+      "args": [
+        "-y",
+        "github:edgecase123/chat-mcp#v0.1.0",
+        "--handle",
+        "claude1"
+      ]
     }
   }
 }

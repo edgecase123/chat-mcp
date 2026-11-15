@@ -1,14 +1,14 @@
-import { connect } from 'node:net';
-import { StringDecoder } from 'node:string_decoder';
-import { isRecord } from '../supervise/commands.js';
+import { connect } from "node:net";
+import { StringDecoder } from "node:string_decoder";
+import { isRecord } from "../supervise/commands.js";
 
 /**
  * 🛑 BOTH ARE `-e` VALUES, NEVER PATHS. The whole state directory is mounted
  * into every container, so a token FILE would let one handle read another's
  * secret and run commands in that handle's tree.
  */
-const PORT_VAR = 'CHAT_MCP_BROKER_PORT';
-const TOKEN_VAR = 'CHAT_MCP_BROKER_TOKEN';
+const PORT_VAR = "CHAT_MCP_BROKER_PORT";
+const TOKEN_VAR = "CHAT_MCP_BROKER_TOKEN";
 
 /**
  * Longer than the broker's own 15-minute script timeout, deliberately.
@@ -27,10 +27,11 @@ export interface BrokerAddress {
   readonly token: string;
 }
 
-export const NO_BROKER = 'this agent is not running under a command broker';
-export const REFUSED = 'the command broker is not accepting connections';
-export const CLOSED_SILENTLY = 'the command broker closed the connection without answering';
-export const TIMED_OUT = 'the command broker did not answer in time';
+export const NO_BROKER = "this agent is not running under a command broker";
+export const REFUSED = "the command broker is not accepting connections";
+export const CLOSED_SILENTLY =
+  "the command broker closed the connection without answering";
+export const TIMED_OUT = "the command broker did not answer in time";
 
 /**
  * Where the broker is, or null when this session has no broker at all.
@@ -38,11 +39,13 @@ export const TIMED_OUT = 'the command broker did not answer in time';
  * 🛑 NULL IS THE NORMAL CASE. Every session outside a supervised container has
  * neither variable, so this is a capability check and not an error path.
  */
-export function brokerAddress(env: NodeJS.ProcessEnv = process.env): BrokerAddress | null {
+export function brokerAddress(
+  env: NodeJS.ProcessEnv = process.env,
+): BrokerAddress | null {
   const token = env[TOKEN_VAR];
   const port = Number(env[PORT_VAR]);
 
-  if (typeof token !== 'string' || token.length === 0) return null;
+  if (typeof token !== "string" || token.length === 0) return null;
 
   // A non-numeric or out-of-range port is absence, not a fault: there is no
   // broker to reach either way, and the caller's one job is to say so.
@@ -79,9 +82,9 @@ export function askBroker(
   const id = nextId();
 
   return new Promise((resolve, reject) => {
-    const socket = connect({ port: address.port, host: '127.0.0.1' });
-    const decoder = new StringDecoder('utf8');
-    let buffer = '';
+    const socket = connect({ port: address.port, host: "127.0.0.1" });
+    const decoder = new StringDecoder("utf8");
+    let buffer = "";
     let settled = false;
 
     const finish = (err: Error | null, payload?: Record<string, unknown>) => {
@@ -102,20 +105,22 @@ export function askBroker(
     // Only a refused CONNECT means nothing is listening. A reset mid-stream is
     // a connection that existed and then stopped answering, which is the same
     // thing as a silent close from the caller's side.
-    socket.on('error', (err: NodeJS.ErrnoException) => {
-      finish(new Error(err.code === 'ECONNREFUSED' ? REFUSED : CLOSED_SILENTLY));
+    socket.on("error", (err: NodeJS.ErrnoException) => {
+      finish(
+        new Error(err.code === "ECONNREFUSED" ? REFUSED : CLOSED_SILENTLY),
+      );
     });
 
     // 🛑 THE ONLY THING THAT SETTLES A SILENT REFUSAL, AND THE DEADLINE ABOVE
     // IS NOT A BACKSTOP FOR IT. Measured by deleting this line: a destroyed
     // socket emits no `timeout`, so the promise never settles and the caller
     // hangs forever instead of failing at `deadlineMs`.
-    socket.on('close', () => finish(new Error(CLOSED_SILENTLY)));
+    socket.on("close", () => finish(new Error(CLOSED_SILENTLY)));
 
-    socket.on('data', (chunk: Buffer) => {
+    socket.on("data", (chunk: Buffer) => {
       buffer += decoder.write(chunk);
 
-      for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
+      for (let nl = buffer.indexOf("\n"); nl >= 0; nl = buffer.indexOf("\n")) {
         const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
 
@@ -132,13 +137,15 @@ export function askBroker(
       }
 
       if (buffer.length > MAX_LINE) {
-        buffer = '';
+        buffer = "";
         finish(new Error(CLOSED_SILENTLY));
       }
     });
 
-    socket.on('connect', () => {
-      socket.write(`${JSON.stringify({ id, token: address.token, op, ...body })}\n`);
+    socket.on("connect", () => {
+      socket.write(
+        `${JSON.stringify({ id, token: address.token, op, ...body })}\n`,
+      );
     });
   });
 }
@@ -168,7 +175,7 @@ function parseReply(line: string): Reply | null {
     return null;
   }
 
-  if (!isRecord(envelope) || typeof envelope.id !== 'number') return null;
+  if (!isRecord(envelope) || typeof envelope.id !== "number") return null;
 
   const { id, ok, error, ...payload } = envelope;
 
@@ -177,7 +184,8 @@ function parseReply(line: string): Reply | null {
     ok: ok === true,
     // The broker's own sentence, verbatim. It is written for this caller and
     // is the only part of a refusal that may cross the boundary.
-    error: typeof error === 'string' && error.length > 0 ? error : CLOSED_SILENTLY,
+    error:
+      typeof error === "string" && error.length > 0 ? error : CLOSED_SILENTLY,
     payload,
   };
 }

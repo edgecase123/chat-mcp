@@ -1,21 +1,34 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile, readdir, stat, writeFile, unlink } from 'node:fs/promises';
-import type { Dirent } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join, normalize, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { openDb, type Db } from '../../storage/db.js';
-import { NotifyBus, notifyPeer } from '../../notify/bus.js';
-import { NotARoomMemberError, RoomSendInputError, sendToRoom } from '../../messaging/room-send.js';
-import { answerAndNotify } from '../../supervise/answer.js';
-import * as dao from '../../storage/dao.js';
-import { parseSearch, snippet } from '../../search/query.js';
-import { gaugeFreshness } from '../../shim/gauge-freshness.js';
-import type { MessageKind } from '../../storage/dao.js';
-import { assertRoomName, isRoomName } from '../../util/naming.js';
-import { ensureStateDir, stateDir, webHandshakeFile, writePrivateFileSync } from '../../util/paths.js';
-import { renderBodyToHtml } from './render.js';
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
+import { readFile, readdir, stat, writeFile, unlink } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join, normalize, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { openDb, type Db } from "../../storage/db.js";
+import { NotifyBus, notifyPeer } from "../../notify/bus.js";
+import {
+  NotARoomMemberError,
+  RoomSendInputError,
+  sendToRoom,
+} from "../../messaging/room-send.js";
+import { answerAndNotify } from "../../supervise/answer.js";
+import * as dao from "../../storage/dao.js";
+import { parseSearch, snippet } from "../../search/query.js";
+import { gaugeFreshness } from "../../shim/gauge-freshness.js";
+import type { MessageKind } from "../../storage/dao.js";
+import { assertRoomName, isRoomName } from "../../util/naming.js";
+import {
+  ensureStateDir,
+  stateDir,
+  webHandshakeFile,
+  writePrivateFileSync,
+} from "../../util/paths.js";
+import { renderBodyToHtml } from "./render.js";
 import {
   ALL_CAPABILITIES,
   COOKIE_NAME,
@@ -26,22 +39,22 @@ import {
   sessionCookie,
   tokenMatches,
   type Capability,
-} from './credential.js';
+} from "./credential.js";
 import {
   buildHints,
   defaultRoots,
   matchesHintPrefix,
   realContainedDir,
   resolveHintQuery,
-} from './file-hints.js';
-import { packageVersion } from '../../util/version.js';
+} from "./file-hints.js";
+import { packageVersion } from "../../util/version.js";
 import {
   aroundWindow,
   parseAroundId,
   parseMessageLimit,
   readerIsPartyToDm,
   targetForMessage,
-} from '../../search/around.js';
+} from "../../search/around.js";
 
 const VERSION = packageVersion();
 
@@ -58,7 +71,7 @@ const VERSION = packageVersion();
  *  path — which made `stateDir()`'s test-runner refusal fire on any test that
  *  imports a route, and baked in whatever CHAT_MCP_HOME held at import. */
 function webUrlFile(): string {
-  return join(stateDir(), 'web-url');
+  return join(stateDir(), "web-url");
 }
 
 /** Where the static web assets live at runtime. Ships alongside the compiled
@@ -67,17 +80,17 @@ function webUrlFile(): string {
 function assetsDir(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   // dist/cli/web -> ../../../web
-  return resolve(here, '..', '..', '..', 'web');
+  return resolve(here, "..", "..", "..", "web");
 }
 
 /** MIME lookup for the tiny set of file types we serve. */
 const MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon',
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
 };
 
 interface ServeOptions {
@@ -98,7 +111,7 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
     pid: process.pid,
     session_id,
     display_name: handle,
-    metadata: { kind: 'human', ui: 'web' },
+    metadata: { kind: "human", ui: "web" },
   });
 
   // Every connected browser tab gets its own SSE writer. When a notify fires,
@@ -112,7 +125,11 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
     // or room).
     const frame = `event: wake\ndata: ${JSON.stringify({ ts: Date.now() })}\n\n`;
     for (const res of sseClients) {
-      try { res.write(frame); } catch { /* client hung up mid-write */ }
+      try {
+        res.write(frame);
+      } catch {
+        /* client hung up mid-write */
+      }
     }
   });
 
@@ -133,7 +150,7 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
       const msg = err instanceof Error ? err.message : String(err);
       if (!res.headersSent) {
         res.statusCode = 500;
-        res.setHeader('Content-Type', 'application/json');
+        res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ error: msg }));
       }
     }
@@ -145,7 +162,11 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   // after a restart. Fall back to an OS-assigned free port only if the
   // preferred port is taken (e.g. another chat-mcp web is already running).
   const PREFERRED_PORT = 3737;
-  const actualPort = await listenWithFallback(server, opts.port, PREFERRED_PORT);
+  const actualPort = await listenWithFallback(
+    server,
+    opts.port,
+    PREFERRED_PORT,
+  );
   boundPort = actualPort;
   const url = `http://127.0.0.1:${actualPort}/`;
   // 🛑 TWO SINKS FOR THIS URL AND BOTH ARE DELIBERATE: the terminal banner for
@@ -158,13 +179,13 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   const handshakeUrl = `${url}?${HANDSHAKE_PARAM}=${token}`;
 
   const banner = [
-    '',
-    '  ╔════════════════════════════════════════════╗',
+    "",
+    "  ╔════════════════════════════════════════════╗",
     `  ║  chat-mcp web  ·  ${handle.padEnd(22)}    ║`,
-    '  ╠════════════════════════════════════════════╣',
+    "  ╠════════════════════════════════════════════╣",
     `  ║  ${url.padEnd(40)}  ║`,
-    '  ╚════════════════════════════════════════════╝',
-    '',
+    "  ╚════════════════════════════════════════════╝",
+    "",
     `  bound:  127.0.0.1 — NOT a containment boundary; a container reaches it`,
     `  open:   ${handshakeUrl}`,
     `  note:   that url carries this session's api credential. reopen it after a restart.`,
@@ -172,19 +193,23 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
     actualPort !== PREFERRED_PORT && !opts.port
       ? `  note:   preferred port ${PREFERRED_PORT} was taken — using ${actualPort} instead`
       : null,
-    '',
-  ].filter((l) => l !== null).join('\n');
+    "",
+  ]
+    .filter((l) => l !== null)
+    .join("\n");
   console.log(banner);
 
   // Write URL to a well-known path so external scripts can find it.
   try {
     ensureStateDir();
-    await writeFile(webUrlFile(), url + '\n');
+    await writeFile(webUrlFile(), url + "\n");
     // 🛑 THE CREDENTIAL-BEARING TWIN, 0600. `scripts/web` reads this instead of
     // scraping the startup banner out of a log — a log that `pc_log_tail`
     // reprints into a terminal transcript on any startup failure.
-    writePrivateFileSync(webHandshakeFile(), handshakeUrl + '\n');
-  } catch { /* best-effort */ }
+    writePrivateFileSync(webHandshakeFile(), handshakeUrl + "\n");
+  } catch {
+    /* best-effort */
+  }
 
   if (opts.open !== false) {
     openBrowser(handshakeUrl);
@@ -200,13 +225,16 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
     if (sseClients.size > 0) return;
     idleTimer = setTimeout(() => {
       if (sseClients.size === 0) {
-        console.log('No connected clients for 60s — exiting.');
+        console.log("No connected clients for 60s — exiting.");
         shutdown(0);
       }
     }, IDLE_TIMEOUT_MS);
   };
   const disarmIdleShutdown = (): void => {
-    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
   };
 
   // Wire the SSE client set to arm/disarm the idle timer. The `route`
@@ -263,7 +291,11 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
 
     const frame = `event: approvals\ndata: ${JSON.stringify({ ts: Date.now() })}\n\n`;
     for (const res of sseClients) {
-      try { res.write(frame); } catch { /* client hung up mid-write */ }
+      try {
+        res.write(frame);
+      } catch {
+        /* client hung up mid-write */
+      }
     }
   }, APPROVAL_POLL_MS);
 
@@ -275,13 +307,21 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
     notifyUnsub();
     server.close();
     void notify.close();
-    try { db.close(); } catch { /* best-effort */ }
-    void unlink(webUrlFile()).catch(() => { /* already gone */ });
-    void unlink(webHandshakeFile()).catch(() => { /* already gone */ });
+    try {
+      db.close();
+    } catch {
+      /* best-effort */
+    }
+    void unlink(webUrlFile()).catch(() => {
+      /* already gone */
+    });
+    void unlink(webHandshakeFile()).catch(() => {
+      /* already gone */
+    });
     process.exit(code);
   };
-  process.on('SIGINT', () => shutdown(130));
-  process.on('SIGTERM', () => shutdown(143));
+  process.on("SIGINT", () => shutdown(130));
+  process.on("SIGTERM", () => shutdown(143));
 }
 
 /** Exported for tests: they drive `route` through a real http server. */
@@ -316,8 +356,12 @@ function allowedOrigins(port: number): string[] {
   return allowedHosts(port).map((h) => `http://${h}`);
 }
 
-export async function route(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
-  const url = new URL(req.url ?? '/', 'http://localhost');
+export async function route(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
 
   // API routes
@@ -327,8 +371,8 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   // they MATCH, and the request is genuinely same-origin, so the attacker
   // reads the replies too. Comparing against a FIXED list built from the
   // bound port is what makes that fail.
-  if (!allowedHosts(ctx.port).includes(req.headers.host ?? '')) {
-    return respondJson(res, { error: 'unexpected host' }, 403);
+  if (!allowedHosts(ctx.port).includes(req.headers.host ?? "")) {
+    return respondJson(res, { error: "unexpected host" }, 403);
   }
 
   // 🛑 Then cross-site POSTs. readJsonBody ignores Content-Type, so
@@ -340,9 +384,8 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   // here may mutate. Marking a room read is a POST for exactly that reason.
   const origin = req.headers.origin;
   if (origin !== undefined && !allowedOrigins(ctx.port).includes(origin)) {
-    return respondJson(res, { error: 'cross-origin request refused' }, 403);
+    return respondJson(res, { error: "cross-origin request refused" }, 403);
   }
-
 
   // The browser's first load carries the token in the query. Trade it for an
   // HttpOnly cookie and redirect, so the secret leaves the ADDRESS BAR and
@@ -352,15 +395,18 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   // back-button entry, but the originally-typed url can still reach the
   // history store and the omnibox. Untested in a real browser. The token is
   // per-process and session-scoped, so a leaked old one is already dead.
-  if ((req.method === 'GET' || req.method === 'HEAD') && url.searchParams.has(HANDSHAKE_PARAM)) {
+  if (
+    (req.method === "GET" || req.method === "HEAD") &&
+    url.searchParams.has(HANDSHAKE_PARAM)
+  ) {
     if (!tokenMatches(ctx.token, url.searchParams.get(HANDSHAKE_PARAM))) {
-      return respondJson(res, { error: 'bad credential' }, 401);
+      return respondJson(res, { error: "bad credential" }, 401);
     }
 
     url.searchParams.delete(HANDSHAKE_PARAM);
     res.statusCode = 302;
-    res.setHeader('Set-Cookie', sessionCookie(ctx.token));
-    res.setHeader('Location', `${url.pathname}${url.search}`);
+    res.setHeader("Set-Cookie", sessionCookie(ctx.token));
+    res.setHeader("Location", `${url.pathname}${url.search}`);
     res.end();
 
     return;
@@ -370,42 +416,69 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
   // OF THE DECISION. A container reaches the host's 127.0.0.1 through
   // `host.docker.internal`, which Docker Desktop proxies from the host side,
   // so the Host allowlist above is a second check and never the only one.
-  const needed = requiredCapability(req.method ?? 'GET', path);
+  const needed = requiredCapability(req.method ?? "GET", path);
 
   if (needed !== null) {
-    if (!tokenMatches(ctx.token, cookieValue(req.headers.cookie, COOKIE_NAME))) {
-      return respondJson(res, { error: 'api credential required; reopen the url from the terminal' }, 401);
+    if (
+      !tokenMatches(ctx.token, cookieValue(req.headers.cookie, COOKIE_NAME))
+    ) {
+      return respondJson(
+        res,
+        { error: "api credential required; reopen the url from the terminal" },
+        401,
+      );
     }
 
     if (!ctx.capabilities.includes(needed)) {
-      return respondJson(res, { error: `this credential cannot ${needed}` }, 403);
+      return respondJson(
+        res,
+        { error: `this credential cannot ${needed}` },
+        403,
+      );
     }
   }
 
-  if (path === '/api/whoami') return handleWhoami(res, ctx);
-  if (path === '/api/messages' && req.method === 'GET' && url.searchParams.has('around_id'))
+  if (path === "/api/whoami") return handleWhoami(res, ctx);
+  if (
+    path === "/api/messages" &&
+    req.method === "GET" &&
+    url.searchParams.has("around_id")
+  )
     return handleMessagesAround(url, res, ctx);
-  if (path === '/api/messages' && req.method === 'GET') return handleGetMessages(url, res, ctx);
-  if (path === '/api/messages' && req.method === 'POST') return handlePostMessage(req, res, ctx);
-  if (path === '/api/rooms/join' && req.method === 'POST') return handleRoomJoin(req, res, ctx);
-  if (path === '/api/rooms/leave' && req.method === 'POST') return handleRoomLeave(req, res, ctx);
-  if (path === '/api/rooms/style' && req.method === 'POST') return handleRoomStyle(req, res, ctx);
-  if (path === '/api/kick' && req.method === 'POST') return handleKick(req, res, ctx);
-  if (path === '/api/rooms/delete' && req.method === 'POST') return handleRoomDelete(req, res, ctx);
-  if (path === '/api/rooms/read' && req.method === 'POST') return handleRoomRead(req, res, ctx);
-  if (path === '/api/activity' && req.method === 'POST') return handleActivity(req, res, ctx);
-  if (path === '/api/messages/clear' && req.method === 'POST')
+  if (path === "/api/messages" && req.method === "GET")
+    return handleGetMessages(url, res, ctx);
+  if (path === "/api/messages" && req.method === "POST")
+    return handlePostMessage(req, res, ctx);
+  if (path === "/api/rooms/join" && req.method === "POST")
+    return handleRoomJoin(req, res, ctx);
+  if (path === "/api/rooms/leave" && req.method === "POST")
+    return handleRoomLeave(req, res, ctx);
+  if (path === "/api/rooms/style" && req.method === "POST")
+    return handleRoomStyle(req, res, ctx);
+  if (path === "/api/kick" && req.method === "POST")
+    return handleKick(req, res, ctx);
+  if (path === "/api/rooms/delete" && req.method === "POST")
+    return handleRoomDelete(req, res, ctx);
+  if (path === "/api/rooms/read" && req.method === "POST")
+    return handleRoomRead(req, res, ctx);
+  if (path === "/api/activity" && req.method === "POST")
+    return handleActivity(req, res, ctx);
+  if (path === "/api/messages/clear" && req.method === "POST")
     return handleMessagesClear(req, res, ctx);
-  if (path === '/api/approvals' && req.method === 'GET') return handleGetApprovals(res, ctx);
-  if (path === '/api/claims' && req.method === 'GET') return handleGetClaims(res, ctx);
-  if (path === '/api/search' && req.method === 'GET') return handleSearch(url, res, ctx);
-  if (path === '/api/approvals/answer' && req.method === 'POST')
+  if (path === "/api/approvals" && req.method === "GET")
+    return handleGetApprovals(res, ctx);
+  if (path === "/api/claims" && req.method === "GET")
+    return handleGetClaims(res, ctx);
+  if (path === "/api/search" && req.method === "GET")
+    return handleSearch(url, res, ctx);
+  if (path === "/api/approvals/answer" && req.method === "POST")
     return handleAnswerApproval(req, res, ctx);
-  if (path === '/api/files' && req.method === 'GET') return handleFileHints(url, res);
-  if (path === '/api/events') return handleSseStream(req, res, ctx);
+  if (path === "/api/files" && req.method === "GET")
+    return handleFileHints(url, res);
+  if (path === "/api/events") return handleSseStream(req, res, ctx);
 
   // Static assets
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
+  if (req.method !== "GET" && req.method !== "HEAD") {
     res.statusCode = 405;
     res.end();
     return;
@@ -417,21 +490,23 @@ export async function route(req: IncomingMessage, res: ServerResponse, ctx: Rout
 
 function respondJson(res: ServerResponse, body: unknown, status = 200): void {
   res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   for await (const c of req) chunks.push(c as Buffer);
-  const raw = Buffer.concat(chunks).toString('utf8');
+  const raw = Buffer.concat(chunks).toString("utf8");
   if (!raw) return {};
   return JSON.parse(raw);
 }
 
 function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
   const me = dao.getAgent(ctx.db, ctx.handle);
-  const peers = dao.listAgents(ctx.db, true).filter((a) => a.handle !== ctx.handle);
+  const peers = dao
+    .listAgents(ctx.db, true)
+    .filter((a) => a.handle !== ctx.handle);
   const myRooms = dao.myRooms(ctx.db, ctx.handle);
   const allRooms = dao.allRooms(ctx.db);
   const memberRoomNames = new Set(myRooms.map((r) => r.name));
@@ -444,8 +519,14 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
   respondJson(res, {
     handle: ctx.handle,
     session_id: me?.session_id,
-    peers: peers.map((a) => ({ ...a, ...gaugeFreshness(a.context_reported_at, now) })),
-    rooms: myRooms.map((r) => ({ ...r, unread: dao.roomUnreadCount(ctx.db, r.name, ctx.handle) })),
+    peers: peers.map((a) => ({
+      ...a,
+      ...gaugeFreshness(a.context_reported_at, now),
+    })),
+    rooms: myRooms.map((r) => ({
+      ...r,
+      unread: dao.roomUnreadCount(ctx.db, r.name, ctx.handle),
+    })),
     discoverRooms,
     version: VERSION,
     // The two roots a dropped file path is shown relative to. The page
@@ -470,30 +551,35 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
  * them would turn the endpoint into an oracle for which ids exist in
  * conversations the reader cannot see.
  */
-function handleMessagesAround(url: URL, res: ServerResponse, ctx: RouteContext): void {
-  const parsed = parseAroundId(url.searchParams.get('around_id'));
+function handleMessagesAround(
+  url: URL,
+  res: ServerResponse,
+  ctx: RouteContext,
+): void {
+  const parsed = parseAroundId(url.searchParams.get("around_id"));
 
   if (!parsed.ok) return respondJson(res, { error: parsed.reason }, 400);
 
-  const lim = parseMessageLimit(url.searchParams.get('limit'));
+  const lim = parseMessageLimit(url.searchParams.get("limit"));
 
   if (!lim.ok) return respondJson(res, { error: lim.reason }, 400);
 
   const limit = lim.limit;
   const row = ctx.db
-    .prepare('SELECT from_handle, to_handle FROM messages WHERE id = ?')
+    .prepare("SELECT from_handle, to_handle FROM messages WHERE id = ?")
     .get(parsed.id) as { from_handle: string; to_handle: string } | undefined;
 
-  if (row === undefined) return respondJson(res, { error: 'no such message' }, 404);
+  if (row === undefined)
+    return respondJson(res, { error: "no such message" }, 404);
 
   const target = targetForMessage(row, ctx.handle);
-  const isRoom = target.startsWith('#');
+  const isRoom = target.startsWith("#");
 
   if (isRoom && !dao.isRoomMember(ctx.db, target, ctx.handle)) {
-    return respondJson(res, { error: 'no such message' }, 404);
+    return respondJson(res, { error: "no such message" }, 404);
   }
   if (!isRoom && !readerIsPartyToDm(row, ctx.handle)) {
-    return respondJson(res, { error: 'no such message' }, 404);
+    return respondJson(res, { error: "no such message" }, 404);
   }
 
   const { before, after } = aroundWindow(limit);
@@ -511,25 +597,29 @@ function handleMessagesAround(url: URL, res: ServerResponse, ctx: RouteContext):
   });
 }
 
-function handleGetMessages(url: URL, res: ServerResponse, ctx: RouteContext): void {
-  const target = url.searchParams.get('target');
+function handleGetMessages(
+  url: URL,
+  res: ServerResponse,
+  ctx: RouteContext,
+): void {
+  const target = url.searchParams.get("target");
   // 🛑 VALIDATED, NOT CLAMPED. `?limit=abc` used to reach `LIMIT NaN` and 500
   // with the raw SQL message in the body. See `parseMessageLimit`.
-  const lim = parseMessageLimit(url.searchParams.get('limit'));
+  const lim = parseMessageLimit(url.searchParams.get("limit"));
 
   if (!lim.ok) return respondJson(res, { error: lim.reason }, 400);
 
   const limit = lim.limit;
-  const beforeIdRaw = url.searchParams.get('before_id');
+  const beforeIdRaw = url.searchParams.get("before_id");
   const beforeId = beforeIdRaw ? parseInt(beforeIdRaw, 10) : undefined;
-  if (!target) return respondJson(res, { error: 'target required' }, 400);
+  if (!target) return respondJson(res, { error: "target required" }, 400);
 
   let rows: dao.Message[];
-  if (target.startsWith('#')) {
+  if (target.startsWith("#")) {
     // Room messages: caller must be a member; DAO doesn't have a "recent
     // messages in room" helper so query directly.
     if (!dao.isRoomMember(ctx.db, target, ctx.handle)) {
-      return respondJson(res, { error: 'not a member of room' }, 403);
+      return respondJson(res, { error: "not a member of room" }, 403);
     }
     rows = recentRoomMessages(ctx.db, target, limit, beforeId);
   } else {
@@ -540,18 +630,26 @@ function handleGetMessages(url: URL, res: ServerResponse, ctx: RouteContext): vo
   respondJson(res, rows.map(hydrateForClient));
 }
 
-async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
-  const body = (await readJsonBody(req)) as { target?: string; body?: string; kind?: MessageKind };
-  if (!body.target || typeof body.body !== 'string') {
-    return respondJson(res, { error: 'target and body required' }, 400);
+async function handlePostMessage(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as {
+    target?: string;
+    body?: string;
+    kind?: MessageKind;
+  };
+  if (!body.target || typeof body.body !== "string") {
+    return respondJson(res, { error: "target and body required" }, 400);
   }
-  const kind: MessageKind = body.kind ?? 'chat';
+  const kind: MessageKind = body.kind ?? "chat";
   const bodyText = body.body;
 
-  if (body.target.startsWith('#')) {
+  if (body.target.startsWith("#")) {
     const room = body.target;
     if (!dao.isRoomMember(ctx.db, room, ctx.handle)) {
-      return respondJson(res, { error: 'not a member of room' }, 403);
+      return respondJson(res, { error: "not a member of room" }, 403);
     }
     // \u{1F6D1} MAPPED, NOT THROWN. `sendToRoom` enforces the 64 KB cap, and an
     // unwrapped throw reaches the `createServer` catch-all as a 500 \u2014 a
@@ -560,11 +658,15 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
     let sent;
     try {
       sent = sendToRoom(ctx.db, {
-        from: ctx.handle, room, body: bodyText, kind, advanceOwnRead: true,
+        from: ctx.handle,
+        room,
+        body: bodyText,
+        kind,
+        advanceOwnRead: true,
       });
     } catch (e) {
       if (e instanceof NotARoomMemberError) {
-        return respondJson(res, { error: 'not a member of room' }, 403);
+        return respondJson(res, { error: "not a member of room" }, 403);
       }
       // 🛑 ONLY caller mistakes become a 4xx. A failed write or a full disk
       // must stay a 500, so anything else is rethrown to the catch-all.
@@ -579,24 +681,51 @@ async function handlePostMessage(req: IncomingMessage, res: ServerResponse, ctx:
     if (!dao.getAgent(ctx.db, peer)) {
       return respondJson(res, { error: `unknown peer: ${peer}` }, 404);
     }
-    const sent = dao.insertMessage(ctx.db, { from: ctx.handle, to: peer, body: bodyText, kind });
+    const sent = dao.insertMessage(ctx.db, {
+      from: ctx.handle,
+      to: peer,
+      body: bodyText,
+      kind,
+    });
     const unread = dao.totalUnreadFor(ctx.db, peer);
-    notifyPeer(peer, { id: sent.id, to: peer, from: ctx.handle, ts: sent.sent_at, body: bodyText, kind, unread });
+    notifyPeer(peer, {
+      id: sent.id,
+      to: peer,
+      from: ctx.handle,
+      ts: sent.sent_at,
+      body: bodyText,
+      kind,
+      unread,
+    });
     respondJson(res, { id: sent.id, sent_at: sent.sent_at });
   }
 }
 
-async function handleRoomJoin(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+async function handleRoomJoin(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
   const body = (await readJsonBody(req)) as { room?: string };
-  if (!body.room) return respondJson(res, { error: 'room required' }, 400);
-  try { assertRoomName(body.room); }
-  catch (e) { return respondJson(res, { error: (e as Error).message }, 400); }
+  if (!body.room) return respondJson(res, { error: "room required" }, 400);
+  try {
+    assertRoomName(body.room);
+  } catch (e) {
+    return respondJson(res, { error: (e as Error).message }, 400);
+  }
   const result = dao.joinRoom(ctx.db, body.room, ctx.handle);
   if (result.was_new_member && result.system_message) {
     for (const member of dao.roomMembers(ctx.db, body.room)) {
       if (member === ctx.handle) continue;
       const unread = dao.totalUnreadFor(ctx.db, member);
-      notifyPeer(member, { id: result.system_message.id, to: body.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body, unread });
+      notifyPeer(member, {
+        id: result.system_message.id,
+        to: body.room,
+        from: dao.SYSTEM_HANDLE,
+        ts: result.system_message.sent_at,
+        body: result.system_message.body,
+        unread,
+      });
     }
   }
   respondJson(res, { ok: true, was_new_member: result.was_new_member });
@@ -608,10 +737,18 @@ async function handleRoomJoin(req: IncomingMessage, res: ServerResponse, ctx: Ro
  * A POST because it mutates, like every other room write here. `style: null`
  * clears it.
  */
-async function handleRoomStyle(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
-  const body = (await readJsonBody(req)) as { room?: string; style?: string | null; custom?: string };
+async function handleRoomStyle(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as {
+    room?: string;
+    style?: string | null;
+    custom?: string;
+  };
 
-  if (!body.room) return respondJson(res, { error: 'room required' }, 400);
+  if (!body.room) return respondJson(res, { error: "room required" }, 400);
 
   if (!dao.roomExists(ctx.db, body.room)) {
     return respondJson(res, { error: `no such room ${body.room}` }, 404);
@@ -639,9 +776,13 @@ async function handleRoomStyle(req: IncomingMessage, res: ServerResponse, ctx: R
   respondJson(res, { ok: true, style });
 }
 
-async function handleRoomLeave(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+async function handleRoomLeave(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
   const body = (await readJsonBody(req)) as { room?: string };
-  if (!body.room) return respondJson(res, { error: 'room required' }, 400);
+  if (!body.room) return respondJson(res, { error: "room required" }, 400);
   const ok = dao.leaveRoom(ctx.db, body.room, ctx.handle);
   respondJson(res, { ok });
 }
@@ -654,11 +795,18 @@ async function handleRoomLeave(req: IncomingMessage, res: ServerResponse, ctx: R
  * advanceRoomRead takes MAX(), so paging back through history cannot rewind
  * it.
  */
-async function handleRoomRead(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
-  const body = (await readJsonBody(req)) as { room?: string; up_to_id?: number };
+async function handleRoomRead(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as {
+    room?: string;
+    up_to_id?: number;
+  };
   const room = body.room;
-  if (!room || typeof body.up_to_id !== 'number') {
-    return respondJson(res, { error: 'room and up_to_id required' }, 400);
+  if (!room || typeof body.up_to_id !== "number") {
+    return respondJson(res, { error: "room and up_to_id required" }, 400);
   }
   if (!dao.isRoomMember(ctx.db, room, ctx.handle)) {
     return respondJson(res, { error: `you are not a member of ${room}` }, 403);
@@ -680,18 +828,25 @@ async function handleRoomRead(req: IncomingMessage, res: ServerResponse, ctx: Ro
  * timestamp and makes the client re-fetch. A pulse has nowhere to re-fetch
  * FROM — no endpoint reports who is working — so the payload is the message.
  */
-async function handleActivity(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
-  const body = (await readJsonBody(req)) as { handle?: unknown; phase?: unknown };
-  const handle = typeof body.handle === 'string' ? body.handle : null;
+async function handleActivity(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as {
+    handle?: unknown;
+    phase?: unknown;
+  };
+  const handle = typeof body.handle === "string" ? body.handle : null;
   const phase = body.phase;
 
   if (handle === null || handle.length === 0) {
-    return respondJson(res, { error: 'handle required' }, 400);
+    return respondJson(res, { error: "handle required" }, 400);
   }
 
   // 🛑 AN ENUMERATED SET, NOT A STRING PASSED THROUGH. A client switching on
   // this value would be switching on whatever a caller sent.
-  if (phase !== 'tick' && phase !== 'end') {
+  if (phase !== "tick" && phase !== "end") {
     return respondJson(res, { error: "phase must be 'tick' or 'end'" }, 400);
   }
 
@@ -713,10 +868,14 @@ async function handleActivity(req: IncomingMessage, res: ServerResponse, ctx: Ro
  * dao.deleteRoom states that authorization is the caller's concern. The shim
  * tool checks membership; this is the other caller, so it checks too.
  */
-async function handleRoomDelete(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+async function handleRoomDelete(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
   const body = (await readJsonBody(req)) as { room?: string };
   const room = body.room;
-  if (!room) return respondJson(res, { error: 'room required' }, 400);
+  if (!room) return respondJson(res, { error: "room required" }, 400);
 
   // 🛑 THE RULE IS IN `dao.deleteRoom`, NOT HERE. It was here on the first cut
   // of #89, and four other surfaces kept deleting under the old member-only
@@ -724,14 +883,19 @@ async function handleRoomDelete(req: IncomingMessage, res: ServerResponse, ctx: 
   const result = dao.deleteRoom(ctx.db, room, ctx.handle);
 
   if (result.ok) return respondJson(res, { ok: true });
-  if (result.reason === 'not-found') return respondJson(res, { error: `${room} does not exist` }, 404);
-  if (result.reason === 'not-a-member') {
+  if (result.reason === "not-found")
+    return respondJson(res, { error: `${room} does not exist` }, 404);
+  if (result.reason === "not-a-member") {
     return respondJson(res, { error: `you are not a member of ${room}` }, 403);
   }
 
   // Names the owner on purpose: the caller is already a member, so the handle
   // is not news to them, and "ask claude1" is actionable where "refused" is not.
-  return respondJson(res, { error: `only ${result.owner} can delete ${room}` }, 403);
+  return respondJson(
+    res,
+    { error: `only ${result.owner} can delete ${room}` },
+    403,
+  );
 }
 
 /**
@@ -745,22 +909,38 @@ async function handleRoomDelete(req: IncomingMessage, res: ServerResponse, ctx: 
  * the DM branch, past the membership check, and answered `cleared: 0` as
  * success under a room-scoped warning.
  */
-async function handleMessagesClear(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+async function handleMessagesClear(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
   const body = (await readJsonBody(req)) as { target?: string };
   const target = body.target;
-  if (!target) return respondJson(res, { error: 'target required' }, 400);
+  if (!target) return respondJson(res, { error: "target required" }, 400);
 
-  if (target.startsWith('#')) {
+  if (target.startsWith("#")) {
     if (!isRoomName(target)) {
-      return respondJson(res, { error: `${target} is not a valid room name` }, 400);
+      return respondJson(
+        res,
+        { error: `${target} is not a valid room name` },
+        400,
+      );
     }
     if (!dao.isRoomMember(ctx.db, target, ctx.handle)) {
-      return respondJson(res, { error: `you are not a member of ${target}` }, 403);
+      return respondJson(
+        res,
+        { error: `you are not a member of ${target}` },
+        403,
+      );
     }
-    return respondJson(res, { cleared: dao.deleteRoomMessages(ctx.db, target) });
+    return respondJson(res, {
+      cleared: dao.deleteRoomMessages(ctx.db, target),
+    });
   }
 
-  respondJson(res, { cleared: dao.deleteDmMessages(ctx.db, ctx.handle, target) });
+  respondJson(res, {
+    cleared: dao.deleteDmMessages(ctx.db, ctx.handle, target),
+  });
 }
 
 /**
@@ -768,13 +948,20 @@ async function handleMessagesClear(req: IncomingMessage, res: ServerResponse, ct
  * reaches one click where /kick has to be typed. The browser confirms first;
  * these are the second line, not the only one.
  */
-async function handleKick(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): Promise<void> {
+async function handleKick(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
   const body = (await readJsonBody(req)) as { handle?: string };
   const target = body.handle;
-  if (!target) return respondJson(res, { error: 'handle required' }, 400);
-  if (target === ctx.handle) return respondJson(res, { error: 'cannot kick yourself' }, 400);
-  if (target === dao.SYSTEM_HANDLE) return respondJson(res, { error: 'cannot kick system' }, 400);
-  if (!dao.deleteAgent(ctx.db, target)) return respondJson(res, { error: `${target} is not registered` }, 404);
+  if (!target) return respondJson(res, { error: "handle required" }, 400);
+  if (target === ctx.handle)
+    return respondJson(res, { error: "cannot kick yourself" }, 400);
+  if (target === dao.SYSTEM_HANDLE)
+    return respondJson(res, { error: "cannot kick system" }, 400);
+  if (!dao.deleteAgent(ctx.db, target))
+    return respondJson(res, { error: `${target} is not registered` }, 404);
   respondJson(res, { ok: true });
 }
 
@@ -792,8 +979,10 @@ async function handleKick(req: IncomingMessage, res: ServerResponse, ctx: RouteC
  * interval leaves the count identical, and the card would never refresh. That
  * is the whole failure mode a poll exists to avoid.
  */
-export function approvalsSignature(approvals: readonly { id: number }[]): string {
-  return approvals.map((a) => a.id).join(',');
+export function approvalsSignature(
+  approvals: readonly { id: number }[],
+): string {
+  return approvals.map((a) => a.id).join(",");
 }
 
 /**
@@ -813,7 +1002,10 @@ function handleGetClaims(res: ServerResponse, ctx: RouteContext): void {
       holder: c.holder,
       note: c.note,
       held_for_minutes: Math.max(1, Math.round((now - c.claimed_at) / 60_000)),
-      expires_in_minutes: Math.max(1, Math.round(Math.max(0, c.expires_at - now) / 60_000)),
+      expires_in_minutes: Math.max(
+        1,
+        Math.round(Math.max(0, c.expires_at - now) / 60_000),
+      ),
     })),
   });
 }
@@ -830,10 +1022,10 @@ function handleGetClaims(res: ServerResponse, ctx: RouteContext): void {
  * that worked.
  */
 function handleSearch(url: URL, res: ServerResponse, ctx: RouteContext): void {
-  const limitRaw = url.searchParams.get('limit');
+  const limitRaw = url.searchParams.get("limit");
   const parsed = parseSearch({
-    q: url.searchParams.get('q') ?? undefined,
-    target: url.searchParams.get('target') ?? undefined,
+    q: url.searchParams.get("q") ?? undefined,
+    target: url.searchParams.get("target") ?? undefined,
     limit: limitRaw === null ? undefined : Number(limitRaw),
   });
 
@@ -881,13 +1073,21 @@ async function handleAnswerApproval(
   res: ServerResponse,
   ctx: RouteContext,
 ): Promise<void> {
-  const body = (await readJsonBody(req)) as { id?: unknown; decision?: unknown };
-  const id = typeof body.id === 'number' ? body.id : NaN;
+  const body = (await readJsonBody(req)) as {
+    id?: unknown;
+    decision?: unknown;
+  };
+  const id = typeof body.id === "number" ? body.id : NaN;
   const decision = body.decision;
 
-  if (!Number.isInteger(id)) return respondJson(res, { error: 'id must be an integer' }, 400);
-  if (decision !== 'approve' && decision !== 'deny') {
-    return respondJson(res, { error: "decision must be 'approve' or 'deny'" }, 400);
+  if (!Number.isInteger(id))
+    return respondJson(res, { error: "id must be an integer" }, 400);
+  if (decision !== "approve" && decision !== "deny") {
+    return respondJson(
+      res,
+      { error: "decision must be 'approve' or 'deny'" },
+      400,
+    );
   }
 
   const outcome = answerAndNotify(ctx.db, id, decision, ctx.handle);
@@ -895,45 +1095,57 @@ async function handleAnswerApproval(
   // 🛑 404, NOT 409, FOR A MISSING ID. `?.requested == null` is also true for
   // an approval that is not there, and reporting "cannot be approved" for
   // "no such approval" sent one operator looking for the wrong problem.
-  if (outcome.kind === 'no-such-approval') {
-    return respondJson(res, { error: 'no such approval' }, 404);
+  if (outcome.kind === "no-such-approval") {
+    return respondJson(res, { error: "no such approval" }, 404);
   }
 
   // 🛑 422, NOT 500. An unnamed request is a valid row that cannot be
   // APPROVED — there is nothing to grant. The UI hides Approve for these,
   // so reaching here means a stale page or a direct call.
-  if (outcome.kind === 'ungrantable') {
+  if (outcome.kind === "ungrantable") {
     return respondJson(res, { error: outcome.message, canApprove: false }, 422);
   }
 
   // 🛑 409 ON AN ALREADY-ANSWERED REQUEST, NOT 200. Two browser tabs are the
   // normal case, and a silent success on the second click would tell the
   // operator they had granted something that was in fact already denied.
-  if (outcome.kind === 'already-answered') {
-    return respondJson(res, { error: 'already answered', decision: outcome.decision }, 409);
+  if (outcome.kind === "already-answered") {
+    return respondJson(
+      res,
+      { error: "already answered", decision: outcome.decision },
+      409,
+    );
   }
 
   respondJson(res, { ok: true, id, decision });
 }
 
-function handleSseStream(req: IncomingMessage, res: ServerResponse, ctx: RouteContext): void {
+function handleSseStream(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): void {
   res.statusCode = 200;
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // in case anything intermediates
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // in case anything intermediates
   res.write(`: connected\n\n`);
   ctx.sseClients.add(res);
   // Heartbeat every 20s so proxies + browsers don't drop the connection.
   const heartbeat = setInterval(() => {
-    try { res.write(`: heartbeat\n\n`); } catch { /* nothing */ }
+    try {
+      res.write(`: heartbeat\n\n`);
+    } catch {
+      /* nothing */
+    }
   }, 20_000);
   const close = (): void => {
     clearInterval(heartbeat);
     ctx.sseClients.delete(res);
   };
-  req.on('close', close);
-  req.on('error', close);
+  req.on("close", close);
+  req.on("error", close);
 }
 
 // ── Static asset serving ─────────────────────────────────────────────────
@@ -942,10 +1154,10 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
   const dir = assetsDir();
   // Normalize + guard against path traversal: only serve files whose
   // resolved absolute path lives under `dir`.
-  const requestedPath = path === '/' ? '/index.html' : path;
-  const clean = normalize(requestedPath).replace(/^([\\/]+)/, '');
+  const requestedPath = path === "/" ? "/index.html" : path;
+  const clean = normalize(requestedPath).replace(/^([\\/]+)/, "");
   const abs = resolve(dir, clean);
-  if (!abs.startsWith(dir + '/') && abs !== dir) {
+  if (!abs.startsWith(dir + "/") && abs !== dir) {
     res.statusCode = 403;
     res.end();
     return;
@@ -958,10 +1170,10 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
       return;
     }
     const content = await readFile(abs);
-    const ext = abs.slice(abs.lastIndexOf('.'));
-    res.setHeader('Content-Type', MIME[ext] ?? 'application/octet-stream');
-    res.setHeader('Content-Length', content.length);
-    res.setHeader('Cache-Control', 'no-cache');
+    const ext = abs.slice(abs.lastIndexOf("."));
+    res.setHeader("Content-Type", MIME[ext] ?? "application/octet-stream");
+    res.setHeader("Content-Length", content.length);
+    res.setHeader("Cache-Control", "no-cache");
     res.end(content);
   } catch {
     res.statusCode = 404;
@@ -971,13 +1183,23 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
 
 // ── DAO helpers (rows the DAO doesn't expose directly) ───────────────────
 
-function recentRoomMessages(db: Db, room: string, limit: number, beforeId?: number): dao.Message[] {
+function recentRoomMessages(
+  db: Db,
+  room: string,
+  limit: number,
+  beforeId?: number,
+): dao.Message[] {
   const args: (string | number)[] = [room];
   let where = `to_handle = ?`;
-  if (beforeId !== undefined) { where += ` AND id < ?`; args.push(beforeId); }
+  if (beforeId !== undefined) {
+    where += ` AND id < ?`;
+    args.push(beforeId);
+  }
   args.push(limit);
   const rows = db
-    .prepare(`SELECT id, from_handle, to_handle, body, sent_at, delivered_at, read_at, kind FROM messages WHERE ${where} ORDER BY id DESC LIMIT ?`)
+    .prepare(
+      `SELECT id, from_handle, to_handle, body, sent_at, delivered_at, read_at, kind FROM messages WHERE ${where} ORDER BY id DESC LIMIT ?`,
+    )
     .all(...args) as unknown as MessageRow[];
   return rows.reverse().map(toMessage);
 }
@@ -989,7 +1211,12 @@ function recentRoomMessages(db: Db, room: string, limit: number, beforeId?: numb
  * forwards from an anchor without fetching the whole tail. These two are the
  * forward half of the window and nothing else uses them yet.
  */
-function roomMessagesAfter(db: Db, room: string, afterId: number, limit: number): dao.Message[] {
+function roomMessagesAfter(
+  db: Db,
+  room: string,
+  afterId: number,
+  limit: number,
+): dao.Message[] {
   if (limit <= 0) return [];
   const rows = db
     .prepare(
@@ -1001,7 +1228,13 @@ function roomMessagesAfter(db: Db, room: string, afterId: number, limit: number)
   return rows.map(toMessage);
 }
 
-function dmMessagesAfter(db: Db, me: string, peer: string, afterId: number, limit: number): dao.Message[] {
+function dmMessagesAfter(
+  db: Db,
+  me: string,
+  peer: string,
+  afterId: number,
+  limit: number,
+): dao.Message[] {
   if (limit <= 0) return [];
   const rows = db
     .prepare(
@@ -1015,13 +1248,24 @@ function dmMessagesAfter(db: Db, me: string, peer: string, afterId: number, limi
   return rows.map(toMessage);
 }
 
-function recentDmMessages(db: Db, me: string, peer: string, limit: number, beforeId?: number): dao.Message[] {
+function recentDmMessages(
+  db: Db,
+  me: string,
+  peer: string,
+  limit: number,
+  beforeId?: number,
+): dao.Message[] {
   const args: (string | number)[] = [me, peer, peer, me];
   let where = `(from_handle = ? AND to_handle = ?) OR (from_handle = ? AND to_handle = ?)`;
-  if (beforeId !== undefined) { where = `(${where}) AND id < ?`; args.push(beforeId); }
+  if (beforeId !== undefined) {
+    where = `(${where}) AND id < ?`;
+    args.push(beforeId);
+  }
   args.push(limit);
   const rows = db
-    .prepare(`SELECT id, from_handle, to_handle, body, sent_at, delivered_at, read_at, kind FROM messages WHERE ${where} ORDER BY id DESC LIMIT ?`)
+    .prepare(
+      `SELECT id, from_handle, to_handle, body, sent_at, delivered_at, read_at, kind FROM messages WHERE ${where} ORDER BY id DESC LIMIT ?`,
+    )
     .all(...args) as unknown as MessageRow[];
   return rows.reverse().map(toMessage);
 }
@@ -1046,7 +1290,7 @@ function toMessage(r: MessageRow): dao.Message {
     sent_at: r.sent_at,
     delivered_at: r.delivered_at,
     read_at: r.read_at,
-    kind: (r.kind as MessageKind) ?? 'chat',
+    kind: (r.kind as MessageKind) ?? "chat",
   };
 }
 
@@ -1068,7 +1312,10 @@ function hydrateForClient(m: dao.Message): dao.Message & { body_html: string } {
  * check is what keeps this off evil.com.
  */
 async function handleFileHints(url: URL, res: ServerResponse): Promise<void> {
-  const query = resolveHintQuery(url.searchParams.get('q') ?? '', defaultRoots());
+  const query = resolveHintQuery(
+    url.searchParams.get("q") ?? "",
+    defaultRoots(),
+  );
   if (!query) return respondJson(res, { hints: [] });
 
   // 🛑 The lexical containment in resolveHintQuery is not enough: a symlink
@@ -1121,31 +1368,35 @@ async function listenWithFallback(
   const tryListen = (port: number): Promise<number> =>
     new Promise((resolve, reject) => {
       const onError = (err: NodeJS.ErrnoException): void => {
-        server.removeListener('error', onError);
+        server.removeListener("error", onError);
         reject(err);
       };
-      server.once('error', onError);
-      server.listen(port, '127.0.0.1', () => {
-        server.removeListener('error', onError);
+      server.once("error", onError);
+      server.listen(port, "127.0.0.1", () => {
+        server.removeListener("error", onError);
         const addr = server.address();
-        resolve(typeof addr === 'object' && addr ? addr.port : port);
+        resolve(typeof addr === "object" && addr ? addr.port : port);
       });
     });
 
   if (explicitPort !== undefined) return tryListen(explicitPort);
-  try { return await tryListen(preferredPort); }
-  catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EADDRINUSE') throw err;
+  try {
+    return await tryListen(preferredPort);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "EADDRINUSE") throw err;
     return tryListen(0);
   }
 }
 
 function openBrowser(url: string): void {
-  const cmd = process.platform === 'darwin' ? 'open'
-    : process.platform === 'win32' ? 'start'
-      : 'xdg-open';
+  const cmd =
+    process.platform === "darwin"
+      ? "open"
+      : process.platform === "win32"
+        ? "start"
+        : "xdg-open";
   try {
-    spawn(cmd, [url], { detached: true, stdio: 'ignore' }).unref();
+    spawn(cmd, [url], { detached: true, stdio: "ignore" }).unref();
   } catch {
     // Best-effort; user can always click the URL we printed.
   }

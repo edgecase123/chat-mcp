@@ -1,7 +1,7 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
+import { test } from "node:test";
+import assert from "node:assert/strict";
 // The SERVER's copy of the byte cap, so the two can be compared.
-import * as dao from '../../src/storage/dao.js';
+import * as dao from "../../src/storage/dao.js";
 // The browser file itself, imported directly. No DOM, no bundler, no copy.
 import {
   styleSelection,
@@ -43,7 +43,7 @@ import {
   dropNameText,
   clearConfirmText,
   clearResultText,
-} from '../../web/assets/logic.js';
+} from "../../web/assets/logic.js";
 
 /**
  * 🛑 WHY THESE ARE PURE RATHER THAN DOM TESTS.
@@ -57,80 +57,140 @@ import {
  * browser and is out of scope here.
  */
 
-const GEO = (scrollTop: number, scrollHeight: number, clientHeight: number) =>
-  ({ scrollTop, scrollHeight, clientHeight });
+const GEO = (
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number,
+) => ({ scrollTop, scrollHeight, clientHeight });
 
 const COMMANDS = [
-  { name: 'dm', arg: '<peer>', desc: 'open a DM', suggest: 'peer', cat: 'conversation' },
-  { name: 'join', arg: '<#room>', desc: 'join a room', suggest: 'room', cat: 'conversation' },
-  { name: 'alert', arg: '<target> <text>', desc: 'urgent', suggest: 'any', cat: 'messaging' },
-  { name: 'who', arg: '', desc: 'list peers', cat: 'status' },
-  { name: 'whoami', arg: '', desc: 'your handle', cat: 'status' },
-  { name: 'help', arg: '', desc: 'this list', cat: 'system' },
+  {
+    name: "dm",
+    arg: "<peer>",
+    desc: "open a DM",
+    suggest: "peer",
+    cat: "conversation",
+  },
+  {
+    name: "join",
+    arg: "<#room>",
+    desc: "join a room",
+    suggest: "room",
+    cat: "conversation",
+  },
+  {
+    name: "alert",
+    arg: "<target> <text>",
+    desc: "urgent",
+    suggest: "any",
+    cat: "messaging",
+  },
+  { name: "who", arg: "", desc: "list peers", cat: "status" },
+  { name: "whoami", arg: "", desc: "your handle", cat: "status" },
+  { name: "help", arg: "", desc: "this list", cat: "system" },
 ];
-const CTX = { commands: COMMANDS, peers: ['alice', 'bob'], rooms: ['#ops', '#gate'] };
+const CTX = {
+  commands: COMMANDS,
+  peers: ["alice", "bob"],
+  rooms: ["#ops", "#gate"],
+};
 
 // ── scroll anchoring ─────────────────────────────────────────────────────
 
-test('at the bottom is pinned, and a fractional gap still counts', () => {
+test("at the bottom is pinned, and a fractional gap still counts", () => {
   assert.equal(isPinnedToBottom(GEO(900, 1000, 100)), true);
-  assert.equal(isPinnedToBottom(GEO(899.6, 1000, 100)), true, 'sub-pixel gap broke the equality');
+  assert.equal(
+    isPinnedToBottom(GEO(899.6, 1000, 100)),
+    true,
+    "sub-pixel gap broke the equality",
+  );
 });
 
-test('scrolled up is not pinned, so a render must hold position', () => {
+test("scrolled up is not pinned, so a render must hold position", () => {
   assert.equal(isPinnedToBottom(GEO(0, 1000, 100)), false);
-  assert.equal(isPinnedToBottom(GEO(875, 1000, 100)), false, '25px is past the tolerance');
+  assert.equal(
+    isPinnedToBottom(GEO(875, 1000, 100)),
+    false,
+    "25px is past the tolerance",
+  );
 });
 
 /**
  * The boundary itself. Lowering the tolerance from 24 to 4 was the whole
  * point, so a test that only checks 0px and 25px would pass at either value.
  */
-test('a nudge of a few pixels already counts as scrolled up', () => {
-  assert.equal(isPinnedToBottom(GEO(896, 1000, 100)), true, '4px is the tolerance, not past it');
-  assert.equal(isPinnedToBottom(GEO(895, 1000, 100)), false, '5px must not count as pinned');
-  assert.equal(isPinnedToBottom(GEO(880, 1000, 100)), false, '20px counted as pinned under the old 24px');
+test("a nudge of a few pixels already counts as scrolled up", () => {
+  assert.equal(
+    isPinnedToBottom(GEO(896, 1000, 100)),
+    true,
+    "4px is the tolerance, not past it",
+  );
+  assert.equal(
+    isPinnedToBottom(GEO(895, 1000, 100)),
+    false,
+    "5px must not count as pinned",
+  );
+  assert.equal(
+    isPinnedToBottom(GEO(880, 1000, 100)),
+    false,
+    "20px counted as pinned under the old 24px",
+  );
 });
 
 // ── growing the stream in place ──────────────────────────────────────────
 
-test('two more messages in the same room append from the old length', () => {
-  const plan = streamPlan({ target: '#ops', ids: [1, 2, 3] }, { target: '#ops', ids: [1, 2, 3, 4, 5] });
+test("two more messages in the same room append from the old length", () => {
+  const plan = streamPlan(
+    { target: "#ops", ids: [1, 2, 3] },
+    { target: "#ops", ids: [1, 2, 3, 4, 5] },
+  );
 
-  assert.deepEqual(plan, { mode: 'append', from: 3 });
+  assert.deepEqual(plan, { mode: "append", from: 3 });
 });
 
-test('nothing new is still an append of zero, so the ephemeral panels refresh', () => {
-  const plan = streamPlan({ target: '#ops', ids: [1, 2] }, { target: '#ops', ids: [1, 2] });
+test("nothing new is still an append of zero, so the ephemeral panels refresh", () => {
+  const plan = streamPlan(
+    { target: "#ops", ids: [1, 2] },
+    { target: "#ops", ids: [1, 2] },
+  );
 
-  assert.deepEqual(plan, { mode: 'append', from: 2 });
+  assert.deepEqual(plan, { mode: "append", from: 2 });
 });
 
-test('switching target rebuilds, because the DOM holds another conversation', () => {
+test("switching target rebuilds, because the DOM holds another conversation", () => {
   assert.deepEqual(
-    streamPlan({ target: '#ops', ids: [1, 2] }, { target: '@alice', ids: [1, 2] }),
-    { mode: 'full' },
+    streamPlan(
+      { target: "#ops", ids: [1, 2] },
+      { target: "@alice", ids: [1, 2] },
+    ),
+    { mode: "full" },
   );
 });
 
-test('a page of older messages loaded above rebuilds, because the prefix moved', () => {
+test("a page of older messages loaded above rebuilds, because the prefix moved", () => {
   assert.deepEqual(
-    streamPlan({ target: '#ops', ids: [8, 9] }, { target: '#ops', ids: [6, 7, 8, 9] }),
-    { mode: 'full' },
+    streamPlan(
+      { target: "#ops", ids: [8, 9] },
+      { target: "#ops", ids: [6, 7, 8, 9] },
+    ),
+    { mode: "full" },
   );
 });
 
-test('a shorter list rebuilds, because something was withdrawn', () => {
+test("a shorter list rebuilds, because something was withdrawn", () => {
   assert.deepEqual(
-    streamPlan({ target: '#ops', ids: [1, 2, 3] }, { target: '#ops', ids: [1, 2] }),
-    { mode: 'full' },
+    streamPlan(
+      { target: "#ops", ids: [1, 2, 3] },
+      { target: "#ops", ids: [1, 2] },
+    ),
+    { mode: "full" },
   );
 });
 
-test('an empty DOM rebuilds even when the target matches', () => {
+test("an empty DOM rebuilds even when the target matches", () => {
   assert.deepEqual(
-    streamPlan({ target: '#ops', ids: [] }, { target: '#ops', ids: [1] }),
-    { mode: 'full' },
+    streamPlan({ target: "#ops", ids: [] }, { target: "#ops", ids: [1] }),
+    { mode: "full" },
   );
 });
 
@@ -142,29 +202,48 @@ test('an empty DOM rebuilds even when the target matches', () => {
  * compares ids, never content. `streamPlan`'s own docblock says so. There is
  * no edit path today, so there is nothing to assert about one.
  */
-test('a replaced id rebuilds, because the prefix no longer matches', () => {
+test("a replaced id rebuilds, because the prefix no longer matches", () => {
   assert.deepEqual(
-    streamPlan({ target: '#ops', ids: [1, 2, 3] }, { target: '#ops', ids: [1, 9, 3] }),
-    { mode: 'full' },
+    streamPlan(
+      { target: "#ops", ids: [1, 2, 3] },
+      { target: "#ops", ids: [1, 9, 3] },
+    ),
+    { mode: "full" },
   );
 });
 
-test('unread accrues while away from the bottom and resets when pinned', () => {
+test("unread accrues while away from the bottom and resets when pinned", () => {
   assert.equal(nextUnreadBelow(0, 2, false), 2);
   assert.equal(nextUnreadBelow(2, 1, false), 3);
-  assert.equal(nextUnreadBelow(3, 1, true), 0, 'being at the bottom means nothing was missed');
-  assert.equal(nextUnreadBelow(2, -5, false), 2, 'a shrinking list cannot subtract unread');
+  assert.equal(
+    nextUnreadBelow(3, 1, true),
+    0,
+    "being at the bottom means nothing was missed",
+  );
+  assert.equal(
+    nextUnreadBelow(2, -5, false),
+    2,
+    "a shrinking list cannot subtract unread",
+  );
 });
 
 // ── the jump badge ───────────────────────────────────────────────────────
 
-test('the badge shows for new messages OR for being far up, independently', () => {
-  assert.equal(shouldShowJump(0, GEO(900, 1000, 100)), false, 'at the bottom, nothing new');
+test("the badge shows for new messages OR for being far up, independently", () => {
+  assert.equal(
+    shouldShowJump(0, GEO(900, 1000, 100)),
+    false,
+    "at the bottom, nothing new",
+  );
   assert.equal(shouldShowJump(2, GEO(0, 5000, 100)), true);
-  assert.equal(shouldShowJump(0, GEO(0, 5000, 100)), true, 'far up with nothing new still offers the jump');
+  assert.equal(
+    shouldShowJump(0, GEO(0, 5000, 100)),
+    true,
+    "far up with nothing new still offers the jump",
+  );
 });
 
-test('pinned-with-unread cannot occur, so the badge never has to decide it', () => {
+test("pinned-with-unread cannot occur, so the badge never has to decide it", () => {
   // An earlier version of this file asserted shouldShowJump(1, <pinned>) is
   // false. That is a state the app cannot reach: being pinned is exactly what
   // zeroes the tally. Asserting an impossible state tests a fiction, so the
@@ -172,106 +251,153 @@ test('pinned-with-unread cannot occur, so the badge never has to decide it', () 
   assert.equal(nextUnreadBelow(5, 3, true), 0);
 });
 
-test('a small nudge up does not arm the badge', () => {
-  assert.equal(shouldShowJump(0, GEO(800, 1000, 100)), false, '100px up is a glance, not reading');
+test("a small nudge up does not arm the badge", () => {
+  assert.equal(
+    shouldShowJump(0, GEO(800, 1000, 100)),
+    false,
+    "100px up is a glance, not reading",
+  );
 });
 
-test('the threshold is a viewport on a tall window, not a fixed 240px', () => {
+test("the threshold is a viewport on a tall window, not a fixed 240px", () => {
   // 500px up, 900px viewport: still a glance.
   assert.equal(shouldShowJump(0, GEO(0, 1400, 900)), false);
   assert.equal(shouldShowJump(0, GEO(0, 2000, 900)), true);
 });
 
-test('the label says what is waiting, and gets the plural right', () => {
-  assert.equal(jumpLabel(1), '1 new message ↓  (End)');
-  assert.equal(jumpLabel(2), '2 new messages ↓  (End)');
-  assert.equal(jumpLabel(0), 'Jump to newest ↓  (End)');
+test("the label says what is waiting, and gets the plural right", () => {
+  assert.equal(jumpLabel(1), "1 new message ↓  (End)");
+  assert.equal(jumpLabel(2), "2 new messages ↓  (End)");
+  assert.equal(jumpLabel(0), "Jump to newest ↓  (End)");
 });
 
 // ── composer suggestions ─────────────────────────────────────────────────
 
-test('ordinary typing is never interrupted', () => {
-  assert.equal(suggestionsFor('hello there', CTX), null);
-  assert.equal(suggestionsFor('', CTX), null);
-  assert.equal(suggestionsFor('/dm alice\nsecond line', CTX), null);
+test("ordinary typing is never interrupted", () => {
+  assert.equal(suggestionsFor("hello there", CTX), null);
+  assert.equal(suggestionsFor("", CTX), null);
+  assert.equal(suggestionsFor("/dm alice\nsecond line", CTX), null);
 });
 
-test('a slash lists commands, and typing filters them', () => {
-  assert.equal(suggestionsFor('/', CTX).items.length, COMMANDS.length);
-  assert.deepEqual(suggestionsFor('/jo', CTX).items.map((i: any) => i.name), ['/join']);
-  assert.equal(suggestionsFor('/nope', CTX), null);
+test("a slash lists commands, and typing filters them", () => {
+  assert.equal(suggestionsFor("/", CTX).items.length, COMMANDS.length);
+  assert.deepEqual(
+    suggestionsFor("/jo", CTX).items.map((i: any) => i.name),
+    ["/join"],
+  );
+  assert.equal(suggestionsFor("/nope", CTX), null);
 });
 
-test('a command that takes an argument suggests the right pool', () => {
-  assert.deepEqual(suggestionsFor('/dm ', CTX).items.map((i: any) => i.name), ['alice', 'bob']);
-  assert.deepEqual(suggestionsFor('/join ', CTX).items.map((i: any) => i.name), ['#ops', '#gate']);
-  assert.equal(suggestionsFor('/alert ', CTX).items.length, 4, '/alert takes either');
+test("a command that takes an argument suggests the right pool", () => {
+  assert.deepEqual(
+    suggestionsFor("/dm ", CTX).items.map((i: any) => i.name),
+    ["alice", "bob"],
+  );
+  assert.deepEqual(
+    suggestionsFor("/join ", CTX).items.map((i: any) => i.name),
+    ["#ops", "#gate"],
+  );
+  assert.equal(
+    suggestionsFor("/alert ", CTX).items.length,
+    4,
+    "/alert takes either",
+  );
 });
 
-test('a # prefix is ignored when matching a room', () => {
-  assert.deepEqual(suggestionsFor('/join #op', CTX).items.map((i: any) => i.name), ['#ops']);
-  assert.deepEqual(suggestionsFor('/join op', CTX).items.map((i: any) => i.name), ['#ops']);
+test("a # prefix is ignored when matching a room", () => {
+  assert.deepEqual(
+    suggestionsFor("/join #op", CTX).items.map((i: any) => i.name),
+    ["#ops"],
+  );
+  assert.deepEqual(
+    suggestionsFor("/join op", CTX).items.map((i: any) => i.name),
+    ["#ops"],
+  );
 });
 
-test('a command with no argument suggests nothing after its space', () => {
-  assert.equal(suggestionsFor('/who ', CTX), null);
+test("a command with no argument suggests nothing after its space", () => {
+  assert.equal(suggestionsFor("/who ", CTX), null);
 });
 
 // ── the Enter rule that unstuck "/help" ──────────────────────────────────
 
-test('🛑 Enter SENDS once the input already equals what accepting would insert', () => {
-  const s = suggestionsFor('/help', CTX);
-  assert.equal(enterShouldSend(s, '/help'), true, 'this is the bug lee hit: /help was stuck');
+test("🛑 Enter SENDS once the input already equals what accepting would insert", () => {
+  const s = suggestionsFor("/help", CTX);
+  assert.equal(
+    enterShouldSend(s, "/help"),
+    true,
+    "this is the bug lee hit: /help was stuck",
+  );
 });
 
-test('Enter ACCEPTS a half-typed command', () => {
-  assert.equal(enterShouldSend(suggestionsFor('/hel', CTX), '/hel'), false);
+test("Enter ACCEPTS a half-typed command", () => {
+  assert.equal(enterShouldSend(suggestionsFor("/hel", CTX), "/hel"), false);
 });
 
 test('"/who" still reaches "/whoami", because that insert differs', () => {
-  const s = suggestionsFor('/who', CTX);
-  assert.equal(s.items[0].name, '/who');
-  assert.equal(enterShouldSend(s, '/who'), true, 'the exact match sends');
+  const s = suggestionsFor("/who", CTX);
+  assert.equal(s.items[0].name, "/who");
+  assert.equal(enterShouldSend(s, "/who"), true, "the exact match sends");
   s.index = moveIndex(s.index, 1, s.items.length);
-  assert.equal(s.items[s.index].name, '/whoami');
-  assert.equal(enterShouldSend(s, '/who'), false, 'after ArrowDown it completes instead');
+  assert.equal(s.items[s.index].name, "/whoami");
+  assert.equal(
+    enterShouldSend(s, "/who"),
+    false,
+    "after ArrowDown it completes instead",
+  );
 });
 
-test('Enter sends when nothing is open at all', () => {
-  assert.equal(enterShouldSend(null, 'a normal message'), true);
+test("Enter sends when nothing is open at all", () => {
+  assert.equal(enterShouldSend(null, "a normal message"), true);
 });
 
-test('accepting reopens only for a command that takes an argument', () => {
-  assert.equal(acceptReopens('/dm '), true);
-  assert.equal(acceptReopens('/help'), false, '/help reopening on itself is what stuck Enter');
+test("accepting reopens only for a command that takes an argument", () => {
+  assert.equal(acceptReopens("/dm "), true);
+  assert.equal(
+    acceptReopens("/help"),
+    false,
+    "/help reopening on itself is what stuck Enter",
+  );
 });
 
-test('the list wraps in both directions', () => {
+test("the list wraps in both directions", () => {
   assert.equal(moveIndex(0, -1, 3), 2);
   assert.equal(moveIndex(2, 1, 3), 0);
-  assert.equal(moveIndex(0, 1, 0), 0, 'an empty list cannot divide by zero');
+  assert.equal(moveIndex(0, 1, 0), 0, "an empty list cannot divide by zero");
 });
 
 // ── the entry a sidebar row offers ───────────────────────────────────────
 
-const ROOM = menuEntriesFor('room', '#ops');
-const PEER = menuEntriesFor('peer', 'alice');
+const ROOM = menuEntriesFor("room", "#ops");
+const PEER = menuEntriesFor("peer", "alice");
 const texts = (entries: { text: string }[]) => entries.map((e) => e.text);
 
-test('🛑 a room offers Delete and NEVER Kick', () => {
-  assert.deepEqual(texts(ROOM), ['Broadcast…', 'Alert…', 'Copy name', 'Leave', 'Delete']);
-  assert.ok(!texts(ROOM).includes('Kick'), 'Kick does not apply to a room');
+test("🛑 a room offers Delete and NEVER Kick", () => {
+  assert.deepEqual(texts(ROOM), [
+    "Broadcast…",
+    "Alert…",
+    "Copy name",
+    "Leave",
+    "Delete",
+  ]);
+  assert.ok(!texts(ROOM).includes("Kick"), "Kick does not apply to a room");
 });
 
-test('🛑 a peer offers Kick, and never Delete or Leave', () => {
-  assert.deepEqual(texts(PEER), ['Dispatch…', 'Alert…', 'Copy handle', 'Kick']);
-  assert.ok(!texts(PEER).includes('Delete'), 'a peer is not deletable');
-  assert.ok(!texts(PEER).includes('Leave'), 'a DM is not a membership');
+test("🛑 a peer offers Kick, and never Delete or Leave", () => {
+  assert.deepEqual(texts(PEER), ["Dispatch…", "Alert…", "Copy handle", "Kick"]);
+  assert.ok(!texts(PEER).includes("Delete"), "a peer is not deletable");
+  assert.ok(!texts(PEER).includes("Leave"), "a DM is not a membership");
 });
 
-test('🛑 a room BROADCASTS and a peer DISPATCHES. The verbs never cross.', () => {
-  assert.ok(!texts(ROOM).includes('Dispatch…'), 'a room does not take the peer verb');
-  assert.ok(!texts(PEER).includes('Broadcast…'), 'a peer does not take the room verb');
+test("🛑 a room BROADCASTS and a peer DISPATCHES. The verbs never cross.", () => {
+  assert.ok(
+    !texts(ROOM).includes("Dispatch…"),
+    "a room does not take the peer verb",
+  );
+  assert.ok(
+    !texts(PEER).includes("Broadcast…"),
+    "a peer does not take the room verb",
+  );
 });
 
 /**
@@ -282,34 +408,47 @@ test('🛑 a room BROADCASTS and a peer DISPATCHES. The verbs never cross.', () 
  * what keeps a mis-click off them, and the CSS rules a line above whatever
  * carries this flag.
  */
-test('exactly one destructive entry per kind, and it is the last one', () => {
-  for (const [kind, entries] of [['room', ROOM], ['peer', PEER]] as const) {
+test("exactly one destructive entry per kind, and it is the last one", () => {
+  for (const [kind, entries] of [
+    ["room", ROOM],
+    ["peer", PEER],
+  ] as const) {
     const flagged = entries.filter((e) => e.destructive);
-    assert.equal(flagged.length, 1, `${kind} must mark exactly one entry destructive`);
-    assert.equal(entries.at(-1), flagged[0], `${kind}'s destructive entry must be last`);
+    assert.equal(
+      flagged.length,
+      1,
+      `${kind} must mark exactly one entry destructive`,
+    );
+    assert.equal(
+      entries.at(-1),
+      flagged[0],
+      `${kind}'s destructive entry must be last`,
+    );
   }
 });
 
 /** ⚠️ The ellipsis is the only thing telling you nothing will be sent. */
-test('an entry carries a prefill if and only if its label ends in an ellipsis', () => {
+test("an entry carries a prefill if and only if its label ends in an ellipsis", () => {
   for (const e of [...ROOM, ...PEER]) {
     assert.equal(
       Boolean(e.prefill),
-      e.text.endsWith('…'),
+      e.text.endsWith("…"),
       `"${e.text}" must say in its label whether it opens in the composer`,
     );
   }
 });
 
-test('a prefill is a complete command line, already targeted, with a trailing space', () => {
+test("a prefill is a complete command line, already targeted, with a trailing space", () => {
   const prefills = Object.fromEntries(
-    [...ROOM, ...PEER].filter((e) => e.prefill).map((e) => [e.text + e.prefill!.split(' ')[1], e.prefill]),
+    [...ROOM, ...PEER]
+      .filter((e) => e.prefill)
+      .map((e) => [e.text + e.prefill!.split(" ")[1], e.prefill]),
   );
   assert.deepEqual(prefills, {
-    'Broadcast…#ops': '/broadcast #ops ',
-    'Alert…#ops': '/alert #ops ',
-    'Dispatch…alice': '/dispatch alice ',
-    'Alert…alice': '/alert alice ',
+    "Broadcast…#ops": "/broadcast #ops ",
+    "Alert…#ops": "/alert #ops ",
+    "Dispatch…alice": "/dispatch alice ",
+    "Alert…alice": "/alert alice ",
   });
 });
 
@@ -319,21 +458,33 @@ test('a prefill is a complete command line, already targeted, with a trailing sp
  * that no longer exists and nothing throws. This pins the three names so the
  * rename breaks a test instead of only the feature.
  */
-test('every prefill names one of the three commands a menu is allowed to open', () => {
-  const used = [...ROOM, ...PEER].filter((e) => e.prefill).map((e) => e.prefill!.split(' ')[0]);
-  assert.equal(used.length, 4, 'four prefill entries across the two menus');
-  assert.deepEqual([...new Set(used)].sort(), ['/alert', '/broadcast', '/dispatch']);
+test("every prefill names one of the three commands a menu is allowed to open", () => {
+  const used = [...ROOM, ...PEER]
+    .filter((e) => e.prefill)
+    .map((e) => e.prefill!.split(" ")[0]);
+  assert.equal(used.length, 4, "four prefill entries across the two menus");
+  assert.deepEqual([...new Set(used)].sort(), [
+    "/alert",
+    "/broadcast",
+    "/dispatch",
+  ]);
 });
 
-test('each entry names its own target in the title', () => {
-  assert.equal(menuEntriesFor('room', '#gate').at(-1)!.title, 'Delete #gate for everyone');
-  assert.equal(menuEntriesFor('peer', 'bob').at(-1)!.title, 'Remove bob from the bus');
-  assert.ok(menuEntriesFor('room', '#gate')[0]!.title.includes('#gate'));
+test("each entry names its own target in the title", () => {
+  assert.equal(
+    menuEntriesFor("room", "#gate").at(-1)!.title,
+    "Delete #gate for everyone",
+  );
+  assert.equal(
+    menuEntriesFor("peer", "bob").at(-1)!.title,
+    "Remove bob from the bus",
+  );
+  assert.ok(menuEntriesFor("room", "#gate")[0]!.title.includes("#gate"));
 });
 
 /** Every action must reach a handler, and app.js keys them by this string. */
-test('every action is one app.js has a handler for', () => {
-  const known = ['prefill', 'copyName', 'leaveRoom', 'deleteRoom', 'kickPeer'];
+test("every action is one app.js has a handler for", () => {
+  const known = ["prefill", "copyName", "leaveRoom", "deleteRoom", "kickPeer"];
   for (const e of [...ROOM, ...PEER]) {
     assert.ok(known.includes(e.action), `no handler key for "${e.action}"`);
   }
@@ -343,298 +494,470 @@ test('every action is one app.js has a handler for', () => {
 
 const MENTION_CTX = {
   // Deliberately out of order, and gatebot shares a prefix with #gate.
-  peers: ['claude2', 'claude1', 'leejenkins', 'gatebot'],
-  rooms: ['#leagues', '#gate'],
+  peers: ["claude2", "claude1", "leejenkins", "gatebot"],
+  rooms: ["#leagues", "#gate"],
 };
 // What the composer would hold after accepting the top item.
 const accept = (value: string, caret: number) => {
   const s = mentionSuggestionsFor(value, caret, MENTION_CTX);
 
-  return s && { insert: s.items[0].insert, caret: s.items[0].caret, names: s.items.map((i) => i.name) };
+  return (
+    s && {
+      insert: s.items[0].insert,
+      caret: s.items[0].caret,
+      names: s.items.map((i) => i.name),
+    }
+  );
 };
 
 test('🛑 "@" NEVER triggers. It is reserved for relative file paths.', () => {
-  assert.equal(mentionTokenAt('@clau', 5), null);
-  assert.equal(accept('tell @clau now', 10), null);
-  assert.equal(accept('@', 1), null);
+  assert.equal(mentionTokenAt("@clau", 5), null);
+  assert.equal(accept("tell @clau now", 10), null);
+  assert.equal(accept("@", 1), null);
 });
 
-test('🛑 a bare word NEVER opens the list, so ordinary typing is not interrupted', () => {
-  assert.equal(mentionTokenAt('Hi clau', 7), null);
-  assert.equal(accept('Hi clau', 7), null);
+test("🛑 a bare word NEVER opens the list, so ordinary typing is not interrupted", () => {
+  assert.equal(mentionTokenAt("Hi clau", 7), null);
+  assert.equal(accept("Hi clau", 7), null);
 });
 
 test('🛑 a "#" inside a word does not open the list', () => {
-  assert.equal(mentionTokenAt('I like C#', 9), null, 'the trigger must OPEN a word');
-  assert.equal(mentionTokenAt('issue3#4', 8), null);
+  assert.equal(
+    mentionTokenAt("I like C#", 9),
+    null,
+    "the trigger must OPEN a word",
+  );
+  assert.equal(mentionTokenAt("issue3#4", 8), null);
 });
 
 test('"#" alone lists every room and every peer', () => {
-  assert.deepEqual(accept('#', 1)!.names,
-    ['#gate', '#leagues', 'claude1', 'claude2', 'gatebot', 'leejenkins']);
+  assert.deepEqual(accept("#", 1)!.names, [
+    "#gate",
+    "#leagues",
+    "claude1",
+    "claude2",
+    "gatebot",
+    "leejenkins",
+  ]);
 });
 
-test('the order does not depend on bus join order', () => {
-  const a = mentionSuggestionsFor('#', 1, { peers: ['b', 'a'], rooms: ['#z', '#y'] })!;
-  assert.deepEqual(a.items.map((i) => i.name), ['#y', '#z', 'a', 'b'], 'rooms first, each group sorted');
+test("the order does not depend on bus join order", () => {
+  const a = mentionSuggestionsFor("#", 1, {
+    peers: ["b", "a"],
+    rooms: ["#z", "#y"],
+  })!;
+  assert.deepEqual(
+    a.items.map((i) => i.name),
+    ["#y", "#z", "a", "b"],
+    "rooms first, each group sorted",
+  );
 });
 
-test('a prefix narrows across both pools', () => {
-  assert.deepEqual(accept('#clau', 5)!.names, ['claude1', 'claude2']);
-  assert.deepEqual(accept('#gat', 4)!.names, ['#gate', 'gatebot'], 'a room and a peer can both match');
+test("a prefix narrows across both pools", () => {
+  assert.deepEqual(accept("#clau", 5)!.names, ["claude1", "claude2"]);
+  assert.deepEqual(
+    accept("#gat", 4)!.names,
+    ["#gate", "gatebot"],
+    "a room and a peer can both match",
+  );
 });
 
-test('a prefix that matches nothing returns null, not an empty list', () => {
-  assert.equal(accept('#zzz', 4), null);
+test("a prefix that matches nothing returns null, not an empty list", () => {
+  assert.equal(accept("#zzz", 4), null);
 });
 
 test('🛑 a room keeps its own "#", and a peer does NOT gain one', () => {
-  assert.equal(accept('#gat', 4)!.insert, '#gate ', 'the # is part of the room name');
-  assert.equal(accept('#clau', 5)!.insert, 'claude1 ', 'the # was only a trigger');
+  assert.equal(
+    accept("#gat", 4)!.insert,
+    "#gate ",
+    "the # is part of the room name",
+  );
+  assert.equal(
+    accept("#clau", 5)!.insert,
+    "claude1 ",
+    "the # was only a trigger",
+  );
 });
 
-test('🛑 accepting mid-token consumes the WHOLE word, leaving no orphan letters', () => {
+test("🛑 accepting mid-token consumes the WHOLE word, leaving no orphan letters", () => {
   // Caret sits inside "clau", between the a and the u.
-  assert.equal(accept('tell #clau now', 9)!.insert, 'tell claude1 now');
+  assert.equal(accept("tell #clau now", 9)!.insert, "tell claude1 now");
 });
 
-test('🛑 completing before an existing space does not leave two spaces', () => {
-  const r = accept('tell #clau now', 10)!;
-  assert.equal(r.insert, 'tell claude1 now');
-  assert.ok(!r.insert.includes('  '), 'a doubled space is the bug this guards');
+test("🛑 completing before an existing space does not leave two spaces", () => {
+  const r = accept("tell #clau now", 10)!;
+  assert.equal(r.insert, "tell claude1 now");
+  assert.ok(!r.insert.includes("  "), "a doubled space is the bug this guards");
 });
 
-test('the caret lands after the inserted name, not at the end of the line', () => {
-  const r = accept('tell #clau now', 10)!;
-  assert.equal(r.caret, 'tell claude1'.length, 'so you can keep typing where you were');
-  assert.equal(r.insert.slice(0, r.caret), 'tell claude1');
+test("the caret lands after the inserted name, not at the end of the line", () => {
+  const r = accept("tell #clau now", 10)!;
+  assert.equal(
+    r.caret,
+    "tell claude1".length,
+    "so you can keep typing where you were",
+  );
+  assert.equal(r.insert.slice(0, r.caret), "tell claude1");
 });
 
-test('a trailing space is added when the name ends the line', () => {
-  assert.equal(accept('tell #clau', 10)!.insert, 'tell claude1 ');
+test("a trailing space is added when the name ends the line", () => {
+  assert.equal(accept("tell #clau", 10)!.insert, "tell claude1 ");
 });
 
-test('🛑 a completed name no longer offers itself, so the popover closes', () => {
-  assert.equal(mentionTokenAt('tell claude1 ', 13), null, 'no trigger left in the line');
-  assert.equal(accept('tell #gate ', 11), null, 'the caret is past the word');
+test("🛑 a completed name no longer offers itself, so the popover closes", () => {
+  assert.equal(
+    mentionTokenAt("tell claude1 ", 13),
+    null,
+    "no trigger left in the line",
+  );
+  assert.equal(accept("tell #gate ", 11), null, "the caret is past the word");
 });
 
-test('🛑 a slash line is a COMMAND line, and the command path WINS', () => {
+test("🛑 a slash line is a COMMAND line, and the command path WINS", () => {
   // The precedence app.js uses: command first, mention only on null.
   const pick = (v: string, caret: number) =>
     suggestionsFor(v, CTX) ?? mentionSuggestionsFor(v, caret, MENTION_CTX);
 
-  assert.equal(pick('/dm ali', 7)!.kind, 'arg', 'the command owns its own argument');
-  assert.equal(pick('/dm #clau', 9), null, 'a # inside a command never becomes a mention');
-  assert.equal(mentionTokenAt('/dm #clau', 9), null, 'the rule lives in the pure function');
-  assert.equal(pick('#clau', 5)!.kind, 'mention', 'and a non-slash line falls through');
+  assert.equal(
+    pick("/dm ali", 7)!.kind,
+    "arg",
+    "the command owns its own argument",
+  );
+  assert.equal(
+    pick("/dm #clau", 9),
+    null,
+    "a # inside a command never becomes a mention",
+  );
+  assert.equal(
+    mentionTokenAt("/dm #clau", 9),
+    null,
+    "the rule lives in the pure function",
+  );
+  assert.equal(
+    pick("#clau", 5)!.kind,
+    "mention",
+    "and a non-slash line falls through",
+  );
 });
 
-test('duplicate handles are listed once', () => {
-  const s = mentionSuggestionsFor('#c', 2, { peers: ['claude1', 'claude1'], rooms: [] });
-  assert.deepEqual(s!.items.map((i) => i.name), ['claude1']);
+test("duplicate handles are listed once", () => {
+  const s = mentionSuggestionsFor("#c", 2, {
+    peers: ["claude1", "claude1"],
+    rooms: [],
+  });
+  assert.deepEqual(
+    s!.items.map((i) => i.name),
+    ["claude1"],
+  );
 });
 
-test('a caret past the end of the value does not throw', () => {
-  assert.equal(accept('#clau', 999)!.insert, 'claude1 ');
-  assert.equal(mentionTokenAt('', 5), null);
+test("a caret past the end of the value does not throw", () => {
+  assert.equal(accept("#clau", 999)!.insert, "claude1 ");
+  assert.equal(mentionTokenAt("", 5), null);
 });
 
 // ── Enter on a mention, which the whole-value rule cannot answer ─────────
 
-test('🛑 Enter SENDS once the typed token IS the name, trigger included', () => {
-  const s = mentionSuggestionsFor('#gate', 5, MENTION_CTX)!;
-  assert.equal(s.items[s.index].name, '#gate');
-  assert.equal(enterShouldSend(s, '#gate'), true, 'otherwise Enter re-accepts forever');
+test("🛑 Enter SENDS once the typed token IS the name, trigger included", () => {
+  const s = mentionSuggestionsFor("#gate", 5, MENTION_CTX)!;
+  assert.equal(s.items[s.index].name, "#gate");
+  assert.equal(
+    enterShouldSend(s, "#gate"),
+    true,
+    "otherwise Enter re-accepts forever",
+  );
 });
 
-test('Enter ACCEPTS a half-typed name', () => {
-  assert.equal(enterShouldSend(mentionSuggestionsFor('#gat', 4, MENTION_CTX)!, '#gat'), false);
-  assert.equal(enterShouldSend(mentionSuggestionsFor('#clau', 5, MENTION_CTX)!, '#clau'), false);
+test("Enter ACCEPTS a half-typed name", () => {
+  assert.equal(
+    enterShouldSend(mentionSuggestionsFor("#gat", 4, MENTION_CTX)!, "#gat"),
+    false,
+  );
+  assert.equal(
+    enterShouldSend(mentionSuggestionsFor("#clau", 5, MENTION_CTX)!, "#clau"),
+    false,
+  );
 });
 
 test('🛑 A FULLY TYPED PEER STILL COMPLETES, because its "#" must come off', () => {
   // The defect this pins: comparing the BARE name made "#gate" send with a
   // stray "#" when gate was a peer, while "#clau" completed to "claude1" with
   // none. How much you had typed decided what got sent.
-  const ctx = { peers: ['gate'], rooms: [] };
-  const s = mentionSuggestionsFor('#gate', 5, ctx)!;
-  assert.equal(s.items[0].insert, 'gate ', 'the completion drops the trigger');
-  assert.equal(enterShouldSend(s, '#gate'), false, 'so there IS something left to do');
+  const ctx = { peers: ["gate"], rooms: [] };
+  const s = mentionSuggestionsFor("#gate", 5, ctx)!;
+  assert.equal(s.items[0].insert, "gate ", "the completion drops the trigger");
+  assert.equal(
+    enterShouldSend(s, "#gate"),
+    false,
+    "so there IS something left to do",
+  );
 });
 
-test('a room and a peer of the same name diverge, and both are right', () => {
-  const asRoom = mentionSuggestionsFor('#gate', 5, { peers: [], rooms: ['#gate'] })!;
-  const asPeer = mentionSuggestionsFor('#gate', 5, { peers: ['gate'], rooms: [] })!;
-  assert.equal(enterShouldSend(asRoom, '#gate'), true, 'the # is part of the room name');
-  assert.equal(enterShouldSend(asPeer, '#gate'), false, 'the # was only a trigger');
+test("a room and a peer of the same name diverge, and both are right", () => {
+  const asRoom = mentionSuggestionsFor("#gate", 5, {
+    peers: [],
+    rooms: ["#gate"],
+  })!;
+  const asPeer = mentionSuggestionsFor("#gate", 5, {
+    peers: ["gate"],
+    rooms: [],
+  })!;
+  assert.equal(
+    enterShouldSend(asRoom, "#gate"),
+    true,
+    "the # is part of the room name",
+  );
+  assert.equal(
+    enterShouldSend(asPeer, "#gate"),
+    false,
+    "the # was only a trigger",
+  );
 });
 
-test('a mistyped case completes rather than sending, so the name is normalised', () => {
-  const s = mentionSuggestionsFor('#GATE', 5, MENTION_CTX)!;
-  assert.equal(s.items[0].insert, '#gate ');
-  assert.equal(enterShouldSend(s, '#GATE'), false);
+test("a mistyped case completes rather than sending, so the name is normalised", () => {
+  const s = mentionSuggestionsFor("#GATE", 5, MENTION_CTX)!;
+  assert.equal(s.items[0].insert, "#gate ");
+  assert.equal(enterShouldSend(s, "#GATE"), false);
 });
 
-test('🛑 the whole-value test would have been WRONG here, which is the point', () => {
+test("🛑 the whole-value test would have been WRONG here, which is the point", () => {
   // The insert carries the rest of the line, so it never equals the value.
-  const s = mentionSuggestionsFor('hey #gate', 9, MENTION_CTX)!;
-  assert.notEqual(s.items[s.index].insert, 'hey #gate', 'insert differs from value');
-  assert.equal(enterShouldSend(s, 'hey #gate'), true, 'and Enter must still send');
+  const s = mentionSuggestionsFor("hey #gate", 9, MENTION_CTX)!;
+  assert.notEqual(
+    s.items[s.index].insert,
+    "hey #gate",
+    "insert differs from value",
+  );
+  assert.equal(
+    enterShouldSend(s, "hey #gate"),
+    true,
+    "and Enter must still send",
+  );
 });
 
-test('after ArrowDown, Enter completes the newly active name instead', () => {
+test("after ArrowDown, Enter completes the newly active name instead", () => {
   // "#gate" is an exact match AND a prefix of "#gateway", which is the only
   // shape where the active item can stop being the typed one.
-  const s = mentionSuggestionsFor('#gate', 5, { peers: [], rooms: ['#gate', '#gateway'] })!;
-  assert.equal(enterShouldSend(s, '#gate'), true, 'the exact match sends');
+  const s = mentionSuggestionsFor("#gate", 5, {
+    peers: [],
+    rooms: ["#gate", "#gateway"],
+  })!;
+  assert.equal(enterShouldSend(s, "#gate"), true, "the exact match sends");
   s.index = moveIndex(s.index, 1, s.items.length);
-  assert.equal(s.items[s.index].name, '#gateway');
-  assert.equal(enterShouldSend(s, '#gate'), false, '#gateway is not what is typed');
+  assert.equal(s.items[s.index].name, "#gateway");
+  assert.equal(
+    enterShouldSend(s, "#gate"),
+    false,
+    "#gateway is not what is typed",
+  );
 });
 
 // ── ArrowUp through sent-line history ───────────────────────────────────
 
-const ring = (...lines: string[]) => lines.reduce((e, l) => pushHistory(e, l), [] as string[]);
+const ring = (...lines: string[]) =>
+  lines.reduce((e, l) => pushHistory(e, l), [] as string[]);
 type Hist = { entries: string[]; index: number | null; draft: string | null };
-const H = (entries: string[], index: number | null = null, draft: string | null = null): Hist =>
-  ({ entries, index, draft });
+const H = (
+  entries: string[],
+  index: number | null = null,
+  draft: string | null = null,
+): Hist => ({ entries, index, draft });
 
-test('consecutive duplicates collapse, because they are one thing to recall', () => {
-  assert.deepEqual(ring('a', 'b', 'b', 'b', 'c'), ['a', 'b', 'c']);
-  assert.deepEqual(ring('a', 'b', 'a'), ['a', 'b', 'a'], 'only CONSECUTIVE ones collapse');
+test("consecutive duplicates collapse, because they are one thing to recall", () => {
+  assert.deepEqual(ring("a", "b", "b", "b", "c"), ["a", "b", "c"]);
+  assert.deepEqual(
+    ring("a", "b", "a"),
+    ["a", "b", "a"],
+    "only CONSECUTIVE ones collapse",
+  );
 });
 
-test('a blank or whitespace-only line is never recorded', () => {
-  assert.deepEqual(ring('a', '   ', '', '\n', 'b'), ['a', 'b']);
+test("a blank or whitespace-only line is never recorded", () => {
+  assert.deepEqual(ring("a", "   ", "", "\n", "b"), ["a", "b"]);
 });
 
-test('a line is stored trimmed', () => {
-  assert.deepEqual(ring('  padded  '), ['padded']);
+test("a line is stored trimmed", () => {
+  assert.deepEqual(ring("  padded  "), ["padded"]);
 });
 
-test('the ring drops the OLDEST once it is full', () => {
+test("the ring drops the OLDEST once it is full", () => {
   let e: string[] = [];
   for (let i = 0; i < 105; i += 1) e = pushHistory(e, `line${i}`, 100);
   assert.equal(e.length, 100);
-  assert.equal(e[0], 'line5', 'the first five are gone');
-  assert.equal(e[99], 'line104', 'the newest is last');
+  assert.equal(e[0], "line5", "the first five are gone");
+  assert.equal(e[99], "line104", "the newest is last");
 });
 
-test('🛑 the FIRST ArrowUp saves the draft you were writing', () => {
-  const step = historyStep(H(ring('one', 'two')), -1, 'half a sentence')!;
-  assert.equal(step.value, 'two', 'newest entry first');
-  assert.equal(step.draft, 'half a sentence', 'losing this is the bug');
+test("🛑 the FIRST ArrowUp saves the draft you were writing", () => {
+  const step = historyStep(H(ring("one", "two")), -1, "half a sentence")!;
+  assert.equal(step.value, "two", "newest entry first");
+  assert.equal(step.draft, "half a sentence", "losing this is the bug");
   assert.equal(step.index, 1);
 });
 
-test('ArrowUp walks back to the oldest and stops there', () => {
-  const entries = ring('one', 'two', 'three');
+test("ArrowUp walks back to the oldest and stops there", () => {
+  const entries = ring("one", "two", "three");
   let h = H(entries);
   const seen: string[] = [];
   for (let i = 0; i < 5; i += 1) {
-    const step = historyStep(h, -1, '');
+    const step = historyStep(h, -1, "");
     if (!step) break;
     seen.push(step.value);
     h = { entries, index: step.index, draft: step.draft };
   }
-  assert.deepEqual(seen, ['three', 'two', 'one'], 'and the 4th press returns null');
+  assert.deepEqual(
+    seen,
+    ["three", "two", "one"],
+    "and the 4th press returns null",
+  );
 });
 
-test('🛑 ArrowDown past the newest RESTORES the draft, not an empty box', () => {
-  const entries = ring('one');
-  const up = historyStep(H(entries), -1, 'my draft')!;
-  const down = historyStep({ entries, index: up.index, draft: up.draft }, 1, 'one')!;
-  assert.equal(down.value, 'my draft');
-  assert.equal(down.index, null, 'and we are no longer browsing');
+test("🛑 ArrowDown past the newest RESTORES the draft, not an empty box", () => {
+  const entries = ring("one");
+  const up = historyStep(H(entries), -1, "my draft")!;
+  const down = historyStep(
+    { entries, index: up.index, draft: up.draft },
+    1,
+    "one",
+  )!;
+  assert.equal(down.value, "my draft");
+  assert.equal(down.index, null, "and we are no longer browsing");
   assert.equal(down.draft, null);
 });
 
-test('ArrowDown restores an EMPTY draft as empty, not as the oldest entry', () => {
-  const entries = ring('one');
-  const up = historyStep(H(entries), -1, '')!;
-  const down = historyStep({ entries, index: up.index, draft: up.draft }, 1, 'one')!;
-  assert.equal(down.value, '', 'the box you started with was empty');
+test("ArrowDown restores an EMPTY draft as empty, not as the oldest entry", () => {
+  const entries = ring("one");
+  const up = historyStep(H(entries), -1, "")!;
+  const down = historyStep(
+    { entries, index: up.index, draft: up.draft },
+    1,
+    "one",
+  )!;
+  assert.equal(down.value, "", "the box you started with was empty");
 });
 
-test('ArrowDown does nothing when you were not browsing', () => {
-  assert.equal(historyStep(H(ring('one')), 1, 'typing'), null);
+test("ArrowDown does nothing when you were not browsing", () => {
+  assert.equal(historyStep(H(ring("one")), 1, "typing"), null);
 });
 
-test('ArrowUp does nothing on an empty ring, so the key stays the browser\'s', () => {
-  assert.equal(historyStep(H([]), -1, 'typing'), null);
+test("ArrowUp does nothing on an empty ring, so the key stays the browser's", () => {
+  assert.equal(historyStep(H([]), -1, "typing"), null);
 });
 
 // ── the multi-line guard the CLI composer never needed ──────────────────
 
-test('🛑 ArrowUp does NOT claim the key when there is a line above the caret', () => {
+test("🛑 ArrowUp does NOT claim the key when there is a line above the caret", () => {
   // Shift-Enter makes newlines here, so the caret must still move between them.
-  assert.equal(historyKeyApplies('one\ntwo', 5, -1), false, 'caret on line 2');
-  assert.equal(historyKeyApplies('one\ntwo', 2, -1), true, 'caret on line 1');
+  assert.equal(historyKeyApplies("one\ntwo", 5, -1), false, "caret on line 2");
+  assert.equal(historyKeyApplies("one\ntwo", 2, -1), true, "caret on line 1");
 });
 
-test('ArrowDown does NOT claim the key when there is a line below the caret', () => {
-  assert.equal(historyKeyApplies('one\ntwo', 2, 1), false, 'caret on line 1');
-  assert.equal(historyKeyApplies('one\ntwo', 5, 1), true, 'caret on the last line');
+test("ArrowDown does NOT claim the key when there is a line below the caret", () => {
+  assert.equal(historyKeyApplies("one\ntwo", 2, 1), false, "caret on line 1");
+  assert.equal(
+    historyKeyApplies("one\ntwo", 5, 1),
+    true,
+    "caret on the last line",
+  );
 });
 
-test('a single-line value gives both keys to history', () => {
-  assert.equal(historyKeyApplies('one line', 4, -1), true);
-  assert.equal(historyKeyApplies('one line', 4, 1), true);
+test("a single-line value gives both keys to history", () => {
+  assert.equal(historyKeyApplies("one line", 4, -1), true);
+  assert.equal(historyKeyApplies("one line", 4, 1), true);
 });
 
-test('an out-of-range caret does not throw', () => {
-  assert.equal(historyKeyApplies('one', 999, -1), true);
-  assert.equal(historyKeyApplies('', 0, 1), true);
+test("an out-of-range caret does not throw", () => {
+  assert.equal(historyKeyApplies("one", 999, -1), true);
+  assert.equal(historyKeyApplies("", 0, 1), true);
 });
 
 // ── the shortcut that focuses the conversation filter ──────────────────
 
 /** A keydown event, as much of one as the predicate reads. */
-const key = (k: string, mods: Record<string, boolean> = {}) => ({ key: k, ...mods });
+const key = (k: string, mods: Record<string, boolean> = {}) => ({
+  key: k,
+  ...mods,
+});
 
-test('🛑 macOS gets Cmd-F and must NOT get Ctrl-F', () => {
+test("🛑 macOS gets Cmd-F and must NOT get Ctrl-F", () => {
   // Ctrl-F on macOS is a SYSTEM text binding: it moves the caret one character
   // right. Claiming it would break the composer, and `metaKey || ctrlKey` does
   // exactly that while looking tolerant.
-  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true }), true), true, 'Cmd-F');
-  assert.equal(focusSearchKeyApplies(key('f', { ctrlKey: true }), true), false, 'Ctrl-F is the caret');
+  assert.equal(
+    focusSearchKeyApplies(key("f", { metaKey: true }), true),
+    true,
+    "Cmd-F",
+  );
+  assert.equal(
+    focusSearchKeyApplies(key("f", { ctrlKey: true }), true),
+    false,
+    "Ctrl-F is the caret",
+  );
 });
 
-test('Windows and Linux get Ctrl-F and must NOT get Cmd-F', () => {
+test("Windows and Linux get Ctrl-F and must NOT get Cmd-F", () => {
   // The Super/Windows key reaches the page as `metaKey` and is the OS menu.
-  assert.equal(focusSearchKeyApplies(key('f', { ctrlKey: true }), false), true, 'Ctrl-F');
-  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true }), false), false, 'Super-F is the OS');
+  assert.equal(
+    focusSearchKeyApplies(key("f", { ctrlKey: true }), false),
+    true,
+    "Ctrl-F",
+  );
+  assert.equal(
+    focusSearchKeyApplies(key("f", { metaKey: true }), false),
+    false,
+    "Super-F is the OS",
+  );
 });
 
-test('an unmodified f is just a letter, on both platforms', () => {
-  assert.equal(focusSearchKeyApplies(key('f'), true), false);
-  assert.equal(focusSearchKeyApplies(key('f'), false), false);
+test("an unmodified f is just a letter, on both platforms", () => {
+  assert.equal(focusSearchKeyApplies(key("f"), true), false);
+  assert.equal(focusSearchKeyApplies(key("f"), false), false);
 });
 
-test('Shift and Alt are rejected rather than ignored', () => {
+test("Shift and Alt are rejected rather than ignored", () => {
   // Cmd-Shift-F is unbound today. Swallowing it now would make a later binding
   // look broken, with nothing in the handler to point at.
-  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, shiftKey: true }), true), false, 'Cmd-Shift-F');
-  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, altKey: true }), true), false, 'Cmd-Alt-F');
-  assert.equal(focusSearchKeyApplies(key('f', { ctrlKey: true, shiftKey: true }), false), false, 'Ctrl-Shift-F');
+  assert.equal(
+    focusSearchKeyApplies(key("f", { metaKey: true, shiftKey: true }), true),
+    false,
+    "Cmd-Shift-F",
+  );
+  assert.equal(
+    focusSearchKeyApplies(key("f", { metaKey: true, altKey: true }), true),
+    false,
+    "Cmd-Alt-F",
+  );
+  assert.equal(
+    focusSearchKeyApplies(key("f", { ctrlKey: true, shiftKey: true }), false),
+    false,
+    "Ctrl-Shift-F",
+  );
 });
 
-test('both modifiers at once is neither platform\'s combo', () => {
-  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, ctrlKey: true }), true), false);
-  assert.equal(focusSearchKeyApplies(key('f', { metaKey: true, ctrlKey: true }), false), false);
+test("both modifiers at once is neither platform's combo", () => {
+  assert.equal(
+    focusSearchKeyApplies(key("f", { metaKey: true, ctrlKey: true }), true),
+    false,
+  );
+  assert.equal(
+    focusSearchKeyApplies(key("f", { metaKey: true, ctrlKey: true }), false),
+    false,
+  );
 });
 
-test('a capital F still applies, because Caps Lock reports it', () => {
-  assert.equal(focusSearchKeyApplies(key('F', { metaKey: true }), true), true);
+test("a capital F still applies, because Caps Lock reports it", () => {
+  assert.equal(focusSearchKeyApplies(key("F", { metaKey: true }), true), true);
 });
 
-test('another letter never applies, however it is modified', () => {
-  assert.equal(focusSearchKeyApplies(key('g', { metaKey: true }), true), false);
-  assert.equal(focusSearchKeyApplies(key('Enter', { ctrlKey: true }), false), false);
+test("another letter never applies, however it is modified", () => {
+  assert.equal(focusSearchKeyApplies(key("g", { metaKey: true }), true), false);
+  assert.equal(
+    focusSearchKeyApplies(key("Enter", { ctrlKey: true }), false),
+    false,
+  );
 });
 
-test('a malformed event does not throw', () => {
+test("a malformed event does not throw", () => {
   // @ts-expect-error — deliberately wrong shape; `undefined` arrives from a
   // synthetic event in a test double before it does from a browser.
   assert.equal(focusSearchKeyApplies(undefined, true), false);
@@ -652,8 +975,8 @@ test('a malformed event does not throw', () => {
  * `getByRole('searchbox', { name: 'Search (Cmd-F)' })` matched nothing.
  */
 const SHORTCUT_LABELS: Array<[string, (isMac: boolean) => string]> = [
-  ['placeholder', searchPlaceholder],
-  ['aria-label', searchAriaLabel],
+  ["placeholder", searchPlaceholder],
+  ["aria-label", searchAriaLabel],
 ];
 
 /**
@@ -666,24 +989,24 @@ const SHORTCUT_LABELS: Array<[string, (isMac: boolean) => string]> = [
  */
 const SHORTCUT_LABEL_PAIRS = 4;
 
-test('🛑 the sweep covers BOTH labels by name — the denominator', () => {
+test("🛑 the sweep covers BOTH labels by name — the denominator", () => {
   // Adding a third label must fail here first, so nobody can add one that the
   // drift test below silently never reaches.
   assert.deepEqual(
     SHORTCUT_LABELS.map(([name]) => name),
-    ['placeholder', 'aria-label'],
+    ["placeholder", "aria-label"],
   );
   assert.equal(SHORTCUT_LABELS.length * 2, SHORTCUT_LABEL_PAIRS);
 });
 
-test('each platform is offered its own combo, in both labels', () => {
-  assert.equal(searchPlaceholder(true), 'Search (Cmd-F)');
-  assert.equal(searchPlaceholder(false), 'Search (Ctrl-F)');
+test("each platform is offered its own combo, in both labels", () => {
+  assert.equal(searchPlaceholder(true), "Search (Cmd-F)");
+  assert.equal(searchPlaceholder(false), "Search (Ctrl-F)");
   assert.match(searchAriaLabel(true), /\(Cmd-F\)$/);
   assert.match(searchAriaLabel(false), /\(Ctrl-F\)$/);
 });
 
-test('🛑 the accessible name KEEPS the description, it does not replace it', () => {
+test("🛑 the accessible name KEEPS the description, it does not replace it", () => {
   // Trimmed to "Search (Cmd-F)" the name would lose the highlighting half of
   // what the box does, and the name is all a screen reader gets.
   assert.match(searchAriaLabel(true), /filter and highlight/i);
@@ -698,7 +1021,7 @@ function advertised(label: string, text: string) {
   return { modifier: m![1], key: m![2] };
 }
 
-test('🛑 EVERY COMBO EITHER LABEL ADVERTISES IS ONE THE BINDING ACCEPTS', () => {
+test("🛑 EVERY COMBO EITHER LABEL ADVERTISES IS ONE THE BINDING ACCEPTS", () => {
   // A string test on the copy would pass while a label advertised a key that
   // does nothing. This feeds each advertised combo back to the predicate.
   let checked = 0;
@@ -706,17 +1029,29 @@ test('🛑 EVERY COMBO EITHER LABEL ADVERTISES IS ONE THE BINDING ACCEPTS', () =
   for (const [label, fn] of SHORTCUT_LABELS) {
     for (const isMac of [true, false]) {
       const { modifier, key } = advertised(label, fn(isMac));
-      const e = { key, metaKey: modifier === 'Cmd', ctrlKey: modifier === 'Ctrl' };
+      const e = {
+        key,
+        metaKey: modifier === "Cmd",
+        ctrlKey: modifier === "Ctrl",
+      };
 
-      assert.equal(focusSearchKeyApplies(e, isMac), true, `${label}: ${modifier}-${key} on isMac=${isMac}`);
+      assert.equal(
+        focusSearchKeyApplies(e, isMac),
+        true,
+        `${label}: ${modifier}-${key} on isMac=${isMac}`,
+      );
       checked += 1;
     }
   }
 
-  assert.equal(checked, SHORTCUT_LABEL_PAIRS, `only ${checked} of ${SHORTCUT_LABEL_PAIRS} combos were checked`);
+  assert.equal(
+    checked,
+    SHORTCUT_LABEL_PAIRS,
+    `only ${checked} of ${SHORTCUT_LABEL_PAIRS} combos were checked`,
+  );
 });
 
-test('🛑 NO LABEL ADVERTISES THE OTHER PLATFORM\'S COMBO', () => {
+test("🛑 NO LABEL ADVERTISES THE OTHER PLATFORM'S COMBO", () => {
   // The negative half. Without it the test above passes for a predicate that
   // accepts everything, which is the exact `metaKey || ctrlKey` bug.
   let checked = 0;
@@ -725,7 +1060,11 @@ test('🛑 NO LABEL ADVERTISES THE OTHER PLATFORM\'S COMBO', () => {
     const mac = advertised(label, fn(true));
     const other = advertised(label, fn(false));
 
-    assert.notEqual(mac.modifier, other.modifier, `${label}: both platforms name the same modifier`);
+    assert.notEqual(
+      mac.modifier,
+      other.modifier,
+      `${label}: both platforms name the same modifier`,
+    );
     assert.equal(
       focusSearchKeyApplies({ key: other.key, ctrlKey: true }, true),
       false,
@@ -739,89 +1078,125 @@ test('🛑 NO LABEL ADVERTISES THE OTHER PLATFORM\'S COMBO', () => {
     checked += 2;
   }
 
-  assert.equal(checked, SHORTCUT_LABEL_PAIRS, `only ${checked} of ${SHORTCUT_LABEL_PAIRS} combos were checked`);
+  assert.equal(
+    checked,
+    SHORTCUT_LABEL_PAIRS,
+    `only ${checked} of ${SHORTCUT_LABEL_PAIRS} combos were checked`,
+  );
 });
 
 // ── the per-message copy button ─────────────────────────────────────────
 
-const MSG = { from: 'claude1', time: '22:42', body: 'Fixed the **gate**. See `logic.js`.' };
+const MSG = {
+  from: "claude1",
+  time: "22:42",
+  body: "Fixed the **gate**. See `logic.js`.",
+};
 
-test('🛑 a plain copy is the sender\'s own markdown, byte for byte', () => {
-  assert.equal(messageMarkdown(MSG), 'Fixed the **gate**. See `logic.js`.');
+test("🛑 a plain copy is the sender's own markdown, byte for byte", () => {
+  assert.equal(messageMarkdown(MSG), "Fixed the **gate**. See `logic.js`.");
 });
 
-test('🛑 a plain copy does NOT trim, because it is the source', () => {
-  assert.equal(messageMarkdown({ ...MSG, body: '  x  \n' }), '  x  \n');
+test("🛑 a plain copy does NOT trim, because it is the source", () => {
+  assert.equal(messageMarkdown({ ...MSG, body: "  x  \n" }), "  x  \n");
 });
 
-test('Shift adds the author and the time as a markdown line', () => {
+test("Shift adds the author and the time as a markdown line", () => {
   assert.equal(
     messageMarkdown(MSG, { attributed: true }),
-    '**claude1** · 22:42\n\nFixed the **gate**. See `logic.js`.',
+    "**claude1** · 22:42\n\nFixed the **gate**. See `logic.js`.",
   );
 });
 
-test('the attributed form keeps a blank line, so the body is its own block', () => {
+test("the attributed form keeps a blank line, so the body is its own block", () => {
   const out = messageMarkdown(MSG, { attributed: true });
-  assert.ok(out.includes('\n\n'), 'without it the body folds into the heading line');
-});
-
-test('a multi-line body survives, with only its trailing blank lines dropped', () => {
-  assert.equal(
-    messageMarkdown({ ...MSG, body: 'one\ntwo\n\n' }, { attributed: true }),
-    '**claude1** · 22:42\n\none\ntwo',
+  assert.ok(
+    out.includes("\n\n"),
+    "without it the body folds into the heading line",
   );
 });
 
-test('an empty body still produces a usable attributed block', () => {
-  assert.equal(messageMarkdown({ ...MSG, body: '' }, { attributed: true }), '**claude1** · 22:42\n\n');
-  assert.equal(messageMarkdown({ ...MSG, body: '' }), '');
+test("a multi-line body survives, with only its trailing blank lines dropped", () => {
+  assert.equal(
+    messageMarkdown({ ...MSG, body: "one\ntwo\n\n" }, { attributed: true }),
+    "**claude1** · 22:42\n\none\ntwo",
+  );
 });
 
-test('🛑 a body containing markdown is NOT re-escaped', () => {
+test("an empty body still produces a usable attributed block", () => {
+  assert.equal(
+    messageMarkdown({ ...MSG, body: "" }, { attributed: true }),
+    "**claude1** · 22:42\n\n",
+  );
+  assert.equal(messageMarkdown({ ...MSG, body: "" }), "");
+});
+
+test("🛑 a body containing markdown is NOT re-escaped", () => {
   // The body IS markdown. Escaping it would break the thing being copied.
-  const body = '```js\nconst a = 1;\n```';
+  const body = "```js\nconst a = 1;\n```";
   assert.equal(messageMarkdown({ ...MSG, body }), body);
-  assert.ok(messageMarkdown({ ...MSG, body }, { attributed: true }).endsWith(body));
+  assert.ok(
+    messageMarkdown({ ...MSG, body }, { attributed: true }).endsWith(body),
+  );
 });
 
-test('a handle with markdown characters is not mangled in the heading', () => {
-  const out = messageMarkdown({ ...MSG, from: 'claude_2' }, { attributed: true });
-  assert.ok(out.startsWith('**claude_2** · 22:42'), 'the handle goes in verbatim');
+test("a handle with markdown characters is not mangled in the heading", () => {
+  const out = messageMarkdown(
+    { ...MSG, from: "claude_2" },
+    { attributed: true },
+  );
+  assert.ok(
+    out.startsWith("**claude_2** · 22:42"),
+    "the handle goes in verbatim",
+  );
 });
 
 // ── /cheat-sheet ────────────────────────────────────────────────────────
 
 const LABELS = {
-  conversation: 'CONVERSATION',
-  messaging: 'MESSAGING',
-  status: 'STATUS',
-  admin: 'ADMIN — destructive',
-  system: 'SYSTEM',
+  conversation: "CONVERSATION",
+  messaging: "MESSAGING",
+  status: "STATUS",
+  admin: "ADMIN — destructive",
+  system: "SYSTEM",
 };
 // 🛑 SEVERAL CATEGORIES CARRY TWO COMMANDS ON PURPOSE. With one each, a
 // mutant that keeps only the FIRST command per category drops nothing, and
 // the drift guard below passes while detecting nothing. Measured.
 const CMDS = [
-  { name: 'dm', arg: '<peer>', desc: 'open a DM', cat: 'conversation' },
-  { name: 'join', arg: '<#room>', desc: 'join a room', cat: 'conversation' },
-  { name: 'alert', arg: '<target> <text>', desc: 'urgent', cat: 'messaging' },
-  { name: 'dispatch', arg: '<peer> <text>', desc: 'hand over a task', cat: 'messaging' },
-  { name: 'who', arg: '', desc: 'list peers', cat: 'status' },
-  { name: 'kick', arg: '<peer>', desc: 'remove a peer', cat: 'admin' },
-  { name: 'help', arg: '', desc: 'the short list', cat: 'system' },
-  { name: 'cheat-sheet', arg: '', desc: 'this sheet', cat: 'system' },
+  { name: "dm", arg: "<peer>", desc: "open a DM", cat: "conversation" },
+  { name: "join", arg: "<#room>", desc: "join a room", cat: "conversation" },
+  { name: "alert", arg: "<target> <text>", desc: "urgent", cat: "messaging" },
+  {
+    name: "dispatch",
+    arg: "<peer> <text>",
+    desc: "hand over a task",
+    cat: "messaging",
+  },
+  { name: "who", arg: "", desc: "list peers", cat: "status" },
+  { name: "kick", arg: "<peer>", desc: "remove a peer", cat: "admin" },
+  { name: "help", arg: "", desc: "the short list", cat: "system" },
+  { name: "cheat-sheet", arg: "", desc: "this sheet", cat: "system" },
 ];
 
-test('🛑 the WIDEST command still keeps a space before its dash', () => {
+test("🛑 the WIDEST command still keeps a space before its dash", () => {
   // A hardcoded pad let `/broadcast <#room> <text>` overflow and collide.
-  const collided = commandBlock(WIDE, LABELS).split('\n').filter((l) => /\S—/.test(l));
-  assert.deepEqual(collided, [], 'a usage wider than the pad ran into its description');
+  const collided = commandBlock(WIDE, LABELS)
+    .split("\n")
+    .filter((l) => /\S—/.test(l));
+  assert.deepEqual(
+    collided,
+    [],
+    "a usage wider than the pad ran into its description",
+  );
   // The denominator: the added command really is the widest in the table.
-  assert.equal(dashColumn(WIDE.map((c) => `/${c.name} ${c.arg}`.trimEnd())), 26);
+  assert.equal(
+    dashColumn(WIDE.map((c) => `/${c.name} ${c.arg}`.trimEnd())),
+    26,
+  );
 });
 
-test('🛑 EVERY dash in the sheet sits at ONE column, commands and gestures alike', () => {
+test("🛑 EVERY dash in the sheet sits at ONE column, commands and gestures alike", () => {
   // Padding the command rows alone splits the sheet into two tables. Measured
   // at 28 and 26 on the first cut of this fix, which `includes(block)` cannot
   // see because each section is internally consistent.
@@ -829,51 +1204,90 @@ test('🛑 EVERY dash in the sheet sits at ONE column, commands and gestures ali
   // so headings are excluded by name rather than by looking for the character.
   const headings = new Set(Object.values(LABELS).map((h) => `  ${h}`));
   const lines = cheatSheet(WIDE, LABELS)
-    .split('\n')
-    .filter((l) => l.includes('—') && !headings.has(l));
-  const columns = [...new Set(lines.map((l) => l.indexOf('—')))];
-  assert.deepEqual(columns, [26 + 2], 'the sheet has more than one dash column');
+    .split("\n")
+    .filter((l) => l.includes("—") && !headings.has(l));
+  const columns = [...new Set(lines.map((l) => l.indexOf("—")))];
+  assert.deepEqual(
+    columns,
+    [26 + 2],
+    "the sheet has more than one dash column",
+  );
   // The denominators: both halves are really in that count.
-  assert.ok(lines.some((l) => l.includes('/broadcast')), 'no command row was measured');
-  assert.ok(lines.some((l) => l.includes('Shift-Enter')), 'no gesture row was measured');
-  assert.ok(lines.length >= WIDE.length + 10, `only ${lines.length} rows carried a dash`);
+  assert.ok(
+    lines.some((l) => l.includes("/broadcast")),
+    "no command row was measured",
+  );
+  assert.ok(
+    lines.some((l) => l.includes("Shift-Enter")),
+    "no gesture row was measured",
+  );
+  assert.ok(
+    lines.length >= WIDE.length + 10,
+    `only ${lines.length} rows carried a dash`,
+  );
 });
 
-test('the toast outdents its category headings and the sheet indents them', () => {
-  const flush = commandBlock(CMDS, LABELS, { headingIndent: '' });
-  assert.ok(flush.includes('\nCONVERSATION') || flush.startsWith('CONVERSATION'));
-  assert.ok(commandBlock(CMDS, LABELS).includes('  CONVERSATION'), 'the sheet default indents');
+test("the toast outdents its category headings and the sheet indents them", () => {
+  const flush = commandBlock(CMDS, LABELS, { headingIndent: "" });
+  assert.ok(
+    flush.includes("\nCONVERSATION") || flush.startsWith("CONVERSATION"),
+  );
+  assert.ok(
+    commandBlock(CMDS, LABELS).includes("  CONVERSATION"),
+    "the sheet default indents",
+  );
 });
 
-const WIDE = [...CMDS, { name: 'broadcast', arg: '<#room> <text>', desc: 'to a room', cat: 'messaging' }];
+const WIDE = [
+  ...CMDS,
+  {
+    name: "broadcast",
+    arg: "<#room> <text>",
+    desc: "to a room",
+    cat: "messaging",
+  },
+];
 
 /** Every non-blank line, trimmed and space-collapsed, so padding cannot matter. */
 const squash = (text: string) =>
-  text.split('\n').map((l) => l.trim().replace(/\s+/g, ' ')).filter(Boolean);
+  text
+    .split("\n")
+    .map((l) => l.trim().replace(/\s+/g, " "))
+    .filter(Boolean);
 
-test('🛑 /help and /cheat-sheet print the SAME command rows', () => {
+test("🛑 /help and /cheat-sheet print the SAME command rows", () => {
   // Two builders is how one new command gets described two different ways
   // depending on which of the two you typed. The column differs by surface on
   // purpose, so this compares the TEXT and the dash-column test owns the pad.
-  const toast = squash(commandBlock(WIDE, LABELS, { headingIndent: '' }));
+  const toast = squash(commandBlock(WIDE, LABELS, { headingIndent: "" }));
   const sheet = squash(cheatSheet(WIDE, LABELS));
   const missing = toast.filter((row) => !sheet.includes(row));
-  assert.deepEqual(missing, [], 'the sheet does not carry what the toast prints');
+  assert.deepEqual(
+    missing,
+    [],
+    "the sheet does not carry what the toast prints",
+  );
   // The denominator, so a toast that silently shrank cannot pass the above.
-  assert.equal(toast.filter((l) => l.startsWith('/')).length, WIDE.length);
+  assert.equal(toast.filter((l) => l.startsWith("/")).length, WIDE.length);
   assert.equal(WIDE.length, 9);
 });
 
-test('🛑 EVERY command in the table reaches the sheet', () => {
+test("🛑 EVERY command in the table reaches the sheet", () => {
   const sheet = cheatSheet(CMDS, LABELS);
-  const missing = CMDS.filter((c) => !sheet.includes(`/${c.name}`)).map((c) => c.name);
-  assert.deepEqual(missing, [], 'a hand-written list is what this guards against');
-  assert.equal(CMDS.length, 8, 'and the check is over all eight, not a subset');
+  const missing = CMDS.filter((c) => !sheet.includes(`/${c.name}`)).map(
+    (c) => c.name,
+  );
+  assert.deepEqual(
+    missing,
+    [],
+    "a hand-written list is what this guards against",
+  );
+  assert.equal(CMDS.length, 8, "and the check is over all eight, not a subset");
   // The denominator that makes the check meaningful: a category with two.
-  assert.equal(CMDS.filter((c) => c.cat === 'conversation').length, 2);
+  assert.equal(CMDS.filter((c) => c.cat === "conversation").length, 2);
 });
 
-test('every command carries its argument and its description', () => {
+test("every command carries its argument and its description", () => {
   const sheet = cheatSheet(CMDS, LABELS);
   for (const c of CMDS) {
     if (c.arg) assert.ok(sheet.includes(c.arg), `${c.name} lost its argument`);
@@ -881,137 +1295,187 @@ test('every command carries its argument and its description', () => {
   }
 });
 
-test('commands are grouped under their category heading', () => {
+test("commands are grouped under their category heading", () => {
   const sheet = cheatSheet(CMDS, LABELS);
-  for (const label of Object.values(LABELS)) assert.ok(sheet.includes(label), `${label} missing`);
-  assert.ok(sheet.indexOf('CONVERSATION') < sheet.indexOf('/dm'), 'the heading comes first');
+  for (const label of Object.values(LABELS))
+    assert.ok(sheet.includes(label), `${label} missing`);
+  assert.ok(
+    sheet.indexOf("CONVERSATION") < sheet.indexOf("/dm"),
+    "the heading comes first",
+  );
 });
 
-test('a category with no commands prints no empty heading', () => {
+test("a category with no commands prints no empty heading", () => {
   const sheet = cheatSheet([CMDS[0]!], LABELS);
-  assert.ok(sheet.includes('CONVERSATION'));
-  assert.ok(!sheet.includes('ADMIN'), 'an empty group would be a heading over nothing');
+  assert.ok(sheet.includes("CONVERSATION"));
+  assert.ok(
+    !sheet.includes("ADMIN"),
+    "an empty group would be a heading over nothing",
+  );
 });
 
-test('🛑 the sheet covers the gestures, which no table can generate', () => {
+test("🛑 the sheet covers the gestures, which no table can generate", () => {
   const sheet = cheatSheet(CMDS, LABELS);
-  for (const section of ['COMPOSER', 'MESSAGES', 'SIDEBAR', 'READING']) {
+  for (const section of ["COMPOSER", "MESSAGES", "SIDEBAR", "READING"]) {
     assert.ok(sheet.includes(section), `${section} section missing`);
   }
 });
 
-test('the gesture lines name the keys and the clicks they describe', () => {
+test("the gesture lines name the keys and the clicks they describe", () => {
   const sheet = cheatSheet(CMDS, LABELS);
-  for (const token of ['Shift-Enter', 'Tab or Enter', 'Esc', 'End', 'Shift-click', 'Kick', 'Delete']) {
+  for (const token of [
+    "Shift-Enter",
+    "Tab or Enter",
+    "Esc",
+    "End",
+    "Shift-click",
+    "Kick",
+    "Delete",
+  ]) {
     assert.ok(sheet.includes(token), `${token} missing`);
   }
 });
 
-test('🛑 the End line carries its caveat, or it is a half-truth', () => {
+test("🛑 the End line carries its caveat, or it is a half-truth", () => {
   // End only jumps while the composer is empty; otherwise it moves the caret.
   const sheet = cheatSheet(CMDS, LABELS);
-  const endLine = sheet.indexOf('End');
-  assert.ok(sheet.slice(endLine, endLine + 220).includes('composer is empty'));
+  const endLine = sheet.indexOf("End");
+  assert.ok(sheet.slice(endLine, endLine + 220).includes("composer is empty"));
 });
 
-test('the sheet says it is not saved, because nothing else tells you', () => {
-  assert.ok(cheatSheet(CMDS, LABELS).includes('not saved'));
+test("the sheet says it is not saved, because nothing else tells you", () => {
+  assert.ok(cheatSheet(CMDS, LABELS).includes("not saved"));
 });
 
-test('an empty command table still produces the gesture half', () => {
+test("an empty command table still produces the gesture half", () => {
   const sheet = cheatSheet([], LABELS);
-  assert.ok(sheet.includes('COMPOSER'));
-  assert.ok(!sheet.includes('CONVERSATION'), 'no headings without commands');
+  assert.ok(sheet.includes("COMPOSER"));
+  assert.ok(!sheet.includes("CONVERSATION"), "no headings without commands");
 });
 
 // ── "@" file path hints ─────────────────────────────────────────────────
 
 const HINTS = [
-  { value: '@src/', kind: 'dir' as const },
-  { value: '@setup.ts', kind: 'file' as const },
+  { value: "@src/", kind: "dir" as const },
+  { value: "@setup.ts", kind: "file" as const },
 ];
 const pathAccept = (value: string, caret: number, hints = HINTS) => {
   const s = pathSuggestionsFor(hints, value, caret);
 
-  return s && { items: s.items.map((i) => ({ insert: i.insert, caret: i.caret, reopen: i.reopen })), typed: s.typed };
+  return (
+    s && {
+      items: s.items.map((i) => ({
+        insert: i.insert,
+        caret: i.caret,
+        reopen: i.reopen,
+      })),
+      typed: s.typed,
+    }
+  );
 };
 
 test('🛑 "@" is for PATHS and "#" is for NAMES. Neither answers the other.', () => {
-  assert.equal(atTokenAt('see #src', 8), null, 'a # token is not a path token');
-  assert.notEqual(atTokenAt('see @src', 8), null);
+  assert.equal(atTokenAt("see #src", 8), null, "a # token is not a path token");
+  assert.notEqual(atTokenAt("see @src", 8), null);
 });
 
-test('🛑 an email address does not open the file list', () => {
-  assert.equal(atTokenAt('a@b.com', 7), null, 'the @ must OPEN a word');
-  assert.equal(atTokenAt('mail lee@here', 13), null);
+test("🛑 an email address does not open the file list", () => {
+  assert.equal(atTokenAt("a@b.com", 7), null, "the @ must OPEN a word");
+  assert.equal(atTokenAt("mail lee@here", 13), null);
 });
 
 test('a slash line is a command line, so "@" stays inert there', () => {
-  assert.equal(atTokenAt('/dm @src', 8), null);
+  assert.equal(atTokenAt("/dm @src", 8), null);
 });
 
-test('a path token keeps slashes, dots and a leading tilde', () => {
-  assert.deepEqual(atTokenAt('@~/dev/le', 9), { query: '~/dev/le', start: 0, end: 9 });
-  assert.deepEqual(atTokenAt('@web/assets/a.js', 16), { query: 'web/assets/a.js', start: 0, end: 16 });
+test("a path token keeps slashes, dots and a leading tilde", () => {
+  assert.deepEqual(atTokenAt("@~/dev/le", 9), {
+    query: "~/dev/le",
+    start: 0,
+    end: 9,
+  });
+  assert.deepEqual(atTokenAt("@web/assets/a.js", 16), {
+    query: "web/assets/a.js",
+    start: 0,
+    end: 16,
+  });
 });
 
-test('the token runs to the end of the word, so accepting leaves no orphan', () => {
-  assert.equal(pathAccept('see @s now', 6)!.items[0]!.insert, 'see @src/ now');
+test("the token runs to the end of the word, so accepting leaves no orphan", () => {
+  assert.equal(pathAccept("see @s now", 6)!.items[0]!.insert, "see @src/ now");
 });
 
-test('🛑 a DIRECTORY reopens the list and gets NO trailing space', () => {
+test("🛑 a DIRECTORY reopens the list and gets NO trailing space", () => {
   // Without this you cannot drill past the first level.
-  const dir = pathAccept('see @s', 6)!.items[0]!;
-  assert.equal(dir.insert, 'see @src/');
+  const dir = pathAccept("see @s", 6)!.items[0]!;
+  assert.equal(dir.insert, "see @src/");
   assert.equal(dir.reopen, true);
 });
 
-test('🛑 a FILE does not reopen, and DOES get a trailing space', () => {
-  const file = pathAccept('see @s', 6)!.items[1]!;
-  assert.equal(file.insert, 'see @setup.ts ');
-  assert.equal(file.reopen, false, 'reopening on a finished file is the /help stuck bug');
+test("🛑 a FILE does not reopen, and DOES get a trailing space", () => {
+  const file = pathAccept("see @s", 6)!.items[1]!;
+  assert.equal(file.insert, "see @setup.ts ");
+  assert.equal(
+    file.reopen,
+    false,
+    "reopening on a finished file is the /help stuck bug",
+  );
 });
 
-test('completing before an existing space does not leave two', () => {
-  const file = pathAccept('see @s now', 6)!.items[1]!;
-  assert.equal(file.insert, 'see @setup.ts now');
-  assert.ok(!file.insert.includes('  '));
+test("completing before an existing space does not leave two", () => {
+  const file = pathAccept("see @s now", 6)!.items[1]!;
+  assert.equal(file.insert, "see @setup.ts now");
+  assert.ok(!file.insert.includes("  "));
 });
 
-test('the caret lands after the inserted path', () => {
-  const dir = pathAccept('see @s now', 6)!.items[0]!;
-  assert.equal(dir.insert.slice(0, dir.caret), 'see @src/');
+test("the caret lands after the inserted path", () => {
+  const dir = pathAccept("see @s now", 6)!.items[0]!;
+  assert.equal(dir.insert.slice(0, dir.caret), "see @src/");
 });
 
-test('no hints means no popover, rather than an empty one', () => {
-  assert.equal(pathSuggestionsFor([], 'see @zzz', 8), null);
+test("no hints means no popover, rather than an empty one", () => {
+  assert.equal(pathSuggestionsFor([], "see @zzz", 8), null);
 });
 
-test('a hint already carries its own directory, so a nested accept is not doubled', () => {
-  const nested = [{ value: '@web/assets/logic.js', kind: 'file' as const }];
-  assert.equal(pathAccept('see @web/assets/lo', 18, nested)!.items[0]!.insert, 'see @web/assets/logic.js ');
+test("a hint already carries its own directory, so a nested accept is not doubled", () => {
+  const nested = [{ value: "@web/assets/logic.js", kind: "file" as const }];
+  assert.equal(
+    pathAccept("see @web/assets/lo", 18, nested)!.items[0]!.insert,
+    "see @web/assets/logic.js ",
+  );
 });
 
-test('🛑 Enter SENDS once the line already equals the top hint, so it never sticks', () => {
+test("🛑 Enter SENDS once the line already equals the top hint, so it never sticks", () => {
   // A path keeps the WHOLE-VALUE rule, unlike a mention. The insert carries
   // no trailing space for a directory, so it can equal the value exactly.
-  const s = pathSuggestionsFor(HINTS, 'see @src/', 9)!;
-  assert.equal(s.items[0]!.insert, 'see @src/', 'accepting would change nothing');
-  assert.equal(enterShouldSend(s, 'see @src/'), true, 'so Enter must send, not re-accept');
+  const s = pathSuggestionsFor(HINTS, "see @src/", 9)!;
+  assert.equal(
+    s.items[0]!.insert,
+    "see @src/",
+    "accepting would change nothing",
+  );
+  assert.equal(
+    enterShouldSend(s, "see @src/"),
+    true,
+    "so Enter must send, not re-accept",
+  );
 });
 
-test('Enter ACCEPTS while the path is still half-typed', () => {
-  assert.equal(enterShouldSend(pathSuggestionsFor(HINTS, 'see @s', 6)!, 'see @s'), false);
+test("Enter ACCEPTS while the path is still half-typed", () => {
+  assert.equal(
+    enterShouldSend(pathSuggestionsFor(HINTS, "see @s", 6)!, "see @s"),
+    false,
+  );
 });
 
-test('Tab is what drills into a directory, and it reopens to show the next level', () => {
-  const dir = pathSuggestionsFor(HINTS, 'see @src/', 9)!.items[0]!;
-  assert.equal(dir.reopen, true, 'Enter sends, Tab keeps going');
+test("Tab is what drills into a directory, and it reopens to show the next level", () => {
+  const dir = pathSuggestionsFor(HINTS, "see @src/", 9)!.items[0]!;
+  assert.equal(dir.reopen, true, "Enter sends, Tab keeps going");
 });
 
 // ── a dropped file's path ───────────────────────────────────────────────
 
-const ROOTS = { cwd: '/Users/lee/dev/proj', home: '/Users/lee' };
+const ROOTS = { cwd: "/Users/lee/dev/proj", home: "/Users/lee" };
 
 /**
  * 🛑 THE FILE LIST CANNOT ANSWER THIS, which is the whole reason this
@@ -1019,16 +1483,20 @@ const ROOTS = { cwd: '/Users/lee/dev/proj', home: '/Users/lee' };
  * exposes `.name` and no path — a browser privacy boundary. The path is in
  * `text/uri-list` or it is nowhere.
  */
-test('a file: URL yields its decoded path', () => {
-  assert.deepEqual(pathsFromUriList('file:///Users/lee/a.ts'), ['/Users/lee/a.ts']);
+test("a file: URL yields its decoded path", () => {
+  assert.deepEqual(pathsFromUriList("file:///Users/lee/a.ts"), [
+    "/Users/lee/a.ts",
+  ]);
 });
 
-test('a percent-escaped space is decoded, because real paths have spaces', () => {
-  assert.deepEqual(pathsFromUriList('file:///Users/lee/a%20b.ts'), ['/Users/lee/a b.ts']);
+test("a percent-escaped space is decoded, because real paths have spaces", () => {
+  assert.deepEqual(pathsFromUriList("file:///Users/lee/a%20b.ts"), [
+    "/Users/lee/a b.ts",
+  ]);
 });
 
-test('several lines give several paths, in order', () => {
-  assert.deepEqual(pathsFromUriList('file:///a\r\nfile:///b'), ['/a', '/b']);
+test("several lines give several paths, in order", () => {
+  assert.deepEqual(pathsFromUriList("file:///a\r\nfile:///b"), ["/a", "/b"]);
 });
 
 /**
@@ -1037,41 +1505,46 @@ test('several lines give several paths, in order', () => {
  * comment filter is unreachable — one was written, no mutant could kill it,
  * and it was deleted.
  */
-test('a comment line and a blank line are skipped', () => {
-  assert.deepEqual(pathsFromUriList('# a comment\n\nfile:///a'), ['/a']);
-  assert.deepEqual(pathsFromUriList('#file:///looks-like-one\nfile:///a'), ['/a']);
+test("a comment line and a blank line are skipped", () => {
+  assert.deepEqual(pathsFromUriList("# a comment\n\nfile:///a"), ["/a"]);
+  assert.deepEqual(pathsFromUriList("#file:///looks-like-one\nfile:///a"), [
+    "/a",
+  ]);
 });
 
-test('🛑 a drag from a BROWSER carries no path and yields nothing', () => {
-  assert.deepEqual(pathsFromUriList('https://example.com/x.ts'), []);
-  assert.deepEqual(pathsFromUriList(''), []);
+test("🛑 a drag from a BROWSER carries no path and yields nothing", () => {
+  assert.deepEqual(pathsFromUriList("https://example.com/x.ts"), []);
+  assert.deepEqual(pathsFromUriList(""), []);
 });
 
 test('"file://localhost/a" is this machine and means "/a"', () => {
-  assert.deepEqual(pathsFromUriList('file://localhost/a'), ['/a']);
+  assert.deepEqual(pathsFromUriList("file://localhost/a"), ["/a"]);
 });
 
 /** 🛑 A REMOTE host is NOT a local path, and inserting it as one would lie. */
-test('file://server/share is refused rather than turned into a local path', () => {
-  assert.deepEqual(pathsFromUriList('file://server/share'), []);
+test("file://server/share is refused rather than turned into a local path", () => {
+  assert.deepEqual(pathsFromUriList("file://server/share"), []);
 });
 
-test('a malformed percent-escape is dropped, not inserted mangled', () => {
-  assert.deepEqual(pathsFromUriList('file:///a%ZZ'), []);
+test("a malformed percent-escape is dropped, not inserted mangled", () => {
+  assert.deepEqual(pathsFromUriList("file:///a%ZZ"), []);
 });
 
 // ── what it becomes in the composer ─────────────────────────────────────
 
-test('a file in the project folder becomes a relative path', () => {
-  assert.equal(droppedPathValue('/Users/lee/dev/proj/src/x.ts', ROOTS), 'src/x.ts');
+test("a file in the project folder becomes a relative path", () => {
+  assert.equal(
+    droppedPathValue("/Users/lee/dev/proj/src/x.ts", ROOTS),
+    "src/x.ts",
+  );
 });
 
 test('a file under home but outside the project gets "~/"', () => {
-  assert.equal(droppedPathValue('/Users/lee/notes.md', ROOTS), '~/notes.md');
+  assert.equal(droppedPathValue("/Users/lee/notes.md", ROOTS), "~/notes.md");
 });
 
-test('a file under neither root keeps its absolute path', () => {
-  assert.equal(droppedPathValue('/etc/hosts', ROOTS), '/etc/hosts');
+test("a file under neither root keeps its absolute path", () => {
+  assert.equal(droppedPathValue("/etc/hosts", ROOTS), "/etc/hosts");
 });
 
 /**
@@ -1081,34 +1554,49 @@ test('a file under neither root keeps its absolute path', () => {
  * project file into "~/dev/proj/..." and the drop disagrees with what the
  * "@" hints insert for the very same file.
  */
-test('🛑 the project folder wins over home, because it is INSIDE home', () => {
-  assert.equal(droppedPathValue('/Users/lee/dev/proj/a.ts', ROOTS), 'a.ts');
-  assert.notEqual(droppedPathValue('/Users/lee/dev/proj/a.ts', ROOTS), '~/dev/proj/a.ts');
+test("🛑 the project folder wins over home, because it is INSIDE home", () => {
+  assert.equal(droppedPathValue("/Users/lee/dev/proj/a.ts", ROOTS), "a.ts");
+  assert.notEqual(
+    droppedPathValue("/Users/lee/dev/proj/a.ts", ROOTS),
+    "~/dev/proj/a.ts",
+  );
 });
 
 /** 🛑 A string prefix is not containment — the trailing slash is the guard. */
-test('a sibling folder sharing a prefix is NOT treated as inside', () => {
-  assert.equal(droppedPathValue('/Users/lee/dev/proj-other/z.ts', ROOTS), '~/dev/proj-other/z.ts');
+test("a sibling folder sharing a prefix is NOT treated as inside", () => {
+  assert.equal(
+    droppedPathValue("/Users/lee/dev/proj-other/z.ts", ROOTS),
+    "~/dev/proj-other/z.ts",
+  );
 });
 
 test('the roots themselves resolve to "." and "~"', () => {
-  assert.equal(droppedPathValue('/Users/lee/dev/proj', ROOTS), '.');
-  assert.equal(droppedPathValue('/Users/lee', ROOTS), '~');
+  assert.equal(droppedPathValue("/Users/lee/dev/proj", ROOTS), ".");
+  assert.equal(droppedPathValue("/Users/lee", ROOTS), "~");
 });
 
-test('a trailing slash on a root does not produce a leading slash', () => {
-  assert.equal(droppedPathValue('/Users/lee/dev/proj/x', { cwd: '/Users/lee/dev/proj/', home: '/Users/lee' }), 'x');
+test("a trailing slash on a root does not produce a leading slash", () => {
+  assert.equal(
+    droppedPathValue("/Users/lee/dev/proj/x", {
+      cwd: "/Users/lee/dev/proj/",
+      home: "/Users/lee",
+    }),
+    "x",
+  );
 });
 
 /** ⚠️ With no roots yet, an absolute path is still better than nothing. */
-test('with empty roots the absolute path is inserted unchanged', () => {
-  assert.equal(droppedPathValue('/a/b.ts', { cwd: '', home: '' }), '/a/b.ts');
+test("with empty roots the absolute path is inserted unchanged", () => {
+  assert.equal(droppedPathValue("/a/b.ts", { cwd: "", home: "" }), "/a/b.ts");
 });
 
-test('several files insert as one space-separated line', () => {
+test("several files insert as one space-separated line", () => {
   assert.equal(
-    dropInsertText(['/Users/lee/dev/proj/a.ts', '/Users/lee/n.md', '/etc/hosts'], ROOTS),
-    'a.ts ~/n.md /etc/hosts',
+    dropInsertText(
+      ["/Users/lee/dev/proj/a.ts", "/Users/lee/n.md", "/etc/hosts"],
+      ROOTS,
+    ),
+    "a.ts ~/n.md /etc/hosts",
   );
 });
 
@@ -1117,32 +1605,32 @@ test('several files insert as one space-separated line', () => {
  * `text/uri-list`, so the composer stayed empty and a warning fired. The name
  * is all the browser gives, so the name is what gets inserted.
  */
-test('🚨 a dropped name with spaces is inserted, quoted', () => {
+test("🚨 a dropped name with spaces is inserted, quoted", () => {
   assert.equal(
-    dropNameText(['Screenshot 2026-10-20 at 7.15.09 PM.png']),
+    dropNameText(["Screenshot 2026-10-20 at 7.15.09 PM.png"]),
     '"Screenshot 2026-10-20 at 7.15.09 PM.png"',
   );
 });
 
-test('a name with no space is inserted bare', () => {
-  assert.equal(dropNameText(['notes.md']), 'notes.md');
+test("a name with no space is inserted bare", () => {
+  assert.equal(dropNameText(["notes.md"]), "notes.md");
 });
 
 /**
  * ⚠️ THE QUOTING IS WHAT KEEPS TWO NAMES SEPARABLE. Unquoted, "a b.png c.png"
  * could be two files or three.
  */
-test('🚨 several names stay separable, each quoted only if it needs it', () => {
-  assert.equal(dropNameText(['a b.png', 'c.png']), '"a b.png" c.png');
+test("🚨 several names stay separable, each quoted only if it needs it", () => {
+  assert.equal(dropNameText(["a b.png", "c.png"]), '"a b.png" c.png');
 });
 
-test('no names produces an empty string rather than a stray quote', () => {
-  assert.equal(dropNameText([]), '');
+test("no names produces an empty string rather than a stray quote", () => {
+  assert.equal(dropNameText([]), "");
 });
 
 /** A tab counts as whitespace, so it must trigger the quoting too. */
-test('a name containing a tab is quoted', () => {
-  assert.equal(dropNameText(['a\tb.png']), '"a\tb.png"');
+test("a name containing a tab is quoted", () => {
+  assert.equal(dropNameText(["a\tb.png"]), '"a\tb.png"');
 });
 
 /**
@@ -1150,12 +1638,15 @@ test('a name containing a tab is quoted', () => {
  * macOS, verified. Quoting without escaping closes the token early and the
  * pair becomes unreadable. Raised by claude1 reviewing 3c044cf.
  */
-test('🚨 an embedded quote is escaped, so the pair stays readable', () => {
-  assert.equal(dropNameText(['two "q" .png', 'plain.png']), '"two \\"q\\" .png" plain.png');
+test("🚨 an embedded quote is escaped, so the pair stays readable", () => {
+  assert.equal(
+    dropNameText(['two "q" .png', "plain.png"]),
+    '"two \\"q\\" .png" plain.png',
+  );
 });
 
 /** A quote with no space still needs the quoting, or the escape has no fence. */
-test('🚨 a name with a quote but no space is quoted too', () => {
+test("🚨 a name with a quote but no space is quoted too", () => {
   assert.equal(dropNameText(['a"b.png']), '"a\\"b.png"');
 });
 
@@ -1165,10 +1656,10 @@ test('🚨 a name with a quote but no space is quoted too', () => {
  * closed on it, which made "keep typing to narrow" unfollowable on exactly
  * the files the 30-item cap hides.
  */
-test('🚨 a space inside a PATH keeps the token alive', () => {
-  const v = '@~/Desktop/Screenshot 2026-11-01';
+test("🚨 a space inside a PATH keeps the token alive", () => {
+  const v = "@~/Desktop/Screenshot 2026-11-01";
   assert.deepEqual(atTokenAt(v, v.length), {
-    query: '~/Desktop/Screenshot 2026-11-01',
+    query: "~/Desktop/Screenshot 2026-11-01",
     start: 0,
     end: v.length,
   });
@@ -1178,13 +1669,13 @@ test('🚨 a space inside a PATH keeps the token alive', () => {
  * 🛑 THE NEGATIVE CONTROL, AND IT IS THE WHOLE SAFETY ARGUMENT. Without the
  * "/" precondition this becomes one token and every mention breaks.
  */
-test('🚨 a space after a HANDLE still ends the token', () => {
-  assert.equal(atTokenAt('@claude1 are you there', 22), null);
-  assert.equal(atTokenAt('@claude1 are', 12), null);
+test("🚨 a space after a HANDLE still ends the token", () => {
+  assert.equal(atTokenAt("@claude1 are you there", 22), null);
+  assert.equal(atTokenAt("@claude1 are", 12), null);
 });
 
-test('🚨 a bare word with no slash does not swallow the next word', () => {
-  assert.equal(atTokenAt('@src more words', 15), null);
+test("🚨 a bare word with no slash does not swallow the next word", () => {
+  assert.equal(atTokenAt("@src more words", 15), null);
 });
 
 /**
@@ -1193,9 +1684,9 @@ test('🚨 a bare word with no slash does not swallow the next word', () => {
  * swallowed the sentence behind it. Found by claude1, and the previous guard
  * could not see it — `@claude1 are you there` has no slash anywhere.
  */
-test('🚨 a mention followed by a path does NOT become one token', () => {
-  assert.equal(atTokenAt('@claude1 look in src/foo', 24), null);
-  assert.equal(atTokenAt('@claude1 see web/assets/app.js please', 37), null);
+test("🚨 a mention followed by a path does NOT become one token", () => {
+  assert.equal(atTokenAt("@claude1 look in src/foo", 24), null);
+  assert.equal(atTokenAt("@claude1 see web/assets/app.js please", 37), null);
 });
 
 /**
@@ -1204,30 +1695,37 @@ test('🚨 a mention followed by a path does NOT become one token', () => {
  * ending a path" while it is still being typed. The damage stops at the hint
  * lookup: no entry starts with a space, so nothing is offered and Tab is inert.
  */
-test('🚨 a path then prose yields NO suggestions, so Tab cannot rewrite the line', () => {
-  const v = '@src/ more words';
-  assert.notEqual(atTokenAt(v, v.length), null, 'the token does extend — this is the residual');
-  assert.equal(pathSuggestionsFor([], v, v.length), null, 'and it offers nothing');
+test("🚨 a path then prose yields NO suggestions, so Tab cannot rewrite the line", () => {
+  const v = "@src/ more words";
+  assert.notEqual(
+    atTokenAt(v, v.length),
+    null,
+    "the token does extend — this is the residual",
+  );
+  assert.equal(
+    pathSuggestionsFor([], v, v.length),
+    null,
+    "and it offers nothing",
+  );
 });
 
-test('several spaces inside one path are all kept', () => {
-  const v = '@~/a b/c d e.png';
-  assert.equal(atTokenAt(v, v.length)!.query, '~/a b/c d e.png');
+test("several spaces inside one path are all kept", () => {
+  const v = "@~/a b/c d e.png";
+  assert.equal(atTokenAt(v, v.length)!.query, "~/a b/c d e.png");
 });
 
 /** The caret is the end, so text after it is left alone. */
-test('🚨 the token ends at the CARET, so a trailing word survives an accept', () => {
-  const v = '@~/Desktop/Screen shot.png and more';
+test("🚨 the token ends at the CARET, so a trailing word survives an accept", () => {
+  const v = "@~/Desktop/Screen shot.png and more";
   const t = atTokenAt(v, 26)!;
-  assert.equal(t.query, '~/Desktop/Screen shot.png');
-  assert.equal(t.end, 26, 'the tail is not swallowed');
+  assert.equal(t.query, "~/Desktop/Screen shot.png");
+  assert.equal(t.end, 26, "the tail is not swallowed");
 });
 
 /** A path typed before a newline must not reach across it. */
-test('a newline is not a path space', () => {
-  assert.equal(atTokenAt('@~/a\nb', 6), null);
+test("a newline is not a path space", () => {
+  assert.equal(atTokenAt("@~/a\nb", 6), null);
 });
-
 
 // ── /clear — chat-mcp#88 ──────────────────────────────────────────────────
 
@@ -1237,40 +1735,43 @@ test('a newline is not a path space', () => {
  * neither can tell an empty room from a missing one. A client that branches on
  * falsiness reports a failure that did not happen.
  */
-test('🚨 a cleared count of 0 reads as success, not as a failure', () => {
-  const room = clearResultText(0, '#gate');
+test("🚨 a cleared count of 0 reads as success, not as a failure", () => {
+  const room = clearResultText(0, "#gate");
   assert.match(room, /already empty/);
   assert.doesNotMatch(room, /fail|error|could not/i);
 
-  const dm = clearResultText(0, 'claude2');
+  const dm = clearResultText(0, "claude2");
   assert.match(dm, /already empty/);
   assert.doesNotMatch(dm, /fail|error|could not/i);
 });
 
-test('the count and its plural are both in the result text', () => {
-  assert.equal(clearResultText(1, '#gate'), 'cleared 1 message from #gate');
-  assert.equal(clearResultText(7, '#gate'), 'cleared 7 messages from #gate');
+test("the count and its plural are both in the result text", () => {
+  assert.equal(clearResultText(1, "#gate"), "cleared 1 message from #gate");
+  assert.equal(clearResultText(7, "#gate"), "cleared 7 messages from #gate");
 });
 
 /** A room is `from`, a DM is `with`. The preposition is the only tell. */
-test('a DM result names the peer, not a room', () => {
-  assert.equal(clearResultText(2, 'claude2'), 'cleared 2 messages with claude2');
+test("a DM result names the peer, not a room", () => {
+  assert.equal(
+    clearResultText(2, "claude2"),
+    "cleared 2 messages with claude2",
+  );
 });
 
 /**
  * The confirm text must state the blast radius, because the web UI reaches
  * this in one click where the CLI makes you type it.
  */
-test('the room confirm says EVERYONE and that the room survives', () => {
-  const t = clearConfirmText('#gate');
+test("the room confirm says EVERYONE and that the room survives", () => {
+  const t = clearConfirmText("#gate");
   assert.match(t, /^Clear #gate\?/);
   assert.match(t, /EVERYONE/);
   assert.match(t, /room and its memberships stay/);
   assert.match(t, /cannot be undone/);
 });
 
-test('the DM confirm says BOTH of you and never says EVERYONE', () => {
-  const t = clearConfirmText('claude2');
+test("the DM confirm says BOTH of you and never says EVERYONE", () => {
+  const t = clearConfirmText("claude2");
   assert.match(t, /^Clear your conversation with claude2\?/);
   assert.match(t, /BOTH of you/);
   assert.doesNotMatch(t, /EVERYONE/);
@@ -1281,8 +1782,11 @@ test('the DM confirm says BOTH of you and never says EVERYONE', () => {
  * Both DM directions are deleted — `deleteDmMessages` matches (a,b) OR (b,a) —
  * so claiming only the caller loses them would be false.
  */
-test('the DM confirm does not promise a one-sided delete', () => {
-  assert.doesNotMatch(clearConfirmText('claude2'), /only (for )?you|your copy/i);
+test("the DM confirm does not promise a one-sided delete", () => {
+  assert.doesNotMatch(
+    clearConfirmText("claude2"),
+    /only (for )?you|your copy/i,
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -1297,23 +1801,29 @@ test('the DM confirm does not promise a one-sided delete', () => {
  * unreadable, and destroyed by the only action that got you back in, because
  * `setRoomStyle` nulls `style_custom` for any style but `custom`.
  */
-test('a room on custom gets its own way back into the editor', () => {
-  assert.equal(styleEditAffordance('custom'), true);
+test("a room on custom gets its own way back into the editor", () => {
+  assert.equal(styleEditAffordance("custom"), true);
 });
 
-test('no other style offers an editor, including an unset one', () => {
-  assert.equal(styleEditAffordance('succinct'), false);
+test("no other style offers an editor, including an unset one", () => {
+  assert.equal(styleEditAffordance("succinct"), false);
   assert.equal(styleEditAffordance(null), false);
   assert.equal(styleEditAffordance(undefined), false);
-  assert.equal(styleEditAffordance(''), false);
+  assert.equal(styleEditAffordance(""), false);
 });
 
-test('choosing a preset saves it', () => {
-  assert.deepEqual(styleSelection('succinct', null), { action: 'save', style: 'succinct' });
+test("choosing a preset saves it", () => {
+  assert.deepEqual(styleSelection("succinct", null), {
+    action: "save",
+    style: "succinct",
+  });
 });
 
-test('choosing none clears it, which is null and not an empty string', () => {
-  assert.deepEqual(styleSelection('', 'succinct'), { action: 'save', style: null });
+test("choosing none clears it, which is null and not an empty string", () => {
+  assert.deepEqual(styleSelection("", "succinct"), {
+    action: "save",
+    style: null,
+  });
 });
 
 /**
@@ -1321,29 +1831,33 @@ test('choosing none clears it, which is null and not an empty string', () => {
  * "use the set_style tool", which is a dead end from a browser — lee hit it and
  * got a message box and nothing else.
  */
-test('choosing custom asks for the editor rather than refusing', () => {
-  const decision = styleSelection('custom', 'succinct');
+test("choosing custom asks for the editor rather than refusing", () => {
+  const decision = styleSelection("custom", "succinct");
 
-  assert.equal(decision.action, 'edit');
-  assert.equal(decision.revertTo, 'succinct', 'cancelling must be able to restore the real value');
+  assert.equal(decision.action, "edit");
+  assert.equal(
+    decision.revertTo,
+    "succinct",
+    "cancelling must be able to restore the real value",
+  );
 });
 
-test('the revert value is a selectable empty string on an unstyled room', () => {
-  assert.equal(styleSelection('custom', null).revertTo, '');
+test("the revert value is a selectable empty string on an unstyled room", () => {
+  assert.equal(styleSelection("custom", null).revertTo, "");
 });
 
-test('an empty custom style is refused before the round trip', () => {
-  assert.deepEqual(customStyleSubmission('   \n  '), {
+test("an empty custom style is refused before the round trip", () => {
+  assert.deepEqual(customStyleSubmission("   \n  "), {
     ok: false,
-    error: 'A custom style needs some markdown.',
+    error: "A custom style needs some markdown.",
   });
 });
 
-test('a valid custom style is trimmed and tagged', () => {
-  assert.deepEqual(customStyleSubmission('  # rules\n\nbe brief.  '), {
+test("a valid custom style is trimmed and tagged", () => {
+  assert.deepEqual(customStyleSubmission("  # rules\n\nbe brief.  "), {
     ok: true,
-    style: 'custom',
-    custom: '# rules\n\nbe brief.',
+    style: "custom",
+    custom: "# rules\n\nbe brief.",
   });
 });
 
@@ -1358,7 +1872,7 @@ test('a valid custom style is trimmed and tagged', () => {
  * browser asset cannot import the TS module. One copy is unavoidable; a drift
  * nobody notices is not. Raised by claude1 on PR 98.
  */
-test('the client and server byte caps are the same number', () => {
+test("the client and server byte caps are the same number", () => {
   assert.equal(STYLE_CUSTOM_MAX_BYTES, dao.STYLE_CUSTOM_MAX_BYTES);
 });
 
@@ -1367,7 +1881,7 @@ test('the client and server byte caps are the same number', () => {
  * with different functions and could differ on the comparison. So walk the
  * boundary and require the same verdict on each side.
  */
-test('both sides give the same verdict on each side of the boundary', () => {
+test("both sides give the same verdict on each side of the boundary", () => {
   const cap = dao.STYLE_CUSTOM_MAX_BYTES;
 
   for (const [bytes, shouldPass] of [
@@ -1375,13 +1889,17 @@ test('both sides give the same verdict on each side of the boundary', () => {
     [cap, true],
     [cap + 1, false],
   ] as [number, boolean][]) {
-    const text = 'a'.repeat(bytes);
+    const text = "a".repeat(bytes);
 
-    assert.equal(customStyleSubmission(text).ok, shouldPass, `client at ${bytes}`);
+    assert.equal(
+      customStyleSubmission(text).ok,
+      shouldPass,
+      `client at ${bytes}`,
+    );
 
     let serverAccepted = true;
     try {
-      dao.assertStyleCustom('custom', text);
+      dao.assertStyleCustom("custom", text);
     } catch {
       serverAccepted = false;
     }
@@ -1390,16 +1908,20 @@ test('both sides give the same verdict on each side of the boundary', () => {
   }
 });
 
-test('the cap is measured in bytes', () => {
-  const justUnder = 'a'.repeat(65536);
+test("the cap is measured in bytes", () => {
+  const justUnder = "a".repeat(65536);
   assert.equal(customStyleSubmission(justUnder).ok, true);
 
-  assert.equal(customStyleSubmission('a'.repeat(65537)).ok, false);
+  assert.equal(customStyleSubmission("a".repeat(65537)).ok, false);
 
   // 2 bytes each in UTF-8, so half the character count hits the cap.
-  const emoji = 'é'.repeat(32769);
+  const emoji = "é".repeat(32769);
   const result = customStyleSubmission(emoji);
-  assert.equal(result.ok, false, 'a character-based cap would have passed this');
+  assert.equal(
+    result.ok,
+    false,
+    "a character-based cap would have passed this",
+  );
   assert.match(result.error, /bytes/);
 });
 
@@ -1415,56 +1937,71 @@ test('the cap is measured in bytes', () => {
  * ⚠️ A SLID WINDOW AND A PAGE OF OLDER HISTORY BOTH MOVE THE PREFIX. Only ids
  * AFTER the last one we already had are arrivals, which is what separates them.
  */
-test('🛑 a slid window still names the arrival, so it can shimmer', () => {
+test("🛑 a slid window still names the arrival, so it can shimmer", () => {
   assert.deepEqual(
-    streamPlan({ target: '#ops', ids: [1, 2, 3] }, { target: '#ops', ids: [2, 3, 4] }),
-    { mode: 'full', freshIds: [4] },
+    streamPlan(
+      { target: "#ops", ids: [1, 2, 3] },
+      { target: "#ops", ids: [2, 3, 4] },
+    ),
+    { mode: "full", freshIds: [4] },
   );
 });
 
-test('a slid window with two arrivals names both', () => {
+test("a slid window with two arrivals names both", () => {
   assert.deepEqual(
-    streamPlan({ target: '#ops', ids: [1, 2, 3] }, { target: '#ops', ids: [3, 4, 5] }),
-    { mode: 'full', freshIds: [4, 5] },
+    streamPlan(
+      { target: "#ops", ids: [1, 2, 3] },
+      { target: "#ops", ids: [3, 4, 5] },
+    ),
+    { mode: "full", freshIds: [4, 5] },
   );
 });
 
-test('🛑 a page of OLDER history names no arrival, so nothing shimmers', () => {
+test("🛑 a page of OLDER history names no arrival, so nothing shimmers", () => {
   // The control that separates the two prefix-moving cases. Without it, a
   // scroll-up would shimmer messages from last week.
   assert.deepEqual(
-    streamPlan({ target: '#ops', ids: [8, 9] }, { target: '#ops', ids: [6, 7, 8, 9] }),
-    { mode: 'full' },
+    streamPlan(
+      { target: "#ops", ids: [8, 9] },
+      { target: "#ops", ids: [6, 7, 8, 9] },
+    ),
+    { mode: "full" },
   );
 });
 
-test('a target switch names no arrival, so a whole room never shimmers at once', () => {
+test("a target switch names no arrival, so a whole room never shimmers at once", () => {
   assert.deepEqual(
-    streamPlan({ target: '#ops', ids: [1, 2] }, { target: '@alice', ids: [3, 4] }),
-    { mode: 'full' },
+    streamPlan(
+      { target: "#ops", ids: [1, 2] },
+      { target: "@alice", ids: [3, 4] },
+    ),
+    { mode: "full" },
   );
 });
 
-test('a window that moved past everything we held names no arrival', () => {
+test("a window that moved past everything we held names no arrival", () => {
   // Nothing in common, so which rows are new is unknowable. Shimmering all of
   // them would be worse than shimmering none.
   assert.deepEqual(
-    streamPlan({ target: '#ops', ids: [1, 2] }, { target: '#ops', ids: [50, 51] }),
-    { mode: 'full' },
+    streamPlan(
+      { target: "#ops", ids: [1, 2] },
+      { target: "#ops", ids: [50, 51] },
+    ),
+    { mode: "full" },
   );
 });
 
 // ── the message id in the meta row (#104) ────────────────────────────────
 
-test('🛑 the id label carries the words, so a bare number is never ambiguous', () => {
+test("🛑 the id label carries the words, so a bare number is never ambiguous", () => {
   // "see 12582" is how agents point at a message. A lone number beside a
   // timestamp reads as a count or a duration.
-  assert.equal(messageIdLabel(12582), 'Message ID: 12582');
+  assert.equal(messageIdLabel(12582), "Message ID: 12582");
 });
 
-test('the id label does not group or pad the number, so it can be pasted back', () => {
-  assert.equal(messageIdLabel(1000), 'Message ID: 1000');
-  assert.equal(messageIdLabel(7), 'Message ID: 7');
+test("the id label does not group or pad the number, so it can be pasted back", () => {
+  assert.equal(messageIdLabel(1000), "Message ID: 1000");
+  assert.equal(messageIdLabel(7), "Message ID: 7");
 });
 
 // ── the search box and term highlighting (#102) ──────────────────────────
@@ -1476,73 +2013,79 @@ test('the id label does not group or pad the number, so it can be pasted back', 
  * caller turns these segments into text nodes and `<mark>` elements, which
  * cannot do either.
  */
-test('🛑 a term with no match yields ONE unhit segment, never an empty list', () => {
+test("🛑 a term with no match yields ONE unhit segment, never an empty list", () => {
   // An empty list would erase the text node it was derived from.
-  assert.deepEqual(highlightSegments('nothing here', 'absent'), [{ text: 'nothing here', hit: false }]);
-});
-
-test('an empty term yields the text untouched, so an empty box highlights nothing', () => {
-  assert.deepEqual(highlightSegments('some text', ''), [{ text: 'some text', hit: false }]);
-  assert.deepEqual(highlightSegments('some text', '   '), [{ text: 'some text', hit: false }]);
-});
-
-test('a single match splits into before, hit, after', () => {
-  assert.deepEqual(highlightSegments('the gate is held', 'gate'), [
-    { text: 'the ', hit: false },
-    { text: 'gate', hit: true },
-    { text: ' is held', hit: false },
+  assert.deepEqual(highlightSegments("nothing here", "absent"), [
+    { text: "nothing here", hit: false },
   ]);
 });
 
-test('two matches both split, and the text between them is one segment', () => {
-  assert.deepEqual(highlightSegments('gate then gate', 'gate'), [
-    { text: 'gate', hit: true },
-    { text: ' then ', hit: false },
-    { text: 'gate', hit: true },
+test("an empty term yields the text untouched, so an empty box highlights nothing", () => {
+  assert.deepEqual(highlightSegments("some text", ""), [
+    { text: "some text", hit: false },
+  ]);
+  assert.deepEqual(highlightSegments("some text", "   "), [
+    { text: "some text", hit: false },
   ]);
 });
 
-test('a match at the very start emits no empty leading segment', () => {
+test("a single match splits into before, hit, after", () => {
+  assert.deepEqual(highlightSegments("the gate is held", "gate"), [
+    { text: "the ", hit: false },
+    { text: "gate", hit: true },
+    { text: " is held", hit: false },
+  ]);
+});
+
+test("two matches both split, and the text between them is one segment", () => {
+  assert.deepEqual(highlightSegments("gate then gate", "gate"), [
+    { text: "gate", hit: true },
+    { text: " then ", hit: false },
+    { text: "gate", hit: true },
+  ]);
+});
+
+test("a match at the very start emits no empty leading segment", () => {
   // An empty text node renders nothing but still counts as a child, and a
   // `<mark>` wrapping nothing is worse.
-  assert.deepEqual(highlightSegments('gate held', 'gate'), [
-    { text: 'gate', hit: true },
-    { text: ' held', hit: false },
+  assert.deepEqual(highlightSegments("gate held", "gate"), [
+    { text: "gate", hit: true },
+    { text: " held", hit: false },
   ]);
 });
 
-test('a match at the very end emits no empty trailing segment', () => {
-  assert.deepEqual(highlightSegments('held gate', 'gate'), [
-    { text: 'held ', hit: false },
-    { text: 'gate', hit: true },
+test("a match at the very end emits no empty trailing segment", () => {
+  assert.deepEqual(highlightSegments("held gate", "gate"), [
+    { text: "held ", hit: false },
+    { text: "gate", hit: true },
   ]);
 });
 
-test('the match is case-insensitive but the ORIGINAL case is preserved', () => {
+test("the match is case-insensitive but the ORIGINAL case is preserved", () => {
   // Returning the lower-cased needle would rewrite the operator's transcript.
-  assert.deepEqual(highlightSegments('CLAIMING the Gate', 'gate'), [
-    { text: 'CLAIMING the ', hit: false },
-    { text: 'Gate', hit: true },
+  assert.deepEqual(highlightSegments("CLAIMING the Gate", "gate"), [
+    { text: "CLAIMING the ", hit: false },
+    { text: "Gate", hit: true },
   ]);
 });
 
-test('🛑 the term is LITERAL, so regex and SQL wildcards match themselves', () => {
+test("🛑 the term is LITERAL, so regex and SQL wildcards match themselves", () => {
   // The same defect `likePattern` exists to stop, on the other side.
-  assert.deepEqual(highlightSegments('at 100% now', '100%'), [
-    { text: 'at ', hit: false },
-    { text: '100%', hit: true },
-    { text: ' now', hit: false },
+  assert.deepEqual(highlightSegments("at 100% now", "100%"), [
+    { text: "at ", hit: false },
+    { text: "100%", hit: true },
+    { text: " now", hit: false },
   ]);
-  assert.deepEqual(highlightSegments('a.c and abc', 'a.c'), [
-    { text: 'a.c', hit: true },
-    { text: ' and abc', hit: false },
+  assert.deepEqual(highlightSegments("a.c and abc", "a.c"), [
+    { text: "a.c", hit: true },
+    { text: " and abc", hit: false },
   ]);
 });
 
-test('adjacent matches do not nest or overlap', () => {
-  assert.deepEqual(highlightSegments('aaaa', 'aa'), [
-    { text: 'aa', hit: true },
-    { text: 'aa', hit: true },
+test("adjacent matches do not nest or overlap", () => {
+  assert.deepEqual(highlightSegments("aaaa", "aa"), [
+    { text: "aa", hit: true },
+    { text: "aa", hit: true },
   ]);
 });
 
@@ -1551,63 +2094,69 @@ test('adjacent matches do not nest or overlap', () => {
  * have to agree about what an id is, or a link opens the wrong message.
  */
 
-test('a message hash carries the id alone, not the conversation', () => {
-  assert.equal(messageHash(12582), '#m12582');
+test("a message hash carries the id alone, not the conversation", () => {
+  assert.equal(messageHash(12582), "#m12582");
 });
 
-test('🛑 a hash round-trips through its own parser', () => {
+test("🛑 a hash round-trips through its own parser", () => {
   for (const id of [1, 42, 12582, 9007199254740991]) {
     assert.equal(messageIdFromHash(messageHash(id)), id, `id ${id}`);
   }
 });
 
-test('🛑 a loose or truncated fragment resolves to NOTHING, never to a number', () => {
+test("🛑 a loose or truncated fragment resolves to NOTHING, never to a number", () => {
   // `parseInt` would give 12 for the first and NaN for the second, so a
   // hand-edited link would open the wrong message or send NaN to the server.
-  assert.equal(messageIdFromHash('#m12x'), null);
-  assert.equal(messageIdFromHash('#m'), null);
-  assert.equal(messageIdFromHash('#m-3'), null);
-  assert.equal(messageIdFromHash('#m0'), null, 'ids start at 1');
-  assert.equal(messageIdFromHash('#m1.5'), null);
-  assert.equal(messageIdFromHash('#m 12'), null);
-  assert.equal(messageIdFromHash('#message12'), null);
-  assert.equal(messageIdFromHash('#12582'), null, 'the m prefix is required');
+  assert.equal(messageIdFromHash("#m12x"), null);
+  assert.equal(messageIdFromHash("#m"), null);
+  assert.equal(messageIdFromHash("#m-3"), null);
+  assert.equal(messageIdFromHash("#m0"), null, "ids start at 1");
+  assert.equal(messageIdFromHash("#m1.5"), null);
+  assert.equal(messageIdFromHash("#m 12"), null);
+  assert.equal(messageIdFromHash("#message12"), null);
+  assert.equal(messageIdFromHash("#12582"), null, "the m prefix is required");
 });
 
-test('an absent or empty hash is nothing, not a crash', () => {
-  assert.equal(messageIdFromHash(''), null);
-  assert.equal(messageIdFromHash('#'), null);
+test("an absent or empty hash is nothing, not a crash", () => {
+  assert.equal(messageIdFromHash(""), null);
+  assert.equal(messageIdFromHash("#"), null);
   assert.equal(messageIdFromHash(undefined), null);
   assert.equal(messageIdFromHash(null), null);
 });
 
-test('the leading # is optional, because `location.hash` includes it', () => {
-  assert.equal(messageIdFromHash('m99'), 99);
-  assert.equal(messageIdFromHash('#m99'), 99);
+test("the leading # is optional, because `location.hash` includes it", () => {
+  assert.equal(messageIdFromHash("m99"), 99);
+  assert.equal(messageIdFromHash("#m99"), 99);
 });
 
-test('⚠️ an id past MAX_SAFE_INTEGER is nothing, not a rounded id', () => {
-  assert.equal(messageIdFromHash('#m9007199254740993'), null);
+test("⚠️ an id past MAX_SAFE_INTEGER is nothing, not a rounded id", () => {
+  assert.equal(messageIdFromHash("#m9007199254740993"), null);
 });
 
 // ── the room meta line names the owner (#89) ────────────────────────────
 
-test('the room line carries the member count AND the owner', () => {
-  assert.equal(roomMetaLabel({ member_count: 4, created_by: 'claude1' }), '4 members · owned by claude1');
+test("the room line carries the member count AND the owner", () => {
+  assert.equal(
+    roomMetaLabel({ member_count: 4, created_by: "claude1" }),
+    "4 members · owned by claude1",
+  );
 });
 
-test('a room with no owner field degrades to the count alone', () => {
+test("a room with no owner field degrades to the count alone", () => {
   // The field is NOT NULL server-side, so this is the shape an older cached
   // payload has, not a state the database can produce.
-  assert.equal(roomMetaLabel({ member_count: 2 }), '2 members');
+  assert.equal(roomMetaLabel({ member_count: 2 }), "2 members");
 });
 
-test('an unknown member count keeps the question mark rather than printing undefined', () => {
-  assert.equal(roomMetaLabel({ created_by: 'lee' }), '? members · owned by lee');
+test("an unknown member count keeps the question mark rather than printing undefined", () => {
+  assert.equal(
+    roomMetaLabel({ created_by: "lee" }),
+    "? members · owned by lee",
+  );
 });
 
-test('no room at all is an empty line, never the word undefined', () => {
+test("no room at all is an empty line, never the word undefined", () => {
   // renderPaneHeader passes the result of `.find()`, which misses.
-  assert.equal(roomMetaLabel(undefined), '');
-  assert.equal(roomMetaLabel(null), '');
+  assert.equal(roomMetaLabel(undefined), "");
+  assert.equal(roomMetaLabel(null), "");
 });

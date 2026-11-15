@@ -25,8 +25,8 @@ and only if you have measured it rather than inferred it.
 
 ## Source files
 
-| File | Role |
-|---|---|
+| File                  | Role         |
+| --------------------- | ------------ |
 | `src/path/to/file.ts` | What it does |
 
 ## Related docs

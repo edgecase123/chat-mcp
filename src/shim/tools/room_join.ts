@@ -1,19 +1,21 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import * as dao from '../../storage/dao.js';
-import { notifyPeer } from '../../notify/bus.js';
-import { assertRoomName } from '../../util/naming.js';
-import type { ShimContext } from '../index.js';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import * as dao from "../../storage/dao.js";
+import { notifyPeer } from "../../notify/bus.js";
+import { assertRoomName } from "../../util/naming.js";
+import type { ShimContext } from "../index.js";
 
 export function installRoomJoin(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
-    'room_join',
+    "room_join",
     {
-      title: 'Join a room',
+      title: "Join a room",
       description:
         'Join a named room (auto-created on first join). Room names must start with # (e.g. "#gate"). Idempotent — safe to call if already a member. Only current members see messages sent to a room. Your UNREAD starts at the join, so `room_inbox` never shows anything older — but `search` still reads the full room history. On a first-time join (not on idempotent re-join), a system message ("<handle> joined <room>", from="system") is posted to the room so existing members see the announcement.',
       inputSchema: {
-        room: z.string().describe('Room name including leading # (e.g. "#gate")'),
+        room: z
+          .string()
+          .describe('Room name including leading # (e.g. "#gate")'),
       },
     },
     async ({ room }) => {
@@ -36,7 +38,7 @@ export function installRoomJoin(server: McpServer, ctx: ShimContext): void {
       }
 
       return {
-        content: [{ type: 'text', text: JSON.stringify(result.room) }],
+        content: [{ type: "text", text: JSON.stringify(result.room) }],
       };
     },
   );

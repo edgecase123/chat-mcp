@@ -20,7 +20,7 @@
  * 307 days with one left fresh reported itself 1 day old and passed.
  */
 
-import type { Captured } from './would-refuse.js';
+import type { Captured } from "./would-refuse.js";
 
 export interface CorpusAge {
   /** Records carrying a usable stamp. */
@@ -57,7 +57,10 @@ const MS_PER_DAY = 86_400_000;
  * that cannot name how many records it covered is the failure claude1 found on
  * PR 43 — a probe over 3 of 7 records that read as certifying the model.
  */
-export function corpusAge(records: readonly Captured[], now: number): CorpusAge {
+export function corpusAge(
+  records: readonly Captured[],
+  now: number,
+): CorpusAge {
   let unstamped = 0;
   let unparseable = 0;
   let future = 0;
@@ -65,7 +68,7 @@ export function corpusAge(records: readonly Captured[], now: number): CorpusAge 
   let oldest: number | null = null;
 
   for (const r of records) {
-    if (typeof r.capturedAt !== 'string' || r.capturedAt === '') {
+    if (typeof r.capturedAt !== "string" || r.capturedAt === "") {
       unstamped += 1;
       continue;
     }
@@ -94,8 +97,10 @@ export function corpusAge(records: readonly Captured[], now: number): CorpusAge 
     total: records.length,
     newest,
     oldest,
-    oldestAgeDays: oldest === null ? null : Math.floor((now - oldest) / MS_PER_DAY),
-    newestAgeDays: newest === null ? null : Math.floor((now - newest) / MS_PER_DAY),
+    oldestAgeDays:
+      oldest === null ? null : Math.floor((now - oldest) / MS_PER_DAY),
+    newestAgeDays:
+      newest === null ? null : Math.floor((now - newest) / MS_PER_DAY),
   };
 }
 
@@ -109,10 +114,12 @@ export function corpusAge(records: readonly Captured[], now: number): CorpusAge 
  * ⚠️ THE OVERRIDE EXISTS SO A RED CORPUS CANNOT BLOCK AN UNRELATED FIX. It is
  * an escape hatch for one run, not a way to retire the signal.
  */
-export function maxAgeDays(env: Record<string, string | undefined> = process.env): number {
+export function maxAgeDays(
+  env: Record<string, string | undefined> = process.env,
+): number {
   const raw = env.CHAT_MCP_CORPUS_MAX_AGE_DAYS;
 
-  if (raw === undefined || raw === '') return 30;
+  if (raw === undefined || raw === "") return 30;
 
   const n = Number(raw);
 
@@ -121,6 +128,6 @@ export function maxAgeDays(env: Record<string, string | undefined> = process.env
 
 /** The command that fixes a stale corpus, quoted in failure messages. */
 export const RECAPTURE = [
-  'CHAT_MCP_LIVE=1 node --import tsx scripts/capture-refusals.mjs',
-  'node --import tsx scripts/rebuild-corpus.mjs',
-].join(' && ');
+  "CHAT_MCP_LIVE=1 node --import tsx scripts/capture-refusals.mjs",
+  "node --import tsx scripts/rebuild-corpus.mjs",
+].join(" && ");

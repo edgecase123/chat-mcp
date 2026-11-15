@@ -1,25 +1,32 @@
-import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import type { AgentChild, BusEndpoint, SpawnOptions } from '../child.js';
-import type { VendorSpawn } from '../vendor.js';
-import { wireAgentChild } from './wiring.js';
-import { mountsFor, containerPathFor } from '../mounts.js';
-import { GH_TOKEN_KEY, readGhToken, readToken } from '../auth.js';
-import { assertProjectDirOutsideState, checkedMountPath } from '../containment.js';
-import { assertHandle } from '../../util/naming.js';
-import { createHash } from 'node:crypto';
-import { realpathSync } from 'node:fs';
+import {
+  execFileSync,
+  spawn,
+  type ChildProcessWithoutNullStreams,
+} from "node:child_process";
+import type { AgentChild, BusEndpoint, SpawnOptions } from "../child.js";
+import type { VendorSpawn } from "../vendor.js";
+import { wireAgentChild } from "./wiring.js";
+import { mountsFor, containerPathFor } from "../mounts.js";
+import { GH_TOKEN_KEY, readGhToken, readToken } from "../auth.js";
+import {
+  assertProjectDirOutsideState,
+  checkedMountPath,
+} from "../containment.js";
+import { assertHandle } from "../../util/naming.js";
+import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 
-export const CONTAINER_PROJECT_DIR = '/work';
+export const CONTAINER_PROJECT_DIR = "/work";
 
 /**
  * The project-relative directory the container owns rather than reads from the
  * bind. One spelling, because the volume destination, the install guard, the
  * collision refusal and the Dockerfile's pre-created mount point must agree.
  */
-export const CONTAINER_NODE_MODULES_DIR = 'node_modules';
+export const CONTAINER_NODE_MODULES_DIR = "node_modules";
 
 /** Carries the whole MCP config, token included, so none of it is in argv. */
-export const CONTAINER_MCP_CONFIG_ENV = 'CHAT_MCP_MCP_CONFIG';
+export const CONTAINER_MCP_CONFIG_ENV = "CHAT_MCP_MCP_CONFIG";
 
 /**
  * What `gh` reads to authenticate, so an agent can file a ticket or open a PR
@@ -43,7 +50,7 @@ export const CONTAINER_GH_TOKEN_ENV = GH_TOKEN_KEY;
  * `url` describes a bus the agent cannot reach. It would look configured and
  * connect to nothing.
  */
-const HOST_FROM_CONTAINER = 'host.docker.internal';
+const HOST_FROM_CONTAINER = "host.docker.internal";
 
 /**
  * Seconds between `docker stop`'s SIGTERM and SIGKILL. Not a measured figure
@@ -88,7 +95,7 @@ export function buildContainerMcpConfig(bus: BusEndpoint): string {
   const config = {
     mcpServers: {
       chat: {
-        type: 'http',
+        type: "http",
         url: containerBusUrl(bus.url),
         headers: { Authorization: `Bearer ${bus.token}` },
       },
@@ -125,7 +132,9 @@ function mcpConfigStep(vendor: VendorSpawn): string {
  * dependency's lifecycle script with no test failing. Pinned by "the install
  * scrubs EVERY credential the plan names".
  */
-export function containerCredentialEnvVars(vendor: VendorSpawn): readonly string[] {
+export function containerCredentialEnvVars(
+  vendor: VendorSpawn,
+): readonly string[] {
   return [vendor.authEnvVar, CONTAINER_GH_TOKEN_ENV, CONTAINER_MCP_CONFIG_ENV];
 }
 
@@ -142,7 +151,7 @@ export function containerCredentialEnvVars(vendor: VendorSpawn): readonly string
  * of this sentence passes while the prelude says something else entirely.
  */
 export const NO_LOCK_HASH_WARNING =
-  'chat-mcp: shasum produced no hash, so every warm spawn reinstalls all dependencies';
+  "chat-mcp: shasum produced no hash, so every warm spawn reinstalls all dependencies";
 
 /**
  * 🛑 THE VOLUME COMES UP EMPTY, so without this the overlay only trades a
@@ -218,7 +227,7 @@ export function nodeModulesInstallStep(
   const stamp = `${containerWorkDir}/${CONTAINER_NODE_MODULES_DIR}/.lock-sha`;
   const scrubbed = containerCredentialEnvVars(vendor)
     .map((name) => `-u '${name}'`)
-    .join(' ');
+    .join(" ");
 
   return (
     `if [ ! -f '${lock}' ]; then :; else ` +
@@ -248,7 +257,7 @@ export function nodeModulesInstallStep(
  * supervisor drives the agent over.
  */
 export function prelude(steps: string[]): string {
-  return [...steps.map((step) => `( ${step} )`), 'exec "$@"'].join(' && ');
+  return [...steps.map((step) => `( ${step} )`), 'exec "$@"'].join(" && ");
 }
 
 /**
@@ -283,10 +292,16 @@ export function containerNameFor(supervisorHandle: string): string {
  * an allowed one — so the space is wider than one per checkout. Filed as a
  * question rather than guessed at a policy.
  */
-export function nodeModulesVolumeFor(supervisorHandle: string, projectDir: string): string {
+export function nodeModulesVolumeFor(
+  supervisorHandle: string,
+  projectDir: string,
+): string {
   // 12 hex chars of sha256. Long enough that a collision is not a practical
   // concern, short enough that `docker volume ls` stays readable.
-  const digest = createHash('sha256').update(realpathSync(projectDir)).digest('hex').slice(0, 12);
+  const digest = createHash("sha256")
+    .update(realpathSync(projectDir))
+    .digest("hex")
+    .slice(0, 12);
 
   return `chat-mcp-node-modules-${supervisorHandle}-${digest}`;
 }
@@ -294,7 +309,9 @@ export function nodeModulesVolumeFor(supervisorHandle: string, projectDir: strin
 /** The one place that validates the field both `dockerRunPlan` and `spawnContainerized` need. */
 function requireSupervisorHandle(opts: SpawnOptions): string {
   if (!opts.supervisorHandle) {
-    throw new Error('a containerized spawn needs opts.supervisorHandle to find its mounts');
+    throw new Error(
+      "a containerized spawn needs opts.supervisorHandle to find its mounts",
+    );
   }
 
   // 🛑 SHAPE, NOT JUST PRESENCE. The handle reaches the argv inside a `-v`
@@ -321,22 +338,25 @@ export interface DockerRunPlan {
   readonly env: NodeJS.ProcessEnv;
 }
 
-export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRunPlan {
+export function dockerRunPlan(
+  vendor: VendorSpawn,
+  opts: SpawnOptions,
+): DockerRunPlan {
   const token = readToken();
   // Optional, unlike the Claude token. Most handles need no GitHub access, and
   // one that does not must still be able to start.
   const ghToken = readGhToken();
   if (!token) {
     throw new Error(
-      'no Claude OAuth token on file; run `claude setup-token` on the host, then ' +
-        '`pbpaste | chat-mcp auth set-token` (stdin, never argv)',
+      "no Claude OAuth token on file; run `claude setup-token` on the host, then " +
+        "`pbpaste | chat-mcp auth set-token` (stdin, never argv)",
     );
   }
 
   const supervisorHandle = requireSupervisorHandle(opts);
   const projectDir = opts.cwd;
   if (!projectDir) {
-    throw new Error('a containerized spawn needs a resolved cwd');
+    throw new Error("a containerized spawn needs a resolved cwd");
   }
 
   // 🛑 CHECKED HERE AS WELL AS AT REGISTRATION. `projects.json` is a file on
@@ -346,17 +366,17 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
   assertProjectDirOutsideState(projectDir);
 
   const args = [
-    'run',
-    '-i',
-    '--rm',
-    '--name',
+    "run",
+    "-i",
+    "--rm",
+    "--name",
     containerNameFor(supervisorHandle),
     // 🛑 BY NAME, NEVER `NAME=value`. The value in the argv is readable through
     // `ps` for the life of the container, which `AGENTS.md` forbids in those
     // words. Docker copies it from this process's environment instead.
-    '-e',
+    "-e",
     vendor.authEnvVar,
-    '-v',
+    "-v",
     `${projectDir}:${CONTAINER_PROJECT_DIR}`,
     // 🛑 A DOCKER VOLUME, SO NO HOST DIRECTORY IS BOUND HERE. `/work` carries
     // the host's macOS `node_modules`, and `esbuild` resolves a
@@ -366,7 +386,7 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
     //
     // Its argv position is incidental, per the measured note below: the daemon
     // sorts mount destinations, so this does not rely on being emitted here.
-    '-v',
+    "-v",
     `${nodeModulesVolumeFor(supervisorHandle, projectDir)}:${CONTAINER_PROJECT_DIR}/${CONTAINER_NODE_MODULES_DIR}`,
   ];
 
@@ -375,7 +395,7 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
   // the container reads to `gh` as a BAD credential rather than as no
   // credential, so the agent gets an auth error in place of the clear
   // "run `chat-mcp auth set-gh-token`" it should get.
-  if (ghToken) args.push('-e', CONTAINER_GH_TOKEN_ENV);
+  if (ghToken) args.push("-e", CONTAINER_GH_TOKEN_ENV);
 
   // 🛑 BOTH SIDES COME FROM ONE CHECKED VALUE. A host side built from the
   // realpath and a container side built from the raw declared string let a
@@ -384,7 +404,11 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
   // Order does not matter — measured both ways, the daemon sorts bind
   // destinations. ⚠️ Docker 24.0.7 / macOS, UNRUN ON LINUX.
   for (const entry of opts.readOnlyPaths ?? []) {
-    const { host, inner } = checkedMountPath(projectDir, entry, 'read-only path');
+    const { host, inner } = checkedMountPath(
+      projectDir,
+      entry,
+      "read-only path",
+    );
 
     // 🛑 REFUSE RATHER THAN EMIT TWO SPECS FOR ONE DESTINATION. A declared
     // `node_modules` passes every containment check — it is relative,
@@ -402,11 +426,11 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
         `read-only path '${entry}' collides with the container-owned ` +
           `${CONTAINER_NODE_MODULES_DIR} volume at ` +
           `${CONTAINER_PROJECT_DIR}/${CONTAINER_NODE_MODULES_DIR}; the container installs its ` +
-          'own, so it cannot also be mounted from the host',
+          "own, so it cannot also be mounted from the host",
       );
     }
 
-    args.push('-v', `${host}:${CONTAINER_PROJECT_DIR}/${inner}:ro`);
+    args.push("-v", `${host}:${CONTAINER_PROJECT_DIR}/${inner}:ro`);
   }
 
   // 🛑 `:ro`, BECAUSE THE TREE CHOOSES THE CODE THAT RUNS HERE. A project
@@ -420,7 +444,7 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
   // outlives the guard in `registerMount`.
   for (const [key, hostDir] of Object.entries(mountsFor(supervisorHandle))) {
     assertProjectDirOutsideState(hostDir);
-    args.push('-v', `${hostDir}:${containerPathFor(key)}:ro`);
+    args.push("-v", `${hostDir}:${containerPathFor(key)}:ro`);
   }
 
   const env: NodeJS.ProcessEnv = { ...process.env, [vendor.authEnvVar]: token };
@@ -434,11 +458,11 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
   if (ghToken) env[CONTAINER_GH_TOKEN_ENV] = ghToken;
   else delete env[CONTAINER_GH_TOKEN_ENV];
 
-  if (opts.grant) args.push('-e', CONTAINER_MCP_CONFIG_ENV);
+  if (opts.grant) args.push("-e", CONTAINER_MCP_CONFIG_ENV);
 
-  args.push('-w', CONTAINER_PROJECT_DIR, vendor.image);
+  args.push("-w", CONTAINER_PROJECT_DIR, vendor.image);
 
-  const cli = [opts.binary ?? vendor.binary, ...vendor.argsFor(opts, 'docker')];
+  const cli = [opts.binary ?? vendor.binary, ...vendor.argsFor(opts, "docker")];
 
   // 🛑 ONE PUSH, SO THE TWO BRANCHES CANNOT DIVERGE AGAIN. Only a granted
   // spawn used to need a shell at all, so an install added to that branch
@@ -451,10 +475,16 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
     // would come up with an MCP config pointing nowhere, and the only symptom
     // is an agent that answers nothing.
     if (!opts.bus) {
-      throw new Error('a containerized spawn with a grant needs opts.bus to reach the host bus');
+      throw new Error(
+        "a containerized spawn with a grant needs opts.bus to reach the host bus",
+      );
     }
 
-    cli.push('--mcp-config', vendor.mcpConfigFor(opts.grant, 'docker'), '--strict-mcp-config');
+    cli.push(
+      "--mcp-config",
+      vendor.mcpConfigFor(opts.grant, "docker"),
+      "--strict-mcp-config",
+    );
 
     env[CONTAINER_MCP_CONFIG_ENV] = buildContainerMcpConfig(opts.bus);
 
@@ -465,7 +495,7 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
 
   steps.push(nodeModulesInstallStep(vendor));
 
-  args.push('sh', '-c', prelude(steps), 'sh', ...cli);
+  args.push("sh", "-c", prelude(steps), "sh", ...cli);
 
   return { args, env };
 }
@@ -487,14 +517,18 @@ export function dockerStopFor(
     // that synchronously froze the whole supervisor for that minute: no
     // logging, no socket handling, and a second Ctrl-C did nothing. The
     // daemon owns the teardown, so this process does not need to watch it.
-    const stopper = spawn('docker', ['stop', '-t', String(graceSeconds), name], {
-      stdio: 'ignore',
-      detached: true,
-    });
+    const stopper = spawn(
+      "docker",
+      ["stop", "-t", String(graceSeconds), name],
+      {
+        stdio: "ignore",
+        detached: true,
+      },
+    );
     // An unhandled 'error' event on a child process is an uncaught exception,
     // so this handler is load-bearing rather than defensive. `kill()` is
     // best-effort by contract, and there is no logger at this layer.
-    stopper.on('error', () => undefined);
+    stopper.on("error", () => undefined);
     stopper.unref();
   };
 }
@@ -523,9 +557,13 @@ export function dockerTeardownFor(
     while (Date.now() < deadline) {
       let present = false;
       try {
-        const out = execFileSync('docker', ['ps', '-aq', '--filter', `name=^${name}$`], {
-          stdio: ['ignore', 'pipe', 'ignore'],
-        });
+        const out = execFileSync(
+          "docker",
+          ["ps", "-aq", "--filter", `name=^${name}$`],
+          {
+            stdio: ["ignore", "pipe", "ignore"],
+          },
+        );
         present = out.toString().trim().length > 0;
       } catch {
         // No daemon, or docker gone. Nothing left to wait for.
@@ -546,7 +584,10 @@ export function dockerTeardownFor(
  * ever — decision 8 of the #129 spec. Removal on kill is proved by
  * `container-removal.test.ts`, not just asserted here.
  */
-export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {}): AgentChild {
+export function spawnContainerized(
+  vendor: VendorSpawn,
+  opts: SpawnOptions = {},
+): AgentChild {
   const name = containerNameFor(requireSupervisorHandle(opts));
 
   // 🛑 BUILD THE PLAN BEFORE THE REMOVAL BELOW, BECAUSE THE REMOVAL IS
@@ -568,18 +609,19 @@ export function spawnContainerized(vendor: VendorSpawn, opts: SpawnOptions = {})
   // spawns, proved by `second-supervisor-refused.test.ts` asserting the spawn
   // count stays at 1. So there is no rival agent for this to take down.
   try {
-    execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' });
+    execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
   } catch {
     // Nothing by that name — the normal case, and not distinguishable from a
     // missing docker without a logger at this layer.
   }
 
-  const child: ChildProcessWithoutNullStreams = spawn('docker', plan.args, {
-    stdio: ['pipe', 'pipe', 'pipe'],
+  const child: ChildProcessWithoutNullStreams = spawn("docker", plan.args, {
+    stdio: ["pipe", "pipe", "pipe"],
     env: plan.env,
   }) as ChildProcessWithoutNullStreams;
 
-  const graceSeconds = opts.shutdownGraceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
+  const graceSeconds =
+    opts.shutdownGraceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
 
   return wireAgentChild(child, vendor, {
     stop: dockerStopFor(name, graceSeconds),

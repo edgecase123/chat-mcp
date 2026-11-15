@@ -14,11 +14,13 @@ The rules are binding, not aspirational. A violation here is the kind of thing t
 ## Invocation contract
 
 **Input** — one of:
+
 - A git ref pair (`base..HEAD`, `main`, `HEAD~1`, etc.). You compute the diff and derive touched files.
 - An explicit list of file paths (absolute or repo-relative).
 - A single file path.
 
 In-scope file classes:
+
 - `src/**/*.ts` — everything except `test/**`
 - `web/assets/**/*.js` — the browser dashboard, DRY/fat-function concerns only (not styling)
 
@@ -86,7 +88,7 @@ Any hit is 🔴, no exceptions — this is the one rule in this codebase that a 
 
 ## Rule 3 — DRY: duplicate operation across call sites (🔴)
 
-The signal is *the same operation, implemented twice, in the touched set* — not textual coincidence.
+The signal is _the same operation, implemented twice, in the touched set_ — not textual coincidence.
 
 1. For each touched file under `src/supervise/drivers/**` or `src/adapters/**`, list its exported functions and their bodies.
 2. Grep sibling driver/adapter files for a function of similar shape (same parameter count, same callback-array pattern, same JSON read-modify-write against a state file under `util/paths.ts`).
@@ -138,7 +140,7 @@ For touched `interface`/`type` exports with more than ~6 fields, check whether e
 
 ## What NOT to do
 
-- Don't flag `Record<string, …>`-shaped state files (`container.json`, `mounts.json`, `projects.json`) following the same read/fallback/write pattern across different modules — that pattern is the codebase's convention, not a DRY violation, unless the actual read/write *logic* (not just the shape) is copy-pasted.
+- Don't flag `Record<string, …>`-shaped state files (`container.json`, `mounts.json`, `projects.json`) following the same read/fallback/write pattern across different modules — that pattern is the codebase's convention, not a DRY violation, unless the actual read/write _logic_ (not just the shape) is copy-pasted.
 - Don't flag test-only duplication in `test/**` — out of scope.
 - Don't propose extracting a shared function for a two-line block with only one caller today — DRY triggers on the **second** implementation, not the first.
 - Don't rename a file or export as a fix — that's a separate refactor pass.

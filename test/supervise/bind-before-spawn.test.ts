@@ -1,15 +1,16 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { oneLine } from "../support/source-text.js";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-bind-first-'));
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-bind-first-"));
 
-const { startSupervisor } = await import('../../src/supervise/index.js');
-const { socketPathFor } = await import('../../src/util/paths.js');
-import type { AgentChild } from '../../src/supervise/child.js';
-import { supervisorOptions } from '../support/supervisor-options.js';
+const { startSupervisor } = await import("../../src/supervise/index.js");
+const { socketPathFor } = await import("../../src/util/paths.js");
+import type { AgentChild } from "../../src/supervise/child.js";
+import { supervisorOptions } from "../support/supervisor-options.js";
 
 const DIRS = [process.cwd()];
 
@@ -50,9 +51,14 @@ function topLevelYields(window: string[]): string[] {
 
   for (const raw of window) {
     const trimmed = raw.trim();
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+    if (
+      trimmed.startsWith("//") ||
+      trimmed.startsWith("*") ||
+      trimmed.startsWith("/*")
+    )
+      continue;
 
-    const code = raw.replace(/\/\/.*$/, '');
+    const code = raw.replace(/\/\/.*$/, "");
 
     if (!scopes.includes(true) && /\bawait\b/.test(code)) hits.push(trimmed);
 
@@ -61,15 +67,17 @@ function topLevelYields(window: string[]): string[] {
     // because the line contains `=>` somewhere. Found by claude1 on PR #164,
     // after it survived three heads of this branch.
     for (let i = 0; i < code.length; i += 1) {
-      if (code[i] === '{') {
+      if (code[i] === "{") {
         const before = code.slice(0, i);
 
         // `=>` must END the text before the brace, which is what separates an
         // arrow BODY from an arrow inside a block header. A `function` needs
         // its signature matched instead, because its name and parameters sit
         // between the keyword and the brace.
-        scopes.push(/=>\s*$/.test(before) || /\bfunction\b[^)]*\)\s*$/.test(before));
-      } else if (code[i] === '}') {
+        scopes.push(
+          /=>\s*$/.test(before) || /\bfunction\b[^)]*\)\s*$/.test(before),
+        );
+      } else if (code[i] === "}") {
         scopes.pop();
       }
     }
@@ -89,25 +97,27 @@ function topLevelYields(window: string[]): string[] {
  * The assertion is the ORDER. A refusal on its own already passed before this
  * change, because the loser refused only after its spawn had run.
  */
-test('the wake socket is listening BEFORE the child is spawned', async () => {
+test("the wake socket is listening BEFORE the child is spawned", async () => {
   let listeningAtSpawn: boolean | null = null;
 
-  const sup = await startSupervisor(supervisorOptions({
-    extraDirs: DIRS,
-    handle: 'bind-first',
-    spawnChild: (): AgentChild => {
-      listeningAtSpawn = existsSync(socketPathFor('bind-first'));
+  const sup = await startSupervisor(
+    supervisorOptions({
+      extraDirs: DIRS,
+      handle: "bind-first",
+      spawnChild: (): AgentChild => {
+        listeningAtSpawn = existsSync(socketPathFor("bind-first"));
 
-      return fakeChild();
-    },
-    log: () => undefined,
-  }));
+        return fakeChild();
+      },
+      log: () => undefined,
+    }),
+  );
 
   try {
     assert.equal(
       listeningAtSpawn,
       true,
-      'the handle must be claimed by the bind before a spawn can run `docker rm -f` on it',
+      "the handle must be claimed by the bind before a spawn can run `docker rm -f` on it",
     );
   } finally {
     await sup.stop();
@@ -130,20 +140,27 @@ test('the wake socket is listening BEFORE the child is spawned', async () => {
  * where the throw lands outside the handler's call stack and takes the
  * supervisor down instead of refusing.
  */
-test('🛑 nothing yields between the bind and the handler install', () => {
-  const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
-  const lines = src.split('\n');
+test("🛑 nothing yields between the bind and the handler install", () => {
+  const src = readFileSync(
+    new URL("../../src/supervise/index.ts", import.meta.url),
+    "utf8",
+  );
+  const lines = src.split("\n");
 
-  const binds = lines.filter((l) => l.includes('WakeListener.bind('));
-  assert.equal(binds.length, 1, 'the window is defined by ONE bind; find them all before trusting this');
+  const binds = lines.filter((l) => l.includes("WakeListener.bind("));
+  assert.equal(
+    binds.length,
+    1,
+    "the window is defined by ONE bind; find them all before trusting this",
+  );
 
-  const bindAt = lines.findIndex((l) => l.includes('WakeListener.bind('));
+  const bindAt = lines.findIndex((l) => l.includes("WakeListener.bind("));
   // The wrapper closure is part of the bind statement, so the window starts
   // after it closes.
-  const wrapperEnd = lines.findIndex((l, i) => i > bindAt && l === '  });');
+  const wrapperEnd = lines.findIndex((l, i) => i > bindAt && l === "  });");
   const installAt = lines.findIndex((l) => /^\s*onWake = /.test(l));
   assert.ok(wrapperEnd > bindAt, "the bind's wrapper must close");
-  assert.ok(installAt > wrapperEnd, 'the handler install must follow the bind');
+  assert.ok(installAt > wrapperEnd, "the handler install must follow the bind");
 
   // 🛑 EXACTLY ONE, AND IT IS WHY THE REFUSAL IS LIVE CODE RATHER THAN DEAD.
   // The spawn-failure path awaits `listener.close()`, so the socket is open
@@ -160,8 +177,8 @@ test('🛑 nothing yields between the bind and the handler install', () => {
   // success path. A yield OUTSIDE that catch would be the real alarm.
   assert.deepEqual(
     topLevelYields(lines.slice(wrapperEnd + 1, installAt)),
-    ['await listener.close();', 'await hostBus?.close();'],
-    'a NEW top-level await here puts the success path in the gap; add it only with the refusal in mind',
+    ["await listener.close();", "await hostBus?.close();"],
+    "a NEW top-level await here puts the success path in the gap; add it only with the refusal in mind",
   );
 });
 
@@ -173,30 +190,33 @@ test('🛑 nothing yields between the bind and the handler install', () => {
  * listener on the handle — and `refuseIfSupervisorLive` would then report the
  * handle as busy forever, turning one failed start into a permanent one.
  */
-test('a spawn failure does not strand the socket on the handle', async () => {
-  const { refuseIfSupervisorLive } = await import('../../src/supervise/socket.js');
+test("a spawn failure does not strand the socket on the handle", async () => {
+  const { refuseIfSupervisorLive } =
+    await import("../../src/supervise/socket.js");
 
   await assert.rejects(
     () =>
-      startSupervisor(supervisorOptions({
-        extraDirs: DIRS,
-        handle: 'spawn-throws',
-        spawnChild: (): AgentChild => {
-          throw new Error('docker is not running');
-        },
-        log: () => undefined,
-      })),
+      startSupervisor(
+        supervisorOptions({
+          extraDirs: DIRS,
+          handle: "spawn-throws",
+          spawnChild: (): AgentChild => {
+            throw new Error("docker is not running");
+          },
+          log: () => undefined,
+        }),
+      ),
     /docker is not running/,
   );
 
   assert.equal(
-    existsSync(socketPathFor('spawn-throws')),
+    existsSync(socketPathFor("spawn-throws")),
     false,
-    'the listener must be closed when the start it was claiming the handle for failed',
+    "the listener must be closed when the start it was claiming the handle for failed",
   );
 
   // The handle has to be startable again, which is the consequence that matters.
-  await assert.doesNotReject(() => refuseIfSupervisorLive('spawn-throws'));
+  await assert.doesNotReject(() => refuseIfSupervisorLive("spawn-throws"));
 });
 
 /**
@@ -211,25 +231,37 @@ test('a spawn failure does not strand the socket on the handle', async () => {
  * it until here. A later edit inserting a branch above the refusal would read
  * as harmless.
  */
-test('🛑 the refusal is the wrapper FIRST statement, above the stop branch', () => {
-  const src = readFileSync(new URL('../../src/supervise/index.ts', import.meta.url), 'utf8');
-  const lines = src.split('\n');
+test("🛑 the refusal is the wrapper FIRST statement, above the stop branch", () => {
+  const src = readFileSync(
+    new URL("../../src/supervise/index.ts", import.meta.url),
+    "utf8",
+  );
+  const lines = src.split("\n");
 
-  const bindAt = lines.findIndex((l) => l.includes('WakeListener.bind('));
-  assert.ok(bindAt >= 0, 'bind call not found');
+  const bindAt = lines.findIndex((l) => l.includes("WakeListener.bind("));
+  assert.ok(bindAt >= 0, "bind call not found");
 
-  const wrapperEnd = lines.findIndex((l, i) => i > bindAt && l === '  });');
+  const wrapperEnd = lines.findIndex((l, i) => i > bindAt && l === "  });");
   const body = lines.slice(bindAt + 1, wrapperEnd);
 
   const statements = body
     .map((l) => l.trim())
-    .filter((l) => l !== '' && !l.startsWith('//') && !l.startsWith('*') && !l.startsWith('/*'));
+    .filter(
+      (l) =>
+        l !== "" &&
+        !l.startsWith("//") &&
+        !l.startsWith("*") &&
+        !l.startsWith("/*"),
+    );
 
-  assert.ok(statements.length > 0, 'the wrapper body must hold statements');
+  assert.ok(statements.length > 0, "the wrapper body must hold statements");
+
+  // 🛑 JOINED, NOT `statements[0]`. Prettier wraps this refusal over two lines,
+  // and the anchored `^` still proves nothing precedes it.
   assert.match(
-    statements[0]!,
+    oneLine(statements.join(" ")),
     /^if \(onWake === null\) return \{ ok: false,/,
-    'the refusal must come before anything else in the wrapper, including the stop branch',
+    "the refusal must come before anything else in the wrapper, including the stop branch",
   );
 });
 
@@ -244,15 +276,47 @@ test('🛑 the refusal is the wrapper FIRST statement, above the stop branch', (
  * A guard that guards nothing is worse than no guard, so the truth table is
  * pinned here rather than asserted in prose.
  */
-test('🛑 topLevelYields: the pinned truth table', () => {
+test("🛑 topLevelYields: the pinned truth table", () => {
   const CASES: [string, string[], number][] = [
-    ['a plain block counts', ['  if (cond) {', '    await realYield();', '  }'], 1],
-    ['an arrow in a block HEADER does not hide it', ['  if (items.some((i) => i.ok)) {', '    await realYield();', '  }'], 1],
-    ['an arrow in a for HEADER does not hide it', ['  for (const x of list.filter((i) => i.on)) {', '    await realYield();', '  }'], 1],
-    ['an arrow BODY is excluded', ['  const f = async () => {', '    await teardown();', '  };'], 0],
-    ['a function DECLARATION body is excluded', ['  function helper() {', '    await teardown();', '  }'], 0],
-    ['a continuation line counts', ['  const a = String(', '    await Promise.resolve(1),', '  );'], 1],
-    ['a comment mentioning await does not count', ['  // we used to await here', '  const x = 1;'], 0],
+    [
+      "a plain block counts",
+      ["  if (cond) {", "    await realYield();", "  }"],
+      1,
+    ],
+    [
+      "an arrow in a block HEADER does not hide it",
+      ["  if (items.some((i) => i.ok)) {", "    await realYield();", "  }"],
+      1,
+    ],
+    [
+      "an arrow in a for HEADER does not hide it",
+      [
+        "  for (const x of list.filter((i) => i.on)) {",
+        "    await realYield();",
+        "  }",
+      ],
+      1,
+    ],
+    [
+      "an arrow BODY is excluded",
+      ["  const f = async () => {", "    await teardown();", "  };"],
+      0,
+    ],
+    [
+      "a function DECLARATION body is excluded",
+      ["  function helper() {", "    await teardown();", "  }"],
+      0,
+    ],
+    [
+      "a continuation line counts",
+      ["  const a = String(", "    await Promise.resolve(1),", "  );"],
+      1,
+    ],
+    [
+      "a comment mentioning await does not count",
+      ["  // we used to await here", "  const x = 1;"],
+      0,
+    ],
   ];
 
   for (const [name, window, want] of CASES) {

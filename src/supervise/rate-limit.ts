@@ -32,8 +32,15 @@ export interface RateLimitSnapshot {
 }
 
 export type GateVerdict =
-  | { readonly allow: true; readonly reason: 'unknown' | 'unmetered' | 'within-budget' }
-  | { readonly allow: false; readonly reason: string; readonly resetsAt?: number };
+  | {
+      readonly allow: true;
+      readonly reason: "unknown" | "unmetered" | "within-budget";
+    }
+  | {
+      readonly allow: false;
+      readonly reason: string;
+      readonly resetsAt?: number;
+    };
 
 export class RateLimitGate {
   private snapshot: RateLimitSnapshot | null = null;
@@ -85,26 +92,32 @@ export class RateLimitGate {
     // 🛑 'unmetered' and 'unknown' are DIFFERENT and used to be the same
     // answer. 'unknown' is the first turn, before any report. 'unmetered' is
     // forever, and the supervisor announces it at startup.
-    if (!this.metered) return { allow: true, reason: 'unmetered' };
+    if (!this.metered) return { allow: true, reason: "unmetered" };
 
-    if (!snap) return { allow: true, reason: 'unknown' };
+    if (!snap) return { allow: true, reason: "unknown" };
 
-    if (snap.status !== 'allowed') {
-      return { allow: false, reason: `the API reports status "${snap.status}"` };
+    if (snap.status !== "allowed") {
+      return {
+        allow: false,
+        reason: `the API reports status "${snap.status}"`,
+      };
     }
 
     for (const [name, w] of Object.entries(snap.windows)) {
       if (w.utilization >= this.ceiling) {
         return {
           allow: false,
-          reason: `${name} window at ${Math.round(w.utilization * 100)}%, ceiling ${Math.round(this.ceiling * 100)}%`
-            + (snap.overageAvailable ? '' : ' and overage is REJECTED, so a full window refuses requests'),
+          reason:
+            `${name} window at ${Math.round(w.utilization * 100)}%, ceiling ${Math.round(this.ceiling * 100)}%` +
+            (snap.overageAvailable
+              ? ""
+              : " and overage is REJECTED, so a full window refuses requests"),
           resetsAt: w.resetsAt,
         };
       }
     }
 
-    return { allow: true, reason: 'within-budget' };
+    return { allow: true, reason: "within-budget" };
   }
 
   /** One line for a human, in utilization and never in dollars. */
@@ -112,15 +125,15 @@ export class RateLimitGate {
     const snap = this.snapshot;
 
     if (!this.metered) {
-      return 'rate limits: UNMETERED — this driver reports none, so NOTHING bounds dispatch';
+      return "rate limits: UNMETERED — this driver reports none, so NOTHING bounds dispatch";
     }
 
-    if (!snap) return 'rate limits: not yet observed';
+    if (!snap) return "rate limits: not yet observed";
 
     const parts = Object.entries(snap.windows)
       .map(([name, w]) => `${name} ${Math.round(w.utilization * 100)}%`)
-      .join('  ');
+      .join("  ");
 
-    return `rate limits: ${parts || 'no windows reported'}  overage=${snap.overageAvailable ? 'available' : 'REJECTED'}`;
+    return `rate limits: ${parts || "no windows reported"}  overage=${snap.overageAvailable ? "available" : "REJECTED"}`;
   }
 }

@@ -1,4 +1,4 @@
-import { AVAILABLE_BUILTINS, allowlistFor, defaultDirs } from './allowlist.js';
+import { AVAILABLE_BUILTINS, allowlistFor, defaultDirs } from "./allowlist.js";
 
 /**
  * What a supervised child is allowed to be and to do.
@@ -68,8 +68,8 @@ export interface ChildGrant {
  */
 export function builtinsFrom(allowed: readonly string[]): string[] {
   const names = allowed
-    .filter((t) => !t.startsWith('mcp__'))
-    .map((t) => t.replace(/\(.*$/, '').trim())
+    .filter((t) => !t.startsWith("mcp__"))
+    .map((t) => t.replace(/\(.*$/, "").trim())
     .filter((t) => t.length > 0);
 
   return [...new Set(names)];
@@ -114,7 +114,7 @@ export function childHandleFor(supervisorHandle: string): string {
 }
 
 /** The suffix `childHandleFor` appends, and the only thing its inverse reads. */
-const CHILD_SUFFIX = '-agent';
+const CHILD_SUFFIX = "-agent";
 
 /**
  * The inverse of `childHandleFor`: the supervisor that owns a child handle, or

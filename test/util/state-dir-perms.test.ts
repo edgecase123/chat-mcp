@@ -1,11 +1,21 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, existsSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  existsSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // Point CHAT_MCP_HOME at a scratch dir BEFORE importing anything that reads it.
-process.env.CHAT_MCP_HOME = join(mkdtempSync(join(tmpdir(), 'chat-mcp-perms-')), 'state');
+process.env.CHAT_MCP_HOME = join(
+  mkdtempSync(join(tmpdir(), "chat-mcp-perms-")),
+  "state",
+);
 
 const {
   ensureStateDir,
@@ -15,7 +25,7 @@ const {
   chmodVerified,
   STATE_DIR_MODE,
   STATE_FILE_MODE,
-} = await import('../../src/util/paths.js');
+} = await import("../../src/util/paths.js");
 
 const modeOf = (p: string) => statSync(p).mode & 0o777;
 
@@ -34,7 +44,7 @@ const withUmask = <T>(mask: number, fn: () => T): T => {
  * Until this guard existed it was 755, so any other account on the host read
  * the whole database with `cat`. No handle, no socket, no peer status.
  */
-test('🚨 the state directory is 0700', () => {
+test("🚨 the state directory is 0700", () => {
   ensureStateDir();
 
   assert.equal(modeOf(stateDir()), STATE_DIR_MODE);
@@ -46,10 +56,14 @@ test('🚨 the state directory is 0700', () => {
  * pre-creates it WIDE OPEN and asserts that, because a fixture that creates it
  * fresh under a tight umask passes with the chmod deleted.
  */
-test('🚨 an ALREADY EXISTING wide-open state directory is tightened', () => {
+test("🚨 an ALREADY EXISTING wide-open state directory is tightened", () => {
   mkdirSync(stateDir(), { recursive: true });
   chmodSync(stateDir(), 0o777);
-  assert.equal(modeOf(stateDir()), 0o777, 'the fixture is actually wide open before the call');
+  assert.equal(
+    modeOf(stateDir()),
+    0o777,
+    "the fixture is actually wide open before the call",
+  );
 
   ensureStateDir();
 
@@ -60,7 +74,7 @@ test('🚨 an ALREADY EXISTING wide-open state directory is tightened', () => {
  * Negative control. Under a permissive umask a `mkdir` mode argument alone
  * lands at 777, so this pins the chmod rather than the environment.
  */
-test('the 0700 comes from the chmod, not from the umask', () => {
+test("the 0700 comes from the chmod, not from the umask", () => {
   withUmask(0o000, () => {
     mkdirSync(stateDir(), { recursive: true });
     chmodSync(stateDir(), 0o777);
@@ -77,22 +91,27 @@ test('the 0700 comes from the chmod, not from the umask', () => {
  * `metadata`. `chmodSync` there returns success and changes nothing, so the
  * fix would report green while storing every message readable.
  */
-test('🚨 chmodVerified THROWS when the chmod did not take', (t) => {
-  if (process.platform === 'win32') return t.skip('modes are not enforceable on win32');
+test("🚨 chmodVerified THROWS when the chmod did not take", (t) => {
+  if (process.platform === "win32")
+    return t.skip("modes are not enforceable on win32");
 
-  const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-noop-'));
+  const dir = mkdtempSync(join(tmpdir(), "chat-mcp-noop-"));
   // Stand in for a filesystem that ignores the mode: ask for a mode, then
   // report a different one back. Only the read-back can tell the difference.
   const original = statSync(dir).mode;
 
   assert.throws(
-    () => chmodVerified(dir, 0o700, () => ({ ...statSync(dir), mode: original | 0o055 })),
+    () =>
+      chmodVerified(dir, 0o700, () => ({
+        ...statSync(dir),
+        mode: original | 0o055,
+      })),
     /did not take/,
   );
 });
 
-test('chmodVerified is silent when the mode landed', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'chat-mcp-ok-'));
+test("chmodVerified is silent when the mode landed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chat-mcp-ok-"));
 
   chmodVerified(dir, STATE_DIR_MODE);
 
@@ -116,26 +135,44 @@ test('chmodVerified is silent when the mode landed', () => {
  * Without the umask half this test passed with `tightenDbFiles()` deleted
  * under `umask 077`. Measured, and found by claude1 reviewing the branch.
  */
-test('🚨 the database, its WAL and its shm are all 0600 after open', async () => {
-  const { openDb } = await import('../../src/storage/db.js');
-  const paths = ['', '-wal', '-shm'].map((suffix) => `${dbPath()}${suffix}`);
+test("🚨 the database, its WAL and its shm are all 0600 after open", async () => {
+  const { openDb } = await import("../../src/storage/db.js");
+  const paths = ["", "-wal", "-shm"].map((suffix) => `${dbPath()}${suffix}`);
   const [main, wal, shm] = paths as [string, string, string];
 
   openDb().close();
 
-  assert.ok(existsSync(main), 'chat.db survived the close, so re-loosening it is possible');
+  assert.ok(
+    existsSync(main),
+    "chat.db survived the close, so re-loosening it is possible",
+  );
   chmodSync(main, 0o644);
-  assert.equal(modeOf(main), 0o644, 'chat.db is group-readable going into the re-open');
+  assert.equal(
+    modeOf(main),
+    0o644,
+    "chat.db is group-readable going into the re-open",
+  );
   // 🛑 Print the denominator: these two are gone, so ONLY the umask protects
   // them and a `chmod` here would be a no-op on a path that does not exist.
-  assert.equal(existsSync(wal), false, '-wal is absent, so SQLite re-creates it');
-  assert.equal(existsSync(shm), false, '-shm is absent, so SQLite re-creates it');
+  assert.equal(
+    existsSync(wal),
+    false,
+    "-wal is absent, so SQLite re-creates it",
+  );
+  assert.equal(
+    existsSync(shm),
+    false,
+    "-shm is absent, so SQLite re-creates it",
+  );
 
   const db = withUmask(0o000, () => openDb());
 
   try {
     for (const path of paths) {
-      assert.ok(existsSync(path), `${path} exists, so the assertion is not vacuous`);
+      assert.ok(
+        existsSync(path),
+        `${path} exists, so the assertion is not vacuous`,
+      );
       assert.equal(modeOf(path), STATE_FILE_MODE, `${path} is owner-only`);
     }
   } finally {
@@ -152,34 +189,42 @@ test('🚨 the database, its WAL and its shm are all 0600 after open', async () 
  * the CONSTRUCTOR's own chmod satisfy the assertion, so it stayed green with
  * `touch()` reverted.
  */
-test('🚨 the NotifyBus constructor leaves its notify file 0600', async () => {
-  const { ensureNotifyDir } = await import('../../src/util/paths.js');
-  const { NotifyBus } = await import('../../src/notify/bus.js');
+test("🚨 the NotifyBus constructor leaves its notify file 0600", async () => {
+  const { ensureNotifyDir } = await import("../../src/util/paths.js");
+  const { NotifyBus } = await import("../../src/notify/bus.js");
 
   ensureNotifyDir();
-  const path = notifyPathFor('perms-ctor');
-  writeFileSync(path, 'pre-existing');
+  const path = notifyPathFor("perms-ctor");
+  writeFileSync(path, "pre-existing");
   chmodSync(path, 0o644);
-  assert.equal(modeOf(path), 0o644, 'the fixture really is group-readable first');
+  assert.equal(
+    modeOf(path),
+    0o644,
+    "the fixture really is group-readable first",
+  );
 
-  new NotifyBus('perms-ctor');
+  new NotifyBus("perms-ctor");
 
   assert.equal(modeOf(path), STATE_FILE_MODE);
 });
 
-test('🚨 touch() leaves its notify file 0600', async () => {
-  const { ensureNotifyDir } = await import('../../src/util/paths.js');
-  const { NotifyBus } = await import('../../src/notify/bus.js');
+test("🚨 touch() leaves its notify file 0600", async () => {
+  const { ensureNotifyDir } = await import("../../src/util/paths.js");
+  const { NotifyBus } = await import("../../src/notify/bus.js");
 
   ensureNotifyDir();
-  const path = notifyPathFor('perms-touch');
-  const bus = new NotifyBus('perms-touch');
+  const path = notifyPathFor("perms-touch");
+  const bus = new NotifyBus("perms-touch");
 
   // 🛑 AFTER the constructor, so its chmod cannot satisfy this assertion.
   chmodSync(path, 0o644);
-  assert.equal(modeOf(path), 0o644, 'the fixture is group-readable going into touch()');
+  assert.equal(
+    modeOf(path),
+    0o644,
+    "the fixture is group-readable going into touch()",
+  );
 
-  bus.touch({ id: 1, from: 'claude1', body: 'payload' });
+  bus.touch({ id: 1, from: "claude1", body: "payload" });
 
   assert.equal(modeOf(path), STATE_FILE_MODE);
 });
@@ -193,43 +238,51 @@ test('🚨 touch() leaves its notify file 0600', async () => {
  * single chokepoint can. Found by claude1 reviewing this branch.
  */
 test("🚨 no file but paths.ts builds a '.chat-mcp' path of its own", async () => {
-  const { execFileSync } = await import('node:child_process');
-  const { readFileSync } = await import('node:fs');
-  const root = new URL('../../src', import.meta.url).pathname;
+  const { execFileSync } = await import("node:child_process");
+  const { readFileSync } = await import("node:fs");
+  const root = new URL("../../src", import.meta.url).pathname;
 
-  const files = execFileSync('grep', ['-rl', '--include=*.ts', "\\.chat-mcp", root], {
-    encoding: 'utf8',
-  })
-    .split('\n')
-    .filter((f) => f.length > 0 && !f.endsWith('/util/paths.ts'));
+  const files = execFileSync(
+    "grep",
+    ["-rl", "--include=*.ts", "\\.chat-mcp", root],
+    {
+      encoding: "utf8",
+    },
+  )
+    .split("\n")
+    .filter((f) => f.length > 0 && !f.endsWith("/util/paths.ts"));
 
   // 🛑 PER FILE, NOT PER LINE. A line-scoped grep is escaped by a two-line
   // `const base = homedir()` followed by a join on the next line. claude1
   // raised that after the first cut shipped.
   const offenders = files.filter((f) => {
-    const src = readFileSync(f, 'utf8');
+    const src = readFileSync(f, "utf8");
 
-    return src.includes('homedir(') && /['"`]\.chat-mcp/.test(src);
+    return src.includes("homedir(") && /['"`]\.chat-mcp/.test(src);
   });
 
   assert.deepEqual(
     offenders,
     [],
-    `these reach ~/.chat-mcp without stateDir():\n${offenders.join('\n')}`,
+    `these reach ~/.chat-mcp without stateDir():\n${offenders.join("\n")}`,
   );
 });
 
-test('🚨 notifyPeer leaves the recipient notify file 0600', async () => {
-  const { ensureNotifyDir } = await import('../../src/util/paths.js');
-  const { notifyPeer } = await import('../../src/notify/bus.js');
+test("🚨 notifyPeer leaves the recipient notify file 0600", async () => {
+  const { ensureNotifyDir } = await import("../../src/util/paths.js");
+  const { notifyPeer } = await import("../../src/notify/bus.js");
 
   ensureNotifyDir();
-  const path = notifyPathFor('perms-peer');
-  writeFileSync(path, 'pre-existing');
+  const path = notifyPathFor("perms-peer");
+  writeFileSync(path, "pre-existing");
   chmodSync(path, 0o644);
-  assert.equal(modeOf(path), 0o644, 'the fixture really is group-readable first');
+  assert.equal(
+    modeOf(path),
+    0o644,
+    "the fixture really is group-readable first",
+  );
 
-  notifyPeer('perms-peer', { id: 1, from: 'claude1', body: 'payload' });
+  notifyPeer("perms-peer", { id: 1, from: "claude1", body: "payload" });
 
   assert.equal(modeOf(path), STATE_FILE_MODE);
 });

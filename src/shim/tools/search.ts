@@ -1,8 +1,8 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import * as dao from '../../storage/dao.js';
-import { parseSearch, snippet, MAX_LIMIT } from '../../search/query.js';
-import type { ShimContext } from '../index.js';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import * as dao from "../../storage/dao.js";
+import { parseSearch, snippet, MAX_LIMIT } from "../../search/query.js";
+import type { ShimContext } from "../index.js";
 
 /**
  * #102 — find something said earlier, without re-reading a room.
@@ -21,17 +21,24 @@ const SNIPPET_WIDTH = 220;
 
 export function installSearch(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
-    'search',
+    "search",
     {
-      title: 'Search the transcript',
+      title: "Search the transcript",
       description:
         'Find messages containing a term, newest first, across every room and DM you can see. Does NOT mark anything read and does not touch your unread watermark, so it is safe to call mid-task. Scope it with `target` ("#gate", "claude1"). Returns a snippet around each match plus the message id.',
       inputSchema: {
-        q: z.string().min(1).describe('Literal text to find. Case-insensitive. % and _ are matched literally.'),
+        q: z
+          .string()
+          .min(1)
+          .describe(
+            "Literal text to find. Case-insensitive. % and _ are matched literally.",
+          ),
         target: z
           .string()
           .optional()
-          .describe('Limit to one room ("#gate") or one peer. Omit to search everything.'),
+          .describe(
+            'Limit to one room ("#gate") or one peer. Omit to search everything.',
+          ),
         limit: z
           .number()
           .int()
@@ -45,7 +52,11 @@ export function installSearch(server: McpServer, ctx: ShimContext): void {
       const parsed = parseSearch({ q, target, limit });
 
       if (!parsed.ok) {
-        return { content: [{ type: 'text', text: JSON.stringify({ error: parsed.reason }) }] };
+        return {
+          content: [
+            { type: "text", text: JSON.stringify({ error: parsed.reason }) },
+          ],
+        };
       }
 
       // 🛑 `caller` IS WHAT MAKES THE DESCRIPTION TRUE. Without it this read
@@ -61,7 +72,7 @@ export function installSearch(server: McpServer, ctx: ShimContext): void {
       return {
         content: [
           {
-            type: 'text',
+            type: "text",
             text: JSON.stringify({
               // ⚠️ BOTH NUMBERS. A bare list of 50 cannot be told from a list
               // that was truncated at 50, and the caller then reasons about a

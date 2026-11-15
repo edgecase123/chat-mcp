@@ -1,7 +1,7 @@
-import type { RateLimitSnapshot } from './rate-limit.js';
-import type { ContextSnapshot } from './context-gauge.js';
-import type { Denial } from './denial.js';
-import type { ChildGrant } from './grant.js';
+import type { RateLimitSnapshot } from "./rate-limit.js";
+import type { ContextSnapshot } from "./context-gauge.js";
+import type { Denial } from "./denial.js";
+import type { ChildGrant } from "./grant.js";
 
 /**
  * 🛑 THE SEAM. NOTHING IN THIS FILE KNOWS ANY CLI's EVENT SHAPES.
@@ -183,7 +183,7 @@ export interface SpawnOptions {
    * running unattended.
    */
   readonly permissionMode?: string;
-  readonly permissionPrompts?: 'host' | 'none';
+  readonly permissionPrompts?: "host" | "none";
 
   /**
    * What the child may be and do. Omitted means it can be woken, cannot
@@ -240,8 +240,8 @@ export interface SpawnOptions {
  * *"dispatch and announce the blank"*.
  */
 export function assertDeclaresCapabilities(child: AgentChild): AgentChild {
-  for (const field of ['reportsUsage', 'reportsContext'] as const) {
-    if (typeof child[field] !== 'boolean') {
+  for (const field of ["reportsUsage", "reportsContext"] as const) {
+    if (typeof child[field] !== "boolean") {
       throw new Error(
         `driver did not declare ${field}. A capability is declared, never inferred from silence: ` +
           `an absent field reads as undefined, and the supervisor would announce the restrictive ` +
@@ -257,12 +257,12 @@ export function assertDeclaresCapabilities(child: AgentChild): AgentChild {
 export function createLineParser(
   onLine: (parsed: Record<string, unknown>) => void,
 ): (chunk: string) => void {
-  let buffer = '';
+  let buffer = "";
 
   return (chunk: string): void => {
     buffer += chunk;
 
-    let newline = buffer.indexOf('\n');
+    let newline = buffer.indexOf("\n");
 
     while (newline !== -1) {
       const line = buffer.slice(0, newline).trim();
@@ -278,8 +278,7 @@ export function createLineParser(
         }
       }
 
-      newline = buffer.indexOf('\n');
+      newline = buffer.indexOf("\n");
     }
   };
 }
-

@@ -19,11 +19,11 @@ supervisor's log, and why one of them was unreadable for so long.
 Every driver spawns with `stdio: ['pipe', 'pipe', 'pipe']`, so all three exist
 on every child. `wireAgentChild` attaches to two of them.
 
-| stream | parsed as | reaches the log via |
-|---|---|---|
-| `stdout` | one JSON object per line | `onEvent` → `describeChildOutput` |
-| `stderr` | unstructured text, split on newlines | `onStderr` → `← child stderr:` |
-| `stdin` | the vendor's input envelope | not read |
+| stream   | parsed as                            | reaches the log via               |
+| -------- | ------------------------------------ | --------------------------------- |
+| `stdout` | one JSON object per line             | `onEvent` → `describeChildOutput` |
+| `stderr` | unstructured text, split on newlines | `onStderr` → `← child stderr:`    |
+| `stdin`  | the vendor's input envelope          | not read                          |
 
 🛑 **A non-JSON line on `stdout` is DROPPED on purpose**, at `child.ts`'s line
 parser. The CLI may print something unstructured and killing the supervisor
@@ -81,12 +81,12 @@ warning count was 0. Found by claude2 on PR 241.
 a `perl`-less image. A missing `shasum` is a performance defect, not a reason
 to refuse a spawn.
 
-| | |
-|---|---|
-| where it goes | `stderr`, because a non-JSON `stdout` line is dropped above |
-| what it changes | nothing — the install still runs and still stamps |
-| the constant | `NO_LOCK_HASH_WARNING`, exported so the suite has no second literal |
-| arms it covers | an absent binary, a broken interpreter, any future hashing change |
+|                 |                                                                     |
+| --------------- | ------------------------------------------------------------------- |
+| where it goes   | `stderr`, because a non-JSON `stdout` line is dropped above         |
+| what it changes | nothing — the install still runs and still stamps                   |
+| the constant    | `NO_LOCK_HASH_WARNING`, exported so the suite has no second literal |
+| arms it covers  | an absent binary, a broken interpreter, any future hashing change   |
 
 ⚠️ **THIS IS WHY THE STDERR WIRING CAME FIRST.** With both channels dead the
 check would have written into nothing in either arm — a guard that always fails
@@ -111,11 +111,11 @@ not.
 
 Guarded two ways, because one fails on the cause and one on the consequence:
 
-| test | fails on | runs in CI? |
-|---|---|---|
-| `/root is chowned to agent AFTER the last root-run npm` | the ORDERING, read off the `Dockerfile` | **yes** |
-| `nothing under /root … is owned by anyone but agent` | the CAUSE, read off the built image | no — docker lane |
-| `the node_modules the install step builds can … TRANSFORM TypeScript` | the CONSEQUENCE | no — docker lane |
+| test                                                                  | fails on                                | runs in CI?      |
+| --------------------------------------------------------------------- | --------------------------------------- | ---------------- |
+| `/root is chowned to agent AFTER the last root-run npm`               | the ORDERING, read off the `Dockerfile` | **yes**          |
+| `nothing under /root … is owned by anyone but agent`                  | the CAUSE, read off the built image     | no — docker lane |
+| `the node_modules the install step builds can … TRANSFORM TypeScript` | the CONSEQUENCE                         | no — docker lane |
 
 🛑 **THE CI COLUMN IS THE POINT.** `ci.yml` runs plain `npm test`, which skips
 the docker lane. Without the first row nothing stops the ordering regressing on
@@ -151,11 +151,11 @@ registration set, and its `REQUIRED` list records this reason.
 
 ## Source files
 
-| File | Role |
-|---|---|
-| `src/supervise/child.ts` | the `AgentChild` contract, and the stdout line parser that drops non-JSON |
-| `src/supervise/drivers/wiring.ts` | attaches both streams once for every driver, and buffers stderr to lines |
-| `src/supervise/index.ts` | subscribes and logs, inside `ifCurrent` |
+| File                              | Role                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------- |
+| `src/supervise/child.ts`          | the `AgentChild` contract, and the stdout line parser that drops non-JSON |
+| `src/supervise/drivers/wiring.ts` | attaches both streams once for every driver, and buffers stderr to lines  |
+| `src/supervise/index.ts`          | subscribes and logs, inside `ifCurrent`                                   |
 
 ## Related docs
 

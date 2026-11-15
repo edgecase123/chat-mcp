@@ -21,39 +21,52 @@
  *   node scripts/prune-test-agents.mjs perm-1-agent e2e-2   delete those two
  *   node scripts/prune-test-agents.mjs --force stuck-agent  delete even if live
  */
-const { openDb } = await import('../dist/storage/db.js');
-const dao = await import('../dist/storage/dao.js');
-const { notifyDir, notifyPathFor } = await import('../dist/util/paths.js');
-const { partitionNotifyFiles, planNotifyRemoval, ORPHAN_UNCHECKED } = await import('../dist/util/notify-orphans.js');
-const { readdirSync, unlinkSync, existsSync } = await import('node:fs');
+const { openDb } = await import("../dist/storage/db.js");
+const dao = await import("../dist/storage/dao.js");
+const { notifyDir, notifyPathFor } = await import("../dist/util/paths.js");
+const { partitionNotifyFiles, planNotifyRemoval, ORPHAN_UNCHECKED } =
+  await import("../dist/util/notify-orphans.js");
+const { readdirSync, unlinkSync, existsSync } = await import("node:fs");
 
 /** Everything in the notify directory, or nothing if it has never been made. */
-const notifyFiles = () => (existsSync(notifyDir()) ? readdirSync(notifyDir()) : []);
+const notifyFiles = () =>
+  existsSync(notifyDir()) ? readdirSync(notifyDir()) : [];
 
 const argv = process.argv.slice(2);
-const force = argv.includes('--force');
-const names = argv.filter((a) => !a.startsWith('-'));
+const force = argv.includes("--force");
+const names = argv.filter((a) => !a.startsWith("-"));
 const db = openDb();
 
 if (names.length === 0) {
   const agents = dao.listAgents(db, true);
   console.log(`${agents.length} agent(s) registered:\n`);
   for (const a of agents) {
-    console.log(`  ${a.online ? 'online ' : 'offline'}  ${a.handle}  pid ${a.pid}`);
+    console.log(
+      `  ${a.online ? "online " : "offline"}  ${a.handle}  pid ${a.pid}`,
+    );
   }
 
   // 🛑 BOTH TOTALS, NEVER THE ORPHAN COUNT ALONE. #78's figure is "49 of 53",
   // and the 53 is what makes the 49 mean anything.
-  const notify = partitionNotifyFiles(notifyFiles(), agents.map((a) => a.handle));
-  console.log(`\n${notify.orphans.length} of ${notify.total} notify file(s) have no agent row:\n`);
+  const notify = partitionNotifyFiles(
+    notifyFiles(),
+    agents.map((a) => a.handle),
+  );
+  console.log(
+    `\n${notify.orphans.length} of ${notify.total} notify file(s) have no agent row:\n`,
+  );
   if (notify.orphans.length > 0) {
-    console.log(`  ${notify.orphans.join(' ')}`);
+    console.log(`  ${notify.orphans.join(" ")}`);
     console.log(`\nEach of those has ${ORPHAN_UNCHECKED}`);
-    console.log('\nRemove the files with:');
-    console.log(`\n  node scripts/prune-test-agents.mjs ${notify.orphans.join(' ')}`);
+    console.log("\nRemove the files with:");
+    console.log(
+      `\n  node scripts/prune-test-agents.mjs ${notify.orphans.join(" ")}`,
+    );
   }
 
-  console.log('\nPass handles in FULL to delete them. Prefixes are not matched.');
+  console.log(
+    "\nPass handles in FULL to delete them. Prefixes are not matched.",
+  );
   process.exit(0);
 }
 
@@ -61,7 +74,9 @@ const { prunable, online, absent } = dao.partitionPrunable(db, names);
 const targets = force ? [...prunable, ...online] : prunable;
 const deleted = dao.pruneAgents(db, targets);
 
-console.log(`deleted ${deleted.length} of ${names.length} agent row(s): ${deleted.join(', ') || '(none)'}`);
+console.log(
+  `deleted ${deleted.length} of ${names.length} agent row(s): ${deleted.join(", ") || "(none)"}`,
+);
 
 // 🛑 THE FILES ARE A SEPARATE LEDGER, because a name can have a row and no
 // file, a file and no row, or neither. Reporting them together would let one
@@ -69,7 +84,10 @@ console.log(`deleted ${deleted.length} of ${names.length} agent row(s): ${delete
 const plan = planNotifyRemoval({
   names,
   files: notifyFiles(),
-  registered: dao.listAgents(db, true).map((a) => a.handle).concat(deleted),
+  registered: dao
+    .listAgents(db, true)
+    .map((a) => a.handle)
+    .concat(deleted),
   online,
   force,
 });
@@ -81,24 +99,33 @@ for (const step of plan) {
   unlinked.push(step.handle);
 }
 
-console.log(`removed ${unlinked.length} notify file(s): ${unlinked.join(', ') || '(none)'}`);
+console.log(
+  `removed ${unlinked.length} notify file(s): ${unlinked.join(", ") || "(none)"}`,
+);
 for (const step of plan) {
-  if (step.reason === 'orphan-liveness-unchecked') {
+  if (step.reason === "orphan-liveness-unchecked") {
     console.log(`  ${step.handle}: ${ORPHAN_UNCHECKED}`);
   }
-  if (step.reason === 'unsafe-name') {
-    console.log(`  ${step.handle}: REFUSED, a handle is one path segment. --force does not override this.`);
+  if (step.reason === "unsafe-name") {
+    console.log(
+      `  ${step.handle}: REFUSED, a handle is one path segment. --force does not override this.`,
+    );
   }
 }
 
 // Both halves are reported: a name that was not there is a typo, not a success.
-if (absent.length > 0) console.log(`no agent row — see the notify-file line above for what happened to each: ${absent.join(', ')}`);
+if (absent.length > 0)
+  console.log(
+    `no agent row — see the notify-file line above for what happened to each: ${absent.join(", ")}`,
+  );
 if (online.length > 0 && !force) {
-  console.log(`ONLINE, refused (row and file both kept): ${online.join(', ')}`);
-  console.log('Pass --force only if you know that process is gone.');
+  console.log(`ONLINE, refused (row and file both kept): ${online.join(", ")}`);
+  console.log("Pass --force only if you know that process is gone.");
 }
 
-const refusedUnsafe = plan.some((p) => p.reason === 'unsafe-name');
+const refusedUnsafe = plan.some((p) => p.reason === "unsafe-name");
 const nothingDone = plan.every((p) => !p.unlink) && deleted.length === 0;
 
-process.exit(refusedUnsafe || nothingDone || (online.length > 0 && !force) ? 1 : 0);
+process.exit(
+  refusedUnsafe || nothingDone || (online.length > 0 && !force) ? 1 : 0,
+);

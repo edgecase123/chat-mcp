@@ -1,33 +1,42 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
-import { Input } from './input/Input.js';
-import { Autocomplete } from './input/Autocomplete.js';
-import { getCompletions } from './input/completions.js';
-import type { Completion } from './input/completions.js';
-import { NotifyBus, notifyPeer } from '../../notify/bus.js';
-import type { Db } from '../../storage/db.js';
-import * as dao from '../../storage/dao.js';
-import type { Message, MessageKind, AgentStatus, Agent } from '../../storage/dao.js';
-import { sendOrReason } from '../../messaging/send-or-reason.js';
-import { assertRoomName } from '../../util/naming.js';
-import { stampOf as timeOf } from '../../util/time.js';
-import { wrappedRowCount, rehydrateEscapedNewlines } from '../../util/wrap.js';
-import type { View } from './views.js';
-import { Header } from './panes/Header.js';
-import { AlertLane } from './panes/AlertLane.js';
-import type { Alert } from './panes/AlertLane.js';
-import { MessagesPane } from './panes/MessagesPane.js';
-import { ScrollableMessageList } from './panes/ScrollableMessageList.js';
-import { WhoPane } from './panes/WhoPane.js';
-import { HelpPane } from './panes/HelpPane.js';
-import { KeyboardPane } from './panes/KeyboardPane.js';
-import { CopyPane } from './panes/CopyPane.js';
-import { RoomsBrowserPane } from './panes/RoomsBrowserPane.js';
-import { Sidebar } from './panes/Sidebar.js';
-import { Palette } from './palette/Palette.js';
-import { HintBar } from './HintBar.js';
-import { Markdown } from './util/markdown.js';
-import { useMessageViewport, useTerminalRows, useTerminalColumns } from './util/viewport.js';
+import React, { useEffect, useMemo, useState, useCallback } from "react";
+import { Box, Text, useApp, useInput } from "ink";
+import { Input } from "./input/Input.js";
+import { Autocomplete } from "./input/Autocomplete.js";
+import { getCompletions } from "./input/completions.js";
+import type { Completion } from "./input/completions.js";
+import { NotifyBus, notifyPeer } from "../../notify/bus.js";
+import type { Db } from "../../storage/db.js";
+import * as dao from "../../storage/dao.js";
+import type {
+  Message,
+  MessageKind,
+  AgentStatus,
+  Agent,
+} from "../../storage/dao.js";
+import { sendOrReason } from "../../messaging/send-or-reason.js";
+import { assertRoomName } from "../../util/naming.js";
+import { stampOf as timeOf } from "../../util/time.js";
+import { wrappedRowCount, rehydrateEscapedNewlines } from "../../util/wrap.js";
+import type { View } from "./views.js";
+import { Header } from "./panes/Header.js";
+import { AlertLane } from "./panes/AlertLane.js";
+import type { Alert } from "./panes/AlertLane.js";
+import { MessagesPane } from "./panes/MessagesPane.js";
+import { ScrollableMessageList } from "./panes/ScrollableMessageList.js";
+import { WhoPane } from "./panes/WhoPane.js";
+import { HelpPane } from "./panes/HelpPane.js";
+import { KeyboardPane } from "./panes/KeyboardPane.js";
+import { CopyPane } from "./panes/CopyPane.js";
+import { RoomsBrowserPane } from "./panes/RoomsBrowserPane.js";
+import { Sidebar } from "./panes/Sidebar.js";
+import { Palette } from "./palette/Palette.js";
+import { HintBar } from "./HintBar.js";
+import { Markdown } from "./util/markdown.js";
+import {
+  useMessageViewport,
+  useTerminalRows,
+  useTerminalColumns,
+} from "./util/viewport.js";
 
 export interface AppProps {
   handle: string;
@@ -41,17 +50,36 @@ export interface AppProps {
  * empty. Input skips inserting these so they don't echo into the field.
  * Keep in sync with the empty-input branches of the global useInput below.
  */
-const EMPTY_BUFFER_HOTKEYS = ['?', '1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+const EMPTY_BUFFER_HOTKEYS = [
+  "?",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+] as const;
 
 /**
  * Ink POC — chat + agent coordination console. Two/three-pane layout:
  * sidebar (agents + rooms + optional watch peer) + main pane + optional
  * mirror pane + alert lane + input bar.
  */
-export function App({ handle, db, notify, version }: AppProps): React.ReactElement {
+export function App({
+  handle,
+  db,
+  notify,
+  version,
+}: AppProps): React.ReactElement {
   const { exit } = useApp();
-  const [view, setView] = useState<View>({ kind: 'home' });
-  const [input, setInput] = useState<{ value: string; cursor: number }>({ value: '', cursor: 0 });
+  const [view, setView] = useState<View>({ kind: "home" });
+  const [input, setInput] = useState<{ value: string; cursor: number }>({
+    value: "",
+    cursor: 0,
+  });
   const [completionIndex, setCompletionIndex] = useState(0);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [copyMode, setCopyMode] = useState(false);
@@ -61,17 +89,22 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   // Which pane receives scroll keys (PgUp/PgDn/Ctrl-P/Ctrl-N/Home/End).
   // Toggled with Ctrl-O when the watch pane is open. Auto-resets to 'main'
   // whenever /unwatch runs so the state doesn't strand on a closed pane.
-  const [focusedPane, setFocusedPane] = useState<'main' | 'watch'>('main');
+  const [focusedPane, setFocusedPane] = useState<"main" | "watch">("main");
   // Session-only ephemeral "system" card inlined into the messages view
   // for the room where /room-check was last run. Synthetic Message with a
   // negative id so it can't collide with a real DB row, never persisted or
   // notified out. Cleared as soon as the user navigates to any other view
   // (see the useEffect below), so /leave + /join or a room-switch and back
   // drops the previous output.
-  const [roomInlineCard, setRoomInlineCard] = useState<{ room: string; card: Message } | null>(null);
+  const [roomInlineCard, setRoomInlineCard] = useState<{
+    room: string;
+    card: Message;
+  } | null>(null);
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
-  const [draft, setDraft] = useState<{ value: string; cursor: number } | null>(null);
+  const [draft, setDraft] = useState<{ value: string; cursor: number } | null>(
+    null,
+  );
   const messageViewport = useMessageViewport();
   const terminalRows = useTerminalRows();
   const terminalColumns = useTerminalColumns();
@@ -91,7 +124,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   // and reappear on re-entry.
   useEffect(() => {
     if (!roomInlineCard) return;
-    if (view.kind !== 'room' || view.room !== roomInlineCard.room) {
+    if (view.kind !== "room" || view.room !== roomInlineCard.room) {
       setRoomInlineCard(null);
     }
   }, [view, roomInlineCard]);
@@ -103,8 +136,15 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   );
 
   const messages = useMemo<Message[]>(() => {
-    if (view.kind === 'home' || view.kind === 'who' || view.kind === 'help' || view.kind === 'keyboard' || view.kind === 'rooms') return [];
-    if (view.kind === 'dm') {
+    if (
+      view.kind === "home" ||
+      view.kind === "who" ||
+      view.kind === "help" ||
+      view.kind === "keyboard" ||
+      view.kind === "rooms"
+    )
+      return [];
+    if (view.kind === "dm") {
       return db
         .prepare(
           `SELECT * FROM messages
@@ -122,7 +162,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           sent_at: (r as { sent_at: number }).sent_at,
           delivered_at: (r as { delivered_at: number | null }).delivered_at,
           read_at: (r as { read_at: number | null }).read_at,
-          kind: ((r as { kind: string }).kind ?? 'chat') as MessageKind,
+          kind: ((r as { kind: string }).kind ?? "chat") as MessageKind,
         }));
     }
     const roomMsgs = db
@@ -139,10 +179,12 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         sent_at: (r as { sent_at: number }).sent_at,
         delivered_at: (r as { delivered_at: number | null }).delivered_at,
         read_at: (r as { read_at: number | null }).read_at,
-        kind: ((r as { kind: string }).kind ?? 'chat') as MessageKind,
+        kind: ((r as { kind: string }).kind ?? "chat") as MessageKind,
       }));
     const card =
-      view.kind === 'room' && roomInlineCard?.room === view.room ? roomInlineCard.card : undefined;
+      view.kind === "room" && roomInlineCard?.room === view.room
+        ? roomInlineCard.card
+        : undefined;
     return card ? [...roomMsgs, card] : roomMsgs;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, tick, roomInlineCard]);
@@ -166,7 +208,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         sent_at: (r as { sent_at: number }).sent_at,
         delivered_at: (r as { delivered_at: number | null }).delivered_at,
         read_at: (r as { read_at: number | null }).read_at,
-        kind: ((r as { kind: string }).kind ?? 'chat') as MessageKind,
+        kind: ((r as { kind: string }).kind ?? "chat") as MessageKind,
       }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchPeer, tick]);
@@ -209,7 +251,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
 
   // Mark DMs read / advance room watermark when their view is open.
   useEffect(() => {
-    if (view.kind === 'dm') {
+    if (view.kind === "dm") {
       const unread = dao.pendingInbox(db, { to: handle });
       const fromPeer = unread.filter((m) => m.from_handle === view.peer);
       if (fromPeer.length > 0) {
@@ -217,8 +259,10 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         dao.markRead(db, ids);
         dao.markDelivered(db, ids);
       }
-    } else if (view.kind === 'room') {
-      const unread = dao.allRoomsUnread(db, handle).filter((m) => m.to_handle === view.room);
+    } else if (view.kind === "room") {
+      const unread = dao
+        .allRoomsUnread(db, handle)
+        .filter((m) => m.to_handle === view.room);
       if (unread.length > 0) {
         const maxId = Math.max(...unread.map((m) => m.id));
         dao.advanceRoomRead(db, view.room, handle, maxId);
@@ -244,28 +288,43 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   }, [db, handle, tick]);
 
   const sendTo = useCallback(
-    (target: { kind: 'dm'; peer: string } | { kind: 'room'; room: string }, body: string, kind: MessageKind) => {
-      if (target.kind === 'dm') {
+    (
+      target: { kind: "dm"; peer: string } | { kind: "room"; room: string },
+      body: string,
+      kind: MessageKind,
+    ) => {
+      if (target.kind === "dm") {
         if (!dao.getAgent(db, target.peer)) {
           setStatus(`peer ${target.peer} not registered`);
           return;
         }
         // A send that did not persist is the one failure here that used to
         // escape the callback instead of reaching the status line.
-        const out = sendOrReason(() => dao.insertMessage(db, { from: handle, to: target.peer, body, kind }));
-        if ('reason' in out) {
+        const out = sendOrReason(() =>
+          dao.insertMessage(db, { from: handle, to: target.peer, body, kind }),
+        );
+        if ("reason" in out) {
           setStatus(out.reason);
           return;
         }
         const sent = out.sent;
-        notifyPeer(target.peer, { id: sent.id, to: target.peer, from: handle, ts: sent.sent_at, body, kind });
+        notifyPeer(target.peer, {
+          id: sent.id,
+          to: target.peer,
+          from: handle,
+          ts: sent.sent_at,
+          body,
+          kind,
+        });
       } else {
         if (!dao.isRoomMember(db, target.room, handle)) {
           setStatus(`not a member of ${target.room}`);
           return;
         }
-        const out = sendOrReason(() => dao.insertMessage(db, { from: handle, to: target.room, body, kind }));
-        if ('reason' in out) {
+        const out = sendOrReason(() =>
+          dao.insertMessage(db, { from: handle, to: target.room, body, kind }),
+        );
+        if ("reason" in out) {
           setStatus(out.reason);
           return;
         }
@@ -273,7 +332,14 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
         dao.advanceRoomRead(db, target.room, handle, sent.id);
         for (const member of dao.roomMembers(db, target.room)) {
           if (member === handle) continue;
-          notifyPeer(member, { id: sent.id, to: target.room, from: handle, ts: sent.sent_at, body, kind });
+          notifyPeer(member, {
+            id: sent.id,
+            to: target.room,
+            from: handle,
+            ts: sent.sent_at,
+            body,
+            kind,
+          });
         }
       }
       setTick((t) => t + 1);
@@ -283,10 +349,12 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   );
 
   const sendCurrent = useCallback(
-    (body: string, kind: MessageKind = 'chat') => {
-      if (view.kind === 'dm') sendTo({ kind: 'dm', peer: view.peer }, body, kind);
-      else if (view.kind === 'room') sendTo({ kind: 'room', room: view.room }, body, kind);
-      else setStatus('open a conversation first (/dm or /join)');
+    (body: string, kind: MessageKind = "chat") => {
+      if (view.kind === "dm")
+        sendTo({ kind: "dm", peer: view.peer }, body, kind);
+      else if (view.kind === "room")
+        sendTo({ kind: "room", room: view.room }, body, kind);
+      else setStatus("open a conversation first (/dm or /join)");
     },
     [view, sendTo],
   );
@@ -294,44 +362,44 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   const doCommand = useCallback(
     (line: string) => {
       const parts = line.slice(1).trim().split(/\s+/);
-      const cmd = parts[0] ?? '';
+      const cmd = parts[0] ?? "";
       const args = parts.slice(1);
       /** Extract the free-text body starting AFTER `argsBefore` whitespace-
        *  separated tokens, preserving internal whitespace (including \n
        *  from Shift-Enter). `args.slice(N).join(' ')` collapses newlines
        *  to spaces because parts was split on /\s+/. */
       const bodyAfter = (argsBefore: number): string => {
-        let s = line.slice(1).replace(/^\s+/, '');
+        let s = line.slice(1).replace(/^\s+/, "");
         const skip = 1 /* cmd itself */ + argsBefore;
         for (let i = 0; i < skip; i++) {
           const wsIdx = s.search(/\s/);
-          if (wsIdx < 0) return '';
-          s = s.slice(wsIdx).replace(/^\s+/, '');
+          if (wsIdx < 0) return "";
+          s = s.slice(wsIdx).replace(/^\s+/, "");
         }
         // Strip trailing whitespace but keep internal \n.
-        return s.replace(/\s+$/, '');
+        return s.replace(/\s+$/, "");
       };
       switch (cmd) {
-        case 'quit':
-        case 'exit':
+        case "quit":
+        case "exit":
           exit();
           return;
-        case 'help':
-          setView({ kind: 'help' });
+        case "help":
+          setView({ kind: "help" });
           return;
-        case 'keyboard':
-          setView({ kind: 'keyboard' });
+        case "keyboard":
+          setView({ kind: "keyboard" });
           return;
-        case 'copy':
+        case "copy":
           setCopyMode(true);
           return;
-        case 'back':
-          setView({ kind: 'home' });
+        case "back":
+          setView({ kind: "home" });
           return;
-        case 'rooms': {
+        case "rooms": {
           // Zero args → open the browser (existing behaviour).
           if (args.length === 0) {
-            setView({ kind: 'rooms' });
+            setView({ kind: "rooms" });
             return;
           }
           // Overload: /rooms <#room> <verb> [args]
@@ -339,49 +407,77 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           //   /rooms #x remove <peer>
           //   /rooms #x invite <peer>
           const [roomArg, verb, ...verbArgs] = args;
-          if (!roomArg) return setStatus('usage: /rooms [#room {delete|remove <peer>|invite <peer>}]');
+          if (!roomArg)
+            return setStatus(
+              "usage: /rooms [#room {delete|remove <peer>|invite <peer>}]",
+            );
           try {
             assertRoomName(roomArg);
           } catch (e) {
             return setStatus((e as Error).message);
           }
-          if (verb === 'delete') {
+          if (verb === "delete") {
             // ⚠️ `notifyList` MUST be read before the delete: `room_members`
             // is gone afterwards and the loop below would notify nobody.
-            const notifyList = dao.roomMembers(db, roomArg).filter((h) => h !== handle);
+            const notifyList = dao
+              .roomMembers(db, roomArg)
+              .filter((h) => h !== handle);
             const result = dao.deleteRoom(db, roomArg, handle);
-            if (!result.ok && result.reason === 'not-a-member') return setStatus(`not a member of ${roomArg} — /join first`);
-            if (!result.ok && result.reason === 'owner-only') return setStatus(`only ${result.owner} can delete ${roomArg}`);
+            if (!result.ok && result.reason === "not-a-member")
+              return setStatus(`not a member of ${roomArg} — /join first`);
+            if (!result.ok && result.reason === "owner-only")
+              return setStatus(`only ${result.owner} can delete ${roomArg}`);
             if (!result.ok) return setStatus(`${roomArg} does not exist`);
             // If we were viewing the room, bounce home.
-            if (view.kind === 'room' && view.room === roomArg) setView({ kind: 'home' });
+            if (view.kind === "room" && view.room === roomArg)
+              setView({ kind: "home" });
             for (const member of notifyList) {
-              notifyPeer(member, { id: 0, to: member, from: dao.SYSTEM_HANDLE, ts: Date.now() });
+              notifyPeer(member, {
+                id: 0,
+                to: member,
+                from: dao.SYSTEM_HANDLE,
+                ts: Date.now(),
+              });
             }
             setStatus(`deleted ${roomArg}`);
             setTick((t) => t + 1);
             return;
           }
-          if (verb === 'remove') {
+          if (verb === "remove") {
             const target = verbArgs[0];
-            if (!target) return setStatus(`usage: /rooms ${roomArg} remove <peer>`);
-            if (!dao.isRoomMember(db, roomArg, handle)) return setStatus(`not a member of ${roomArg} — /join first`);
-            if (target === handle) return setStatus('cannot remove yourself — /leave instead');
-            if (!dao.isRoomMember(db, roomArg, target)) return setStatus(`${target} is not a member of ${roomArg}`);
+            if (!target)
+              return setStatus(`usage: /rooms ${roomArg} remove <peer>`);
+            if (!dao.isRoomMember(db, roomArg, handle))
+              return setStatus(`not a member of ${roomArg} — /join first`);
+            if (target === handle)
+              return setStatus("cannot remove yourself — /leave instead");
+            if (!dao.isRoomMember(db, roomArg, target))
+              return setStatus(`${target} is not a member of ${roomArg}`);
             const ok = dao.bootFromRoom(db, roomArg, target);
-            if (!ok) return setStatus(`remove failed: ${target} not in ${roomArg}`);
-            notifyPeer(target, { id: 0, to: target, from: dao.SYSTEM_HANDLE, ts: Date.now() });
+            if (!ok)
+              return setStatus(`remove failed: ${target} not in ${roomArg}`);
+            notifyPeer(target, {
+              id: 0,
+              to: target,
+              from: dao.SYSTEM_HANDLE,
+              ts: Date.now(),
+            });
             setStatus(`removed ${target} from ${roomArg}`);
             setTick((t) => t + 1);
             return;
           }
-          if (verb === 'invite') {
+          if (verb === "invite") {
             const target = verbArgs[0];
-            if (!target) return setStatus(`usage: /rooms ${roomArg} invite <peer>`);
-            if (!dao.isRoomMember(db, roomArg, handle)) return setStatus(`not a member of ${roomArg} — /join first`);
-            if (target === handle) return setStatus('you\'re already in this room');
-            if (!dao.getAgent(db, target)) return setStatus(`unknown peer: ${target}`);
-            if (dao.isRoomMember(db, roomArg, target)) return setStatus(`${target} is already in ${roomArg}`);
+            if (!target)
+              return setStatus(`usage: /rooms ${roomArg} invite <peer>`);
+            if (!dao.isRoomMember(db, roomArg, handle))
+              return setStatus(`not a member of ${roomArg} — /join first`);
+            if (target === handle)
+              return setStatus("you're already in this room");
+            if (!dao.getAgent(db, target))
+              return setStatus(`unknown peer: ${target}`);
+            if (dao.isRoomMember(db, roomArg, target))
+              return setStatus(`${target} is already in ${roomArg}`);
             // joinRoom on behalf of the target adds them + fires the system
             // announcement to existing members (including the invitee's own
             // "joined" line — anchored so THEY don't see it, others do).
@@ -402,23 +498,25 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             setTick((t) => t + 1);
             return;
           }
-          return setStatus(`unknown /rooms verb: ${verb ?? '(missing)'} (try delete | remove | invite)`);
+          return setStatus(
+            `unknown /rooms verb: ${verb ?? "(missing)"} (try delete | remove | invite)`,
+          );
         }
-        case 'who':
-          setView({ kind: 'who' });
+        case "who":
+          setView({ kind: "who" });
           return;
-        case 'dm': {
+        case "dm": {
           const t = args[0];
-          if (!t) return setStatus('usage: /dm <peer>');
-          if (t === handle) return setStatus('cannot dm yourself');
+          if (!t) return setStatus("usage: /dm <peer>");
+          if (t === handle) return setStatus("cannot dm yourself");
           if (!dao.getAgent(db, t)) return setStatus(`unknown peer: ${t}`);
-          setView({ kind: 'dm', peer: t });
+          setView({ kind: "dm", peer: t });
           setStatus(null);
           return;
         }
-        case 'join': {
+        case "join": {
           const name = args[0];
-          if (!name) return setStatus('usage: /join #<room>');
+          if (!name) return setStatus("usage: /join #<room>");
           try {
             assertRoomName(name);
           } catch (e) {
@@ -437,41 +535,52 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
               });
             }
           }
-          setView({ kind: 'room', room: name });
+          setView({ kind: "room", room: name });
           setStatus(null);
           setTick((t) => t + 1);
           return;
         }
-        case 'leave': {
-          if (view.kind !== 'room') return setStatus('not in a room');
+        case "leave": {
+          if (view.kind !== "room") return setStatus("not in a room");
           dao.leaveRoom(db, view.room, handle);
-          setView({ kind: 'home' });
+          setView({ kind: "home" });
           setTick((t) => t + 1);
           return;
         }
-        case 'set-status': {
+        case "set-status": {
           const [s, ...rest] = args;
-          const allowed: AgentStatus[] = ['idle', 'thinking', 'tool', 'blocked', 'error', 'offline'];
+          const allowed: AgentStatus[] = [
+            "idle",
+            "thinking",
+            "tool",
+            "blocked",
+            "error",
+            "offline",
+          ];
           if (!s || !(allowed as string[]).includes(s)) {
-            return setStatus(`usage: /set-status <${allowed.join('|')}> [focus...]`);
+            return setStatus(
+              `usage: /set-status <${allowed.join("|")}> [focus...]`,
+            );
           }
-          const focus = rest.length > 0 ? rest.join(' ') : null;
+          const focus = rest.length > 0 ? rest.join(" ") : null;
           dao.setAgentStatus(db, handle, s as AgentStatus, focus);
           setTick((t) => t + 1);
-          setStatus(`status → ${s}${focus ? ` · ${focus}` : ''}`);
+          setStatus(`status → ${s}${focus ? ` · ${focus}` : ""}`);
           return;
         }
-        case 'dispatch': {
+        case "dispatch": {
           const [to, ...rest] = args;
-          if (!to || rest.length === 0) return setStatus('usage: /dispatch <peer> <text...>');
+          if (!to || rest.length === 0)
+            return setStatus("usage: /dispatch <peer> <text...>");
           if (!dao.getAgent(db, to)) return setStatus(`unknown peer: ${to}`);
-          sendTo({ kind: 'dm', peer: to }, bodyAfter(1), 'dispatch');
+          sendTo({ kind: "dm", peer: to }, bodyAfter(1), "dispatch");
           setStatus(`dispatched → ${to}`);
           return;
         }
-        case 'broadcast': {
+        case "broadcast": {
           const [room, ...rest] = args;
-          if (!room || rest.length === 0) return setStatus('usage: /broadcast #<room> <text...>');
+          if (!room || rest.length === 0)
+            return setStatus("usage: /broadcast #<room> <text...>");
           try {
             assertRoomName(room);
           } catch (e) {
@@ -480,15 +589,16 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           if (!dao.isRoomMember(db, room, handle)) {
             return setStatus(`not a member of ${room} — /join first`);
           }
-          sendTo({ kind: 'room', room }, bodyAfter(1), 'dispatch');
+          sendTo({ kind: "room", room }, bodyAfter(1), "dispatch");
           setStatus(`broadcast → ${room}`);
           return;
         }
-        case 'alert': {
+        case "alert": {
           const [target, ...rest] = args;
-          if (!target || rest.length === 0) return setStatus('usage: /alert <peer|#room> <text...>');
+          if (!target || rest.length === 0)
+            return setStatus("usage: /alert <peer|#room> <text...>");
           const body = bodyAfter(1);
-          if (target.startsWith('#')) {
+          if (target.startsWith("#")) {
             try {
               assertRoomName(target);
             } catch (e) {
@@ -497,36 +607,41 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             if (!dao.isRoomMember(db, target, handle)) {
               return setStatus(`not a member of ${target} — /join first`);
             }
-            sendTo({ kind: 'room', room: target }, body, 'alert');
+            sendTo({ kind: "room", room: target }, body, "alert");
             setStatus(`🚨 alert → ${target}`);
           } else {
-            if (!dao.getAgent(db, target)) return setStatus(`unknown peer: ${target}`);
-            sendTo({ kind: 'dm', peer: target }, body, 'alert');
+            if (!dao.getAgent(db, target))
+              return setStatus(`unknown peer: ${target}`);
+            sendTo({ kind: "dm", peer: target }, body, "alert");
             setStatus(`🚨 alert → ${target}`);
           }
           return;
         }
-        case 'watch': {
+        case "watch": {
           const [p] = args;
-          if (!p) return setStatus('usage: /watch <peer>');
-          if (p === handle) return setStatus('cannot watch yourself');
+          if (!p) return setStatus("usage: /watch <peer>");
+          if (p === handle) return setStatus("cannot watch yourself");
           if (!dao.getAgent(db, p)) return setStatus(`unknown peer: ${p}`);
           setWatchPeer(p);
           setStatus(`watching ${p}`);
           return;
         }
-        case 'unwatch':
+        case "unwatch":
           setWatchPeer(null);
-          setFocusedPane('main');
-          setStatus('unwatched');
+          setFocusedPane("main");
+          setStatus("unwatched");
           return;
-        case 'room-check': {
-          if (view.kind !== 'room') return setStatus('/room-check only works inside a room (/join #x first)');
+        case "room-check": {
+          if (view.kind !== "room")
+            return setStatus(
+              "/room-check only works inside a room (/join #x first)",
+            );
           const members = dao.roomMembers(db, view.room);
           const others = members.filter((m) => m !== dao.SYSTEM_HANDLE);
-          const body = others.length === 0
-            ? `👥 ${view.room} has no members yet.`
-            : `👥 ${view.room} · ${others.length} member${others.length === 1 ? '' : 's'}: ${others.join(', ')}`;
+          const body =
+            others.length === 0
+              ? `👥 ${view.room} has no members yet.`
+              : `👥 ${view.room} · ${others.length} member${others.length === 1 ? "" : "s"}: ${others.join(", ")}`;
           const now = Date.now();
           const card: Message = {
             // Negative id keeps it out of the DB id space forever; ScrollableMessageList's
@@ -539,13 +654,13 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             sent_at: now,
             delivered_at: null,
             read_at: null,
-            kind: 'chat',
+            kind: "chat",
           };
           setRoomInlineCard({ room: view.room, card });
           setTick((t) => t + 1);
           return;
         }
-        case 'ack': {
+        case "ack": {
           // Dismiss the alert lane by marking every visible alert read (DMs)
           // or advancing the room read watermark past them.
           for (const a of alerts) {
@@ -558,12 +673,12 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             }
           }
           setTick((t) => t + 1);
-          setStatus('alerts dismissed');
+          setStatus("alerts dismissed");
           return;
         }
-        case 'all-hands': {
+        case "all-hands": {
           const [roomArg] = args;
-          if (!roomArg) return setStatus('usage: /all-hands #<room>');
+          if (!roomArg) return setStatus("usage: /all-hands #<room>");
           try {
             assertRoomName(roomArg);
           } catch (e) {
@@ -576,14 +691,23 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             if (joinRes.was_new_member && joinRes.system_message) {
               for (const member of dao.roomMembers(db, roomArg)) {
                 if (member === handle) continue;
-                notifyPeer(member, { id: joinRes.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: joinRes.system_message.sent_at, body: joinRes.system_message.body });
+                notifyPeer(member, {
+                  id: joinRes.system_message.id,
+                  to: roomArg,
+                  from: dao.SYSTEM_HANDLE,
+                  ts: joinRes.system_message.sent_at,
+                  body: joinRes.system_message.body,
+                });
               }
             }
           }
-          const targets = dao.listAgents(db, false).filter(
-            (a) => a.handle !== handle && a.handle !== dao.SYSTEM_HANDLE,
-          );
-          if (targets.length === 0) return setStatus('no other peers online to ping');
+          const targets = dao
+            .listAgents(db, false)
+            .filter(
+              (a) => a.handle !== handle && a.handle !== dao.SYSTEM_HANDLE,
+            );
+          if (targets.length === 0)
+            return setStatus("no other peers online to ping");
           const body = `📢 All hands — please /join ${roomArg} (from ${handle})`;
           // 🛑 COUNT, DO NOT ASSUME. A throw partway through used to leave the
           // earlier peers notified, the rest not, and no status line at all —
@@ -592,81 +716,131 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           let stoppedAt: string | null = null;
           for (const t of targets) {
             const out = sendOrReason(() =>
-              dao.insertMessage(db, { from: handle, to: t.handle, body, kind: 'alert' }),
+              dao.insertMessage(db, {
+                from: handle,
+                to: t.handle,
+                body,
+                kind: "alert",
+              }),
             );
-            if ('reason' in out) {
+            if ("reason" in out) {
               stoppedAt = t.handle;
               break;
             }
             const sent = out.sent;
-            notifyPeer(t.handle, { id: sent.id, to: t.handle, from: handle, ts: sent.sent_at, body, kind: 'alert' });
+            notifyPeer(t.handle, {
+              id: sent.id,
+              to: t.handle,
+              from: handle,
+              ts: sent.sent_at,
+              body,
+              kind: "alert",
+            });
             notified += 1;
           }
           if (stoppedAt !== null) {
             const progress = `${notified} of ${targets.length}`;
-            setStatus(`📢 all-hands STOPPED at ${stoppedAt} — ${progress} notified → ${roomArg}`);
+            setStatus(
+              `📢 all-hands STOPPED at ${stoppedAt} — ${progress} notified → ${roomArg}`,
+            );
             setTick((t) => t + 1);
             return;
           }
-          setStatus(`📢 all-hands sent to ${targets.length} peer${targets.length === 1 ? '' : 's'} → ${roomArg}`);
+          setStatus(
+            `📢 all-hands sent to ${targets.length} peer${targets.length === 1 ? "" : "s"} → ${roomArg}`,
+          );
           setTick((t) => t + 1);
           return;
         }
-        case 'invite': {
+        case "invite": {
           const [roomArg, list] = args;
-          if (!roomArg || !list) return setStatus('usage: /invite #<room> <peer1,peer2,...>');
+          if (!roomArg || !list)
+            return setStatus("usage: /invite #<room> <peer1,peer2,...>");
           try {
             assertRoomName(roomArg);
           } catch (e) {
             return setStatus((e as Error).message);
           }
-          if (!dao.isRoomMember(db, roomArg, handle)) return setStatus(`not a member of ${roomArg} — /join first`);
-          const invitees = list.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
-          if (invitees.length === 0) return setStatus('usage: /invite #<room> <peer1,peer2,...>');
+          if (!dao.isRoomMember(db, roomArg, handle))
+            return setStatus(`not a member of ${roomArg} — /join first`);
+          const invitees = list
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+          if (invitees.length === 0)
+            return setStatus("usage: /invite #<room> <peer1,peer2,...>");
           let added = 0;
           const skipped: string[] = [];
           for (const p of invitees) {
-            if (p === handle) { skipped.push(`${p} (self)`); continue; }
-            if (p === dao.SYSTEM_HANDLE) { skipped.push(`${p} (system)`); continue; }
-            if (!dao.getAgent(db, p)) { skipped.push(`${p} (unknown)`); continue; }
-            if (dao.isRoomMember(db, roomArg, p)) { skipped.push(`${p} (already in)`); continue; }
+            if (p === handle) {
+              skipped.push(`${p} (self)`);
+              continue;
+            }
+            if (p === dao.SYSTEM_HANDLE) {
+              skipped.push(`${p} (system)`);
+              continue;
+            }
+            if (!dao.getAgent(db, p)) {
+              skipped.push(`${p} (unknown)`);
+              continue;
+            }
+            if (dao.isRoomMember(db, roomArg, p)) {
+              skipped.push(`${p} (already in)`);
+              continue;
+            }
             const r = dao.joinRoom(db, roomArg, p);
             if (r.was_new_member && r.system_message) {
               for (const member of dao.roomMembers(db, roomArg)) {
                 if (member === handle) continue;
-                notifyPeer(member, { id: r.system_message.id, to: roomArg, from: dao.SYSTEM_HANDLE, ts: r.system_message.sent_at, body: r.system_message.body });
+                notifyPeer(member, {
+                  id: r.system_message.id,
+                  to: roomArg,
+                  from: dao.SYSTEM_HANDLE,
+                  ts: r.system_message.sent_at,
+                  body: r.system_message.body,
+                });
               }
             }
             added += 1;
           }
-          const skipMsg = skipped.length > 0 ? ` (skipped: ${skipped.join(', ')})` : '';
+          const skipMsg =
+            skipped.length > 0 ? ` (skipped: ${skipped.join(", ")})` : "";
           setStatus(`invited ${added} to ${roomArg}${skipMsg}`);
           setTick((t) => t + 1);
           return;
         }
-        case 'clear': {
-          if (view.kind === 'dm') {
+        case "clear": {
+          if (view.kind === "dm") {
             const n = dao.deleteDmMessages(db, handle, view.peer);
-            setStatus(`cleared ${n} message${n === 1 ? '' : 's'} with ${view.peer}`);
+            setStatus(
+              `cleared ${n} message${n === 1 ? "" : "s"} with ${view.peer}`,
+            );
             setTick((t) => t + 1);
-          } else if (view.kind === 'room') {
+          } else if (view.kind === "room") {
             const n = dao.deleteRoomMessages(db, view.room);
-            setStatus(`cleared ${n} message${n === 1 ? '' : 's'} from ${view.room}`);
+            setStatus(
+              `cleared ${n} message${n === 1 ? "" : "s"} from ${view.room}`,
+            );
             setTick((t) => t + 1);
           } else {
-            setStatus('open a DM or room first (/dm or /join)');
+            setStatus("open a DM or room first (/dm or /join)");
           }
           return;
         }
-        case 'kick': {
+        case "kick": {
           const [target] = args;
-          if (!target) return setStatus('usage: /kick <peer>');
-          if (target === handle) return setStatus('cannot kick yourself — /quit instead');
-          if (target === dao.SYSTEM_HANDLE) return setStatus('cannot kick system');
-          if (!dao.getAgent(db, target)) return setStatus(`unknown peer: ${target}`);
+          if (!target) return setStatus("usage: /kick <peer>");
+          if (target === handle)
+            return setStatus("cannot kick yourself — /quit instead");
+          if (target === dao.SYSTEM_HANDLE)
+            return setStatus("cannot kick system");
+          if (!dao.getAgent(db, target))
+            return setStatus(`unknown peer: ${target}`);
           const removed = dao.deleteAgent(db, target);
           if (removed) {
-            setStatus(`kicked ${target} — will rejoin if their shim is still running`);
+            setStatus(
+              `kicked ${target} — will rejoin if their shim is still running`,
+            );
             setTick((t) => t + 1);
           } else {
             setStatus(`kick failed: ${target} not found`);
@@ -692,7 +866,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
       });
       setHistoryIndex(null);
       setDraft(null);
-      if (line.startsWith('/')) doCommand(line);
+      if (line.startsWith("/")) doCommand(line);
       else sendCurrent(line);
     },
     [doCommand, sendCurrent],
@@ -719,7 +893,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     setHistoryIndex((i) => {
       if (i === null) return null;
       if (i >= history.length - 1) {
-        const d = draft ?? { value: '', cursor: 0 };
+        const d = draft ?? { value: "", cursor: 0 };
         setInput(d);
         setDraft(null);
         return null;
@@ -731,43 +905,57 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
   }, [history, draft]);
 
   useInput((raw, key) => {
-    if (key.ctrl && raw === 'c') exit();
-    if (key.ctrl && raw === 'k' && !paletteOpen) return setPaletteOpen(true);
-    if (key.ctrl && raw === 'r' && !paletteOpen) return setView({ kind: 'rooms' });
+    if (key.ctrl && raw === "c") exit();
+    if (key.ctrl && raw === "k" && !paletteOpen) return setPaletteOpen(true);
+    if (key.ctrl && raw === "r" && !paletteOpen)
+      return setView({ kind: "rooms" });
     // Ctrl-O — cycle scroll focus between main and watch panes. No-op unless
     // the watch pane is open. Fires regardless of input-buffer content so
     // the user can move focus while composing a message.
-    if (key.ctrl && raw === 'o' && watchPeer !== null && !paletteOpen) {
-      return setFocusedPane((p) => (p === 'main' ? 'watch' : 'main'));
+    if (key.ctrl && raw === "o" && watchPeer !== null && !paletteOpen) {
+      return setFocusedPane((p) => (p === "main" ? "watch" : "main"));
     }
 
     // Empty-input hotkeys — must not fire while palette is open.
     if (input.value.length > 0 || paletteOpen) return;
-    if (raw === '?') return setView({ kind: 'help' });
+    if (raw === "?") return setView({ kind: "help" });
     if (/^[1-9]$/.test(raw)) {
       const n = parseInt(raw, 10) - 1;
       // Order: peers first, then joined rooms, then discover rooms.
-      const targets: Array<{ kind: 'dm'; peer: string } | { kind: 'room'; room: string; join?: boolean }> = [
-        ...peers.map((p) => ({ kind: 'dm' as const, peer: p.handle })),
-        ...rooms.map((r) => ({ kind: 'room' as const, room: r.name })),
-        ...discoverRooms.map((r) => ({ kind: 'room' as const, room: r.name, join: true })),
+      const targets: Array<
+        | { kind: "dm"; peer: string }
+        | { kind: "room"; room: string; join?: boolean }
+      > = [
+        ...peers.map((p) => ({ kind: "dm" as const, peer: p.handle })),
+        ...rooms.map((r) => ({ kind: "room" as const, room: r.name })),
+        ...discoverRooms.map((r) => ({
+          kind: "room" as const,
+          room: r.name,
+          join: true,
+        })),
       ];
       const t = targets[n];
       if (!t) return;
-      if (t.kind === 'dm') {
-        setView({ kind: 'dm', peer: t.peer });
+      if (t.kind === "dm") {
+        setView({ kind: "dm", peer: t.peer });
       } else if (t.join) {
         const result = dao.joinRoom(db, t.room, handle);
         if (result.was_new_member && result.system_message) {
           for (const member of dao.roomMembers(db, t.room)) {
             if (member === handle) continue;
-            notifyPeer(member, { id: result.system_message.id, to: t.room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });
+            notifyPeer(member, {
+              id: result.system_message.id,
+              to: t.room,
+              from: dao.SYSTEM_HANDLE,
+              ts: result.system_message.sent_at,
+              body: result.system_message.body,
+            });
           }
         }
-        setView({ kind: 'room', room: t.room });
+        setView({ kind: "room", room: t.room });
         setTick((tk) => tk + 1);
       } else {
-        setView({ kind: 'room', room: t.room });
+        setView({ kind: "room", room: t.room });
       }
     }
   });
@@ -805,7 +993,10 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
 
   const allRoomsList = useMemo(() => dao.allRooms(db), [db, tick]);
   const discoverRooms = useMemo(
-    () => allRoomsList.filter((r) => !rooms.some((mr) => mr.name === r.name) && r.member_count > 0),
+    () =>
+      allRoomsList.filter(
+        (r) => !rooms.some((mr) => mr.name === r.name) && r.member_count > 0,
+      ),
     [allRoomsList, rooms],
   );
 
@@ -864,7 +1055,7 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             if (cmd.args.length === 0) {
               doCommand(cmd.name);
             } else {
-              setInput({ value: cmd.name + ' ', cursor: cmd.name.length + 1 });
+              setInput({ value: cmd.name + " ", cursor: cmd.name.length + 1 });
             }
           }}
         />
@@ -886,21 +1077,21 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
           flexDirection="column"
           flexGrow={1}
           borderStyle="round"
-          borderColor={showWatch && focusedPane === 'main' ? 'cyan' : 'gray'}
+          borderColor={showWatch && focusedPane === "main" ? "cyan" : "gray"}
           paddingX={1}
         >
-          {view.kind === 'who' ? (
+          {view.kind === "who" ? (
             <WhoPane peers={peers} meHandle={handle} />
-          ) : view.kind === 'help' ? (
+          ) : view.kind === "help" ? (
             <HelpPane />
-          ) : view.kind === 'keyboard' ? (
+          ) : view.kind === "keyboard" ? (
             <KeyboardPane />
-          ) : view.kind === 'rooms' ? (
+          ) : view.kind === "rooms" ? (
             <RoomsBrowserPane
               db={db}
               handle={handle}
               rooms={allRoomsList.filter((r) => r.member_count > 0)}
-              onOpen={(room) => setView({ kind: 'room', room })}
+              onOpen={(room) => setView({ kind: "room", room })}
               // #92 — `allRoomsList` is memoised on `tick`, and Room now
               // carries the style, so a cycle needs a bump to show up.
               onStyleChanged={() => setTick((t) => t + 1)}
@@ -909,15 +1100,27 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                 if (result.was_new_member && result.system_message) {
                   for (const member of dao.roomMembers(db, room)) {
                     if (member === handle) continue;
-                    notifyPeer(member, { id: result.system_message.id, to: room, from: dao.SYSTEM_HANDLE, ts: result.system_message.sent_at, body: result.system_message.body });
+                    notifyPeer(member, {
+                      id: result.system_message.id,
+                      to: room,
+                      from: dao.SYSTEM_HANDLE,
+                      ts: result.system_message.sent_at,
+                      body: result.system_message.body,
+                    });
                   }
                 }
-                setView({ kind: 'room', room });
+                setView({ kind: "room", room });
                 setTick((t) => t + 1);
               }}
             />
           ) : (
-            <MessagesPane view={view} messages={messages} meHandle={handle} focused={!showWatch || focusedPane === 'main'} contentColumns={messageContentColumns} />
+            <MessagesPane
+              view={view}
+              messages={messages}
+              meHandle={handle}
+              focused={!showWatch || focusedPane === "main"}
+              contentColumns={messageContentColumns}
+            />
           )}
         </Box>
 
@@ -927,13 +1130,14 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
             width={34}
             flexShrink={0}
             borderStyle="round"
-            borderColor={focusedPane === 'watch' ? 'magentaBright' : 'magenta'}
+            borderColor={focusedPane === "watch" ? "magentaBright" : "magenta"}
             paddingX={1}
           >
             <Text bold color="magenta">
-              👁  WATCH: {watchPeer}{focusedPane === 'watch' ? ' ⟵' : ''}
+              👁 WATCH: {watchPeer}
+              {focusedPane === "watch" ? " ⟵" : ""}
             </Text>
-            <Text dimColor>{'─'.repeat(30)}</Text>
+            <Text dimColor>{"─".repeat(30)}</Text>
             {watchMessages.length === 0 ? (
               <Text dimColor>(no traffic)</Text>
             ) : (
@@ -942,15 +1146,23 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                 meHandle={handle}
                 viewportRows={messageViewport}
                 contentColumns={30}
-                focused={focusedPane === 'watch'}
-                rowsForMessage={(m) => 1 /* header */ + wrappedRowCount(rehydrateEscapedNewlines(m.body), 28)}
+                focused={focusedPane === "watch"}
+                rowsForMessage={(m) =>
+                  1 /* header */ +
+                  wrappedRowCount(rehydrateEscapedNewlines(m.body), 28)
+                }
                 renderRow={(m) => (
                   <Box key={m.id} flexDirection="column">
                     <Text>
-                      <Text bold color={m.from_handle === watchPeer ? 'green' : 'cyan'}>
+                      <Text
+                        bold
+                        color={m.from_handle === watchPeer ? "green" : "cyan"}
+                      >
                         {m.from_handle}
-                      </Text>{' '}
-                      <Text dimColor>→ {m.to_handle} · {timeOf(m.sent_at)}</Text>
+                      </Text>{" "}
+                      <Text dimColor>
+                        → {m.to_handle} · {timeOf(m.sent_at)}
+                      </Text>
                     </Text>
                     <Box paddingLeft={2}>
                       <Markdown body={rehydrateEscapedNewlines(m.body)} />
@@ -969,18 +1181,32 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
       {!paletteOpen && (
         <Box flexDirection="column" flexShrink={0}>
           {completions.length > 0 && (
-            <Autocomplete completions={completions} selectedIndex={completionIndex} />
+            <Autocomplete
+              completions={completions}
+              selectedIndex={completionIndex}
+            />
           )}
-          <Box borderStyle="round" borderColor="gray" paddingX={1} flexShrink={0}>
+          <Box
+            borderStyle="round"
+            borderColor="gray"
+            paddingX={1}
+            flexShrink={0}
+          >
             <Input
               value={input.value}
               cursor={input.cursor}
               onChange={(value, cursor) => {
                 setInput({ value, cursor });
                 setCompletionIndex(0);
-                if (historyIndex !== null) { setHistoryIndex(null); setDraft(null); }
+                if (historyIndex !== null) {
+                  setHistoryIndex(null);
+                  setDraft(null);
+                }
               }}
-              onSubmit={(v) => { handleSubmit(v); setInput({ value: '', cursor: 0 }); }}
+              onSubmit={(v) => {
+                handleSubmit(v);
+                setInput({ value: "", cursor: 0 });
+              }}
               onTab={() => {
                 // Tab-complete: replace current token with the selected completion + trailing space.
                 const c = completions[completionIndex];
@@ -989,27 +1215,36 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
                 const after = input.value.slice(input.cursor);
                 // Token starts at the char AFTER the last space, OR at the
                 // last '#' / '@' if those introduce a room- or path-token.
-                const tokenStart = Math.max(
-                  before.lastIndexOf(' '),
-                  before.lastIndexOf('#') - 1,
-                  before.lastIndexOf('@') - 1,
-                ) + 1;
-                const nextValue = input.value.slice(0, tokenStart) + c.value + ' ' + after;
+                const tokenStart =
+                  Math.max(
+                    before.lastIndexOf(" "),
+                    before.lastIndexOf("#") - 1,
+                    before.lastIndexOf("@") - 1,
+                  ) + 1;
+                const nextValue =
+                  input.value.slice(0, tokenStart) + c.value + " " + after;
                 const nextCursor = tokenStart + c.value.length + 1;
                 setInput({ value: nextValue, cursor: nextCursor });
                 setCompletionIndex(0);
               }}
               onEsc={() => {
-                setInput({ value: '', cursor: 0 });
+                setInput({ value: "", cursor: 0 });
                 setCompletionIndex(0);
-                if (historyIndex !== null) { setHistoryIndex(null); setDraft(null); }
+                if (historyIndex !== null) {
+                  setHistoryIndex(null);
+                  setDraft(null);
+                }
               }}
               onUp={() => {
-                if (completions.length > 0) return setCompletionIndex((i) => Math.max(0, i - 1));
+                if (completions.length > 0)
+                  return setCompletionIndex((i) => Math.max(0, i - 1));
                 historyUp();
               }}
               onDown={() => {
-                if (completions.length > 0) return setCompletionIndex((i) => Math.min(completions.length - 1, i + 1));
+                if (completions.length > 0)
+                  return setCompletionIndex((i) =>
+                    Math.min(completions.length - 1, i + 1),
+                  );
                 historyDown();
               }}
               emptyBufferHotkeys={EMPTY_BUFFER_HOTKEYS}
@@ -1026,5 +1261,3 @@ export function App({ handle, db, notify, version }: AppProps): React.ReactEleme
     </Box>
   );
 }
-
-

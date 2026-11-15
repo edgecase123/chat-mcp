@@ -1,9 +1,14 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import * as dao from '../../storage/dao.js';
-import { decideClaim, decideRelease, remainingMs, ttlMinutes } from '../../claims/lifecycle.js';
-import type { Db } from '../../storage/db.js';
-import type { ShimContext } from '../index.js';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import * as dao from "../../storage/dao.js";
+import {
+  decideClaim,
+  decideRelease,
+  remainingMs,
+  ttlMinutes,
+} from "../../claims/lifecycle.js";
+import type { Db } from "../../storage/db.js";
+import type { ShimContext } from "../index.js";
 
 /**
  * #101 — a claim on a shared resource, as a row the UI can show.
@@ -25,10 +30,11 @@ const MAX_NOTE_LEN = 200;
 const minutes = (ms: number) => Math.max(1, Math.round(ms / 60_000));
 
 const text = (payload: unknown) => ({
-  content: [{ type: 'text' as const, text: JSON.stringify(payload) }],
+  content: [{ type: "text" as const, text: JSON.stringify(payload) }],
 });
 
-const CONFLICT_HINT = 'Ask the holder in the room, or `release` with force if you know their process is gone.';
+const CONFLICT_HINT =
+  "Ask the holder in the room, or `release` with force if you know their process is gone.";
 
 /**
  * Decide and store one claim, as the payload the tool returns.
@@ -47,11 +53,17 @@ export function performClaim(input: {
 }): Record<string, unknown> {
   const { db, holder, resource, note, now } = input;
   const existing = dao.latestClaim(db, resource);
-  const decision = decideClaim({ existing, resource, holder, now, ttlMinutes: input.ttlMinutes });
+  const decision = decideClaim({
+    existing,
+    resource,
+    holder,
+    now,
+    ttlMinutes: input.ttlMinutes,
+  });
 
-  if (decision.outcome === 'conflict') {
+  if (decision.outcome === "conflict") {
     return {
-      outcome: 'conflict',
+      outcome: "conflict",
       resource,
       held_by: decision.heldBy,
       expires_in_minutes: minutes(decision.remainingMs ?? 0),
@@ -62,8 +74,13 @@ export function performClaim(input: {
   // 🛑 A RENEWAL UPDATES THE SAME ROW. Appending would lose `claimed_at`,
   // which is the answer to "how long has this been held".
   const row =
-    decision.outcome === 'renewed' && existing !== null
-      ? dao.renewClaim(db, { id: existing.id, holder, expires_at: decision.expires_at as number, now })
+    decision.outcome === "renewed" && existing !== null
+      ? dao.renewClaim(db, {
+          id: existing.id,
+          holder,
+          expires_at: decision.expires_at as number,
+          now,
+        })
       : dao.insertClaim(db, {
           resource,
           holder,
@@ -79,7 +96,7 @@ export function performClaim(input: {
     const rival = dao.latestClaim(db, resource);
 
     return {
-      outcome: 'conflict',
+      outcome: "conflict",
       resource,
       held_by: rival?.holder,
       expires_in_minutes: minutes(rival === null ? 0 : remainingMs(rival, now)),
@@ -100,27 +117,30 @@ export function performClaim(input: {
 
 export function installClaims(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
-    'claim',
+    "claim",
     {
-      title: 'Claim a shared resource',
+      title: "Claim a shared resource",
       description:
-        'Take an exclusive claim on a shared resource — the gate script, a Docker stack, a branch, a file two agents could both touch. Refuses if someone else already holds it and tells you who. Re-claiming something you already hold renews it. Claims expire on a generous failsafe, but you are expected to call `release` when you are done.',
+        "Take an exclusive claim on a shared resource — the gate script, a Docker stack, a branch, a file two agents could both touch. Refuses if someone else already holds it and tells you who. Re-claiming something you already hold renews it. Claims expire on a generous failsafe, but you are expected to call `release` when you are done.",
       inputSchema: {
         resource: z
           .string()
           .min(1)
           .max(MAX_RESOURCE_LEN)
-          .describe('What you are claiming. Use the same spelling every time — "reset-and-test.sh", "leagues_app".'),
+          .describe(
+            'What you are claiming. Use the same spelling every time — "reset-and-test.sh", "leagues_app".',
+          ),
         note: z
           .string()
           .max(MAX_NOTE_LEN)
           .optional()
-          .describe('Optional one line on why, shown beside the claim.'),
+          .describe("Optional one line on why, shown beside the claim."),
       },
     },
     async ({ resource, note }) => {
       const name = resource.trim();
-      if (name.length === 0) return text({ outcome: 'invalid', reason: 'resource is blank' });
+      if (name.length === 0)
+        return text({ outcome: "invalid", reason: "resource is blank" });
 
       return text(
         performClaim({
@@ -136,42 +156,57 @@ export function installClaims(server: McpServer, ctx: ShimContext): void {
   );
 
   server.registerTool(
-    'release',
+    "release",
     {
-      title: 'Release a claim',
+      title: "Release a claim",
       description:
-        'Give up a claim you hold. The onus is on you to call this when you are done — expiry is only a failsafe. Pass force to clear a claim held by an agent you know is gone.',
+        "Give up a claim you hold. The onus is on you to call this when you are done — expiry is only a failsafe. Pass force to clear a claim held by an agent you know is gone.",
       inputSchema: {
-        resource: z.string().min(1).max(MAX_RESOURCE_LEN).describe('The resource you claimed.'),
+        resource: z
+          .string()
+          .min(1)
+          .max(MAX_RESOURCE_LEN)
+          .describe("The resource you claimed."),
         force: z
           .boolean()
           .optional()
-          .describe("Release someone else's claim. Only when you know their process is gone."),
+          .describe(
+            "Release someone else's claim. Only when you know their process is gone.",
+          ),
       },
     },
     async ({ resource, force }) => {
       const name = resource.trim();
       const now = Date.now();
       const existing = dao.latestClaim(ctx.db, name);
-      const decision = decideRelease({ existing, by: ctx.handle, force: force === true, now });
+      const decision = decideRelease({
+        existing,
+        by: ctx.handle,
+        force: force === true,
+        now,
+      });
 
-      if (decision.outcome === 'not-held') {
-        return text({ outcome: 'not-held', resource: name, hint: 'Nothing live to release. Check the spelling.' });
+      if (decision.outcome === "not-held") {
+        return text({
+          outcome: "not-held",
+          resource: name,
+          hint: "Nothing live to release. Check the spelling.",
+        });
       }
 
-      if (decision.outcome === 'not-yours') {
+      if (decision.outcome === "not-yours") {
         return text({
-          outcome: 'not-yours',
+          outcome: "not-yours",
           resource: name,
           held_by: decision.heldBy,
-          hint: 'Pass force only if you know that process is gone.',
+          hint: "Pass force only if you know that process is gone.",
         });
       }
 
       dao.releaseClaim(ctx.db, existing?.id as number, now);
 
       return text({
-        outcome: 'released',
+        outcome: "released",
         resource: name,
         forced_from: decision.forcedFrom,
       });
@@ -179,11 +214,11 @@ export function installClaims(server: McpServer, ctx: ShimContext): void {
   );
 
   server.registerTool(
-    'claims',
+    "claims",
     {
-      title: 'List live claims',
+      title: "List live claims",
       description:
-        'Every resource currently claimed, with its holder, how long it has been held and how long until the failsafe frees it. Call this before starting anything a sibling agent could already be holding.',
+        "Every resource currently claimed, with its holder, how long it has been held and how long until the failsafe frees it. Call this before starting anything a sibling agent could already be holding.",
       inputSchema: {},
     },
     async () => {

@@ -1,34 +1,38 @@
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { randomUUID } from 'node:crypto';
-import { openDb, type Db } from '../storage/db.js';
-import { NotifyBus } from '../notify/bus.js';
-import * as dao from '../storage/dao.js';
-import { packageVersion } from '../util/version.js';
-import { installWhoami } from './tools/whoami.js';
-import { installRegister } from './tools/register.js';
-import { installListAgents } from './tools/list_agents.js';
-import { installSend } from './tools/send.js';
-import { installInbox } from './tools/inbox.js';
-import { installWaitForMessage } from './tools/wait_for_message.js';
-import { installRoomJoin } from './tools/room_join.js';
-import { installRoomLeave } from './tools/room_leave.js';
-import { installRoomSend } from './tools/room_send.js';
-import { installRoomInbox } from './tools/room_inbox.js';
-import { installRoomList } from './tools/room_list.js';
-import { installRoomMembers } from './tools/room_members.js';
-import { installRoomDelete } from './tools/room_delete.js';
-import { installRoomBoot } from './tools/room_boot.js';
-import { installSetStatus } from './tools/set_status.js';
-import { installReportContext } from './tools/report_context.js';
-import { installSetStyle } from './tools/set_style.js';
-import { installClaims } from './tools/claims.js';
-import { installSearch } from './tools/search.js';
-import { installHealth } from './tools/health.js';
-import { installRunCommand } from './tools/run_command.js';
-import { installInboxResource } from './resources/inbox.js';
-import { checkWakeAdapter, prependAdapterWarning, type AdapterStatus } from './adapter-check.js';
-import { dbPath, notifyPathFor } from '../util/paths.js';
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { randomUUID } from "node:crypto";
+import { openDb, type Db } from "../storage/db.js";
+import { NotifyBus } from "../notify/bus.js";
+import * as dao from "../storage/dao.js";
+import { packageVersion } from "../util/version.js";
+import { installWhoami } from "./tools/whoami.js";
+import { installRegister } from "./tools/register.js";
+import { installListAgents } from "./tools/list_agents.js";
+import { installSend } from "./tools/send.js";
+import { installInbox } from "./tools/inbox.js";
+import { installWaitForMessage } from "./tools/wait_for_message.js";
+import { installRoomJoin } from "./tools/room_join.js";
+import { installRoomLeave } from "./tools/room_leave.js";
+import { installRoomSend } from "./tools/room_send.js";
+import { installRoomInbox } from "./tools/room_inbox.js";
+import { installRoomList } from "./tools/room_list.js";
+import { installRoomMembers } from "./tools/room_members.js";
+import { installRoomDelete } from "./tools/room_delete.js";
+import { installRoomBoot } from "./tools/room_boot.js";
+import { installSetStatus } from "./tools/set_status.js";
+import { installReportContext } from "./tools/report_context.js";
+import { installSetStyle } from "./tools/set_style.js";
+import { installClaims } from "./tools/claims.js";
+import { installSearch } from "./tools/search.js";
+import { installHealth } from "./tools/health.js";
+import { installRunCommand } from "./tools/run_command.js";
+import { installInboxResource } from "./resources/inbox.js";
+import {
+  checkWakeAdapter,
+  prependAdapterWarning,
+  type AdapterStatus,
+} from "./adapter-check.js";
+import { dbPath, notifyPathFor } from "../util/paths.js";
 
 export interface ShimOptions {
   handle: string;
@@ -112,7 +116,7 @@ function buildInstructions(handle: string): string {
     `Update the status on transitions, not on every turn — the point is to reflect *state changes*, not to broadcast a heartbeat. A rough cadence: set it when you start a new task, when you become blocked, when a blocker clears, when you finish a big unit of work. Skip micro-updates.`,
     ``,
     `Example — kicking off a feature: \`set_status({ status: "tool", focus: "implementing #727 announcement composer" })\`. Blocked mid-flight: \`set_status({ status: "blocked", focus: "need lee to confirm payload shape" })\`. Back to idle when done: \`set_status({ status: "idle" })\` with no focus.`,
-  ].join('\n');
+  ].join("\n");
 }
 
 export interface ShimContext {
@@ -136,8 +140,13 @@ export interface ShimContext {
  */
 export function buildServer(ctx: ShimContext): McpServer {
   const server = new McpServer(
-    { name: 'chat-mcp', version: packageVersion() },
-    { instructions: prependAdapterWarning(buildInstructions(ctx.handle), ctx.adapterStatus) },
+    { name: "chat-mcp", version: packageVersion() },
+    {
+      instructions: prependAdapterWarning(
+        buildInstructions(ctx.handle),
+        ctx.adapterStatus,
+      ),
+    },
   );
 
   installWhoami(server, ctx);
@@ -193,11 +202,17 @@ export function shimContextFor(opts: ShimContextOptions): ShimContext {
     pid: process.pid,
     session_id,
     display_name: opts.handle,
-    metadata: { kind: 'agent' },
+    metadata: { kind: "agent" },
     force: opts.force,
   });
 
-  return { handle: opts.handle, session_id, db, notify, adapterStatus: opts.adapterStatus };
+  return {
+    handle: opts.handle,
+    session_id,
+    db,
+    notify,
+    adapterStatus: opts.adapterStatus,
+  };
 }
 
 export async function runShim(opts: ShimOptions): Promise<void> {
@@ -232,8 +247,8 @@ export async function runShim(opts: ShimOptions): Promise<void> {
   transport.onclose = () => {
     void cleanup();
   };
-  process.on('SIGINT', () => void cleanup());
-  process.on('SIGTERM', () => void cleanup());
+  process.on("SIGINT", () => void cleanup());
+  process.on("SIGTERM", () => void cleanup());
 
   await server.connect(transport);
 }

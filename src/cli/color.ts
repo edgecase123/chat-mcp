@@ -8,13 +8,15 @@
 
 // Color precedence: NO_COLOR (off) > FORCE_COLOR (on) > TTY autodetect.
 // https://no-color.org/ · https://force-color.org/
-const USE_COLOR = !process.env.NO_COLOR && (!!process.env.FORCE_COLOR || process.stdout.isTTY === true);
+const USE_COLOR =
+  !process.env.NO_COLOR &&
+  (!!process.env.FORCE_COLOR || process.stdout.isTTY === true);
 
 function wrap(code: string): (s: string) => string {
   return (s: string) => (USE_COLOR ? `\x1b[${code}m${s}\x1b[0m` : s);
 }
 
-export const dim = wrap('2');
-export const bold = wrap('1');
-export const cyan = wrap('36');
-export const green = wrap('32');
+export const dim = wrap("2");
+export const bold = wrap("1");
+export const cyan = wrap("36");
+export const green = wrap("32");

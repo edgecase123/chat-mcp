@@ -1,8 +1,15 @@
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { mkdirSync, chmodSync, existsSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import type { Stats } from 'node:fs';
-import { assertHandle } from './naming.js';
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import {
+  mkdirSync,
+  chmodSync,
+  existsSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
+import type { Stats } from "node:fs";
+import { assertHandle } from "./naming.js";
 
 /**
  * 🛑 UNDER THE TEST RUNNER, THE DEFAULT PATH IS REFUSED. Ruled by lee.
@@ -25,22 +32,22 @@ export function stateDir(): string {
 
   if (process.env.NODE_TEST_CONTEXT !== undefined) {
     throw new Error(
-      'CHAT_MCP_HOME is unset under the node test runner, so this would resolve the ' +
+      "CHAT_MCP_HOME is unset under the node test runner, so this would resolve the " +
         "operator's live ~/.chat-mcp — where binding a socket unlinks whatever looks " +
-        'stale, silently stopping a running agent.\n' +
-        'In a TEST: set process.env.CHAT_MCP_HOME to a temp directory BEFORE importing ' +
-        'anything that resolves a state path.\n' +
-        'In a SPAWNED CHILD, which inherits NODE_TEST_CONTEXT and so lands here with no ' +
-        'import of its own: pass it through, ' +
-        'spawn(cmd, { env: { ...process.env, CHAT_MCP_HOME: dir } }).',
+        "stale, silently stopping a running agent.\n" +
+        "In a TEST: set process.env.CHAT_MCP_HOME to a temp directory BEFORE importing " +
+        "anything that resolves a state path.\n" +
+        "In a SPAWNED CHILD, which inherits NODE_TEST_CONTEXT and so lands here with no " +
+        "import of its own: pass it through, " +
+        "spawn(cmd, { env: { ...process.env, CHAT_MCP_HOME: dir } }).",
     );
   }
 
-  return join(homedir(), '.chat-mcp');
+  return join(homedir(), ".chat-mcp");
 }
 
 export function dbPath(): string {
-  return join(stateDir(), 'chat.db');
+  return join(stateDir(), "chat.db");
 }
 
 /**
@@ -57,11 +64,11 @@ export function dbPath(): string {
  * `test/cli/web/handshake-file.test.ts`.
  */
 export function webHandshakeFile(): string {
-  return join(stateDir(), 'web-handshake');
+  return join(stateDir(), "web-handshake");
 }
 
 export function notifyDir(): string {
-  return join(stateDir(), 'notify');
+  return join(stateDir(), "notify");
 }
 
 /**
@@ -84,7 +91,7 @@ export function notifyPathFor(handle: string): string {
  * a clear error. `~/.chat-mcp/sock/<handle>` leaves room for long handles.
  */
 export function socketDir(): string {
-  return join(stateDir(), 'sock');
+  return join(stateDir(), "sock");
 }
 
 /** 🛑 The handle becomes a filename, so it is validated. See the test. */
@@ -134,7 +141,7 @@ export const SOCKET_MODE = 0o600;
  * exclude it. Writing there would also mutate somebody else's repo.
  */
 export function mcpConfigDir(): string {
-  return join(stateDir(), 'mcp');
+  return join(stateDir(), "mcp");
 }
 
 /** 🛑 The handle becomes a filename, so it is validated. See the test. */
@@ -188,7 +195,7 @@ export function ensureManifestDir(): string {
 }
 
 export function adaptersDir(): string {
-  return join(stateDir(), 'adapters');
+  return join(stateDir(), "adapters");
 }
 
 /**
@@ -219,23 +226,35 @@ export const STATE_FILE_MODE = 0o600;
  * win32 is exempt because modes are not enforceable there at all — its
  * protection is the ACL inherited from the user profile directory.
  */
-export function chmodVerified(path: string, mode: number, stat: (p: string) => Stats = statSync) {
+export function chmodVerified(
+  path: string,
+  mode: number,
+  stat: (p: string) => Stats = statSync,
+) {
   chmodSync(path, mode);
-  if (process.platform === 'win32') return;
+  if (process.platform === "win32") return;
 
   const got = stat(path).mode & 0o777;
   if (got === mode) return;
 
   throw new Error(
     `chmod on ${path} did not take: asked for ${mode.toString(8)}, got ${got.toString(8)}. ` +
-      'A filesystem that ignores modes cannot hold this. Move CHAT_MCP_HOME onto one that can, ' +
-      'or mount it with POSIX metadata.',
+      "A filesystem that ignores modes cannot hold this. Move CHAT_MCP_HOME onto one that can, " +
+      "or mount it with POSIX metadata.",
   );
 }
 
 /** Write a file nobody else on the host may read. */
-export function writePrivateFileSync(path: string, data: string, flag?: string) {
-  writeFileSync(path, data, flag ? { mode: STATE_FILE_MODE, flag } : { mode: STATE_FILE_MODE });
+export function writePrivateFileSync(
+  path: string,
+  data: string,
+  flag?: string,
+) {
+  writeFileSync(
+    path,
+    data,
+    flag ? { mode: STATE_FILE_MODE, flag } : { mode: STATE_FILE_MODE },
+  );
   // 🛑 The `mode` above applies on CREATE only, and is masked by the umask.
   // Every file that predates this guard needs the explicit chmod.
   chmodSync(path, STATE_FILE_MODE);

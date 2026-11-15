@@ -1,6 +1,6 @@
-import { resolve } from 'node:path';
-import { realpathSync } from 'node:fs';
-import { realContains } from './containment.js';
+import { resolve } from "node:path";
+import { realpathSync } from "node:fs";
+import { realContains } from "./containment.js";
 
 /**
  * What a supervised agent may do without asking.
@@ -45,7 +45,7 @@ export function editScopesFor(dirs: readonly string[]): string[] {
 }
 
 export const DEFAULT_CWD_NOTE =
-  'the supervisor is launched in the directory its child should work in';
+  "the supervisor is launched in the directory its child should work in";
 
 /**
  * Refuse a working directory outside the reachable set.
@@ -78,14 +78,14 @@ export function resolveCwd(
   const target = requested ?? dirs[0];
 
   if (target === undefined) {
-    throw new Error('a supervised child needs at least one allowed directory');
+    throw new Error("a supervised child needs at least one allowed directory");
   }
 
   let real: string;
   try {
     real = realpathSync(resolve(target));
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(`working directory does not exist: ${target}`);
     }
 
@@ -100,7 +100,7 @@ export function resolveCwd(
     throw new Error(
       `refusing to run a supervised child in "${target}": a child's working directory is ` +
         `always reachable, and this resolves to "${real}", which is outside every allowed ` +
-        `directory (${dirs.join(', ')})`,
+        `directory (${dirs.join(", ")})`,
     );
   }
 
@@ -116,41 +116,41 @@ export function resolveCwd(
  */
 export function allowlistFor(dirs: readonly string[]): string[] {
   return [
-  'Read',
-  'Glob',
-  'Grep',
+    "Read",
+    "Glob",
+    "Grep",
 
-  // 🛑 SCOPED, NEVER BARE, AND THIS WAS PROVEN THE EXPENSIVE WAY.
-  //
-  // A bare `Write` or `Edit` allows the tool against ANY path — measured, it
-  // edited `/tmp` with `--add-dir` naming three unrelated directories. The
-  // directory list does not constrain a bare entry at all.
-  //
-  // ⚠️ IT ALSO COMPOUNDED WITH THE PERMISSION MODE: `acceptEdits` was
-  // justified by a comment claiming no Edit tool existed to accept, which
-  // stopped being true the moment Write and Edit were added. Found by
-  // claude1; I then "fixed" it by going bare and reopened the hole.
-  //
-  // These cover Write too — the CLI states `Edit(path)` rules govern every
-  // file-editing tool.
-  ...editScopesFor(dirs),
+    // 🛑 SCOPED, NEVER BARE, AND THIS WAS PROVEN THE EXPENSIVE WAY.
+    //
+    // A bare `Write` or `Edit` allows the tool against ANY path — measured, it
+    // edited `/tmp` with `--add-dir` naming three unrelated directories. The
+    // directory list does not constrain a bare entry at all.
+    //
+    // ⚠️ IT ALSO COMPOUNDED WITH THE PERMISSION MODE: `acceptEdits` was
+    // justified by a comment claiming no Edit tool existed to accept, which
+    // stopped being true the moment Write and Edit were added. Found by
+    // claude1; I then "fixed" it by going bare and reopened the hole.
+    //
+    // These cover Write too — the CLI states `Edit(path)` rules govern every
+    // file-editing tool.
+    ...editScopesFor(dirs),
 
-  // Inspect and record work, but never publish it.
-  'Bash(git status:*)',
-  'Bash(git diff:*)',
-  'Bash(git add:*)',
-  'Bash(git commit:*)',
+    // Inspect and record work, but never publish it.
+    "Bash(git status:*)",
+    "Bash(git diff:*)",
+    "Bash(git add:*)",
+    "Bash(git commit:*)",
 
-  // Prove it before claiming it.
-  'Bash(npm test:*)',
-  'Bash(npx playwright:*)',
-  'Bash(php artisan test:*)',
+    // Prove it before claiming it.
+    "Bash(npm test:*)",
+    "Bash(npx playwright:*)",
+    "Bash(php artisan test:*)",
 
-  // Answer on the bus. Without these the supervisor is a doorbell.
-  'mcp__chat__send',
-  'mcp__chat__room_send',
-  'mcp__chat__inbox',
-  'mcp__chat__room_inbox',
+    // Answer on the bus. Without these the supervisor is a doorbell.
+    "mcp__chat__send",
+    "mcp__chat__room_send",
+    "mcp__chat__inbox",
+    "mcp__chat__room_inbox",
   ];
 }
 
@@ -161,7 +161,10 @@ export function allowlistFor(dirs: readonly string[]): string[] {
  * the agent already had, mid-task, and the symptom would be a second denial
  * for something that worked a minute earlier.
  */
-export function allowlistWith(base: readonly string[], granted: readonly string[]): string[] {
+export function allowlistWith(
+  base: readonly string[],
+  granted: readonly string[],
+): string[] {
   return [...new Set([...base, ...granted])];
 }
 
@@ -176,4 +179,11 @@ export function allowlistWith(base: readonly string[], granted: readonly string[
  * ⚠️ So `builtinsFrom(DEFAULT_ALLOWLIST)` is a strict SUBSET of this, not an
  * equal. A test asserting equality would force one of the two bugs back.
  */
-export const AVAILABLE_BUILTINS = ['Read', 'Glob', 'Grep', 'Write', 'Edit', 'Bash'] as const;
+export const AVAILABLE_BUILTINS = [
+  "Read",
+  "Glob",
+  "Grep",
+  "Write",
+  "Edit",
+  "Bash",
+] as const;

@@ -1,15 +1,23 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // 🛑 BEFORE any import that resolves a state path.
-process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-manifest-dir-'));
+process.env.CHAT_MCP_HOME = mkdtempSync(
+  join(tmpdir(), "chat-mcp-manifest-dir-"),
+);
 
-const { ensureManifestDir, ensureNotifyDir, manifestDir, manifestPathFor, notifyDir, stateDir } =
-  await import('../../src/util/paths.js');
-const { realContains } = await import('../../src/supervise/containment.js');
+const {
+  ensureManifestDir,
+  ensureNotifyDir,
+  manifestDir,
+  manifestPathFor,
+  notifyDir,
+  stateDir,
+} = await import("../../src/util/paths.js");
+const { realContains } = await import("../../src/supervise/containment.js");
 
 /**
  * 🛑 THE WHOLE POINT OF THIS DIRECTORY IS THAT A CONTAINER CANNOT REACH IT.
@@ -21,7 +29,7 @@ const { realContains } = await import('../../src/supervise/containment.js');
  * ⚠️ `realContains`, not a string compare. `${stateDir()}-manifests` LOOKS
  * outside by prefix while a symlink could still land it inside.
  */
-test('🛑 the manifest dir is NOT inside the state dir, which is mounted into every container', () => {
+test("🛑 the manifest dir is NOT inside the state dir, which is mounted into every container", () => {
   ensureManifestDir();
 
   // 🛑 POSITIVE CONTROL, AND IT ALREADY EARNED ITS PLACE. `realContains`
@@ -35,7 +43,7 @@ test('🛑 the manifest dir is NOT inside the state dir, which is mounted into e
   assert.equal(
     realContains(stateDir(), notifyDir()),
     true,
-    'realContains cannot see inside the state dir, so the refusal below proves nothing',
+    "realContains cannot see inside the state dir, so the refusal below proves nothing",
   );
 
   assert.equal(
@@ -45,8 +53,8 @@ test('🛑 the manifest dir is NOT inside the state dir, which is mounted into e
   );
 });
 
-test('a handle’s manifest is inside the manifest dir', () => {
-  const path = manifestPathFor('claude2');
+test("a handle’s manifest is inside the manifest dir", () => {
+  const path = manifestPathFor("claude2");
 
   // The file must EXIST — see the symlink note on the control above.
   ensureManifestDir();
@@ -60,7 +68,7 @@ test('a handle’s manifest is inside the manifest dir', () => {
  * tree. `stateDir()` already refuses the default under the test runner; a
  * manifest dir derived from `homedir()` instead would bypass that refusal.
  */
-test('🛑 it follows CHAT_MCP_HOME, so a test cannot reach the real one', () => {
+test("🛑 it follows CHAT_MCP_HOME, so a test cannot reach the real one", () => {
   assert.ok(
     manifestDir().startsWith(process.env.CHAT_MCP_HOME as string),
     `${manifestDir()} does not follow CHAT_MCP_HOME`,
@@ -76,10 +84,10 @@ test('🛑 it follows CHAT_MCP_HOME, so a test cannot reach the real one', () =>
  * existing validator (`assertHandle`) is reused rather than a second rule
  * written.
  */
-test('🛑 a traversing handle is refused rather than reaching another manifest', () => {
-  assert.throws(() => manifestPathFor('../claude1'), /Invalid handle/);
-  assert.throws(() => manifestPathFor('a/b'), /Invalid handle/);
-  assert.throws(() => manifestPathFor(''), /Invalid handle/);
+test("🛑 a traversing handle is refused rather than reaching another manifest", () => {
+  assert.throws(() => manifestPathFor("../claude1"), /Invalid handle/);
+  assert.throws(() => manifestPathFor("a/b"), /Invalid handle/);
+  assert.throws(() => manifestPathFor(""), /Invalid handle/);
 });
 
 /**
@@ -93,7 +101,7 @@ test('🛑 a traversing handle is refused rather than reaching another manifest'
  * ⚠️ THE SLASH IS PARAMETERISED ON PURPOSE. A guard hardcoding one spelling of
  * the state dir cannot fail on the other.
  */
-for (const home of ['/tmp/chat-mcp-trailing', '/tmp/chat-mcp-trailing/']) {
+for (const home of ["/tmp/chat-mcp-trailing", "/tmp/chat-mcp-trailing/"]) {
   test(`🛑 the manifest dir stays outside the mount for CHAT_MCP_HOME "${home}"`, (t) => {
     const saved = process.env.CHAT_MCP_HOME;
     t.after(() => {
@@ -102,7 +110,7 @@ for (const home of ['/tmp/chat-mcp-trailing', '/tmp/chat-mcp-trailing/']) {
     process.env.CHAT_MCP_HOME = home;
 
     assert.equal(
-      manifestDir().startsWith(`${home.replace(/\/$/, '')}/`),
+      manifestDir().startsWith(`${home.replace(/\/$/, "")}/`),
       false,
       `${manifestDir()} is inside the mounted state dir ${stateDir()}`,
     );

@@ -1,6 +1,6 @@
-import { realpath as fsRealpath } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
+import { realpath as fsRealpath } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 
 /**
  * 🛑 THIS RUNS BEHIND AN HTTP ENDPOINT, WHICH THE Ink CLI's COPY DOES NOT.
@@ -41,8 +41,11 @@ export interface HintRoots {
  * root it started from. `@../../../etc/` is the case that matters: without the
  * containment test it lists the filesystem.
  */
-export function resolveHintQuery(token: string, { cwd, home }: HintRoots): HintQuery | null {
-  if (token.includes('\0')) return null;
+export function resolveHintQuery(
+  token: string,
+  { cwd, home }: HintRoots,
+): HintQuery | null {
+  if (token.includes("\0")) return null;
   // An absolute token has no root to be contained by.
   //
   // ⚠️ NOT REDUNDANT WITH THE CONTAINMENT TEST BELOW. Each guard covers a case
@@ -50,17 +53,17 @@ export function resolveHintQuery(token: string, { cwd, home }: HintRoots): HintQ
   // only containment refuses it, and containment on its own has the symlink
   // hole realContainedDir closes. Measured: removing EITHER alone leaves the
   // absolute tests green, so no single mutant turns them red.
-  if (token.startsWith('/')) return null;
+  if (token.startsWith("/")) return null;
 
-  const tilde = token === '~' || token.startsWith('~/');
+  const tilde = token === "~" || token.startsWith("~/");
   const root = tilde ? home : cwd;
-  const body = tilde ? token.slice(1).replace(/^\//, '') : token;
+  const body = tilde ? token.slice(1).replace(/^\//, "") : token;
 
-  const lastSlash = body.lastIndexOf('/');
-  const dirPart = lastSlash >= 0 ? body.slice(0, lastSlash + 1) : '';
+  const lastSlash = body.lastIndexOf("/");
+  const dirPart = lastSlash >= 0 ? body.slice(0, lastSlash + 1) : "";
   const prefix = lastSlash >= 0 ? body.slice(lastSlash + 1) : body;
 
-  const dirAbs = path.resolve(root, dirPart || '.');
+  const dirAbs = path.resolve(root, dirPart || ".");
   if (!isInside(dirAbs, root)) return null;
 
   return { dirAbs, root, prefix, rebuild: tilde ? `~/${dirPart}` : dirPart };
@@ -102,7 +105,7 @@ export async function realContainedDir(
 export function isInside(child: string, root: string): boolean {
   const rel = path.relative(root, child);
 
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
 /** The home directory, as a separate export so a test can inject its own. */
@@ -113,7 +116,7 @@ export function defaultRoots(): HintRoots {
 export interface HintEntry {
   /** What replaces the `@token`, including the leading `@`. */
   value: string;
-  kind: 'dir' | 'file';
+  kind: "dir" | "file";
 }
 
 export interface HintResult {
@@ -137,7 +140,7 @@ export function matchesHintPrefix(name: string, prefix: string): boolean {
   if (!name.toLowerCase().startsWith(prefix.toLowerCase())) return false;
 
   // Hidden unless the prefix opens with a dot, so `@` is not a wall of dotfiles.
-  return !name.startsWith('.') || prefix.startsWith('.');
+  return !name.startsWith(".") || prefix.startsWith(".");
 }
 
 /**
@@ -147,7 +150,7 @@ export function matchesHintPrefix(name: string, prefix: string): boolean {
  */
 export function buildHints(
   entries: { name: string; isDirectory: boolean; mtimeMs?: number }[],
-  { prefix, rebuild }: Pick<HintQuery, 'prefix' | 'rebuild'>,
+  { prefix, rebuild }: Pick<HintQuery, "prefix" | "rebuild">,
 ): HintResult {
   const matched = entries.filter((e) => matchesHintPrefix(e.name, prefix));
 
@@ -159,7 +162,11 @@ export function buildHints(
       // of a Desktop, so the files most likely to be wanted were the first
       // ones the cap dropped. Directories stay alphabetical — a folder's age
       // says nothing about whether you are navigating into it.
-      if (!a.isDirectory && a.mtimeMs !== undefined && b.mtimeMs !== undefined) {
+      if (
+        !a.isDirectory &&
+        a.mtimeMs !== undefined &&
+        b.mtimeMs !== undefined
+      ) {
         if (a.mtimeMs !== b.mtimeMs) return b.mtimeMs - a.mtimeMs;
       }
 
@@ -167,8 +174,8 @@ export function buildHints(
     })
     .slice(0, HINT_LIMIT)
     .map((e) => ({
-      value: `@${rebuild}${e.name}${e.isDirectory ? '/' : ''}`,
-      kind: e.isDirectory ? ('dir' as const) : ('file' as const),
+      value: `@${rebuild}${e.name}${e.isDirectory ? "/" : ""}`,
+      kind: e.isDirectory ? ("dir" as const) : ("file" as const),
     }));
 
   return { hints, total: matched.length };

@@ -1,6 +1,13 @@
-import { realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, normalize, resolve } from 'node:path';
-import { manifestDir, stateDir } from '../util/paths.js';
+import { realpathSync } from "node:fs";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  resolve,
+} from "node:path";
+import { manifestDir, stateDir } from "../util/paths.js";
 
 /**
  * Is a path inside a directory, after symlinks?
@@ -129,28 +136,35 @@ export function assertProjectDirOutsideState(projectDir: string): void {
   assertDisjoint(
     projectDir,
     stateDir(),
-    'state directory',
-    'mounting it would put the sandbox inside the container read-write',
+    "state directory",
+    "mounting it would put the sandbox inside the container read-write",
   );
 
   assertDisjoint(
     projectDir,
     manifestDir(),
-    'manifest directory',
-    'the agent could edit the manifest the broker executes from',
+    "manifest directory",
+    "the agent could edit the manifest the broker executes from",
   );
 }
 
 /** Neither path may contain the other. */
-function assertDisjoint(projectDir: string, sensitive: string, noun: string, why: string): void {
+function assertDisjoint(
+  projectDir: string,
+  sensitive: string,
+  noun: string,
+  why: string,
+): void {
   const overlap = containsWhenCreated(projectDir, sensitive)
-    ? 'contains'
+    ? "contains"
     : containsWhenCreated(sensitive, projectDir)
-      ? 'is inside'
+      ? "is inside"
       : null;
 
   if (overlap !== null) {
-    throw new Error(`refusing "${projectDir}": it ${overlap} the ${noun} "${sensitive}", so ${why}`);
+    throw new Error(
+      `refusing "${projectDir}": it ${overlap} the ${noun} "${sensitive}", so ${why}`,
+    );
   }
 }
 
@@ -175,7 +189,7 @@ export function assertNoControlChars(raw: string, noun: string): void {
  * through `checkedProjectPath`.
  */
 export function containedRelative(raw: unknown, noun: string): string {
-  if (typeof raw !== 'string' || raw.length === 0) {
+  if (typeof raw !== "string" || raw.length === 0) {
     throw new Error(`${noun} must be a non-empty string`);
   }
 
@@ -191,18 +205,20 @@ export function containedRelative(raw: unknown, noun: string): string {
   // filename that merely BEGINS with dots, like `..foo`, is legitimate.
   const segments = normalised.split(/[\\/]/);
 
-  if (segments[0] === '..') {
+  if (segments[0] === "..") {
     throw new Error(`${noun} must stay inside the project, got "${raw}"`);
   }
 
-  if (segments.some((segment) => segment.startsWith('-'))) {
-    throw new Error(`${noun} must not have a path segment starting with "-", got "${raw}"`);
+  if (segments.some((segment) => segment.startsWith("-"))) {
+    throw new Error(
+      `${noun} must not have a path segment starting with "-", got "${raw}"`,
+    );
   }
 
   // 🛑 A COLON IS A FIELD DELIMITER IN A DOCKER `-v` SPEC, and a legal POSIX
   // filename character. `odd:name` builds a four-field spec that the daemon
   // refuses, so one bad entry denies the whole spawn.
-  if (normalised.includes(':')) {
+  if (normalised.includes(":")) {
     throw new Error(`${noun} must not contain a colon, got "${raw}"`);
   }
 
@@ -217,14 +233,18 @@ export function containedRelative(raw: unknown, noun: string): string {
  * does not exist — the same distinction `resolveCwd` makes. `noun` is what the
  * caller is checking, so neither message is script-specific.
  */
-export function checkedProjectPath(projectDir: string, relative: string, noun: string): string {
+export function checkedProjectPath(
+  projectDir: string,
+  relative: string,
+  noun: string,
+): string {
   const target = join(projectDir, containedRelative(relative, noun));
   let real: string;
 
   try {
     real = realpathSync(target);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(`${noun} does not exist: ${target}`);
     }
 
@@ -271,12 +291,16 @@ export interface MountPath {
  * writable — so the next spawn resolves through whatever the agent re-pointed
  * it at.
  */
-export function checkedMountPath(projectDir: string, declared: string, noun: string): MountPath {
-  const inner = containedRelative(declared, noun).replace(/\/+$/, '');
+export function checkedMountPath(
+  projectDir: string,
+  declared: string,
+  noun: string,
+): MountPath {
+  const inner = containedRelative(declared, noun).replace(/\/+$/, "");
 
   // `.`, `./` and `scripts/..` all normalise to the root, which would mount the
   // whole project read-only and stop the agent editing the repo it works in.
-  if (inner === '' || inner === '.') {
+  if (inner === "" || inner === ".") {
     throw new Error(`${noun} may not be the project root, got "${declared}"`);
   }
 
@@ -293,7 +317,7 @@ export function checkedMountPath(projectDir: string, declared: string, noun: str
   if (host !== join(realProject, inner)) {
     throw new Error(
       `refusing "${declared}": it is a symlink or sits under one, resolving to "${host}". ` +
-        'A read-only mount would leave that directory writable under its real name.',
+        "A read-only mount would leave that directory writable under its real name.",
     );
   }
 
@@ -301,6 +325,9 @@ export function checkedMountPath(projectDir: string, declared: string, noun: str
 }
 
 /** The absolute path a manifest's script actually runs, or throw. */
-export function checkedScriptPath(projectDir: string, script: UncheckedScript): string {
-  return checkedProjectPath(projectDir, script.relative, 'command script');
+export function checkedScriptPath(
+  projectDir: string,
+  script: UncheckedScript,
+): string {
+  return checkedProjectPath(projectDir, script.relative, "command script");
 }

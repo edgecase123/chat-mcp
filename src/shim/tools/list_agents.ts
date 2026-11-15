@@ -1,18 +1,21 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
-import * as dao from '../../storage/dao.js';
-import { gaugeFreshness } from '../gauge-freshness.js';
-import type { ShimContext } from '../index.js';
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import * as dao from "../../storage/dao.js";
+import { gaugeFreshness } from "../gauge-freshness.js";
+import type { ShimContext } from "../index.js";
 
 export function installListAgents(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
-    'list_agents',
+    "list_agents",
     {
-      title: 'List peers on the chat bus',
+      title: "List peers on the chat bus",
       description:
-        'List peers on the chat bus, including their kind (agent, human, etc.) and online status. By default returns only online peers; pass include_offline=true to see everyone the bus has ever known.',
+        "List peers on the chat bus, including their kind (agent, human, etc.) and online status. By default returns only online peers; pass include_offline=true to see everyone the bus has ever known.",
       inputSchema: {
-        include_offline: z.boolean().optional().describe('Include peers whose shim process is no longer alive'),
+        include_offline: z
+          .boolean()
+          .optional()
+          .describe("Include peers whose shim process is no longer alive"),
       },
     },
     async ({ include_offline }) => {
@@ -45,7 +48,7 @@ export function installListAgents(server: McpServer, ctx: ShimContext): void {
         unread: dao.totalUnreadFor(ctx.db, a.handle),
       }));
       return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       };
     },
   );

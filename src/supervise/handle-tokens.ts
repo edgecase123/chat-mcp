@@ -1,16 +1,27 @@
-import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { assertHandle } from '../util/naming.js';
-import { chmodVerified, stateDir, writePrivateFileSync } from '../util/paths.js';
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
+import { join } from "node:path";
+import { assertHandle } from "../util/naming.js";
+import {
+  chmodVerified,
+  stateDir,
+  writePrivateFileSync,
+} from "../util/paths.js";
 
 const TOKEN_BYTES = 32;
 
 /** Pinned by `the stored file holds NO token, only its SHA-256`. */
-const DIGEST = 'sha256';
+const DIGEST = "sha256";
 
 const HEX_DIGEST = /^[0-9a-f]{64}$/;
-const SUFFIX = '.json';
+const SUFFIX = ".json";
 const DIR_MODE = 0o700;
 
 interface TokenFile {
@@ -27,7 +38,7 @@ interface TokenFile {
  * Pinned by `🛑 CONCURRENT mints of DISTINCT handles all keep working`.
  */
 export function handleTokensDir(): string {
-  return join(stateDir(), 'tokens');
+  return join(stateDir(), "tokens");
 }
 
 /**
@@ -43,7 +54,7 @@ export function handleTokenPathFor(handle: string): string {
 }
 
 function digestOf(token: string): Buffer {
-  return createHash(DIGEST).update(token, 'utf8').digest();
+  return createHash(DIGEST).update(token, "utf8").digest();
 }
 
 function ensureTokensDir(): string {
@@ -67,8 +78,8 @@ function ensureTokensDir(): string {
  */
 export function mintToken(handle: string): string {
   const path = handleTokenPathFor(handle);
-  const token = randomBytes(TOKEN_BYTES).toString('base64url');
-  const payload: TokenFile = { digest: digestOf(token).toString('hex') };
+  const token = randomBytes(TOKEN_BYTES).toString("base64url");
+  const payload: TokenFile = { digest: digestOf(token).toString("hex") };
 
   ensureTokensDir();
 
@@ -99,11 +110,11 @@ export function revokeToken(handle: string): void {
 function digestIn(path: string): Buffer {
   const parsed = parseTokenFile(path);
 
-  if (typeof parsed?.digest !== 'string' || !HEX_DIGEST.test(parsed.digest)) {
+  if (typeof parsed?.digest !== "string" || !HEX_DIGEST.test(parsed.digest)) {
     throw new Error(`${path} does not hold a ${DIGEST} hex digest`);
   }
 
-  return Buffer.from(parsed.digest, 'hex');
+  return Buffer.from(parsed.digest, "hex");
 }
 
 /**
@@ -113,7 +124,7 @@ function digestIn(path: string): Buffer {
  */
 function parseTokenFile(path: string): TokenFile {
   try {
-    return JSON.parse(readFileSync(path, 'utf8')) as TokenFile;
+    return JSON.parse(readFileSync(path, "utf8")) as TokenFile;
   } catch (err) {
     throw new Error(`${path} does not hold readable JSON`, { cause: err });
   }
@@ -148,7 +159,8 @@ export function authenticateToken(token: string): string | null {
     const candidate = digestIn(join(dir, entry));
 
     if (candidate.length !== presented.length) continue;
-    if (timingSafeEqual(candidate, presented)) matched.push(entry.slice(0, -SUFFIX.length));
+    if (timingSafeEqual(candidate, presented))
+      matched.push(entry.slice(0, -SUFFIX.length));
   }
 
   // 🛑 AMBIGUOUS MEANS REFUSE. Two handles sharing a digest is a hand-edited

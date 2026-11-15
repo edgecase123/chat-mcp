@@ -17,7 +17,7 @@
  * child or spending money.
  */
 
-export type TurnState = 'idle' | 'inTurn';
+export type TurnState = "idle" | "inTurn";
 
 export interface QueuedPrompt {
   /** What gets written to the child. */
@@ -32,7 +32,7 @@ export interface TurnQueueEvents {
 }
 
 export class TurnQueue {
-  private state: TurnState = 'idle';
+  private state: TurnState = "idle";
   private readonly pending: QueuedPrompt[] = [];
   private readonly seen = new Set<number>();
 
@@ -54,11 +54,11 @@ export class TurnQueue {
    * same message is re-read from the bus more than once. Without this the
    * agent is asked the same question twice.
    */
-  offer(prompt: QueuedPrompt): 'sent' | 'queued' | 'duplicate' {
+  offer(prompt: QueuedPrompt): "sent" | "queued" | "duplicate" {
     const fresh = prompt.messageIds.filter((id) => !this.seen.has(id));
 
     if (prompt.messageIds.length > 0 && fresh.length === 0) {
-      return 'duplicate';
+      return "duplicate";
     }
 
     for (const id of fresh) this.seen.add(id);
@@ -78,7 +78,7 @@ export class TurnQueue {
    * to a child, so sending it once is correct — and leaving the id in `seen`
    * keeps the bus's own re-reads de-duplicated afterwards.
    */
-  reoffer(prompt: QueuedPrompt): 'sent' | 'queued' {
+  reoffer(prompt: QueuedPrompt): "sent" | "queued" {
     return this.dispatch(prompt);
   }
 
@@ -92,22 +92,22 @@ export class TurnQueue {
    * child that is really there.
    */
   park(prompt: QueuedPrompt): void {
-    this.state = 'inTurn';
+    this.state = "inTurn";
     this.pending.push(prompt);
   }
 
   /** Send now when idle, queue behind the running turn otherwise. */
-  private dispatch(prompt: QueuedPrompt): 'sent' | 'queued' {
-    if (this.state === 'idle') {
-      this.state = 'inTurn';
+  private dispatch(prompt: QueuedPrompt): "sent" | "queued" {
+    if (this.state === "idle") {
+      this.state = "inTurn";
       this.events.send(prompt);
 
-      return 'sent';
+      return "sent";
     }
 
     this.pending.push(prompt);
 
-    return 'queued';
+    return "queued";
   }
 
   /**
@@ -121,12 +121,12 @@ export class TurnQueue {
    * what completion looks like; this only reacts to it.**
    */
   turnEnded(): void {
-    this.state = 'idle';
+    this.state = "idle";
 
     const next = this.pending.shift();
 
     if (next) {
-      this.state = 'inTurn';
+      this.state = "inTurn";
       this.events.send(next);
     }
   }
@@ -137,7 +137,7 @@ export class TurnQueue {
    */
   drain(): QueuedPrompt[] {
     const unsent = this.pending.splice(0, this.pending.length);
-    this.state = 'idle';
+    this.state = "idle";
 
     return unsent;
   }

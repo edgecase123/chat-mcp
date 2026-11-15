@@ -1,20 +1,20 @@
-import React from 'react';
-import { render } from 'ink';
-import { randomUUID } from 'node:crypto';
-import { openDb } from '../../storage/db.js';
-import { NotifyBus } from '../../notify/bus.js';
-import * as dao from '../../storage/dao.js';
-import { App } from './App.js';
-import { packageVersion } from '../../util/version.js';
+import React from "react";
+import { render } from "ink";
+import { randomUUID } from "node:crypto";
+import { openDb } from "../../storage/db.js";
+import { NotifyBus } from "../../notify/bus.js";
+import * as dao from "../../storage/dao.js";
+import { App } from "./App.js";
+import { packageVersion } from "../../util/version.js";
 
 const VERSION = packageVersion();
 
 /** DEC private-mode sequence: enter alternate screen buffer (save cursor +
  *  switch to a fresh scroll region so the app owns the visible viewport and
  *  does not pollute the user's terminal scrollback). */
-const ENTER_ALT_SCREEN = '\x1b[?1049h';
+const ENTER_ALT_SCREEN = "\x1b[?1049h";
 /** Restore original scrollback + cursor. */
-const EXIT_ALT_SCREEN = '\x1b[?1049l';
+const EXIT_ALT_SCREEN = "\x1b[?1049l";
 
 export interface InkCliOptions {
   handle: string;
@@ -23,8 +23,8 @@ export interface InkCliOptions {
 export async function runInkCli(opts: InkCliOptions): Promise<void> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error(
-      'chat-mcp cli --experimental needs a real terminal (TTY). ' +
-        'Run it directly in your terminal, not through a pipe or non-interactive shell.',
+      "chat-mcp cli --experimental needs a real terminal (TTY). " +
+        "Run it directly in your terminal, not through a pipe or non-interactive shell.",
     );
     process.exit(1);
   }
@@ -38,7 +38,7 @@ export async function runInkCli(opts: InkCliOptions): Promise<void> {
     pid: process.pid,
     session_id,
     display_name: opts.handle,
-    metadata: { kind: 'human' },
+    metadata: { kind: "human" },
   });
 
   // Full-screen: switch to alternate buffer so the Ink app doesn't scroll
@@ -51,10 +51,16 @@ export async function runInkCli(opts: InkCliOptions): Promise<void> {
     exited = true;
     process.stdout.write(EXIT_ALT_SCREEN);
   };
-  process.on('exit', restoreTerminal);
-  process.on('SIGINT', () => { restoreTerminal(); process.exit(130); });
-  process.on('SIGTERM', () => { restoreTerminal(); process.exit(143); });
-  process.on('uncaughtException', (err) => {
+  process.on("exit", restoreTerminal);
+  process.on("SIGINT", () => {
+    restoreTerminal();
+    process.exit(130);
+  });
+  process.on("SIGTERM", () => {
+    restoreTerminal();
+    process.exit(143);
+  });
+  process.on("uncaughtException", (err) => {
     restoreTerminal();
     console.error(err);
     process.exit(1);
@@ -62,7 +68,12 @@ export async function runInkCli(opts: InkCliOptions): Promise<void> {
 
   try {
     const { waitUntilExit } = render(
-      React.createElement(App, { handle: opts.handle, db, notify, version: VERSION }),
+      React.createElement(App, {
+        handle: opts.handle,
+        db,
+        notify,
+        version: VERSION,
+      }),
     );
 
     await waitUntilExit();

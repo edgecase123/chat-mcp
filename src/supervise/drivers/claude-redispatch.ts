@@ -36,14 +36,22 @@ export interface RedispatchClause {
  * version that refused twice.
  */
 export const REQUIRED_CLAUSES: readonly RedispatchClause[] = [
-  { name: 'new-invocation', pattern: /This is a NEW invocation\./ },
-  { name: 'now-allowlisted', pattern: /is now explicitly in --allowedTools for this session/ },
-  { name: 'denial-superseded', pattern: /the earlier denial no longer applies/ },
+  { name: "new-invocation", pattern: /This is a NEW invocation\./ },
+  {
+    name: "now-allowlisted",
+    pattern: /is now explicitly in --allowedTools for this session/,
+  },
+  {
+    name: "denial-superseded",
+    pattern: /the earlier denial no longer applies/,
+  },
 ];
 
 /** Which required clauses a prompt is missing. Empty means it is well formed. */
 export function missingClauses(prompt: string): string[] {
-  return REQUIRED_CLAUSES.filter((c) => !c.pattern.test(prompt)).map((c) => c.name);
+  return REQUIRED_CLAUSES.filter((c) => !c.pattern.test(prompt)).map(
+    (c) => c.name,
+  );
 }
 
 export interface RedispatchInput {
@@ -59,24 +67,26 @@ export function redispatchPrompt(input: RedispatchInput): string {
   // 🛑 An empty command would produce a prompt that passes every clause check
   // and tells the child nothing. Fail loudly instead.
   if (command.length === 0) {
-    throw new Error('redispatchPrompt needs the granted command, verbatim');
+    throw new Error("redispatchPrompt needs the granted command, verbatim");
   }
 
   const prompt = [
-    'This is a NEW invocation.',
+    "This is a NEW invocation.",
     `The command \`${command}\` is now explicitly in --allowedTools for this session,`,
-    'so the earlier denial no longer applies.',
+    "so the earlier denial no longer applies.",
     `Please attempt \`${command}\` now and report what the tool returns.`,
     input.followUp.trim(),
   ]
     .filter((line) => line.length > 0)
-    .join(' ');
+    .join(" ");
 
   // 🛑 The guard runs on the way out, so a future edit to the lines above
   // cannot quietly drop a clause the five live runs paid for.
   const missing = missingClauses(prompt);
   if (missing.length > 0) {
-    throw new Error(`redispatchPrompt lost required clause(s): ${missing.join(', ')}`);
+    throw new Error(
+      `redispatchPrompt lost required clause(s): ${missing.join(", ")}`,
+    );
   }
 
   return prompt;

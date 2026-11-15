@@ -50,7 +50,7 @@ export type Threshold = 50 | 70 | 85 | 95;
 export const PLANNING_BAND = 50 as const;
 
 /** How a band reaches its audience. */
-export type Delivery = 'dm' | 'room' | 'alert';
+export type Delivery = "dm" | "room" | "alert";
 
 export interface GaugeTransition {
   /** New value to persist to context_warned_threshold. */
@@ -70,7 +70,10 @@ export interface GaugeTransition {
  * @param percent — new percent (0..100), typically Math.round((used/total)*1000)/10
  * @param prevWarned — value currently in context_warned_threshold
  */
-export function nextGaugeState(percent: number, prevWarned: Threshold | null): GaugeTransition {
+export function nextGaugeState(
+  percent: number,
+  prevWarned: Threshold | null,
+): GaugeTransition {
   // Step up: find the highest band we've newly entered.
   let next: Threshold | null = prevWarned;
   let fire: Threshold | null = null;
@@ -111,11 +114,11 @@ export function deliveryFor(level: Threshold): Delivery {
   switch (level) {
     case 50:
     case 70:
-      return 'dm';
+      return "dm";
     case 85:
-      return 'room';
+      return "room";
     case 95:
-      return 'alert';
+      return "alert";
   }
 }
 
@@ -123,7 +126,11 @@ export function deliveryFor(level: Threshold): Delivery {
  * Body copy for a warning at each level. Client-agnostic — the peer's own
  * client determines what /compact or /clear looks like.
  */
-export function warningBody(handle: string, level: Threshold, percent: number): string {
+export function warningBody(
+  handle: string,
+  level: Threshold,
+  percent: number,
+): string {
   const pct = percent.toFixed(1);
   switch (level) {
     case 50:

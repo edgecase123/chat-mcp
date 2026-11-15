@@ -20,7 +20,7 @@
 export const MAX_LIMIT = 200;
 
 const DEFAULT_LIMIT = 50;
-const ESCAPE = '\\';
+const ESCAPE = "\\";
 
 /**
  * A `LIKE` pattern matching the query as literal text.
@@ -37,9 +37,9 @@ export function likePattern(q: string): string {
     .trim()
     .split(ESCAPE)
     .join(ESCAPE + ESCAPE)
-    .split('%')
+    .split("%")
     .join(`${ESCAPE}%`)
-    .split('_')
+    .split("_")
     .join(`${ESCAPE}_`);
 
   return `%${literal}%`;
@@ -62,21 +62,37 @@ export function parseSearch(input: {
   readonly target?: string;
   readonly limit?: number;
 }): ParsedSearch {
-  const q = (input.q ?? '').trim();
+  const q = (input.q ?? "").trim();
 
   // 🛑 A BLANK QUERY IS REFUSED. `%%` matches every row, and a search that
   // returns the whole transcript is indistinguishable from one that worked.
-  if (q.length === 0) return { ok: false, reason: 'A search needs a term. A blank one would match every message.' };
+  if (q.length === 0)
+    return {
+      ok: false,
+      reason: "A search needs a term. A blank one would match every message.",
+    };
 
-  const target = input.target !== undefined && input.target.trim().length > 0 ? input.target.trim() : undefined;
+  const target =
+    input.target !== undefined && input.target.trim().length > 0
+      ? input.target.trim()
+      : undefined;
 
   // Junk falls back rather than becoming zero — a zero limit returns nothing
   // and reads as "no matches".
   const asked = input.limit;
   const limit =
-    typeof asked === 'number' && Number.isFinite(asked) && asked > 0 ? Math.min(Math.floor(asked), MAX_LIMIT) : DEFAULT_LIMIT;
+    typeof asked === "number" && Number.isFinite(asked) && asked > 0
+      ? Math.min(Math.floor(asked), MAX_LIMIT)
+      : DEFAULT_LIMIT;
 
-  return { ok: true, q, pattern: likePattern(q), target, limit, broad: q.length < 3 };
+  return {
+    ok: true,
+    q,
+    pattern: likePattern(q),
+    target,
+    limit,
+    broad: q.length < 3,
+  };
 }
 
 /**
@@ -103,5 +119,5 @@ export function snippet(body: string, term: string, width: number): string {
 
   // ⚠️ THE MARKERS SAY IT IS A WINDOW. Without them a truncated message reads
   // as a short one, and an operator compares it against what they remember.
-  return `${start > 0 ? '…' : ''}${cut}${end < body.length ? '…' : ''}`;
+  return `${start > 0 ? "…" : ""}${cut}${end < body.length ? "…" : ""}`;
 }

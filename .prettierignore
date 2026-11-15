@@ -1,0 +1,8 @@
+# Build output and npm's own file.
+dist/
+node_modules/
+package-lock.json
+
+# Frozen records, not source. `docs/system/README.md` fixes a spec or plan at
+# the date in its filename, so reformatting one rewrites history.
+docs/superpowers/

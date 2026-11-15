@@ -1,6 +1,6 @@
-import * as dao from '../storage/dao.js';
-import { openDb } from '../storage/db.js';
-import { resolveHandle, timeOf } from './common.js';
+import * as dao from "../storage/dao.js";
+import { openDb } from "../storage/db.js";
+import { resolveHandle, timeOf } from "./common.js";
 
 export interface InboxOpts {
   handle?: string;
@@ -9,7 +9,7 @@ export interface InboxOpts {
 }
 
 export async function runInbox(opts: InboxOpts): Promise<void> {
-  const handle = resolveHandle(opts.handle, '--handle');
+  const handle = resolveHandle(opts.handle, "--handle");
   const db = openDb();
   try {
     const messages = dao.pendingInbox(db, { to: handle });
@@ -31,12 +31,14 @@ export async function runInbox(opts: InboxOpts): Promise<void> {
     }
 
     if (messages.length === 0) {
-      process.stdout.write('(no unread messages)\n');
+      process.stdout.write("(no unread messages)\n");
       return;
     }
 
     for (const m of messages) {
-      process.stdout.write(`[${m.from_handle} → ${handle} ${timeOf(m.sent_at)}]  ${m.body}\n`);
+      process.stdout.write(
+        `[${m.from_handle} → ${handle} ${timeOf(m.sent_at)}]  ${m.body}\n`,
+      );
     }
   } finally {
     db.close();

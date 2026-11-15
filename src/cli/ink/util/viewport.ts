@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useStdout } from 'ink';
+import { useEffect, useState } from "react";
+import { useStdout } from "ink";
 
 /**
  * Terminal rows reserved for chrome. Header(3) + HintBar(1) + Input(3) = 7
@@ -16,8 +16,10 @@ export function useTerminalRows(): number {
   useEffect(() => {
     if (!stdout) return;
     const onResize = (): void => setRows(stdout.rows);
-    stdout.on('resize', onResize);
-    return () => { stdout.off('resize', onResize); };
+    stdout.on("resize", onResize);
+    return () => {
+      stdout.off("resize", onResize);
+    };
   }, [stdout]);
   return rows;
 }
@@ -29,8 +31,10 @@ export function useTerminalColumns(): number {
   useEffect(() => {
     if (!stdout) return;
     const onResize = (): void => setCols(stdout.columns);
-    stdout.on('resize', onResize);
-    return () => { stdout.off('resize', onResize); };
+    stdout.on("resize", onResize);
+    return () => {
+      stdout.off("resize", onResize);
+    };
   }, [stdout]);
   return cols;
 }

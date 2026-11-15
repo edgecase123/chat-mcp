@@ -68,7 +68,7 @@ export function partitionNotifyFiles(
  */
 export function isSafeHandleName(name: string): boolean {
   if (name.length === 0) return false;
-  if (name === '.' || name === '..') return false;
+  if (name === "." || name === "..") return false;
 
   return !/[/\\]/.test(name);
 }
@@ -88,22 +88,22 @@ export function isSafeHandleName(name: string): boolean {
  * again.
  */
 export const ORPHAN_UNCHECKED =
-  'no agent row. That is NOT proof no bus is running under that handle — nothing here can check. ' +
-  'If one is, removing its file kills its wake silently.';
+  "no agent row. That is NOT proof no bus is running under that handle — nothing here can check. " +
+  "If one is, removing its file kills its wake silently.";
 
 export type RemovalReason =
   /** Registered, offline — the row and the file go together. */
-  | 'offline-row'
+  | "offline-row"
   /** Registered and online, removed anyway because `--force` was given. */
-  | 'forced'
+  | "forced"
   /** No row at all, so liveness could not be checked. Said, not implied. */
-  | 'orphan-liveness-unchecked'
+  | "orphan-liveness-unchecked"
   /** Registered and online. Removing the file would silence the agent. */
-  | 'online'
+  | "online"
   /** Named, but there is no such file. A typo, not a success. */
-  | 'no-file'
+  | "no-file"
   /** Could escape the notify directory. No override. */
-  | 'unsafe-name';
+  | "unsafe-name";
 
 export interface NotifyRemoval {
   readonly handle: string;
@@ -143,20 +143,21 @@ export function planNotifyRemoval(request: RemovalRequest): NotifyRemoval[] {
     // refused whatever else is true of it, which is the same split the prune
     // script already draws: the liveness guard has an override, the
     // structural one does not.
-    if (!isSafeHandleName(handle)) return { handle, unlink: false, reason: 'unsafe-name' };
+    if (!isSafeHandleName(handle))
+      return { handle, unlink: false, reason: "unsafe-name" };
 
-    if (!files.has(handle)) return { handle, unlink: false, reason: 'no-file' };
+    if (!files.has(handle)) return { handle, unlink: false, reason: "no-file" };
 
     if (!registered.has(handle)) {
-      return { handle, unlink: true, reason: 'orphan-liveness-unchecked' };
+      return { handle, unlink: true, reason: "orphan-liveness-unchecked" };
     }
 
     if (online.has(handle)) {
       return request.force
-        ? { handle, unlink: true, reason: 'forced' }
-        : { handle, unlink: false, reason: 'online' };
+        ? { handle, unlink: true, reason: "forced" }
+        : { handle, unlink: false, reason: "online" };
     }
 
-    return { handle, unlink: true, reason: 'offline-row' };
+    return { handle, unlink: true, reason: "offline-row" };
   });
 }

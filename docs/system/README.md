@@ -22,28 +22,38 @@ listed here will not be found. Add the row in the same commit as the page.
 ## Contents
 
 ### [03 — Infrastructure](03-infrastructure/)
-| File | What it covers |
-|---|---|
-| [state-directory.md](03-infrastructure/state-directory.md) | Every entry under `~/.chat-mcp`, who owns it, what is safe to delete |
-| [settings.md](03-infrastructure/settings.md) | Every env var, CLI flag, state file and hardcoded tunable, and which of them a config UI could safely write |
+
+| File                                                       | What it covers                                                                                              |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| [state-directory.md](03-infrastructure/state-directory.md) | Every entry under `~/.chat-mcp`, who owns it, what is safe to delete                                        |
+| [settings.md](03-infrastructure/settings.md)               | Every env var, CLI flag, state file and hardcoded tunable, and which of them a config UI could safely write |
 
 ### [05 — Supervision](05-supervision/)
-| File | What it covers |
-|---|---|
-| [agent-liveness.md](05-supervision/agent-liveness.md) | How `online` is computed, why a containerized child's row holds the supervisor's pid, and what the exit handler clears |
-| [child-output.md](05-supervision/child-output.md) | The three streams a child writes to, which reach the log, and why stderr went unread |
-| [activity-pulse.md](05-supervision/activity-pulse.md) | How the web UI learns an agent is working, why the supervisor is the HTTP client, and the 401 a url-as-token causes |
+
+| File                                                      | What it covers                                                                                                                                                          |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [agent-liveness.md](05-supervision/agent-liveness.md)     | How `online` is computed, why a containerized child's row holds the supervisor's pid, and what the exit handler clears                                                  |
+| [child-output.md](05-supervision/child-output.md)         | The three streams a child writes to, which reach the log, and why stderr went unread                                                                                    |
+| [activity-pulse.md](05-supervision/activity-pulse.md)     | How the web UI learns an agent is working, why the supervisor is the HTTP client, and the 401 a url-as-token causes                                                     |
 | [project-commands.md](05-supervision/project-commands.md) | How an agent runs a declared project command on the host, the three limits that bound it, how an operator sets them in `limits.json`, and the second cap in `broker.ts` |
 
 ### [06 — Interfaces](06-interfaces/)
-| File | What it covers |
-|---|---|
+
+| File                                           | What it covers                                                                                                              |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | [terminal-ui.md](06-interfaces/terminal-ui.md) | The fallback terminal surfaces — the ink CLI, the line REPL, shell aliases, the one-shot subcommands, and the layout limits |
 
 ### [07 — Operations](07-operations/)
-| File | What it covers |
-|---|---|
+
+| File                                                     | What it covers                                                       |
+| -------------------------------------------------------- | -------------------------------------------------------------------- |
 | [operator-scripts.md](07-operations/operator-scripts.md) | `./scripts/agent` and `./scripts/web` — start, stop, restart, status |
+
+### [09 — Conventions](09-conventions/)
+
+| File                                          | What it covers                                                                                                |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| [formatting.md](09-conventions/formatting.md) | Prettier's defaults are the rule, why there is no config file, and the two things the one-time reformat broke |
 
 ---
 
@@ -51,15 +61,15 @@ listed here will not be found. Add the row in the same commit as the page.
 
 Ranked by what would help most on arrival.
 
-| Section | What belongs there |
-|---|---|
-| `01-overview` | What the bus is, how the pieces fit, a glossary. Today that lives in `README.md` and `DESIGN.md` at the repo root |
+| Section          | What belongs there                                                                                                            |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `01-overview`    | What the bus is, how the pieces fit, a glossary. Today that lives in `README.md` and `DESIGN.md` at the repo root             |
 | `05-supervision` | Still needed: drivers, the container boundary, the host/container split. Today partly in `AGENTS.md`. Liveness is now covered |
-| `02-setup` | The three clones, `CHAT_MCP_HOME` isolation, wiring an MCP client. Today in `AGENTS.md` and `README.md` |
-| `04-messaging` | DMs, rooms, read watermarks, claims, the notify wake path |
-| `06-interfaces` | Still needed: the MCP shim's tools and the web UI. The terminal surfaces are now covered |
-| `08-testing` | The node test runner, `CHAT_MCP_HOME` isolation, proving a guard non-vacuous |
-| `09-conventions` | TDD, commit style, secret handling. Today in `AGENTS.md` § Conventions |
+| `02-setup`       | The three clones, `CHAT_MCP_HOME` isolation, wiring an MCP client. Today in `AGENTS.md` and `README.md`                       |
+| `04-messaging`   | DMs, rooms, read watermarks, claims, the notify wake path                                                                     |
+| `06-interfaces`  | Still needed: the MCP shim's tools and the web UI. The terminal surfaces are now covered                                      |
+| `08-testing`     | The node test runner, `CHAT_MCP_HOME` isolation, proving a guard non-vacuous                                                  |
+| `09-conventions` | Still needed: TDD, commit style, secret handling. Today in `AGENTS.md` § Conventions. Formatting is now covered               |
 
 ⚠️ **`AGENTS.md`, `README.md` and `DESIGN.md` at the repo root are not
 superseded by this tree.** Where a topic moves here, leave a one-line pointer
@@ -67,11 +77,11 @@ behind rather than two copies that drift.
 
 ## How these relate to `docs/superpowers/`
 
-| Tree | Holds | Lifetime |
-|---|---|---|
-| `docs/system/` | How the software works **now** | Updated with the code, forever |
+| Tree                      | Holds                             | Lifetime                           |
+| ------------------------- | --------------------------------- | ---------------------------------- |
+| `docs/system/`            | How the software works **now**    | Updated with the code, forever     |
 | `docs/superpowers/specs/` | What a change was **going** to do | Frozen at the date in its filename |
-| `docs/superpowers/plans/` | How that change was **executed** | Frozen likewise |
+| `docs/superpowers/plans/` | How that change was **executed**  | Frozen likewise                    |
 
 A spec is a record of a decision. This tree is the current state. Do not read a
 dated spec as documentation.

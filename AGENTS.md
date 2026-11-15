@@ -37,7 +37,7 @@ node --import tsx src/index.ts --help   # proves the module graph actually boots
 ```
 
 **Tests under the node runner refuse the real `~/.chat-mcp` directory.**
-Set `process.env.CHAT_MCP_HOME` to a temp dir *before* importing anything
+Set `process.env.CHAT_MCP_HOME` to a temp dir _before_ importing anything
 that resolves a state path — see `src/util/paths.ts`'s `stateDir()` for why,
 and any `test/supervise/*.test.ts` for the pattern.
 
@@ -46,11 +46,11 @@ and any `test/supervise/*.test.ts` for the pattern.
 Two agents work this repo at the same time. A third clone runs the bus they
 talk over, so neither agent's work-in-progress can take the comms down.
 
-| clone | role | handle |
-|---|---|---|
-| `~/dev/chat-mcp-main` | runs the bus for both agents. Stays on `main`. | — |
-| `~/dev/chat-mcp` | claude1 edits and tests here | `claude1` |
-| `~/dev/chat-mcp2` | claude2 edits and tests here | `claude2` |
+| clone                 | role                                           | handle    |
+| --------------------- | ---------------------------------------------- | --------- |
+| `~/dev/chat-mcp-main` | runs the bus for both agents. Stays on `main`. | —         |
+| `~/dev/chat-mcp`      | claude1 edits and tests here                   | `claude1` |
+| `~/dev/chat-mcp2`     | claude2 edits and tests here                   | `claude2` |
 
 Each agent clone carries a `.mcp.json` at its root, **gitignored and
 per-tree**. It names that clone's handle and points at `chat-mcp-main`:
@@ -61,7 +61,11 @@ per-tree**. It names that clone's handle and points at `chat-mcp-main`:
     "chat": {
       "type": "stdio",
       "command": "node",
-      "args": ["/Users/leejenkins/dev/chat-mcp-main/dist/index.js", "--handle", "claude2"],
+      "args": [
+        "/Users/leejenkins/dev/chat-mcp-main/dist/index.js",
+        "--handle",
+        "claude2"
+      ],
       "env": {}
     }
   }
@@ -116,12 +120,24 @@ The wake trigger is a hook, in `.claude/settings.local.json` at the clone root
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [ { "type": "command",
-        "command": "/Users/leejenkins/.chat-mcp/adapters/claude-code-claude2.sh" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/leejenkins/.chat-mcp/adapters/claude-code-claude2.sh"
+          }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "hooks": [ { "type": "command",
-        "command": "/Users/leejenkins/.chat-mcp/adapters/claude-code-context-claude2.sh" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/leejenkins/.chat-mcp/adapters/claude-code-context-claude2.sh"
+          }
+        ]
+      }
     ]
   }
 }
@@ -158,9 +174,9 @@ connects to the host over HTTP with a per-handle bearer token.
 
 lee, 2026-11-13, ruling on the docker/stdin arc:
 
-> *"NO FILE SHIM SHARING. Put that in AGENTS.md or somewhere that it is
-> cannonized"* — then, scoping it: *"For the dokcer/stdin arc, that is. NO
-> FILE SHIMS"*
+> _"NO FILE SHIM SHARING. Put that in AGENTS.md or somewhere that it is
+> cannonized"_ — then, scoping it: _"For the dokcer/stdin arc, that is. NO
+> FILE SHIMS"_
 
 ### What this forbids
 
@@ -237,7 +253,6 @@ that guard is the one thing that ever refused a container's request.
 container's request arrives with `Host: host.docker.internal:<port>`, which a
 loopback allowlist never contains, so it would refuse the caller this transport
 exists for. The bearer token is the whole boundary there.
-
 
 ## Conventions
 

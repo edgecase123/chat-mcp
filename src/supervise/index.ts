@@ -1,29 +1,42 @@
-import type { AgentChild, SpawnOptions } from './child.js';
-import { assertDeclaresCapabilities } from './child.js';
-import type { VendorSpawn } from './vendor.js';
-import { resolveDriver } from './drivers/index.js';
-import { spawnOnHost } from './drivers/host.js';
-import { spawnContainerized, DEFAULT_SHUTDOWN_GRACE_SECONDS } from './drivers/containerized.js';
-import { TurnQueue } from './turn-queue.js';
-import { WakeListener, refuseIfSupervisorLive, type WakeAck, type WakeEnvelope } from './socket.js';
-import { RateLimitGate } from './rate-limit.js';
-import { openDb } from '../storage/db.js';
-import * as dao from '../storage/dao.js';
-import { availableBuiltins, childHandleFor, defaultAllowed, type ChildGrant } from './grant.js';
-import { dirsFor } from './projects.js';
-import { allowlistWith, resolveCwd } from './allowlist.js';
-import { commandFromGrant, grantFor, grantVariants } from './denial.js';
-import { writeClaudeMcpConfig } from './drivers/claude.js';
+import type { AgentChild, SpawnOptions } from "./child.js";
+import { assertDeclaresCapabilities } from "./child.js";
+import type { VendorSpawn } from "./vendor.js";
+import { resolveDriver } from "./drivers/index.js";
+import { spawnOnHost } from "./drivers/host.js";
+import {
+  spawnContainerized,
+  DEFAULT_SHUTDOWN_GRACE_SECONDS,
+} from "./drivers/containerized.js";
+import { TurnQueue } from "./turn-queue.js";
+import {
+  WakeListener,
+  refuseIfSupervisorLive,
+  type WakeAck,
+  type WakeEnvelope,
+} from "./socket.js";
+import { RateLimitGate } from "./rate-limit.js";
+import { openDb } from "../storage/db.js";
+import * as dao from "../storage/dao.js";
+import {
+  availableBuiltins,
+  childHandleFor,
+  defaultAllowed,
+  type ChildGrant,
+} from "./grant.js";
+import { dirsFor } from "./projects.js";
+import { allowlistWith, resolveCwd } from "./allowlist.js";
+import { commandFromGrant, grantFor, grantVariants } from "./denial.js";
+import { writeClaudeMcpConfig } from "./drivers/claude.js";
 import {
   describeChildOutput,
   describeTurnResult,
   excerptForLog,
-} from './drivers/claude-events.js';
-import { openHostBus, type HostBus } from './host-bus.js';
-import { applyContextReport } from '../shim/gauge-report.js';
-import type { ContextSnapshot } from './context-gauge.js';
-import { createActivityReporter } from './activity.js';
-import { describeContextGauge } from './context-gauge.js';
+} from "./drivers/claude-events.js";
+import { openHostBus, type HostBus } from "./host-bus.js";
+import { applyContextReport } from "../shim/gauge-report.js";
+import type { ContextSnapshot } from "./context-gauge.js";
+import { createActivityReporter } from "./activity.js";
+import { describeContextGauge } from "./context-gauge.js";
 
 /**
  * The supervisor: it owns the loop the harness used to own.
@@ -124,7 +137,7 @@ export interface Supervisor {
    * grace period for the current turn to end (#149) — the CLI's SIGINT/
    * SIGTERM handler is the one caller that wants this.
    */
-  stop(mode?: 'graceful' | 'now'): Promise<void>;
+  stop(mode?: "graceful" | "now"): Promise<void>;
   /**
    * Called once this supervisor has stopped, however the stop was triggered.
    *
@@ -138,20 +151,20 @@ export interface Supervisor {
 
 /** How an arriving message is presented to the agent. */
 export function formatPrompt(envelope: WakeEnvelope): string {
-  const from = envelope.from || 'unknown';
+  const from = envelope.from || "unknown";
   const body = envelope.body?.trim();
-  const where = envelope.to.startsWith('#') ? ` in ${envelope.to}` : '';
+  const where = envelope.to.startsWith("#") ? ` in ${envelope.to}` : "";
 
   // 🛑 An `alert` is BLOCKING by this bus's own definition. Rendering it the
   // same as a chat message loses the urgency at the layer built to deliver it
   // faster, so the escalation is in the prompt text and not left to the
   // agent to infer from a field it may not read.
   const banner =
-    envelope.kind === 'alert'
-      ? '🚨 ALERT — BLOCKING. This was sent as high-severity; handle it before anything queued behind it.\n\n'
-      : envelope.kind === 'dispatch'
-        ? '📋 DISPATCH — a task hand-off, not a status update.\n\n'
-        : '';
+    envelope.kind === "alert"
+      ? "🚨 ALERT — BLOCKING. This was sent as high-severity; handle it before anything queued behind it.\n\n"
+      : envelope.kind === "dispatch"
+        ? "📋 DISPATCH — a task hand-off, not a status update.\n\n"
+        : "";
 
   if (!body) {
     // 🛑 No body means this came through the FALLBACK file path, which
@@ -170,7 +183,10 @@ export function formatPrompt(envelope: WakeEnvelope): string {
  * never be made equal by forgetting a flag — a child sharing the supervisor's
  * handle consumes the deliveries meant for it (chat-mcp#35).
  */
-function buildGrant(opts: SupervisorOptions, dirs: readonly string[]): ChildGrant | undefined {
+function buildGrant(
+  opts: SupervisorOptions,
+  dirs: readonly string[],
+): ChildGrant | undefined {
   if (opts.reply === false) return undefined;
 
   const handle = childHandleFor(opts.handle);
@@ -186,7 +202,9 @@ function buildGrant(opts: SupervisorOptions, dirs: readonly string[]): ChildGran
   };
 }
 
-export async function startSupervisor(opts: SupervisorOptions): Promise<Supervisor> {
+export async function startSupervisor(
+  opts: SupervisorOptions,
+): Promise<Supervisor> {
   // 🛑 FIRST STATEMENT, BEFORE ANYTHING WRITES OR SPAWNS. lee ruled on
   // 2026-11-11 that a second supervisor refuses rather than taking over.
   // Refusing here rather than at the `bind` below keeps two destructive steps
@@ -196,23 +214,26 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   await refuseIfSupervisorLive(opts.handle);
 
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
-  const selection = resolveDriver({ driver: opts.driver, container: opts.container });
+  const selection = resolveDriver({
+    driver: opts.driver,
+    container: opts.container,
+  });
 
   // 🛑 THE MODE IS THE GATE, NOT A DRIVER-NAME STRING. `resolveDriver` already
   // folds `--driver docker-claude` and `--container` into one `SandboxMode`,
   // so every container-only decision in this function (mount banner included)
   // reads `selection.mode` rather than re-deriving container-ness from a name
   // a second vendor could spell differently.
-  const isContainerSpawn = selection.mode === 'docker';
+  const isContainerSpawn = selection.mode === "docker";
 
   if (isContainerSpawn) {
-    const { readToken } = await import('./auth.js');
-    const { isConfirmed } = await import('./container.js');
+    const { readToken } = await import("./auth.js");
+    const { isConfirmed } = await import("./container.js");
 
     if (!readToken()) {
       throw new Error(
-        'no Claude OAuth token on file; run `claude setup-token` on the host, then ' +
-          '`pbpaste | chat-mcp auth set-token` (stdin, never argv)',
+        "no Claude OAuth token on file; run `claude setup-token` on the host, then " +
+          "`pbpaste | chat-mcp auth set-token` (stdin, never argv)",
       );
     }
     if (!isConfirmed(opts.handle)) {
@@ -234,19 +255,21 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   // — so the mapping is explicit. lee, 2026-10-31.
   const dirs = opts.extraDirs ?? dirsFor(opts.handle);
 
-  const { mountsFor, containerPathFor } = await import('./mounts.js');
+  const { mountsFor, containerPathFor } = await import("./mounts.js");
 
   let needsMountBanner = isContainerSpawn && !opts.resumeSessionId;
 
   const mountBannerPrefix = (): string => {
-    if (!needsMountBanner) return '';
+    if (!needsMountBanner) return "";
     needsMountBanner = false;
 
     const entries = Object.entries(mountsFor(opts.handle)).map(
       ([key]) => `${key} -> ${containerPathFor(key)}`,
     );
 
-    return entries.length === 0 ? '' : `Mounted directories: ${entries.join(', ')}.\n\n`;
+    return entries.length === 0
+      ? ""
+      : `Mounted directories: ${entries.join(", ")}.\n\n`;
   };
 
   const childCwd = resolveCwd(opts.cwd, dirs);
@@ -256,7 +279,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   const spawnRaw =
     opts.spawnChild ??
     ((o: SpawnOptions) =>
-      selection.mode === 'docker'
+      selection.mode === "docker"
         ? spawnContainerized(opts.vendor, o)
         : spawnOnHost(opts.vendor, o));
 
@@ -278,7 +301,9 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       } catch (killErr) {
         // Swallowed on purpose: `err` is the reason the operator needs, and a
         // failing kill must not replace it. Logged so it is not invisible.
-        log(`could not kill the child of an undeclared driver: ${String(killErr)}`);
+        log(
+          `could not kill the child of an undeclared driver: ${String(killErr)}`,
+        );
       }
 
       throw err;
@@ -324,7 +349,9 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * Host children keep the stdio shim, which needs no socket.
    */
   const hostBus: HostBus | undefined =
-    isContainerSpawn && initialGrant ? await openHostBus(initialGrant.handle) : undefined;
+    isContainerSpawn && initialGrant
+      ? await openHostBus(initialGrant.handle)
+      : undefined;
 
   let onWake: ((envelope: WakeEnvelope) => WakeAck) | null = null;
 
@@ -335,7 +362,8 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // temporal-dead-zone throw lands outside this call stack and takes the
     // supervisor down instead of refusing a wake. lee ruled on 2026-11-11 that
     // a wake arriving here is refused rather than queued.
-    if (onWake === null) return { ok: false, error: 'supervisor is still starting' };
+    if (onWake === null)
+      return { ok: false, error: "supervisor is still starting" };
 
     return onWake(envelope);
   });
@@ -389,7 +417,8 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * 🛑 READ IT, DO NOT CACHE IT. `currentGrant` is reassigned on a replace, so
    * a value captured at wiring time names the previous grant's handle.
    */
-  const childBusHandle = () => currentGrant?.handle ?? childHandleFor(opts.handle);
+  const childBusHandle = () =>
+    currentGrant?.handle ?? childHandleFor(opts.handle);
 
   // 🛑 SAID OUT LOUD, both ways. A doorbell that cannot answer and a child
   // holding a bus identity are both things an operator must be able to see in
@@ -397,10 +426,13 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   log(
     initialGrant
       ? `child acts as "${initialGrant.handle}"; ${initialGrant.allowed.length} allowed tool(s), ` +
-        `built-ins: ${initialGrant.available.join(' ')}`
-      : 'child has NO grant — it can be woken and can do nothing (--no-reply)',
+          `built-ins: ${initialGrant.available.join(" ")}`
+      : "child has NO grant — it can be woken and can do nothing (--no-reply)",
   );
-  const gate = new RateLimitGate(opts.utilizationCeiling ?? 0.9, child.reportsUsage);
+  const gate = new RateLimitGate(
+    opts.utilizationCeiling ?? 0.9,
+    child.reportsUsage,
+  );
 
   /**
    * Accepted but not dispatched, because the window was too full.
@@ -426,7 +458,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * is itself an observer-notified event, so "offered" and "sent" can be
    * ticks apart.
    */
-  const sendListeners: ((prompt: { text: string; messageIds: readonly number[] }) => void)[] = [];
+  const sendListeners: ((prompt: {
+    text: string;
+    messageIds: readonly number[];
+  }) => void)[] = [];
 
   /**
    * Counts each onTurnEnd invocation, incremented BEFORE `queue.turnEnded()`
@@ -571,7 +606,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
      * ⚠️ `onTurnEnd` had `generation` in scope two lines above and did not
      * use it. A per-call check is something to forget; a wrapper is not.
      */
-    const ifCurrent = <A extends unknown[]>(label: string, fn: (...args: A) => void) => {
+    const ifCurrent = <A extends unknown[]>(
+      label: string,
+      fn: (...args: A) => void,
+    ) => {
       return (...args: A): void => {
         if (generation !== childGeneration) {
           // 🛑 SAY IT, DO NOT SWALLOW IT. The first version returned
@@ -587,7 +625,6 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       };
     };
 
-
     /**
      * 🛑 THE ONLY WINDOW ONTO WHAT THE AGENT ACTUALLY DID. Without it a
      * child that ran a turn and answered nothing logs exactly what a child
@@ -602,10 +639,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // separate the old child from the new one. `ifCurrent` SAYS it dropped a
     // stale line, so the loss is visible rather than silent.
     child.onStderr(
-      ifCurrent('onStderr', (line: string) => {
-      // `wiring.ts` already drops blank lines. Repeated here because a driver
-      // may deliver this callback by another route, and a log spammed one
-      // entry per empty flush is unreadable either way.
+      ifCurrent("onStderr", (line: string) => {
+        // `wiring.ts` already drops blank lines. Repeated here because a driver
+        // may deliver this callback by another route, and a log spammed one
+        // entry per empty flush is unreadable either way.
         if (line.trim().length === 0) return;
 
         log(`← child stderr: ${line}`);
@@ -613,10 +650,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     );
 
     child.onEvent(
-      ifCurrent('onEvent', (event) => {
+      ifCurrent("onEvent", (event) => {
         // 🛑 NOT AWAITED, AND INSIDE `ifCurrent`. This runs while draining the
         // child's stdout, and a dead child must not pulse a live dot.
-        reportActivity('tick');
+        reportActivity("tick");
 
         const said = describeChildOutput(event);
 
@@ -629,12 +666,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     );
 
     child.onTurnEnd(
-      ifCurrent('onTurnEnd', () => {
+      ifCurrent("onTurnEnd", () => {
         turnEndCount++;
         // 🛑 CLEARS THE PULSE, AND IT IS NEVER THROTTLED. A dropped `end`
         // leaves the dot running to the 30s failsafe, which reads as an agent
         // that never finished.
-        reportActivity('end');
+        reportActivity("end");
         queue.turnEnded();
         log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
 
@@ -645,7 +682,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     );
 
     child.onSession(
-      ifCurrent('onSession', (id) => {
+      ifCurrent("onSession", (id) => {
         childSession = id;
       }),
     );
@@ -657,7 +694,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
      * nobody reads and leave the blank exactly where #213 found it.
      */
     child.onContext(
-      ifCurrent('onContext', (snapshot: ContextSnapshot) => {
+      ifCurrent("onContext", (snapshot: ContextSnapshot) => {
         // 🛑 THE WHOLE BODY IS GUARDED, NOT JUST THE WRITE. The gauge touches
         // the database three times — the existence read, the row write, and a
         // notify per room member — and the driver's line parser swallows a
@@ -676,16 +713,21 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
           if (!dao.getAgent(approvalsDb, childHandle)) {
             if (!warnedUnregisteredGauge) {
               warnedUnregisteredGauge = true;
-              log(`context gauge: ${childHandle} has not registered on the bus yet; not reporting`);
+              log(
+                `context gauge: ${childHandle} has not registered on the bus yet; not reporting`,
+              );
             }
 
             return;
           }
 
-          if (snapshot.totalIsFallback && !warnedFallbackWindows.has(snapshot.model ?? '')) {
-            warnedFallbackWindows.add(snapshot.model ?? '');
+          if (
+            snapshot.totalIsFallback &&
+            !warnedFallbackWindows.has(snapshot.model ?? "")
+          ) {
+            warnedFallbackWindows.add(snapshot.model ?? "");
             log(
-              `context gauge: no window size known for model "${snapshot.model ?? 'unreported'}"; ` +
+              `context gauge: no window size known for model "${snapshot.model ?? "unreported"}"; ` +
                 `using ${snapshot.total} — the percentage is only as right as that guess`,
             );
           }
@@ -705,74 +747,76 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     );
 
     child.onDenial(
-      ifCurrent('onDenial', (denial) => {
-      const grantHandle = childBusHandle();
+      ifCurrent("onDenial", (denial) => {
+        const grantHandle = childBusHandle();
 
-      try {
-        const approvalId = dao.insertApproval(approvalsDb, {
-          agentHandle: grantHandle,
-          supervisorHandle: opts.handle,
-          // 🛑 NULL WHEN THE CLI DID NOT NAME IT, never a placeholder.
-          //
-          // Measured end to end: a `git push` denial gives a prose reason
-          // with no command. A placeholder was filed, lee APPROVED A BLANK,
-          // the literal went into `--allowedTools` and granted nothing, the
-          // retry was denied, and a second card appeared.
-          //
-          // ⚠️ FILING NOTHING WAS THE FIRST FIX AND IT WAS WORSE. claude1:
-          // it restores the bug #39 exists to fix — the child stops and
-          // nobody is told. Worse still, the one unnameable case measured is
-          // `git push`, which is on lee's excluded list BY NAME, so silence
-          // would land exactly on the high-stakes requests.
-          //
-          // The row is filed, the reason is shown, and `answerApproval`
-          // refuses to APPROVE it. Deny always works.
-          requested: denial.requested,
-          // 🛑 WHAT THE CARD SHOWS AND WHAT THE GRANT CARRIES ARE DIFFERENT
-          // LANGUAGES. `requested` is prose a human reads; `grant` is the
-          // allowlist entry. Feeding the prose into `--allowedTools` grants
-          // nothing — measured live: lee approved
-          // `rm in '/path/README.md'`, the child was denied again, and a
-          // second card appeared.
-          grant: grantFor(denial),
-          // 🛑 EVERY SPELLING OF THE SAME FILE. `/var` and `/private/var`
-          // are the same path on macOS, and a grant in one spelling does
-          // not match a retry in the other — measured live, caused by this
-          // supervisor's own realpath resolution.
-          grantForms: grantVariants(denial),
-          // 🛑 WHAT WAS IN FORCE WHEN IT WAS REFUSED — SO IT MUST BE THE LIVE
-          // VALUE. Without this a refusal cannot say what a grant would have
-          // done: the same command is refused under one allowlist and
-          // permitted under another, which approvals 23 and 25 measured.
-          // Raised by claude1 on PR 43.
-          //
-          // 🛑 IT READ THE SPAWN-TIME BINDING FOR FOUR COMMITS. Every denial
-          // after the first then reported the set the child started with, so
-          // the column answered wrongly in exactly the case it was added for.
-          // Measured on the live run of 2026-10-31: approvals 50, 52 and 53
-          // were all retries and all three recorded the base set. #49.
-          allowlist: currentGrant?.allowed ?? [],
-          // The CLI's own words, kept verbatim so the denial can be re-parsed
-          // if the detector changes.
-          reason: denial.raw,
-          sessionId: childSession,
-        });
+        try {
+          const approvalId = dao.insertApproval(approvalsDb, {
+            agentHandle: grantHandle,
+            supervisorHandle: opts.handle,
+            // 🛑 NULL WHEN THE CLI DID NOT NAME IT, never a placeholder.
+            //
+            // Measured end to end: a `git push` denial gives a prose reason
+            // with no command. A placeholder was filed, lee APPROVED A BLANK,
+            // the literal went into `--allowedTools` and granted nothing, the
+            // retry was denied, and a second card appeared.
+            //
+            // ⚠️ FILING NOTHING WAS THE FIRST FIX AND IT WAS WORSE. claude1:
+            // it restores the bug #39 exists to fix — the child stops and
+            // nobody is told. Worse still, the one unnameable case measured is
+            // `git push`, which is on lee's excluded list BY NAME, so silence
+            // would land exactly on the high-stakes requests.
+            //
+            // The row is filed, the reason is shown, and `answerApproval`
+            // refuses to APPROVE it. Deny always works.
+            requested: denial.requested,
+            // 🛑 WHAT THE CARD SHOWS AND WHAT THE GRANT CARRIES ARE DIFFERENT
+            // LANGUAGES. `requested` is prose a human reads; `grant` is the
+            // allowlist entry. Feeding the prose into `--allowedTools` grants
+            // nothing — measured live: lee approved
+            // `rm in '/path/README.md'`, the child was denied again, and a
+            // second card appeared.
+            grant: grantFor(denial),
+            // 🛑 EVERY SPELLING OF THE SAME FILE. `/var` and `/private/var`
+            // are the same path on macOS, and a grant in one spelling does
+            // not match a retry in the other — measured live, caused by this
+            // supervisor's own realpath resolution.
+            grantForms: grantVariants(denial),
+            // 🛑 WHAT WAS IN FORCE WHEN IT WAS REFUSED — SO IT MUST BE THE LIVE
+            // VALUE. Without this a refusal cannot say what a grant would have
+            // done: the same command is refused under one allowlist and
+            // permitted under another, which approvals 23 and 25 measured.
+            // Raised by claude1 on PR 43.
+            //
+            // 🛑 IT READ THE SPAWN-TIME BINDING FOR FOUR COMMITS. Every denial
+            // after the first then reported the set the child started with, so
+            // the column answered wrongly in exactly the case it was added for.
+            // Measured on the live run of 2026-10-31: approvals 50, 52 and 53
+            // were all retries and all three recorded the base set. #49.
+            allowlist: currentGrant?.allowed ?? [],
+            // The CLI's own words, kept verbatim so the denial can be re-parsed
+            // if the detector changes.
+            reason: denial.raw,
+            sessionId: childSession,
+          });
 
-        log(
-          denial.requested
-            ? `child BLOCKED, approval ${approvalId} pending: ${denial.requested}`
-            : `child BLOCKED, approval ${approvalId} pending but UNNAMED — it can only be denied`,
-        );
-      } catch (err) {
-        // 🛑 SAY SO. A failed write here means the operator is never asked, and
-        // silence is the failure mode this whole path exists to remove.
-          log(`FAILED to record a denial — nobody will be asked: ${String(err)}`);
+          log(
+            denial.requested
+              ? `child BLOCKED, approval ${approvalId} pending: ${denial.requested}`
+              : `child BLOCKED, approval ${approvalId} pending but UNNAMED — it can only be denied`,
+          );
+        } catch (err) {
+          // 🛑 SAY SO. A failed write here means the operator is never asked, and
+          // silence is the failure mode this whole path exists to remove.
+          log(
+            `FAILED to record a denial — nobody will be asked: ${String(err)}`,
+          );
         }
       }),
     );
 
     child.onUsage(
-      ifCurrent('onUsage', (snapshot) => {
+      ifCurrent("onUsage", (snapshot) => {
         gate.update(snapshot);
         log(gate.describe());
         releaseHeld();
@@ -780,20 +824,22 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     );
 
     child.onExit(
-      ifCurrent('onExit', (code, signal) => {
-      // 🛑 Anything queued is UNSENT. Reporting it is the difference between a
-      // visible gap and silence, and silence is the ambiguity this whole change
-      // exists to remove.
+      ifCurrent("onExit", (code, signal) => {
+        // 🛑 Anything queued is UNSENT. Reporting it is the difference between a
+        // visible gap and silence, and silence is the ambiguity this whole change
+        // exists to remove.
         // 🛑 CLEARS THE DOT. `onTurnEnd` does not fire for a child that dies
         // mid-turn, so without this the 30s failsafe is the only thing that
         // ends the pulse — and for those 30 seconds a working agent and a dead
         // one look identical, which is the ambiguity #240 exists to remove.
-        reportActivity('end');
+        reportActivity("end");
 
         const unsent = queue.drain();
-        log(`child exited code=${code} signal=${signal}; ${unsent.length} prompt(s) never sent`);
+        log(
+          `child exited code=${code} signal=${signal}; ${unsent.length} prompt(s) never sent`,
+        );
 
-        for (const p of unsent) log(`  UNSENT ids=[${p.messageIds.join(',')}]`);
+        for (const p of unsent) log(`  UNSENT ids=[${p.messageIds.join(",")}]`);
 
         // 🛑 THE BUS LEARNS THE CHILD IS GONE HERE, OR IT NEVER DOES. A
         // containerized child's row carries the SUPERVISOR's pid, because the
@@ -808,7 +854,9 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
             log(`child ${childBusHandle()} had no bus row to take offline`);
           }
         } catch (err) {
-          log(`FAILED to take ${childBusHandle()} offline on the bus: ${String(err)}`);
+          log(
+            `FAILED to take ${childBusHandle()} offline on the bus: ${String(err)}`,
+          );
         }
 
         // 🛑 THE SOCKET GOES WITH THE CHILD, per lee's ruling of 2026-11-14.
@@ -828,14 +876,13 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
         // stopped" rather than moving earlier.
         if (!hasStopped && !replacingChild) {
           void listener.close().catch((err: unknown) => {
-            log(`FAILED to close the wake socket after the child exited: ${String(err)}`);
+            log(
+              `FAILED to close the wake socket after the child exited: ${String(err)}`,
+            );
           });
         }
       }),
     );
-
-
-
   }
 
   wireChild();
@@ -865,16 +912,20 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * miss a step.
    */
   const takeChildOffline = (verb: string): void => {
-    reportActivity('end');
+    reportActivity("end");
 
     try {
       if (!dao.clearAgentPid(approvalsDb, childBusHandle())) {
         // More surprising here than on an exit: a replace or restart means the
         // child has been running, so its shim should long since have registered.
-        log(`${verb} ${childBusHandle()}, which has no bus row to take offline`);
+        log(
+          `${verb} ${childBusHandle()}, which has no bus row to take offline`,
+        );
       }
     } catch (err) {
-      log(`FAILED to take ${childBusHandle()} offline across a ${verb}: ${String(err)}`);
+      log(
+        `FAILED to take ${childBusHandle()} offline across a ${verb}: ${String(err)}`,
+      );
     }
   };
 
@@ -906,13 +957,17 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     replacingChild = true;
     child.kill();
 
-    takeChildOffline('replacing');
+    takeChildOffline("replacing");
 
     if (change.model) currentModel = change.model;
 
     if (change.allowedTools && currentGrant) {
       const allowed = [...change.allowedTools];
-      currentGrant = { ...currentGrant, allowed, available: availableBuiltins(allowed) };
+      currentGrant = {
+        ...currentGrant,
+        allowed,
+        available: availableBuiltins(allowed),
+      };
     }
 
     // 🛑 THE SUPERVISOR STAYS UP, per lee's ruling of 2026-11-15. It already
@@ -981,8 +1036,8 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * A denied child will not retry, so a grant means a NEW invocation: the
    * child is REPLACED, resuming its session, with the one command added.
    */
-  const applyAnswer = (answer: NonNullable<WakeEnvelope['approval']>): void => {
-    if (answer.decision === 'deny') {
+  const applyAnswer = (answer: NonNullable<WakeEnvelope["approval"]>): void => {
+    if (answer.decision === "deny") {
       queue.offer({
         text: `[chat-mcp] your request for \`${answer.requested}\` was DENIED by the operator. Do not retry it; carry on with what does not need it.`,
         messageIds: [],
@@ -1005,7 +1060,11 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
         // Every spelling, not just the one shown. They denote one file.
         allowedTools: allowlistWith(
           currentGrant?.allowed ?? [],
-          answer.grantForms?.length ? [...answer.grantForms] : answer.grant ? [answer.grant] : [],
+          answer.grantForms?.length
+            ? [...answer.grantForms]
+            : answer.grant
+              ? [answer.grant]
+              : [],
         ),
       },
       opts.vendor.redispatchPrompt({
@@ -1015,7 +1074,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
           (answer.grant === null || answer.grant === undefined
             ? null
             : commandFromGrant(answer.grant)) ?? answer.requested,
-        followUp: 'Then carry on with the task you were on.',
+        followUp: "Then carry on with the task you were on.",
       }),
     );
   };
@@ -1025,14 +1084,15 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    * the respawned child starts a brand-new session.
    */
   const RESTART_NOTICE =
-    'This container is restarting. Externalize anything you need now — ' +
-    'this is the last turn before shutdown.';
+    "This container is restarting. Externalize anything you need now — " +
+    "this is the last turn before shutdown.";
   const GRACEFUL_RESTART_TIMEOUT_MS = 30_000;
 
   const SHUTDOWN_NOTICE =
-    'This agent is shutting down. Externalize anything you need now — ' +
-    'this is the last turn before SIGTERM.';
-  const shutdownGraceMs = (opts.shutdownGraceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS) * 1000;
+    "This agent is shutting down. Externalize anything you need now — " +
+    "this is the last turn before SIGTERM.";
+  const shutdownGraceMs =
+    (opts.shutdownGraceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS) * 1000;
 
   /**
    * Send `notice`, then wait up to `timeoutMs` for the current turn to end
@@ -1081,7 +1141,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       finish();
     };
 
-    const onSend = (prompt: { text: string; messageIds: readonly number[] }): void => {
+    const onSend = (prompt: {
+      text: string;
+      messageIds: readonly number[];
+    }): void => {
       if (prompt.text !== notice || noticeDispatchedAtCount !== null) return;
       noticeDispatchedAtCount = turnEndCount;
     };
@@ -1099,7 +1162,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     log(`restarting child (${unsent.length} prompt(s) carried over)`);
     replacingChild = true;
     child.kill();
-    takeChildOffline('restarting');
+    takeChildOffline("restarting");
     childSession = null;
     needsMountBanner = isContainerSpawn;
 
@@ -1154,13 +1217,17 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     for (const p of unsent) queue.reoffer(p);
   };
 
-  const restartChild = (mode: 'graceful' | 'now'): void => {
-    if (mode === 'now') {
+  const restartChild = (mode: "graceful" | "now"): void => {
+    if (mode === "now") {
       doRestart();
       return;
     }
 
-    sendNoticeThenFinish(RESTART_NOTICE, GRACEFUL_RESTART_TIMEOUT_MS, doRestart);
+    sendNoticeThenFinish(
+      RESTART_NOTICE,
+      GRACEFUL_RESTART_TIMEOUT_MS,
+      doRestart,
+    );
   };
 
   /**
@@ -1174,19 +1241,23 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    */
   let cancelGracefulWait: (() => void) | null = null;
 
-  const doStop = async (mode: 'graceful' | 'now'): Promise<void> => {
+  const doStop = async (mode: "graceful" | "now"): Promise<void> => {
     // A bus-delivered stop and the CLI's SIGINT handler can both land, and the
     // second one must not re-close the socket or fire `onStopped` twice.
     if (hasStopped) {
-      if (mode === 'now') cancelGracefulWait?.();
+      if (mode === "now") cancelGracefulWait?.();
 
       return;
     }
     hasStopped = true;
 
-    if (mode === 'graceful') {
+    if (mode === "graceful") {
       await new Promise<void>((resolve) => {
-        cancelGracefulWait = sendNoticeThenFinish(SHUTDOWN_NOTICE, shutdownGraceMs, resolve);
+        cancelGracefulWait = sendNoticeThenFinish(
+          SHUTDOWN_NOTICE,
+          shutdownGraceMs,
+          resolve,
+        );
       });
       cancelGracefulWait = null;
     }
@@ -1218,7 +1289,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // graceful stop mid-grace. Refusing it would tell the operator their
     // escalation landed while they wait out the original period — #136's own
     // symptom. `doStop` is idempotent and handles the upgrade itself.
-    if (envelope.control?.kind === 'stop') {
+    if (envelope.control?.kind === "stop") {
       const mode = envelope.control.mode;
       // A stop closes the very socket this ack travels back on, so it CANNOT
       // run inline. Deferring lets the ack reach the CLI before the listener
@@ -1228,22 +1299,26 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       // The CLI's wait ceiling comes from HERE rather than its own copy of the
       // default, so a per-handle `shutdownGraceSeconds` cannot make a healthy
       // stop report failure. Found by claude2 reviewing PR #158.
-      return { ok: true, queued: 'sent', graceSeconds: Math.ceil(shutdownGraceMs / 1000) };
+      return {
+        ok: true,
+        queued: "sent",
+        graceSeconds: Math.ceil(shutdownGraceMs / 1000),
+      };
     }
 
     // 🛑 THE SOCKET OUTLIVES THE CHILD DURING A TEARDOWN, by up to the full
     // grace period. Without this a wake in that window is "delivered" to a
     // child that is already being killed, and the sender is told `sent`.
     if (hasStopped) {
-      return { ok: false, error: 'supervisor is stopping' };
+      return { ok: false, error: "supervisor is stopping" };
     }
 
     // A restart command is out-of-band, not a chat message or an approval,
     // and must run before either of those checks.
-    if (envelope.control?.kind === 'restart') {
+    if (envelope.control?.kind === "restart") {
       restartChild(envelope.control.mode);
 
-      return { ok: true, queued: 'sent' };
+      return { ok: true, queued: "sent" };
     }
 
     // An answer is not a chat message and must not be rendered as one.
@@ -1253,7 +1328,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     if (envelope.approval) {
       applyAnswer(envelope.approval);
 
-      return { ok: true, queued: 'sent' };
+      return { ok: true, queued: "sent" };
     }
 
     const prompt = {
@@ -1269,7 +1344,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
       // The sender learns the message is safe but waiting, and why. A file
       // write could never say either.
-      return { ok: true, queued: 'held', error: verdict.reason };
+      return { ok: true, queued: "held", error: verdict.reason };
     }
 
     // The ack tells the SENDER what happened, which a file write never could.
@@ -1307,7 +1382,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     onStopped(cb: () => void): void {
       stoppedListeners.push(cb);
     },
-    async stop(mode: 'graceful' | 'now' = 'now'): Promise<void> {
+    async stop(mode: "graceful" | "now" = "now"): Promise<void> {
       await doStop(mode);
     },
   };

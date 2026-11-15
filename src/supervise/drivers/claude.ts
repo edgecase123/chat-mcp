@@ -1,12 +1,19 @@
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import type { SpawnOptions } from '../child.js';
-import { type RateLimitSnapshot } from '../rate-limit.js';
-import { parseClaudeRateLimit, claudeContextSnapshot } from './claude-events.js';
-import { denialFromClaude, rememberClaudeToolUse } from './claude-events.js';
-import type { Denial } from '../denial.js';
-import type { ContextSnapshot } from '../context-gauge.js';
-import { ensureMcpConfigDir, mcpConfigPathFor, writePrivateFileSync } from '../../util/paths.js';
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import type { SpawnOptions } from "../child.js";
+import { type RateLimitSnapshot } from "../rate-limit.js";
+import {
+  parseClaudeRateLimit,
+  claudeContextSnapshot,
+} from "./claude-events.js";
+import { denialFromClaude, rememberClaudeToolUse } from "./claude-events.js";
+import type { Denial } from "../denial.js";
+import type { ContextSnapshot } from "../context-gauge.js";
+import {
+  ensureMcpConfigDir,
+  mcpConfigPathFor,
+  writePrivateFileSync,
+} from "../../util/paths.js";
 
 /**
  * The Claude Code driver: the ONLY file that knows this CLI's flags and event
@@ -29,13 +36,13 @@ import { ensureMcpConfigDir, mcpConfigPathFor, writePrivateFileSync } from '../.
  */
 export function claudeArgs(opts: SpawnOptions = {}): string[] {
   const args = [
-    '-p',
-    '--verbose',
-    '--output-format',
-    'stream-json',
-    '--input-format',
-    'stream-json',
-    '--permission-mode',
+    "-p",
+    "--verbose",
+    "--output-format",
+    "stream-json",
+    "--input-format",
+    "stream-json",
+    "--permission-mode",
     // 🛑 `plan` DENIES every tool, measured on chat-mcp#33 — a child in plan
     // mode wakes, understands it is on the bus, tries to answer and is
     // refused. So a working child needs a mode that permits an allowlisted
@@ -63,13 +70,13 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
     // Found by claude1 reviewing PR 34.
     //
     // An explicit --permission-mode always wins over both defaults.
-    opts.permissionMode ?? (opts.grant ? 'manual' : 'plan'),
-    '--permission-prompts',
-    opts.permissionPrompts ?? 'none',
+    opts.permissionMode ?? (opts.grant ? "manual" : "plan"),
+    "--permission-prompts",
+    opts.permissionPrompts ?? "none",
   ];
 
-  if (opts.model) args.push('--model', opts.model);
-  if (opts.resumeSessionId) args.push('--resume', opts.resumeSessionId);
+  if (opts.model) args.push("--model", opts.model);
+  if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
 
   // 🛑 ALL FOUR OR NONE. `--mcp-config` ADDS to whatever the cwd already
   // configures, so without `--strict-mcp-config` the child also loads the
@@ -79,19 +86,19 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
   // rather than a wider permission mode.
   if (opts.grant) {
     args.push(
-      '--mcp-config',
+      "--mcp-config",
       opts.grant.configPath,
-      '--strict-mcp-config',
-      '--tools',
+      "--strict-mcp-config",
+      "--tools",
       // 🛑 SPACE-SEPARATED, because `--tools <tools...>` is variadic.
       //
       // ⚠️ AN EMPTY LIST WOULD EMIT A VALUELESS FLAG and the next argument
       // would be swallowed as its value. Fail CLOSED with an explicit empty
       // string instead, which disables every built-in — the reply-only
       // behaviour. Raised by claude1 reviewing PR 34.
-      ...(opts.grant.available.length > 0 ? opts.grant.available : ['']),
-      '--allowedTools',
-      opts.grant.allowed.join(','),
+      ...(opts.grant.available.length > 0 ? opts.grant.available : [""]),
+      "--allowedTools",
+      opts.grant.allowed.join(","),
     );
 
     // 🛑 WHERE the child may write, which the allowlist does NOT control.
@@ -100,7 +107,7 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
     // confined to the working directory. This flag is the only thing that
     // widens it. Claude Code's spelling; another driver uses its own.
     if (opts.grant.extraDirs.length > 0) {
-      args.push('--add-dir', ...opts.grant.extraDirs);
+      args.push("--add-dir", ...opts.grant.extraDirs);
     }
   }
 
@@ -135,23 +142,29 @@ function resolveChatMcpEntry(): { command: string; args: string[] } {
   // of this exact shape tonight.
   //
   // Installed layout: dist/supervise/drivers/claude.js -> dist/index.js
-  const built = fileURLToPath(new URL('../../index.js', import.meta.url));
+  const built = fileURLToPath(new URL("../../index.js", import.meta.url));
   if (existsSync(built)) return { command: process.execPath, args: [built] };
 
   // Source layout with a build present — preferred, because it needs no loader
   // and therefore nothing to resolve from the child's cwd.
-  const builtFromSource = fileURLToPath(new URL('../../../dist/index.js', import.meta.url));
-  if (existsSync(builtFromSource)) return { command: process.execPath, args: [builtFromSource] };
+  const builtFromSource = fileURLToPath(
+    new URL("../../../dist/index.js", import.meta.url),
+  );
+  if (existsSync(builtFromSource))
+    return { command: process.execPath, args: [builtFromSource] };
 
   // Source layout with no build. The loader has to be an ABSOLUTE path.
-  const source = fileURLToPath(new URL('../../index.ts', import.meta.url));
+  const source = fileURLToPath(new URL("../../index.ts", import.meta.url));
   if (existsSync(source)) {
-    return { command: process.execPath, args: ['--import', resolveLoader(), source] };
+    return {
+      command: process.execPath,
+      args: ["--import", resolveLoader(), source],
+    };
   }
 
   throw new Error(
     `cannot locate the chat-mcp entry point next to ${import.meta.url}; ` +
-      'pass an explicit entry to writeClaudeMcpConfig',
+      "pass an explicit entry to writeClaudeMcpConfig",
   );
 }
 
@@ -170,7 +183,7 @@ function resolveChatMcpEntry(): { command: string; args: string[] } {
  * than stated is resolved against the CHILD's cwd, not ours.
  */
 function resolveLoader(): string {
-  return fileURLToPath(import.meta.resolve('tsx'));
+  return fileURLToPath(import.meta.resolve("tsx"));
 }
 
 /**
@@ -187,13 +200,15 @@ function resolveLoader(): string {
 export function writeClaudeMcpConfig(handle: string, entry?: string): string {
   ensureMcpConfigDir();
 
-  const launch = entry ? { command: process.execPath, args: [entry] } : resolveChatMcpEntry();
+  const launch = entry
+    ? { command: process.execPath, args: [entry] }
+    : resolveChatMcpEntry();
   const path = mcpConfigPathFor(handle);
   const config = {
     mcpServers: {
       chat: {
         command: launch.command,
-        args: [...launch.args, '--handle', handle],
+        args: [...launch.args, "--handle", handle],
       },
     },
   };
@@ -242,7 +257,7 @@ export function routeClaudeEvent(
   // The session id arrives on the `system` init event and is what makes a
   // grant resumable instead of a restart.
   const id = event.session_id;
-  if (typeof id === 'string' && on.session) on.session(id);
+  if (typeof id === "string" && on.session) on.session(id);
 
   // ⚠️ A DIFFERENT WINDOW FROM `usage` AT THE TOP. That one is the
   // subscription rate limit and gates dispatch; this one is the context window
@@ -260,13 +275,13 @@ export function routeClaudeEvent(
 
   // `result` is Claude Code's terminal event. An `assistant` event with no
   // following `result` is a turn still in flight.
-  if (event.type === 'result') on.turnEnd();
+  if (event.type === "result") on.turnEnd();
 }
 
 /** The documented streaming-input shape: one JSON user message per line. */
 export function claudeEncodeInput(text: string): string {
   return `${JSON.stringify({
-    type: 'user',
-    message: { role: 'user', content: [{ type: 'text', text }] },
+    type: "user",
+    message: { role: "user", content: [{ type: "text", text }] },
   })}\n`;
 }

@@ -1,8 +1,8 @@
-import * as dao from '../storage/dao.js';
-import type { Db } from '../storage/db.js';
-import type { MessageKind } from '../storage/dao.js';
-import { notifyPeer } from '../notify/bus.js';
-import { assertRoomName } from '../util/naming.js';
+import * as dao from "../storage/dao.js";
+import type { Db } from "../storage/db.js";
+import type { MessageKind } from "../storage/dao.js";
+import { notifyPeer } from "../notify/bus.js";
+import { assertRoomName } from "../util/naming.js";
 
 export const MAX_BODY_BYTES = 64 * 1024;
 
@@ -19,21 +19,24 @@ export class NotARoomMemberError extends RoomSendInputError {
     readonly handle: string,
   ) {
     super(`${handle} is not a member of ${room}`);
-    this.name = 'NotARoomMemberError';
+    this.name = "NotARoomMemberError";
   }
 }
 
 export class BodyTooLargeError extends RoomSendInputError {
   constructor(readonly bytes: number) {
     super(`Message body exceeds ${MAX_BODY_BYTES}-byte cap`);
-    this.name = 'BodyTooLargeError';
+    this.name = "BodyTooLargeError";
   }
 }
 
 export class InvalidRoomNameError extends RoomSendInputError {
-  constructor(readonly room: string, cause: Error) {
+  constructor(
+    readonly room: string,
+    cause: Error,
+  ) {
     super(cause.message);
-    this.name = 'InvalidRoomNameError';
+    this.name = "InvalidRoomNameError";
   }
 }
 
@@ -88,9 +91,10 @@ export function sendToRoom(db: Db, input: SendToRoomInput): SendToRoomResult {
     throw new InvalidRoomNameError(room, e as Error);
   }
 
-  const bytes = Buffer.byteLength(body, 'utf8');
+  const bytes = Buffer.byteLength(body, "utf8");
   if (bytes > MAX_BODY_BYTES) throw new BodyTooLargeError(bytes);
-  if (!dao.isRoomMember(db, room, from)) throw new NotARoomMemberError(room, from);
+  if (!dao.isRoomMember(db, room, from))
+    throw new NotARoomMemberError(room, from);
 
   const sent = dao.insertMessage(db, { from, to: room, body, kind });
   if (advanceOwnRead) dao.advanceRoomRead(db, room, from, sent.id);
@@ -100,7 +104,15 @@ export function sendToRoom(db: Db, input: SendToRoomInput): SendToRoomResult {
   for (const member of dao.roomMembers(db, room)) {
     if (member === from) continue;
     const unread = dao.totalUnreadFor(db, member);
-    notifyPeer(member, { id: sent.id, to: room, from, ts: sent.sent_at, body, kind, unread });
+    notifyPeer(member, {
+      id: sent.id,
+      to: room,
+      from,
+      ts: sent.sent_at,
+      body,
+      kind,
+      unread,
+    });
     notified += 1;
     // Counted inside the SAME loop, so the two figures can never be taken
     // over different member sets.

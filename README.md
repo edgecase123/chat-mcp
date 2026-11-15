@@ -8,7 +8,7 @@ Modern coding agents are strong at different things. Claude Code, Cursor, and Co
 
 Concretely, that means you can:
 
-- Assign the **backend-savvy agent** to write a Laravel migration while the **front-end-savvy agent** iterates on the Vue component that consumes it — coordinated in a `#feature` room where they agree the payload shape *before* either commits.
+- Assign the **backend-savvy agent** to write a Laravel migration while the **front-end-savvy agent** iterates on the Vue component that consumes it — coordinated in a `#feature` room where they agree the payload shape _before_ either commits.
 - Split a large PR across two agents by track (services + PHPUnit to one, UI + Playwright to the other), have them work in parallel on the same branch, and let them reconcile in-room without you narrating every handoff.
 - Point a **reviewer agent** at an **implementer agent's** branch, have them exchange fixes over DM, and get back a PR that's already been argued down.
 - Send a **specialist agent** into the specific problem a generalist just got stuck on — the generalist stays in `blocked` status with a `focus` describing what it needs, the specialist DMs when the block clears, the generalist picks up again.
@@ -93,10 +93,10 @@ costs no tokens to read.
 Each peer pushes its own context usage. Crossing 70% / 85% / 95% emits a
 warning, with 5% hysteresis so the boundary does not chatter.
 
-| % | who hears about it |
-|---|---|
-| ≥ 70 | 🟡 DM to the reporter only |
-| ≥ 85 | 🟠 every room the peer is in |
+| %    | who hears about it               |
+| ---- | -------------------------------- |
+| ≥ 70 | 🟡 DM to the reporter only       |
+| ≥ 85 | 🟠 every room the peer is in     |
 | ≥ 95 | 🔴 every room, in the alert lane |
 
 **Use it to** catch a degrading session before it ships something wrong. A
@@ -220,12 +220,12 @@ returns.
 
 ### Why this mode and not a wake adapter
 
-| | attached client | supervised |
-|---|---|---|
-| who owns the agent process | your editor | chat-mcp |
-| how a message reaches the model | a file-watch pokes an idle session | written to the child's **long-lived stdin** |
-| what the agent can touch | your whole machine | **the one directory you mounted** |
-| runs with nobody at the keyboard | no | yes |
+|                                  | attached client                    | supervised                                  |
+| -------------------------------- | ---------------------------------- | ------------------------------------------- |
+| who owns the agent process       | your editor                        | chat-mcp                                    |
+| how a message reaches the model  | a file-watch pokes an idle session | written to the child's **long-lived stdin** |
+| what the agent can touch         | your whole machine                 | **the one directory you mounted**           |
+| runs with nobody at the keyboard | no                                 | yes                                         |
 
 **The second row is the substantive difference.** An attached client needs a
 wake primitive to poke a session that is sitting idle, which is why only Claude
@@ -258,13 +258,13 @@ container still waits out its own shutdown grace.
 
 ### Setting one up
 
-| Step | Command |
-|---|---|
-| Register the project directory | `project set <handle> <dir>` |
-| Give the container its Claude credential | `auth set-token` |
-| Let it use `gh` | `auth set-gh-token` |
-| Mount an extra directory | `mount add <handle> <key> <dir>` |
-| List what is registered | `project list` · `mount list` |
+| Step                                     | Command                          |
+| ---------------------------------------- | -------------------------------- |
+| Register the project directory           | `project set <handle> <dir>`     |
+| Give the container its Claude credential | `auth set-token`                 |
+| Let it use `gh`                          | `auth set-gh-token`              |
+| Mount an extra directory                 | `mount add <handle> <key> <dir>` |
+| List what is registered                  | `project list` · `mount list`    |
 
 `project`, `mount` and `auth` are `node dist/index.js <command>`. So is
 `agents`, which controls a supervisor directly and is what `./scripts/agent`
@@ -383,8 +383,14 @@ Currently supported: **`claude-code`** only. Cursor, Codex, and Gemini CLI can r
 JSON object:
 
 ```json
-{ "id": 11862, "to": "#leagues", "from": "lee", "ts": 1793661988880,
-  "body": "the whole message text", "kind": "chat" }
+{
+  "id": 11862,
+  "to": "#leagues",
+  "from": "lee",
+  "ts": 1793661988880,
+  "body": "the whole message text",
+  "kind": "chat"
+}
 ```
 
 So an agent whose wake command PRINTS THE FILE starts its turn with the message
@@ -396,11 +402,11 @@ message. `to` is also the routing: a leading `#` means it came from a room.
 waiting for that recipient across DMs and every room, including this message,
 because one notify file carries both.
 
-| `unread` | what to do |
-|---|---|
-| `1` | the payload is everything waiting. **Call nothing.** |
-| `> 1` | the file was overwritten and earlier messages are gone from it. **Read.** |
-| absent | **unknown, never zero.** The CLI and the one-shot senders do not set it, so read if you care. |
+| `unread` | what to do                                                                                    |
+| -------- | --------------------------------------------------------------------------------------------- |
+| `1`      | the payload is everything waiting. **Call nothing.**                                          |
+| `> 1`    | the file was overwritten and earlier messages are gone from it. **Read.**                     |
+| absent   | **unknown, never zero.** The CLI and the one-shot senders do not set it, so read if you care. |
 
 ⚠️ **Two other cases still need a read.** `body` is absent on a bodyless
 notification such as a presence ping, and a long body may be truncated by the host
@@ -530,30 +536,30 @@ something else (ambient — surfaces on the next MCP turn boundary via a
 
 All tools are namespaced under `chat.` in the client:
 
-| Tool | Args | Purpose |
-|---|---|---|
-| `whoami` | — | Confirm own handle + wake-adapter state + who's online (with per-peer context gauge). First tool to call after install. |
-| `register` | `display_name?`, `metadata?` | Idempotent; auto-called on shim boot. Rarely called by the agent directly. |
-| `list_agents` | `include_offline?=false` | List peers with kind, online status, last-seen, live status/focus, and context gauge. |
-| `set_status` | `status`, `focus?` | Update your live status (`idle` / `thinking` / `tool` / `blocked` / `error` / `offline`) + a one-line freeform focus (≤200 chars). Visible in every sibling's sidebar. |
-| `set_style` | `target`, `style`, `custom?` | Set the prose style agents must follow in a room. `succinct` is the only preset; `custom` takes your own markdown and REPLACES it. Pushed with every `room_inbox` read of that room. Rooms only — a peer target is refused. |
-| `report_context` | `used`, `total` | Push your current context-window usage. Crossing 70%/85%/95% bands emits threshold warnings (5% hysteresis). See [Context gauge](#context-gauge). |
-| `send` | `to`, `body`, `kind?` | 1:1 message. Body cap 64 KB. `kind` is `chat` / `dispatch` / `alert`. |
-| `inbox` | `since_id?`, `limit?=50` | Cheap read of unread DMs. |
-| `wait_for_message` | `timeout_s?=25`, `since_id?` | Block until a DM arrives or timeout. Use when actively awaiting a reply. |
-| `health` | — | The resolved database path, `MAX(id)` and the AUTOINCREMENT high-water mark, plus the device+inode of the file the connection holds against the file at that path. Call it when a send reported an id you cannot find, or before concluding a peer never replied. A diverging inode means the writes landed in a replaced file — `lsof` reports a path and cannot see it. |
-| `search` | `q`, `target?`, `limit?` | Find messages containing a term, newest first, across every room and DM you can see. Does NOT advance any read watermark, so it is safe mid-task. |
-| `room_list` | `include_all?=false` | Rooms you belong to (or every room on the bus). |
-| `room_join` | `room` | Join a room (auto-creates on first join; names must start with `#`). Posts a system announcement to existing members. |
-| `room_leave` | `room` | Leave a room. |
-| `room_send` | `room`, `body`, `kind?` | Post to a room you're a member of. Returns `notified`, how many members it wrote to, beside `online_members`, how many of those the bus believes are live. `online_members: 0` with `notified` above zero means the send worked and nobody is there to read it. |
-| `room_inbox` | `room?`, `limit?=50`, `since_id?` | Unread room messages, from one room or all. Per-member watermark. `since_id` fetches only what follows a known id, requires `room`, and marks nothing read. |
-| `room_members` | `room` | Handles that are current members (includes offline). |
-| `room_boot` | `room`, `handle` | Boot another peer from a room (caller must be a member; posts a system announcement). |
-| `room_delete` | `room` | Delete a room entirely. Owner-only while the owner is still a member — see **Rooms**. |
-| `claim` | `resource`, `note?` | Take an exclusive claim on a shared resource — a gate script, a Docker stack, a branch, a file. Refuses if someone else holds it and names them. Re-claiming renews. |
-| `release` | `resource`, `force?` | Give up a claim you hold. Expiry is only a failsafe, so call this when done. `force` clears a claim held by an agent you know is gone. |
-| `claims` | — | Every resource currently claimed, its holder, how long it has been held and how long until the failsafe frees it. Call before starting anything a sibling could already hold. |
+| Tool               | Args                              | Purpose                                                                                                                                                                                                                                                                                                                                                                   |
+| ------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `whoami`           | —                                 | Confirm own handle + wake-adapter state + who's online (with per-peer context gauge). First tool to call after install.                                                                                                                                                                                                                                                   |
+| `register`         | `display_name?`, `metadata?`      | Idempotent; auto-called on shim boot. Rarely called by the agent directly.                                                                                                                                                                                                                                                                                                |
+| `list_agents`      | `include_offline?=false`          | List peers with kind, online status, last-seen, live status/focus, and context gauge.                                                                                                                                                                                                                                                                                     |
+| `set_status`       | `status`, `focus?`                | Update your live status (`idle` / `thinking` / `tool` / `blocked` / `error` / `offline`) + a one-line freeform focus (≤200 chars). Visible in every sibling's sidebar.                                                                                                                                                                                                    |
+| `set_style`        | `target`, `style`, `custom?`      | Set the prose style agents must follow in a room. `succinct` is the only preset; `custom` takes your own markdown and REPLACES it. Pushed with every `room_inbox` read of that room. Rooms only — a peer target is refused.                                                                                                                                               |
+| `report_context`   | `used`, `total`                   | Push your current context-window usage. Crossing 70%/85%/95% bands emits threshold warnings (5% hysteresis). See [Context gauge](#context-gauge).                                                                                                                                                                                                                         |
+| `send`             | `to`, `body`, `kind?`             | 1:1 message. Body cap 64 KB. `kind` is `chat` / `dispatch` / `alert`.                                                                                                                                                                                                                                                                                                     |
+| `inbox`            | `since_id?`, `limit?=50`          | Cheap read of unread DMs.                                                                                                                                                                                                                                                                                                                                                 |
+| `wait_for_message` | `timeout_s?=25`, `since_id?`      | Block until a DM arrives or timeout. Use when actively awaiting a reply.                                                                                                                                                                                                                                                                                                  |
+| `health`           | —                                 | The resolved database path, `MAX(id)` and the AUTOINCREMENT high-water mark, plus the device+inode of the file the connection holds against the file at that path. Call it when a send reported an id you cannot find, or before concluding a peer never replied. A diverging inode means the writes landed in a replaced file — `lsof` reports a path and cannot see it. |
+| `search`           | `q`, `target?`, `limit?`          | Find messages containing a term, newest first, across every room and DM you can see. Does NOT advance any read watermark, so it is safe mid-task.                                                                                                                                                                                                                         |
+| `room_list`        | `include_all?=false`              | Rooms you belong to (or every room on the bus).                                                                                                                                                                                                                                                                                                                           |
+| `room_join`        | `room`                            | Join a room (auto-creates on first join; names must start with `#`). Posts a system announcement to existing members.                                                                                                                                                                                                                                                     |
+| `room_leave`       | `room`                            | Leave a room.                                                                                                                                                                                                                                                                                                                                                             |
+| `room_send`        | `room`, `body`, `kind?`           | Post to a room you're a member of. Returns `notified`, how many members it wrote to, beside `online_members`, how many of those the bus believes are live. `online_members: 0` with `notified` above zero means the send worked and nobody is there to read it.                                                                                                           |
+| `room_inbox`       | `room?`, `limit?=50`, `since_id?` | Unread room messages, from one room or all. Per-member watermark. `since_id` fetches only what follows a known id, requires `room`, and marks nothing read.                                                                                                                                                                                                               |
+| `room_members`     | `room`                            | Handles that are current members (includes offline).                                                                                                                                                                                                                                                                                                                      |
+| `room_boot`        | `room`, `handle`                  | Boot another peer from a room (caller must be a member; posts a system announcement).                                                                                                                                                                                                                                                                                     |
+| `room_delete`      | `room`                            | Delete a room entirely. Owner-only while the owner is still a member — see **Rooms**.                                                                                                                                                                                                                                                                                     |
+| `claim`            | `resource`, `note?`               | Take an exclusive claim on a shared resource — a gate script, a Docker stack, a branch, a file. Refuses if someone else holds it and names them. Re-claiming renews.                                                                                                                                                                                                      |
+| `release`          | `resource`, `force?`              | Give up a claim you hold. Expiry is only a failsafe, so call this when done. `force` clears a claim held by an agent you know is gone.                                                                                                                                                                                                                                    |
+| `claims`           | —                                 | Every resource currently claimed, its holder, how long it has been held and how long until the failsafe frees it. Call before starting anything a sibling could already hold.                                                                                                                                                                                             |
 
 ### Rooms
 
@@ -580,7 +586,7 @@ Unread tracking is a per-member high-watermark (last-read message id), not per-m
 `since_id` is for recovering **one** message whose wake payload arrived truncated. It is exclusive — `since_id: 100` returns 101 onward — and matches `inbox`'s parameter. Two rules make it safe:
 
 - **It can only raise the floor, never lower it.** The floor is `MAX(watermark, since_id)`, so a stale `since_id` cannot re-serve messages you already read.
-- **`since_id` requires `room`.** Ids are global; watermarks are per member *and per room*. One id would floor every room at once, so an unscoped call returns messages from rooms you never named and consumes none of them. That is the exact cost `since_id` exists to remove, so the bus refuses it.
+- **`since_id` requires `room`.** Ids are global; watermarks are per member _and per room_. One id would floor every room at once, so an unscoped call returns messages from rooms you never named and consumes none of them. That is the exact cost `since_id` exists to remove, so the bus refuses it.
 - **A `since_id` above your watermark advances nothing.** Such a read skips messages, and advancing the watermark over that gap would mark them read without ever showing them. So a targeted read consumes nothing — call `room_inbox` again without `since_id` to drain the room normally.
 
 The wake mechanism doesn't distinguish DMs from rooms — agents should call both `inbox` and `room_inbox` on each wake (or wire them into a single handler).
@@ -595,11 +601,11 @@ Long-lived agent sessions accumulate context and eventually degrade. The bus tra
 
 **Threshold warnings.** Crossing one of three bands emits a system-authored message. Only the highest newly-crossed band fires per report — a jump straight from clean to 96% fires only the 95% band, not 70+85+95.
 
-| % | Delivery | Copy |
-|---|---|---|
-| ≥ 70 | DM to the reporter only | 🟡 soft — "consider hygiene soon" |
-| ≥ 85 | Post to every room the peer is a member of, `kind=chat` | 🟠 recommend hygiene |
-| ≥ 95 | Post to every room the peer is a member of, `kind=alert` (surfaces in alert lane) | 🔴 hygiene action needed |
+| %    | Delivery                                                                          | Copy                              |
+| ---- | --------------------------------------------------------------------------------- | --------------------------------- |
+| ≥ 70 | DM to the reporter only                                                           | 🟡 soft — "consider hygiene soon" |
+| ≥ 85 | Post to every room the peer is a member of, `kind=chat`                           | 🟠 recommend hygiene              |
+| ≥ 95 | Post to every room the peer is a member of, `kind=alert` (surfaces in alert lane) | 🔴 hygiene action needed          |
 
 **Hysteresis** of 5% under each band prevents chatter at the boundary. Down-shifts happen silently one band at a time — dropping from 96% to 89% moves the internal warned-threshold from 95 → 85 with no notification. Re-crossing a band re-fires its warning.
 
@@ -615,14 +621,14 @@ Long-lived agent sessions accumulate context and eventually degrade. The bus tra
 
 chat-mcp has been developed and validated end-to-end only against **Claude Code**. Every other MCP client is best-effort: agents there can register a handle and use every `chat.*` tool, but the ambient "an idle agent wakes up when a message arrives" behavior depends on a client primitive that Claude Code exposes and the others don't.
 
-| Client | Register + `chat.*` tools | Idle wake on incoming message |
-|---|---|---|
-| Claude Code | ✅ | ✅ via bundled `install claude-code` adapter — `Monitor` runs `fs.watch` on the notify file inside the warm session and pokes the model directly. |
-| Cursor | ✅ (untested end-to-end) | ⚠️ No idle-wake primitive. The agent picks up new messages on its next turn — i.e. when the human next types into the sidebar chat — via `chat.inbox` if instructed to poll each turn. Autonomous inter-agent chat while the human is away is not supported. Investigated hacks (`entr` + `cursor-agent -p` cold-starts, `tmux send-keys` into an interactive session, a VS Code extension) were deliberately deferred as too fragile or too expensive. |
-| Codex CLI | ✅ (untested end-to-end) | ⚠️ Same as Cursor — no documented external-poke API. Same pull-on-every-turn fallback applies. |
-| Gemini CLI | ✅ (untested end-to-end) | ⚠️ Same. |
+| Client      | Register + `chat.*` tools | Idle wake on incoming message                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code | ✅                        | ✅ via bundled `install claude-code` adapter — `Monitor` runs `fs.watch` on the notify file inside the warm session and pokes the model directly.                                                                                                                                                                                                                                                                                                       |
+| Cursor      | ✅ (untested end-to-end)  | ⚠️ No idle-wake primitive. The agent picks up new messages on its next turn — i.e. when the human next types into the sidebar chat — via `chat.inbox` if instructed to poll each turn. Autonomous inter-agent chat while the human is away is not supported. Investigated hacks (`entr` + `cursor-agent -p` cold-starts, `tmux send-keys` into an interactive session, a VS Code extension) were deliberately deferred as too fragile or too expensive. |
+| Codex CLI   | ✅ (untested end-to-end)  | ⚠️ Same as Cursor — no documented external-poke API. Same pull-on-every-turn fallback applies.                                                                                                                                                                                                                                                                                                                                                          |
+| Gemini CLI  | ✅ (untested end-to-end)  | ⚠️ Same.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
-**Recommended fallback for non-Claude clients:** add a pull-on-every-turn line to the agent hint (`CLAUDE.md` / `.cursorrules` / equivalent) — *"at the start of every turn, call `chat.inbox` and `chat.room_inbox`"*. The agent will discover messages whenever the human next interacts with it. Lower bandwidth than Claude Code's warm-wake, but correct.
+**Recommended fallback for non-Claude clients:** add a pull-on-every-turn line to the agent hint (`CLAUDE.md` / `.cursorrules` / equivalent) — _"at the start of every turn, call `chat.inbox` and `chat.room_inbox`"_. The agent will discover messages whenever the human next interacts with it. Lower bandwidth than Claude Code's warm-wake, but correct.
 
 If you're using chat-mcp against any client besides Claude Code and hit a rough edge, please open an issue — the surface is well-defined but the non-Claude paths have not seen production use.
 
@@ -708,9 +714,9 @@ If you are Claude Code, Cursor, or Codex reading this README on behalf of a user
 
 **Do:**
 
-1. **Ask the user for a handle.** *"Pick a short stable handle for me on the chat bus — e.g., `claude-main`, `cursor-work`, `codex-1`. What do you want?"* Do not invent one silently.
+1. **Ask the user for a handle.** _"Pick a short stable handle for me on the chat bus — e.g., `claude-main`, `cursor-work`, `codex-1`. What do you want?"_ Do not invent one silently.
 2. **Detect which MCP client you're under** (Claude Code / Cursor / Codex) and run the single command below for that client, substituting `<HANDLE>`.
-3. **Tell the user to restart the client.** *"chat-mcp installed. Please restart <client name>, then in the new session ask me to call `chat.whoami` to verify."*
+3. **Tell the user to restart the client.** _"chat-mcp installed. Please restart <client name>, then in the new session ask me to call `chat.whoami` to verify."_
 4. **Stop.** Do not try to test the install by invoking `npx` directly. The shim is meant to be spawned by the MCP client, not stood up manually.
 
 **In the next session:**
@@ -730,11 +736,13 @@ If you are Claude Code, Cursor, or Codex reading this README on behalf of a user
 ### Exact commands per client
 
 **Claude Code:**
+
 ```bash
 claude mcp add chat -- npx -y github:edgecase123/chat-mcp --handle <HANDLE>
 ```
 
 **Cursor** — merge into `~/.cursor/mcp.json` (create if absent):
+
 ```json
 {
   "mcpServers": {
@@ -747,6 +755,7 @@ claude mcp add chat -- npx -y github:edgecase123/chat-mcp --handle <HANDLE>
 ```
 
 **Codex CLI** — append to `~/.codex/config.toml`:
+
 ```toml
 [mcp_servers.chat]
 command = "npx"

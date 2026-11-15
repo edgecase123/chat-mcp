@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { stateDir } from '../util/paths.js';
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { stateDir } from "../util/paths.js";
 
 export const DEFAULT_MAX_CONCURRENT = 4;
 export const DEFAULT_TIMEOUT_MINUTES = 15;
@@ -22,7 +22,7 @@ export const MAX_CONCURRENT_CEILING = 64;
 export const MAX_TIMEOUT_MINUTES = 24 * 60;
 export const MAX_BUFFER_MB_CEILING = 1024;
 
-const KEYS = ['maxConcurrent', 'timeoutMinutes', 'maxBufferMb'] as const;
+const KEYS = ["maxConcurrent", "timeoutMinutes", "maxBufferMb"] as const;
 
 export interface CommandLimits {
   readonly maxConcurrent: number;
@@ -43,10 +43,11 @@ const DEFAULTS: CommandLimits = {
  * `assertDisjoint` for this path would be dead code.
  */
 export function limitsPath(): string {
-  return join(stateDir(), 'limits.json');
+  return join(stateDir(), "limits.json");
 }
 
-const quoted = (keys: readonly string[]) => keys.map((k) => `"${k}"`).join(', ');
+const quoted = (keys: readonly string[]) =>
+  keys.map((k) => `"${k}"`).join(", ");
 
 /**
  * 🛑 AN UNKNOWN KEY IS REFUSED, NOT IGNORED. A misspelling is the one bad input
@@ -54,12 +55,14 @@ const quoted = (keys: readonly string[]) => keys.map((k) => `"${k}"`).join(', ')
  * unapplied while the file reads correct at a glance.
  */
 function assertKnownKeys(raw: Record<string, unknown>, path: string): void {
-  const unknown = Object.keys(raw).filter((k) => !(KEYS as readonly string[]).includes(k));
+  const unknown = Object.keys(raw).filter(
+    (k) => !(KEYS as readonly string[]).includes(k),
+  );
 
   if (unknown.length === 0) return;
 
   throw new Error(
-    `${path} has ${unknown.length === 1 ? 'an unknown key' : 'unknown keys'} ` +
+    `${path} has ${unknown.length === 1 ? "an unknown key" : "unknown keys"} ` +
       `${quoted(unknown)}; the limits are ${quoted(KEYS)}`,
   );
 }
@@ -72,7 +75,7 @@ function assertKnownKeys(raw: Record<string, unknown>, path: string): void {
 function finite(value: unknown, key: string, path: string): number | undefined {
   if (value === undefined) return undefined;
 
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     throw new Error(`"${key}" in ${path} is not a finite number`);
   }
 
@@ -80,7 +83,12 @@ function finite(value: unknown, key: string, path: string): number | undefined {
 }
 
 /** Refuses above `max`; a caller decides what a value below 1 means. */
-function atMost(value: unknown, key: string, path: string, max: number): number | undefined {
+function atMost(
+  value: unknown,
+  key: string,
+  path: string,
+  max: number,
+): number | undefined {
   const n = finite(value, key, path);
 
   if (n === undefined) return undefined;
@@ -94,7 +102,12 @@ function atMost(value: unknown, key: string, path: string, max: number): number 
  * For the two limits with no most-restrictive-but-usable value. A zero timeout
  * kills every command, so clamping would have to invent a floor.
  */
-function positive(value: unknown, key: string, path: string, max: number): number | undefined {
+function positive(
+  value: unknown,
+  key: string,
+  path: string,
+  max: number,
+): number | undefined {
   const n = atMost(value, key, path, max);
 
   if (n === undefined) return undefined;
@@ -122,7 +135,7 @@ export function commandLimits(path: string = limitsPath()): CommandLimits {
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(readFileSync(path, 'utf8'));
+    parsed = JSON.parse(readFileSync(path, "utf8"));
   } catch (err) {
     throw new Error(
       `${path} is not readable JSON, so the command limits it sets cannot be applied: ` +
@@ -130,7 +143,7 @@ export function commandLimits(path: string = limitsPath()): CommandLimits {
     );
   }
 
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`${path} must hold a JSON object`);
   }
 
@@ -142,16 +155,21 @@ export function commandLimits(path: string = limitsPath()): CommandLimits {
   // gives it. An operator writing 0 wants throttling, never a deadlock.
   const maxConcurrent = Math.max(
     1,
-    atMost(raw.maxConcurrent, 'maxConcurrent', path, MAX_CONCURRENT_CEILING) ??
+    atMost(raw.maxConcurrent, "maxConcurrent", path, MAX_CONCURRENT_CEILING) ??
       DEFAULT_MAX_CONCURRENT,
   );
 
   const minutes =
-    positive(raw.timeoutMinutes, 'timeoutMinutes', path, MAX_TIMEOUT_MINUTES) ??
+    positive(raw.timeoutMinutes, "timeoutMinutes", path, MAX_TIMEOUT_MINUTES) ??
     DEFAULT_TIMEOUT_MINUTES;
 
   const mb =
-    positive(raw.maxBufferMb, 'maxBufferMb', path, MAX_BUFFER_MB_CEILING) ?? DEFAULT_MAX_BUFFER_MB;
+    positive(raw.maxBufferMb, "maxBufferMb", path, MAX_BUFFER_MB_CEILING) ??
+    DEFAULT_MAX_BUFFER_MB;
 
-  return { maxConcurrent, timeoutMs: minutes * 60 * 1000, maxBuffer: mb * 1024 * 1024 };
+  return {
+    maxConcurrent,
+    timeoutMs: minutes * 60 * 1000,
+    maxBuffer: mb * 1024 * 1024,
+  };
 }

@@ -1,9 +1,9 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { NotifyBus, notifyPeer } from '../../src/notify/bus.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { NotifyBus, notifyPeer } from "../../src/notify/bus.js";
 
 /**
  * 🛑 THE POLL REPLACED A FILE WATCH, ON lee's INSTRUCTION: *"I just don't
@@ -16,7 +16,7 @@ import { NotifyBus, notifyPeer } from '../../src/notify/bus.js';
  */
 
 function withTempHome<T>(fn: () => Promise<T>): Promise<T> {
-  const home = mkdtempSync(join(tmpdir(), 'chat-mcp-poll-'));
+  const home = mkdtempSync(join(tmpdir(), "chat-mcp-poll-"));
   const previous = process.env.CHAT_MCP_HOME;
   process.env.CHAT_MCP_HOME = home;
 
@@ -29,25 +29,31 @@ function withTempHome<T>(fn: () => Promise<T>): Promise<T> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-test('a subscriber fires on a real write', async () => {
+test("a subscriber fires on a real write", async () => {
   await withTempHome(async () => {
-    const bus = new NotifyBus('probe');
+    const bus = new NotifyBus("probe");
     let fired = 0;
     bus.subscribe(() => {
       fired += 1;
     });
 
-    notifyPeer('probe', { id: 1, to: 'probe', from: 't', ts: Date.now(), body: 'hi' });
+    notifyPeer("probe", {
+      id: 1,
+      to: "probe",
+      from: "t",
+      ts: Date.now(),
+      body: "hi",
+    });
     await sleep(600);
     await bus.close();
 
-    assert.ok(fired > 0, 'the poll never noticed the write');
+    assert.ok(fired > 0, "the poll never noticed the write");
   });
 });
 
-test('it starts at the floor, so the first burst is fast', async () => {
+test("it starts at the floor, so the first burst is fast", async () => {
   await withTempHome(async () => {
-    const bus = new NotifyBus('probe');
+    const bus = new NotifyBus("probe");
 
     assert.equal(bus.pollIntervalMs, NotifyBus.MIN_POLL_MS);
     await bus.close();
@@ -59,15 +65,21 @@ test('it starts at the floor, so the first burst is fast', async () => {
  * after a long quiet period waits an arbitrary time, which is the ambiguity
  * this whole bus argues against.
  */
-test('it relaxes while idle and never passes the ceiling', async () => {
+test("it relaxes while idle and never passes the ceiling", async () => {
   await withTempHome(async () => {
-    const bus = new NotifyBus('probe');
+    const bus = new NotifyBus("probe");
 
     await sleep(1500);
     const relaxed = bus.pollIntervalMs;
 
-    assert.ok(relaxed > NotifyBus.MIN_POLL_MS, `it never backed off (${relaxed}ms)`);
-    assert.ok(relaxed <= NotifyBus.MAX_POLL_MS, `it passed the ceiling (${relaxed}ms)`);
+    assert.ok(
+      relaxed > NotifyBus.MIN_POLL_MS,
+      `it never backed off (${relaxed}ms)`,
+    );
+    assert.ok(
+      relaxed <= NotifyBus.MAX_POLL_MS,
+      `it passed the ceiling (${relaxed}ms)`,
+    );
 
     await bus.close();
   });
@@ -78,9 +90,9 @@ test('it relaxes while idle and never passes the ceiling', async () => {
  * interval, a burst arriving after a quiet spell would be delivered at the
  * SLOWEST rate — exactly backwards.
  */
-test('activity resets the interval to the floor', async () => {
+test("activity resets the interval to the floor", async () => {
   await withTempHome(async () => {
-    const bus = new NotifyBus('probe');
+    const bus = new NotifyBus("probe");
 
     // ⚠️ SAMPLED AT FIRE TIME, not afterwards. The first version slept past
     // the burst and read the interval once it had relaxed AGAIN — it was
@@ -92,38 +104,57 @@ test('activity resets the interval to the floor', async () => {
 
     await sleep(1500);
     const relaxed = bus.pollIntervalMs;
-    assert.ok(relaxed > NotifyBus.MIN_POLL_MS, 'it never backed off to begin with');
+    assert.ok(
+      relaxed > NotifyBus.MIN_POLL_MS,
+      "it never backed off to begin with",
+    );
 
-    notifyPeer('probe', { id: 2, to: 'probe', from: 't', ts: Date.now(), body: 'burst' });
+    notifyPeer("probe", {
+      id: 2,
+      to: "probe",
+      from: "t",
+      ts: Date.now(),
+      body: "burst",
+    });
     await sleep(NotifyBus.MAX_POLL_MS + 300);
     await bus.close();
 
-    assert.equal(atFire, NotifyBus.MIN_POLL_MS, 'a burst did not speed it back up');
+    assert.equal(
+      atFire,
+      NotifyBus.MIN_POLL_MS,
+      "a burst did not speed it back up",
+    );
   });
 });
 
-test('the bounds are sane: a floor below the ceiling, both positive', () => {
+test("the bounds are sane: a floor below the ceiling, both positive", () => {
   assert.ok(NotifyBus.MIN_POLL_MS > 0);
   assert.ok(NotifyBus.MIN_POLL_MS < NotifyBus.MAX_POLL_MS);
-  assert.ok(NotifyBus.BACKOFF > 1, 'a backoff of 1 or less never relaxes');
+  assert.ok(NotifyBus.BACKOFF > 1, "a backoff of 1 or less never relaxes");
 });
 
 /**
  * ⚠️ `setTimeout` RE-ARMS ITSELF, so a close that misses leaves a timer
  * polling a deleted file forever.
  */
-test('close stops the loop', async () => {
+test("close stops the loop", async () => {
   await withTempHome(async () => {
-    const bus = new NotifyBus('probe');
+    const bus = new NotifyBus("probe");
     let fired = 0;
     bus.subscribe(() => {
       fired += 1;
     });
 
     await bus.close();
-    notifyPeer('probe', { id: 3, to: 'probe', from: 't', ts: Date.now(), body: 'after close' });
+    notifyPeer("probe", {
+      id: 3,
+      to: "probe",
+      from: "t",
+      ts: Date.now(),
+      body: "after close",
+    });
     await sleep(600);
 
-    assert.equal(fired, 0, 'the bus fired after close');
+    assert.equal(fired, 0, "the bus fired after close");
   });
 });

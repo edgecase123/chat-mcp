@@ -1,5 +1,5 @@
-import { notifyPeer } from '../notify/bus.js';
-import * as dao from '../storage/dao.js';
+import { notifyPeer } from "../notify/bus.js";
+import * as dao from "../storage/dao.js";
 
 /**
  * Record a decision on an approval and wake the supervisor that can act on it.
@@ -14,20 +14,23 @@ import * as dao from '../storage/dao.js';
  * permission mode, and nothing here decides on a human's behalf.
  */
 export type AnswerOutcome =
-  | { readonly kind: 'answered'; readonly approval: dao.Approval }
-  | { readonly kind: 'already-answered'; readonly decision: 'approve' | 'deny' | null }
-  | { readonly kind: 'no-such-approval' }
-  | { readonly kind: 'ungrantable'; readonly message: string };
+  | { readonly kind: "answered"; readonly approval: dao.Approval }
+  | {
+      readonly kind: "already-answered";
+      readonly decision: "approve" | "deny" | null;
+    }
+  | { readonly kind: "no-such-approval" }
+  | { readonly kind: "ungrantable"; readonly message: string };
 
 export function answerAndNotify(
   db: Parameters<typeof dao.getApproval>[0],
   id: number,
-  decision: 'approve' | 'deny',
+  decision: "approve" | "deny",
   fromHandle: string,
 ): AnswerOutcome {
   const request = dao.getApproval(db, id);
 
-  if (!request) return { kind: 'no-such-approval' };
+  if (!request) return { kind: "no-such-approval" };
 
   let answered: boolean;
 
@@ -37,14 +40,17 @@ export function answerAndNotify(
     // An unnamed request is a valid row that cannot be APPROVED, because
     // there is nothing to allowlist. Denying it always works.
     if (err instanceof dao.UnnameableApprovalError) {
-      return { kind: 'ungrantable', message: err.message };
+      return { kind: "ungrantable", message: err.message };
     }
 
     throw err;
   }
 
   if (!answered) {
-    return { kind: 'already-answered', decision: dao.getApproval(db, id)?.decision ?? null };
+    return {
+      kind: "already-answered",
+      decision: dao.getApproval(db, id)?.decision ?? null,
+    };
   }
 
   // 🛑 THE SUPERVISOR'S HANDLE, AND THE DECISION RIDES IN THE BODY so it can
@@ -54,16 +60,16 @@ export function answerAndNotify(
     to: request.supervisorHandle,
     from: fromHandle,
     ts: Date.now(),
-    body: `approval ${id} ${decision}: ${request.requested ?? '(unnamed)'}`,
+    body: `approval ${id} ${decision}: ${request.requested ?? "(unnamed)"}`,
     approval: {
       approvalId: id,
       decision,
-      requested: request.requested ?? '',
+      requested: request.requested ?? "",
       grant: request.grant,
       grantForms: request.grantForms,
       sessionId: request.sessionId,
     },
   });
 
-  return { kind: 'answered', approval: request };
+  return { kind: "answered", approval: request };
 }

@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
  * 🛑 THE TOKEN IS WRITTEN UNDER `stateDir()`, 0600, AND THAT IS DELIBERATE.
@@ -9,12 +9,12 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
  *
  * ⚠️ `web-url` STAYS TOKENLESS — it is the twin external readers expect.
  */
-export const COOKIE_NAME = 'chat_mcp_api';
+export const COOKIE_NAME = "chat_mcp_api";
 
 /** The query parameter that carries the token on the browser's first load. */
-export const HANDSHAKE_PARAM = 't';
+export const HANDSHAKE_PARAM = "t";
 
-export type Capability = 'read' | 'write' | 'admin';
+export type Capability = "read" | "write" | "admin";
 
 /**
  * Every capability, for the operator's own browser.
@@ -24,10 +24,14 @@ export type Capability = 'read' | 'write' | 'admin';
  * credential is minted yet. This is the groundwork for lee's 2026-11-11
  * ruling that the credential can be scoped per route, not a live restriction.
  */
-export const ALL_CAPABILITIES: readonly Capability[] = ['read', 'write', 'admin'];
+export const ALL_CAPABILITIES: readonly Capability[] = [
+  "read",
+  "write",
+  "admin",
+];
 
 export function mintToken(): string {
-  return randomBytes(32).toString('base64url');
+  return randomBytes(32).toString("base64url");
 }
 
 /**
@@ -40,16 +44,19 @@ export function mintToken(): string {
  * restrictive level while the comment promised the most. Found by claude2
  * reviewing PR #165. The tests pin all four quadrants.
  */
-export function requiredCapability(method: string, path: string): Capability | null {
-  if (!path.startsWith('/api/')) return null;
+export function requiredCapability(
+  method: string,
+  path: string,
+): Capability | null {
+  if (!path.startsWith("/api/")) return null;
 
-  const reading = method === 'GET' || method === 'HEAD';
+  const reading = method === "GET" || method === "HEAD";
 
-  if (ADMIN_ROUTES.has(path)) return 'admin';
-  if (WRITE_ROUTES.has(path) && !reading) return 'write';
-  if (READ_ROUTES.has(path) && reading) return 'read';
+  if (ADMIN_ROUTES.has(path)) return "admin";
+  if (WRITE_ROUTES.has(path) && !reading) return "write";
+  if (READ_ROUTES.has(path) && reading) return "read";
 
-  return 'admin';
+  return "admin";
 }
 
 /**
@@ -58,9 +65,9 @@ export function requiredCapability(method: string, path: string): Capability | n
  * permission the operator never clicked.
  */
 const ADMIN_ROUTES: ReadonlySet<string> = new Set([
-  '/api/approvals/answer',
-  '/api/kick',
-  '/api/rooms/delete',
+  "/api/approvals/answer",
+  "/api/kick",
+  "/api/rooms/delete",
 ]);
 
 /**
@@ -70,13 +77,13 @@ const ADMIN_ROUTES: ReadonlySet<string> = new Set([
  * the method decides which tier applies, not the path.
  */
 const READ_ROUTES: ReadonlySet<string> = new Set([
-  '/api/whoami',
-  '/api/messages',
-  '/api/approvals',
-  '/api/claims',
-  '/api/search',
-  '/api/files',
-  '/api/events',
+  "/api/whoami",
+  "/api/messages",
+  "/api/approvals",
+  "/api/claims",
+  "/api/search",
+  "/api/files",
+  "/api/events",
 ]);
 
 const WRITE_ROUTES: ReadonlySet<string> = new Set([
@@ -84,13 +91,13 @@ const WRITE_ROUTES: ReadonlySet<string> = new Set([
   // An unrecognised /api/* path returns 'admin', which fails closed and is
   // therefore safe and wrong — the supervisor holds a write credential, so an
   // unclassified route silently 403s every pulse. #240.
-  '/api/activity',
-  '/api/messages',
-  '/api/messages/clear',
-  '/api/rooms/join',
-  '/api/rooms/leave',
-  '/api/rooms/read',
-  '/api/rooms/style',
+  "/api/activity",
+  "/api/messages",
+  "/api/messages/clear",
+  "/api/rooms/join",
+  "/api/rooms/leave",
+  "/api/rooms/read",
+  "/api/rooms/style",
 ]);
 
 /**
@@ -115,11 +122,14 @@ export const CLASSIFIED_PATHS: ReadonlySet<string> = new Set([
  * and public. This comment said "does not leak the expected length", which was
  * a security property the function never had. Found by claude2 on PR #165.
  */
-export function tokenMatches(expected: string, presented: string | null): boolean {
+export function tokenMatches(
+  expected: string,
+  presented: string | null,
+): boolean {
   if (presented === null) return false;
 
-  const a = Buffer.from(expected, 'utf8');
-  const b = Buffer.from(presented, 'utf8');
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(presented, "utf8");
 
   if (a.length !== b.length) return false;
 
@@ -132,11 +142,14 @@ export function tokenMatches(expected: string, presented: string | null): boolea
  * ⚠️ A value is NOT url-decoded. The token is base64url, which has nothing to
  * decode, and decoding here would accept `%2B` for a token containing `+`.
  */
-export function cookieValue(header: string | undefined, name: string): string | null {
+export function cookieValue(
+  header: string | undefined,
+  name: string,
+): string | null {
   if (!header) return null;
 
-  for (const pair of header.split(';')) {
-    const eq = pair.indexOf('=');
+  for (const pair of header.split(";")) {
+    const eq = pair.indexOf("=");
     if (eq === -1) continue;
     if (pair.slice(0, eq).trim() !== name) continue;
 

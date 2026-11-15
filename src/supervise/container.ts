@@ -1,11 +1,15 @@
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { execFileSync as realExecFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { ensureStateDir, stateDir, writePrivateFileSync } from '../util/paths.js';
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { execFileSync as realExecFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  ensureStateDir,
+  stateDir,
+  writePrivateFileSync,
+} from "../util/paths.js";
 
-export const IMAGE_TAG = 'chat-mcp-agent:local';
+export const IMAGE_TAG = "chat-mcp-agent:local";
 
 export interface ContainerPlan {
   readonly mountPaths: readonly string[];
@@ -22,7 +26,7 @@ interface ContainerState {
 const EMPTY_STATE: ContainerState = { builtHash: null, confirmed: {} };
 
 function containerStatePath(): string {
-  return join(stateDir(), 'container.json');
+  return join(stateDir(), "container.json");
 }
 
 function readContainerState(): ContainerState {
@@ -31,25 +35,37 @@ function readContainerState(): ContainerState {
   if (!existsSync(path)) return EMPTY_STATE;
 
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<ContainerState>;
+    const parsed = JSON.parse(
+      readFileSync(path, "utf8"),
+    ) as Partial<ContainerState>;
 
-    return { builtHash: parsed.builtHash ?? null, confirmed: parsed.confirmed ?? {} };
+    return {
+      builtHash: parsed.builtHash ?? null,
+      confirmed: parsed.confirmed ?? {},
+    };
   } catch {
-    console.error(`container state at ${path} is not valid JSON — falling back to empty state`);
+    console.error(
+      `container state at ${path} is not valid JSON — falling back to empty state`,
+    );
     return EMPTY_STATE;
   }
 }
 
 function writeContainerState(state: ContainerState): void {
   ensureStateDir();
-  writePrivateFileSync(containerStatePath(), `${JSON.stringify(state, null, 2)}\n`);
+  writePrivateFileSync(
+    containerStatePath(),
+    `${JSON.stringify(state, null, 2)}\n`,
+  );
 }
 
 export function dockerfilePath(): string {
-  const fromDist = fileURLToPath(new URL('../../Dockerfile', import.meta.url));
+  const fromDist = fileURLToPath(new URL("../../Dockerfile", import.meta.url));
   if (existsSync(fromDist)) return fromDist;
 
-  const fromSource = fileURLToPath(new URL('../../../Dockerfile', import.meta.url));
+  const fromSource = fileURLToPath(
+    new URL("../../../Dockerfile", import.meta.url),
+  );
   if (existsSync(fromSource)) return fromSource;
 
   throw new Error(`cannot locate Dockerfile next to ${import.meta.url}`);
@@ -64,7 +80,11 @@ export function dockerfilePath(): string {
  * the whole defect this file exists to fix. `DockerfileInputsTest` fails if
  * the Dockerfile copies something this list does not name.
  */
-export const BUILD_INPUT_PATHS = ['package.json', 'package-lock.json', 'dist'] as const;
+export const BUILD_INPUT_PATHS = [
+  "package.json",
+  "package-lock.json",
+  "dist",
+] as const;
 
 /** The build context: `docker build` is handed `dirname(dockerfilePath())`. */
 function contextPath(): string {
@@ -80,11 +100,11 @@ function contextPath(): string {
  * the image — the one action that would have cleared it. Raised by claude2
  * on PR 211.
  */
-function kindOf(path: string): 'file' | 'dir' | 'unreadable' {
+function kindOf(path: string): "file" | "dir" | "unreadable" {
   try {
-    return statSync(path).isDirectory() ? 'dir' : 'file';
+    return statSync(path).isDirectory() ? "dir" : "file";
   } catch {
-    return 'unreadable';
+    return "unreadable";
   }
 }
 
@@ -96,10 +116,10 @@ function kindOf(path: string): 'file' | 'dir' | 'unreadable' {
  * real file with a dangling link would not rebuild.
  */
 function filesUnder(root: string): string[] {
-  if (kindOf(root) !== 'dir') return [''];
+  if (kindOf(root) !== "dir") return [""];
 
-  return readdirSync(root, { recursive: true, encoding: 'utf8' })
-    .filter((rel) => kindOf(join(root, rel)) !== 'dir')
+  return readdirSync(root, { recursive: true, encoding: "utf8" })
+    .filter((rel) => kindOf(join(root, rel)) !== "dir")
     .sort();
 }
 
@@ -119,7 +139,7 @@ function filesUnder(root: string): string[] {
  * a docker build, and a stale `dist` restored with a fresh mtime must not pass.
  */
 export function buildInputsHash(context: string = contextPath()): string {
-  const hash = createHash('sha256');
+  const hash = createHash("sha256");
 
   hash.update(readFileSync(dockerfilePath()));
 
@@ -138,8 +158,8 @@ export function buildInputsHash(context: string = contextPath()): string {
 
       hash.update(`\0${input}/${rel}\0`);
 
-      if (kindOf(full) === 'unreadable') {
-        hash.update('\0unreadable\0');
+      if (kindOf(full) === "unreadable") {
+        hash.update("\0unreadable\0");
         continue;
       }
 
@@ -147,7 +167,7 @@ export function buildInputsHash(context: string = contextPath()): string {
     }
   }
 
-  return hash.digest('hex');
+  return hash.digest("hex");
 }
 
 type Runner = (cmd: string, args: readonly string[]) => Buffer;
@@ -158,7 +178,7 @@ export function imageNeedsBuild(run: Runner = realExecFileSync): boolean {
   if (state.builtHash !== buildInputsHash()) return true;
 
   try {
-    run('docker', ['image', 'inspect', IMAGE_TAG]);
+    run("docker", ["image", "inspect", IMAGE_TAG]);
     return false;
   } catch {
     return true;
@@ -166,9 +186,19 @@ export function imageNeedsBuild(run: Runner = realExecFileSync): boolean {
 }
 
 export function buildImage(run: Runner = realExecFileSync): void {
-  run('docker', ['build', '-t', IMAGE_TAG, '-f', dockerfilePath(), dirname(dockerfilePath())]);
+  run("docker", [
+    "build",
+    "-t",
+    IMAGE_TAG,
+    "-f",
+    dockerfilePath(),
+    dirname(dockerfilePath()),
+  ]);
 
-  writeContainerState({ ...readContainerState(), builtHash: buildInputsHash() });
+  writeContainerState({
+    ...readContainerState(),
+    builtHash: buildInputsHash(),
+  });
 }
 
 export function isConfirmed(handle: string): boolean {
@@ -177,15 +207,18 @@ export function isConfirmed(handle: string): boolean {
 
 export function markConfirmed(handle: string): void {
   const state = readContainerState();
-  writeContainerState({ ...state, confirmed: { ...state.confirmed, [handle]: true } });
+  writeContainerState({
+    ...state,
+    confirmed: { ...state.confirmed, [handle]: true },
+  });
 }
 
 export function describePlan(plan: ContainerPlan): string {
   return [
-    'This will run the agent inside a Docker container:',
-    `  mounts: ${plan.mountPaths.join(', ')}`,
-    `  env vars (names only): ${plan.envVarNames.join(', ')}`,
+    "This will run the agent inside a Docker container:",
+    `  mounts: ${plan.mountPaths.join(", ")}`,
+    `  env vars (names only): ${plan.envVarNames.join(", ")}`,
     `  binary: ${plan.binary}`,
     `  network: ${plan.networkMode}`,
-  ].join('\n');
+  ].join("\n");
 }

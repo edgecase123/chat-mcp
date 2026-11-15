@@ -1,9 +1,13 @@
-import { createServer, type Server, type Socket } from 'node:net';
-import { StringDecoder } from 'node:string_decoder';
-import { isRecord, type ListedCommand } from './commands.js';
-import { BIND_ADDRESS, listenOnLoopback } from './loopback.js';
-import { Refusal, listCommandsFor, runCommandFor } from './run-command-service.js';
-import { type ScriptResult, type ScriptRunner } from './run-script.js';
+import { createServer, type Server, type Socket } from "node:net";
+import { StringDecoder } from "node:string_decoder";
+import { isRecord, type ListedCommand } from "./commands.js";
+import { BIND_ADDRESS, listenOnLoopback } from "./loopback.js";
+import {
+  Refusal,
+  listCommandsFor,
+  runCommandFor,
+} from "./run-command-service.js";
+import { type ScriptResult, type ScriptRunner } from "./run-script.js";
 
 const DEFAULT_MAX_IN_FLIGHT = 4;
 const DEFAULT_MAX_CONNECTIONS = 8;
@@ -73,7 +77,7 @@ export class CommandBroker {
     const broker = new CommandBroker(server, options);
 
     server.maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
-    server.on('connection', (socket) => broker.accept(socket));
+    server.on("connection", (socket) => broker.accept(socket));
 
     broker.boundPort = await listenOnLoopback(server);
 
@@ -93,14 +97,14 @@ export class CommandBroker {
 
   private accept(socket: Socket): void {
     this.open.add(socket);
-    socket.once('close', () => this.open.delete(socket));
+    socket.once("close", () => this.open.delete(socket));
 
     // 🛑 THE IDLE TIMEOUT IS ARMED ONLY WHILE NOTHING IS IN FLIGHT. A gate runs
     // for minutes with no bytes on the wire, so a plain idle timeout would kill
     // the connection while it waits for the answer it asked for.
     const idle = this.options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
-    const decoder = new StringDecoder('utf8');
-    let buffer = '';
+    const decoder = new StringDecoder("utf8");
+    let buffer = "";
     let pending = 0;
 
     const armIdle = () => {
@@ -108,14 +112,14 @@ export class CommandBroker {
       socket.setTimeout(pending === 0 ? idle : 0);
     };
 
-    socket.on('timeout', () => socket.destroy());
-    socket.on('error', () => socket.destroy());
+    socket.on("timeout", () => socket.destroy());
+    socket.on("error", () => socket.destroy());
     armIdle();
 
-    socket.on('data', (chunk: Buffer) => {
+    socket.on("data", (chunk: Buffer) => {
       buffer += decoder.write(chunk);
 
-      for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
+      for (let nl = buffer.indexOf("\n"); nl >= 0; nl = buffer.indexOf("\n")) {
         if (socket.destroyed) return;
 
         const line = buffer.slice(0, nl);
@@ -137,7 +141,7 @@ export class CommandBroker {
       // line reach `JSON.parse`, which is what made this guard's first test
       // vacuous.
       if (buffer.length > MAX_LINE) {
-        buffer = '';
+        buffer = "";
         socket.destroy();
       }
     });
@@ -163,7 +167,7 @@ export class CommandBroker {
       return;
     }
 
-    if (!isRecord(envelope) || typeof envelope.token !== 'string') {
+    if (!isRecord(envelope) || typeof envelope.token !== "string") {
       socket.destroy();
 
       return;
@@ -185,19 +189,19 @@ export class CommandBroker {
     // 🛑 A NON-EMPTY STRING, NOT "not null". `undefined` from a `Map.get` miss
     // or from a missing `return` would otherwise AUTHENTICATE, and the declared
     // `string | null` is not enforced on a value that arrives from config.
-    if (typeof handle !== 'string' || handle.length === 0) {
+    if (typeof handle !== "string" || handle.length === 0) {
       socket.destroy();
 
       return;
     }
 
-    const id = typeof envelope.id === 'number' ? envelope.id : null;
+    const id = typeof envelope.id === "number" ? envelope.id : null;
 
     // 🛑 ONE WRITE CAN CARRY MANY ENVELOPES, AND EACH ONE SPAWNS A HOST
     // PROCESS. Without this, a single chunk of N run-commands starts N
     // processes, each allowed the full timeout and output budget.
     if (this.inFlight >= (this.options.maxInFlight ?? DEFAULT_MAX_IN_FLIGHT)) {
-      this.reply(socket, { id, ok: false, error: 'the broker is busy; retry' });
+      this.reply(socket, { id, ok: false, error: "the broker is busy; retry" });
 
       return;
     }
@@ -205,14 +209,26 @@ export class CommandBroker {
     this.inFlight += 1;
 
     try {
-      this.reply(socket, { id, ok: true, ...(await this.dispatch(handle, envelope)) });
+      this.reply(socket, {
+        id,
+        ok: true,
+        ...(await this.dispatch(handle, envelope)),
+      });
     } catch (err) {
       if (err instanceof Refusal) {
-        console.error(`broker refused a request from "${handle}": ${err.detail}`);
+        console.error(
+          `broker refused a request from "${handle}": ${err.detail}`,
+        );
         this.reply(socket, { id, ok: false, error: err.message });
       } else {
-        console.error(`broker failed a request from "${handle}": ${String(err)}`);
-        this.reply(socket, { id, ok: false, error: 'the broker could not run that command' });
+        console.error(
+          `broker failed a request from "${handle}": ${String(err)}`,
+        );
+        this.reply(socket, {
+          id,
+          ok: false,
+          error: "the broker could not run that command",
+        });
       }
     } finally {
       this.inFlight -= 1;
@@ -223,15 +239,15 @@ export class CommandBroker {
     handle: string,
     envelope: Record<string, unknown>,
   ): Promise<{ commands: ListedCommand[] } | ScriptResult> {
-    if (envelope.op === 'list-commands') {
+    if (envelope.op === "list-commands") {
       return listCommandsFor(handle);
     }
 
-    if (envelope.op === 'run-command') {
+    if (envelope.op === "run-command") {
       return this.runCommand(handle, envelope);
     }
 
-    throw new Refusal('unknown op');
+    throw new Refusal("unknown op");
   }
 
   /**
@@ -242,7 +258,7 @@ export class CommandBroker {
     handle: string,
     envelope: Record<string, unknown>,
   ): Promise<ScriptResult> {
-    if (typeof envelope.name !== 'string') {
+    if (typeof envelope.name !== "string") {
       throw new Refusal('run-command needs a string "name"');
     }
 
@@ -252,14 +268,19 @@ export class CommandBroker {
       throw new Refusal('run-command "params" must be an object');
     }
 
-    return runCommandFor(handle, envelope.name, params as Record<string, string>, {
-      // 🛑 PASSED THROUGH UNSET, NOT DEFAULTED HERE. Resolving the two
-      // constants in this class put a SECOND copy of the defaults in front of
-      // `limits.json`, so a configured value was overridden on every call.
-      timeoutMs: this.options.timeoutMs,
-      maxBuffer: this.options.maxBuffer,
-      run: this.options.run,
-    });
+    return runCommandFor(
+      handle,
+      envelope.name,
+      params as Record<string, string>,
+      {
+        // 🛑 PASSED THROUGH UNSET, NOT DEFAULTED HERE. Resolving the two
+        // constants in this class put a SECOND copy of the defaults in front of
+        // `limits.json`, so a configured value was overridden on every call.
+        timeoutMs: this.options.timeoutMs,
+        maxBuffer: this.options.maxBuffer,
+        run: this.options.run,
+      },
+    );
   }
 
   private reply(socket: Socket, payload: Record<string, unknown>): void {

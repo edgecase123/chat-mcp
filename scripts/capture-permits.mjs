@@ -22,34 +22,49 @@
  * two-variable run is how three wrong conclusions were drawn in one evening.
  */
 
-import { mkdtempSync, rmSync, mkdirSync, existsSync, writeFileSync, realpathSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { startSupervisor } from '../src/supervise/index.ts';
-import { deliverToSupervisor } from '../src/supervise/socket.ts';
-import { answerAndNotify } from '../src/supervise/answer.ts';
-import { openDb } from '../src/storage/db.ts';
-import * as dao from '../src/storage/dao.ts';
+import {
+  mkdtempSync,
+  rmSync,
+  mkdirSync,
+  existsSync,
+  writeFileSync,
+  realpathSync,
+} from "node:fs";
+import { execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { startSupervisor } from "../src/supervise/index.ts";
+import { deliverToSupervisor } from "../src/supervise/socket.ts";
+import { answerAndNotify } from "../src/supervise/answer.ts";
+import { openDb } from "../src/storage/db.ts";
+import * as dao from "../src/storage/dao.ts";
 
 // 🛑 `--list` IS THE ONLY FREE WAY TO SEE WHAT THIS RUN WOULD MEASURE.
 // The loop derives its indices from the probe list, and nothing else can show
 // that the two agree without spawning an agent and spending money.
-const LIST_ONLY = process.argv.includes('--list');
+const LIST_ONLY = process.argv.includes("--list");
 
 if (!LIST_ONLY && !process.env.CHAT_MCP_LIVE) {
-  console.error('Refusing to run: this spawns a real agent CLI and spends money.');
-  console.error('Set CHAT_MCP_LIVE=1 to opt in.');
+  console.error(
+    "Refusing to run: this spawns a real agent CLI and spends money.",
+  );
+  console.error("Set CHAT_MCP_LIVE=1 to opt in.");
   process.exit(2);
 }
 
 // ⚠️ RESOLVED FROM THIS MODULE, NOT THE CWD. `would-refuse.ts` carries the
 // same note for the same reason: a relative path only works when the run
 // happens to start at the package root. Both writes below were relative.
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-const BASE_ALLOWLIST = ['Read', 'Glob', 'Grep', 'mcp__chat__send', 'mcp__chat__room_send'];
+const BASE_ALLOWLIST = [
+  "Read",
+  "Glob",
+  "Grep",
+  "mcp__chat__send",
+  "mcp__chat__room_send",
+];
 const SETTLE_MS = Number(process.env.PERMIT_SETTLE_SECONDS ?? 90) * 1000;
 const db = openDb();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -59,7 +74,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // the swallowed-error branch would reach one probe and not the other.
 function hasTag(work, name) {
   try {
-    return execFileSync('git', ['-C', work, 'tag', '-l', name]).toString().includes(name);
+    return execFileSync("git", ["-C", work, "tag", "-l", name])
+      .toString()
+      .includes(name);
   } catch {
     return false;
   }
@@ -73,17 +90,17 @@ function hasTag(work, name) {
  * look at afterwards.
  */
 function probesFor(root, work, handle) {
-  const made = join(work, 'made.txt');
+  const made = join(work, "made.txt");
   const tag = `permit-${process.pid}`;
   const cdTag = `permit-cd-${process.pid}`;
   const sentinel = `permit-ok-${process.pid}`;
-  const firstHalf = join(work, 'compound-a.txt');
-  const secondHalf = join(work, 'compound-b.txt');
+  const firstHalf = join(work, "compound-a.txt");
+  const secondHalf = join(work, "compound-b.txt");
 
   // ⚠️ `probesFor('', '', 'x')` builds the ROSTER with dummy arguments, and
   // `realpathSync('')` throws. The roster only needs labels.
-  const symlinked = join(work, 'canonical.txt');
-  const realpath = work ? join(realpathSync(work), 'canonical.txt') : symlinked;
+  const symlinked = join(work, "canonical.txt");
+  const realpath = work ? join(realpathSync(work), "canonical.txt") : symlinked;
 
   return [
     {
@@ -97,27 +114,27 @@ function probesFor(root, work, handle) {
        * `touch` was measured as grantable here, which already contradicts
        * the general form of that claim.
        */
-      label: 'remove a file inside the allowed directory',
-      command: `rm ${join(work, 'README.md')}`,
-      moved: () => !existsSync(join(work, 'README.md')),
+      label: "remove a file inside the allowed directory",
+      command: `rm ${join(work, "README.md")}`,
+      moved: () => !existsSync(join(work, "README.md")),
     },
     {
-      label: 'touch a file inside the allowed directory',
+      label: "touch a file inside the allowed directory",
       command: `touch ${made}`,
       moved: () => existsSync(made),
     },
     {
-      label: 'create a git tag in the scratch repo',
+      label: "create a git tag in the scratch repo",
       command: `git -C ${work} tag ${tag}`,
       moved: () => hasTag(work, tag),
     },
     {
-      label: 'publish a status over MCP',
+      label: "publish a status over MCP",
       command: `mcp__chat__set_status with status "tool" and focus exactly "${sentinel}"`,
       moved: () => {
         const a = dao.getAgent(db, `${handle}-agent`);
 
-        return `${a?.focus ?? ''} ${a?.status ?? ''}`.includes(sentinel);
+        return `${a?.focus ?? ""} ${a?.status ?? ""}`.includes(sentinel);
       },
     },
     {
@@ -130,7 +147,7 @@ function probesFor(root, work, handle) {
        * Same observable target as probe 3 ON PURPOSE. The tag either resolves
        * or it does not, and `cd` is then the only variable between them.
        */
-      label: 'change directory and then create a git tag',
+      label: "change directory and then create a git tag",
       command: `cd ${work} && git tag ${cdTag}`,
       moved: () => hasTag(work, cdTag),
     },
@@ -143,7 +160,7 @@ function probesFor(root, work, handle) {
        * Both halves are `touch`, which approval 42 already measured as
        * grantable on its own. The separator is therefore the only variable.
        */
-      label: 'two operations in one command, separated by a semicolon',
+      label: "two operations in one command, separated by a semicolon",
       command: `touch ${firstHalf}; touch ${secondHalf}`,
       moved: () => existsSync(firstHalf) && existsSync(secondHalf),
       /**
@@ -197,11 +214,11 @@ function probesFor(root, work, handle) {
        * not be read later as proof the relay works for a single-form grant.
        * claude1's caveat, and the evidence string carries it.
        */
-      label: 'the grant names the realpath and the command names the symlink',
+      label: "the grant names the realpath and the command names the symlink",
       command: `touch ${symlinked}`,
       preGranted: `Bash(touch ${realpath})`,
       caveat:
-        'PRE-GRANTED, so `applyAnswer` was never reached. It measures the ' +
+        "PRE-GRANTED, so `applyAnswer` was never reached. It measures the " +
         "CLI's path matching, NOT the relay.",
       moved: () => existsSync(symlinked),
       // 🛑 THE DISCRIMINATOR, PRINTED. Without it the run says
@@ -209,7 +226,7 @@ function probesFor(root, work, handle) {
       // this probe exists to replace.
       note: ({ approvals }) =>
         approvals.length === 0
-          ? 'approvals: 0 — a move means the realpath form ALONE sufficed, so the CLI canonicalises; no move means the child never tried'
+          ? "approvals: 0 — a move means the realpath form ALONE sufficed, so the CLI canonicalises; no move means the child never tried"
           : `approvals: ${approvals.length} — an approval was NEEDED, so the CLI matched the path AS TYPED`,
     },
   ];
@@ -248,20 +265,26 @@ const withheld = [];
  */
 const underGrant = [];
 
-const PROBE_LABELS = probesFor('', '', 'x').map((p) => p.label);
+const PROBE_LABELS = probesFor("", "", "x").map((p) => p.label);
 
 if (LIST_ONLY) {
   // 🛑 THE ALLOWLIST SIZE IS PART OF THE ROSTER. A probe measured under a
   // different starting set is a different experiment, and a roster that hides
   // that reads as seven runs of one setup.
-  for (const [i, probe] of probesFor('', '', 'x').entries()) {
-    const size = (probe.preGranted ? [...BASE_ALLOWLIST, probe.preGranted] : BASE_ALLOWLIST).length;
+  for (const [i, probe] of probesFor("", "", "x").entries()) {
+    const size = (
+      probe.preGranted ? [...BASE_ALLOWLIST, probe.preGranted] : BASE_ALLOWLIST
+    ).length;
 
     console.log(`${i + 1}. ${probe.label}`);
-    console.log(`   starts with ${size} allowed tool(s)${probe.preGranted ? ', PRE-GRANTED' : ''}`);
+    console.log(
+      `   starts with ${size} allowed tool(s)${probe.preGranted ? ", PRE-GRANTED" : ""}`,
+    );
   }
 
-  console.log(`\n${PROBE_LABELS.length} probe(s), and the run iterates every one of them.`);
+  console.log(
+    `\n${PROBE_LABELS.length} probe(s), and the run iterates every one of them.`,
+  );
   process.exit(0);
 }
 
@@ -270,15 +293,15 @@ if (LIST_ONLY) {
 // refusal when nothing was attempted at all.
 for (const index of PROBE_LABELS.keys()) {
   const handle = `perm-${process.pid}-${index}`;
-  const root = mkdtempSync(join(tmpdir(), 'chat-mcp-e2e-'));
-  const work = join(root, 'work');
+  const root = mkdtempSync(join(tmpdir(), "chat-mcp-e2e-"));
+  const work = join(root, "work");
   mkdirSync(work);
-  writeFileSync(join(work, 'README.md'), 'permit\n', 'utf8');
-  execFileSync('git', ['init', '-q', '-b', 'main', work]);
-  execFileSync('git', ['-C', work, 'config', 'user.email', 'p@example.com']);
-  execFileSync('git', ['-C', work, 'config', 'user.name', 'p']);
-  execFileSync('git', ['-C', work, 'add', '-A']);
-  execFileSync('git', ['-C', work, 'commit', '-q', '-m', 'initial']);
+  writeFileSync(join(work, "README.md"), "permit\n", "utf8");
+  execFileSync("git", ["init", "-q", "-b", "main", work]);
+  execFileSync("git", ["-C", work, "config", "user.email", "p@example.com"]);
+  execFileSync("git", ["-C", work, "config", "user.name", "p"]);
+  execFileSync("git", ["-C", work, "add", "-A"]);
+  execFileSync("git", ["-C", work, "commit", "-q", "-m", "initial"]);
 
   const probes = probesFor(root, work, handle);
 
@@ -286,7 +309,9 @@ for (const index of PROBE_LABELS.keys()) {
   // throwaway call with dummy arguments. Nothing makes the roster depend on
   // those arguments today, and nothing stops it either. claude1 on this PR.
   if (probes.length !== PROBE_LABELS.length) {
-    throw new Error(`roster is ${PROBE_LABELS.length} probe(s), this call built ${probes.length}`);
+    throw new Error(
+      `roster is ${PROBE_LABELS.length} probe(s), this call built ${probes.length}`,
+    );
   }
 
   const probe = probes[index];
@@ -314,7 +339,7 @@ for (const index of PROBE_LABELS.keys()) {
     await deliverToSupervisor(handle, {
       id: 1,
       to: handle,
-      from: 'permit-harness',
+      from: "permit-harness",
       ts: Date.now(),
       body:
         `Attempt exactly this, once, as a single tool call: ${probe.command}\n` +
@@ -339,11 +364,22 @@ for (const index of PROBE_LABELS.keys()) {
         if (answered.has(row.id)) continue;
         answered.add(row.id);
 
-        const outcome = answerAndNotify(db, row.id, 'approve', 'permit-harness');
+        const outcome = answerAndNotify(
+          db,
+          row.id,
+          "approve",
+          "permit-harness",
+        );
 
-        console.log(`   approval ${row.id}: ${outcome.kind}  grant=${row.grant ?? '(none)'}`);
+        console.log(
+          `   approval ${row.id}: ${outcome.kind}  grant=${row.grant ?? "(none)"}`,
+        );
 
-        if (outcome.kind === 'answered' && row.grant && !grantedEntries.includes(row.grant)) {
+        if (
+          outcome.kind === "answered" &&
+          row.grant &&
+          !grantedEntries.includes(row.grant)
+        ) {
           grantedEntries.push(row.grant);
         }
       }
@@ -365,7 +401,10 @@ for (const index of PROBE_LABELS.keys()) {
       // keys on `sameSet(r.allowlist, grants)`, so the one field a
       // `refused_under_grant` record would depend on was the one this threw
       // away. claude1 on this PR.
-      allowlist: grantedEntries.length > 0 ? [...BASE_ALLOWLIST, ...grantedEntries] : null,
+      allowlist:
+        grantedEntries.length > 0
+          ? [...BASE_ALLOWLIST, ...grantedEntries]
+          : null,
       grants: grantedEntries,
       targetMoved: worked,
       note,
@@ -393,7 +432,9 @@ for (const index of PROBE_LABELS.keys()) {
      */
     if (worked && grantedEntries.length > 1) {
       withheld.push({ probe: probe.label, grants: grantedEntries.length });
-      console.log(`   PERMIT WITHHELD: the target moved under ${grantedEntries.length} grants, and a record names one`);
+      console.log(
+        `   PERMIT WITHHELD: the target moved under ${grantedEntries.length} grants, and a record names one`,
+      );
     }
 
     /**
@@ -417,11 +458,11 @@ for (const index of PROBE_LABELS.keys()) {
      */
     if (probe.preGranted && answered.size > 0) {
       console.log(
-        '   ANSWERED: an approval was NEEDED, so the pre-granted entry alone did not match',
+        "   ANSWERED: an approval was NEEDED, so the pre-granted entry alone did not match",
       );
 
       underGrant.push({
-        outcome: 'refused_under_grant',
+        outcome: "refused_under_grant",
         probe: probe.label,
         approvalIds: [...answered],
         attempted: probe.command,
@@ -431,9 +472,9 @@ for (const index of PROBE_LABELS.keys()) {
         evidence:
           `${new Date().toISOString().slice(0, 10)}: ${probe.label} — refused while holding ` +
           `exactly the pre-granted entry, so that entry alone does not match this command.` +
-          `${worked ? ' A later widening then made it succeed, which does not unmake the refusal.' : ''}` +
-          `${probe.caveat ? ` ${probe.caveat}` : ''}` +
-          ' HISTORICAL: the scratch directory is deleted when this run ends.',
+          `${worked ? " A later widening then made it succeed, which does not unmake the refusal." : ""}` +
+          `${probe.caveat ? ` ${probe.caveat}` : ""}` +
+          " HISTORICAL: the scratch directory is deleted when this run ends.",
       });
     }
 
@@ -448,12 +489,19 @@ for (const index of PROBE_LABELS.keys()) {
      * the child never ran anything would be filed as "approved and it failed".
      */
     if (!worked && answered.size === 0) {
-      console.log('   NO INFORMATION: nothing was denied and nothing moved — the command was never attempted');
+      console.log(
+        "   NO INFORMATION: nothing was denied and nothing moved — the command was never attempted",
+      );
     }
 
-    if (!worked && answered.size > 0 && grantedEntries.length > 0 && !probe.preGranted) {
+    if (
+      !worked &&
+      answered.size > 0 &&
+      grantedEntries.length > 0 &&
+      !probe.preGranted
+    ) {
       underGrant.push({
-        outcome: 'refused_under_grant',
+        outcome: "refused_under_grant",
         probe: probe.label,
         // ⚠️ PLURAL, unlike the permit records' single `approvalId`. A probe
         // can answer more than one approval before its target is checked.
@@ -463,16 +511,18 @@ for (const index of PROBE_LABELS.keys()) {
         evidence:
           `${new Date().toISOString().slice(0, 10)}: ${probe.label} — approved under ` +
           `${grantedEntries.length} grant(s) and the target did not move.` +
-          `${note ? ` ${note}.` : ''}${probe.caveat ? ` ${probe.caveat}` : ''}` +
-          ' HISTORICAL: the scratch directory is deleted when this run ends.',
+          `${note ? ` ${note}.` : ""}${probe.caveat ? ` ${probe.caveat}` : ""}` +
+          " HISTORICAL: the scratch directory is deleted when this run ends.",
       });
 
-      console.log(`   REFUSED UNDER GRANT: approved, and the target did not move`);
+      console.log(
+        `   REFUSED UNDER GRANT: approved, and the target did not move`,
+      );
     }
 
     if (worked && grantedEntries.length === 1) {
       captured.push({
-        outcome: 'permitted',
+        outcome: "permitted",
         probe: probe.label,
         approvalId: [...answered].pop() ?? null,
         attempted: probe.command,
@@ -482,8 +532,8 @@ for (const index of PROBE_LABELS.keys()) {
         allowlistEntry: grantedEntries[0],
         evidence:
           `${new Date().toISOString().slice(0, 10)}: ${probe.label} — the target moved after ` +
-          `the grant was added.${probe.caveat ? ` ${probe.caveat}` : ''}` +
-          ' HISTORICAL: the scratch directory is deleted when this run ends.',
+          `the grant was added.${probe.caveat ? ` ${probe.caveat}` : ""}` +
+          " HISTORICAL: the scratch directory is deleted when this run ends.",
       });
     }
   } finally {
@@ -494,14 +544,21 @@ for (const index of PROBE_LABELS.keys()) {
 
 // 🛑 ONE RESULT PER PROBE, NAMED. `captured.length > 0` exits 0 on 1 of 4,
 // which certifies a run that mostly failed. claude1 on PR 43.
-const missing = PROBE_LABELS.filter((l) => !captured.some((c) => c.probe === l));
+const missing = PROBE_LABELS.filter(
+  (l) => !captured.some((c) => c.probe === l),
+);
 
-console.log(`\n${captured.length} of ${PROBE_LABELS.length} probe(s) produced a permit, 0 clicks needed.`);
+console.log(
+  `\n${captured.length} of ${PROBE_LABELS.length} probe(s) produced a permit, 0 clicks needed.`,
+);
 
 for (const m of missing) {
   const w = withheld.find((x) => x.probe === m);
 
-  if (w) console.log(`  PERMIT WITHHELD: ${m} — worked under ${w.grants} grants, see the observation log`);
+  if (w)
+    console.log(
+      `  PERMIT WITHHELD: ${m} — worked under ${w.grants} grants, see the observation log`,
+    );
   else console.log(`  NO PERMIT: ${m}`);
 }
 
@@ -510,20 +567,27 @@ for (const c of captured) console.log(`  ${c.allowlistEntry}`);
 // 🛑 WRITTEN BESIDE THE FIXTURE, NOT INTO IT. Merging is `rebuild-corpus.mjs`
 // work, and a harness that edits the fixture directly is how an inline
 // rebuild silently discarded a record earlier today.
-writeFileSync(join(ROOT, 'test', 'fixtures', 'captured-permits.pending.json'), `${JSON.stringify(captured, null, 2)}\n`);
-console.log('\nwrote test/fixtures/captured-permits.pending.json');
+writeFileSync(
+  join(ROOT, "test", "fixtures", "captured-permits.pending.json"),
+  `${JSON.stringify(captured, null, 2)}\n`,
+);
+console.log("\nwrote test/fixtures/captured-permits.pending.json");
 
 writeFileSync(
-  join(ROOT, 'test', 'fixtures', 'captured-refused-under-grant.pending.json'),
+  join(ROOT, "test", "fixtures", "captured-refused-under-grant.pending.json"),
   `${JSON.stringify(underGrant, null, 2)}\n`,
 );
-console.log(`wrote test/fixtures/captured-refused-under-grant.pending.json — ${underGrant.length} record(s)`);
+console.log(
+  `wrote test/fixtures/captured-refused-under-grant.pending.json — ${underGrant.length} record(s)`,
+);
 
-mkdirSync(join(ROOT, 'measurements'), { recursive: true });
+mkdirSync(join(ROOT, "measurements"), { recursive: true });
 
-const log = join(ROOT, 'measurements', `permit-run-${process.pid}.json`);
+const log = join(ROOT, "measurements", `permit-run-${process.pid}.json`);
 
 writeFileSync(log, `${JSON.stringify(observations, null, 2)}\n`);
-console.log(`wrote ${log} — ${observations.length} observation(s), permits and non-permits alike`);
+console.log(
+  `wrote ${log} — ${observations.length} observation(s), permits and non-permits alike`,
+);
 
 process.exit(missing.length === 0 ? 0 : 1);

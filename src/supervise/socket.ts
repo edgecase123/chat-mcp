@@ -1,7 +1,7 @@
-import { createServer, connect, type Server, type Socket } from 'node:net';
-import { chmodSync, existsSync, unlinkSync } from 'node:fs';
-import { SOCKET_MODE, ensureSocketDir, socketPathFor } from '../util/paths.js';
-import { supervisorHandleFor } from './grant.js';
+import { createServer, connect, type Server, type Socket } from "node:net";
+import { chmodSync, existsSync, unlinkSync } from "node:fs";
+import { SOCKET_MODE, ensureSocketDir, socketPathFor } from "../util/paths.js";
+import { supervisorHandleFor } from "./grant.js";
 
 /**
  * Direct delivery to a running supervisor.
@@ -36,7 +36,7 @@ import { supervisorHandleFor } from './grant.js';
  */
 export interface ApprovalAnswer {
   readonly approvalId: number;
-  readonly decision: 'approve' | 'deny';
+  readonly decision: "approve" | "deny";
   /** The command, VERBATIM, as the operator saw and approved it. */
   readonly requested: string;
 
@@ -67,8 +67,8 @@ export interface ApprovalAnswer {
  * respawns immediately, no notice.
  */
 export interface RestartControl {
-  readonly kind: 'restart';
-  readonly mode: 'graceful' | 'now';
+  readonly kind: "restart";
+  readonly mode: "graceful" | "now";
 }
 
 /**
@@ -79,8 +79,8 @@ export interface RestartControl {
  * `kill -INT` from a second terminal was the only confirmed way out.
  */
 export interface StopControl {
-  readonly kind: 'stop';
-  readonly mode: 'graceful' | 'now';
+  readonly kind: "stop";
+  readonly mode: "graceful" | "now";
 }
 
 export type SupervisorControl = RestartControl | StopControl;
@@ -109,7 +109,7 @@ export interface WakeEnvelope {
 
 export interface WakeAck {
   readonly ok: boolean;
-  readonly queued?: 'sent' | 'queued' | 'duplicate' | 'held';
+  readonly queued?: "sent" | "queued" | "duplicate" | "held";
   readonly error?: string;
 
   /**
@@ -200,14 +200,14 @@ export class WakeListener {
     const open = new Set<Socket>();
     const server = createServer((socket: Socket) => {
       open.add(socket);
-      socket.once('close', () => open.delete(socket));
+      socket.once("close", () => open.delete(socket));
       handleConnection(socket, onEnvelope);
     });
 
     await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
+      server.once("error", reject);
       server.listen(path, () => {
-        server.removeListener('error', reject);
+        server.removeListener("error", reject);
         resolve();
       });
     });
@@ -221,9 +221,9 @@ export class WakeListener {
     const listener = new WakeListener(server, path);
     for (const s of open) listener.open.add(s);
     // The set is mutated by later connections, so share the same instance.
-    server.on('connection', (socket: Socket) => {
+    server.on("connection", (socket: Socket) => {
       listener.open.add(socket);
-      socket.once('close', () => listener.open.delete(socket));
+      socket.once("close", () => listener.open.delete(socket));
     });
 
     return listener;
@@ -250,20 +250,20 @@ function handleConnection(
   socket: Socket,
   onEnvelope: (envelope: WakeEnvelope) => WakeAck | Promise<WakeAck>,
 ): void {
-  let buffer = '';
+  let buffer = "";
 
-  socket.setEncoding('utf8');
-  socket.on('error', () => socket.destroy());
-  socket.on('data', (chunk: string) => {
+  socket.setEncoding("utf8");
+  socket.on("error", () => socket.destroy());
+  socket.on("data", (chunk: string) => {
     buffer += chunk;
 
-    let newline = buffer.indexOf('\n');
+    let newline = buffer.indexOf("\n");
 
     while (newline !== -1) {
       const line = buffer.slice(0, newline);
       buffer = buffer.slice(newline + 1);
       void respond(socket, line, onEnvelope);
-      newline = buffer.indexOf('\n');
+      newline = buffer.indexOf("\n");
     }
   });
 }
@@ -278,8 +278,8 @@ async function respond(
   try {
     const parsed = JSON.parse(line) as WakeEnvelope;
 
-    if (typeof parsed?.id !== 'number' || typeof parsed?.to !== 'string') {
-      ack = { ok: false, error: 'envelope needs a numeric id and a string to' };
+    if (typeof parsed?.id !== "number" || typeof parsed?.to !== "string") {
+      ack = { ok: false, error: "envelope needs a numeric id and a string to" };
     } else {
       ack = await onEnvelope(parsed);
     }
@@ -287,7 +287,10 @@ async function respond(
     // 🛑 An ack is sent even on a parse failure. A sender waiting on a reply
     // that never comes blocks for the full timeout and then cannot tell a
     // malformed payload from a dead supervisor.
-    ack = { ok: false, error: err instanceof Error ? err.message : 'unparseable envelope' };
+    ack = {
+      ok: false,
+      error: err instanceof Error ? err.message : "unparseable envelope",
+    };
   }
 
   try {
@@ -305,8 +308,8 @@ async function isLive(path: string): Promise<boolean> {
       probe.destroy();
       resolve(live);
     };
-    probe.once('connect', () => finish(true));
-    probe.once('error', () => finish(false));
+    probe.once("connect", () => finish(true));
+    probe.once("error", () => finish(false));
     setTimeout(() => finish(false), 250);
   });
 }
@@ -360,7 +363,7 @@ export async function deliverToSupervisor(
 
   return new Promise((resolve) => {
     let settled = false;
-    let buffer = '';
+    let buffer = "";
 
     const socket = connect(path);
 
@@ -376,13 +379,13 @@ export async function deliverToSupervisor(
     // stalls on every send and the bus looks broken rather than unsupervised.
     const timer = setTimeout(() => finish(null), timeoutMs);
 
-    socket.setEncoding('utf8');
-    socket.on('error', () => finish(null));
-    socket.on('close', () => finish(null));
-    socket.on('connect', () => socket.write(`${JSON.stringify(envelope)}\n`));
-    socket.on('data', (chunk: string) => {
+    socket.setEncoding("utf8");
+    socket.on("error", () => finish(null));
+    socket.on("close", () => finish(null));
+    socket.on("connect", () => socket.write(`${JSON.stringify(envelope)}\n`));
+    socket.on("data", (chunk: string) => {
       buffer += chunk;
-      const newline = buffer.indexOf('\n');
+      const newline = buffer.indexOf("\n");
 
       if (newline === -1) return;
 

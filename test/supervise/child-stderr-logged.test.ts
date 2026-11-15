@@ -1,17 +1,17 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // 🛑 BEFORE any import that resolves a state path. See replace-child.test.ts.
-process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), 'chat-mcp-childerr-'));
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-childerr-"));
 
-const { migrate } = await import('../../src/storage/db.js');
-const { startSupervisor } = await import('../../src/supervise/index.js');
-import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
-import { supervisorOptions } from '../support/supervisor-options.js';
+const { migrate } = await import("../../src/storage/db.js");
+const { startSupervisor } = await import("../../src/supervise/index.js");
+import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
+import { supervisorOptions } from "../support/supervisor-options.js";
 
 /**
  * 🛑 A CONTAINER DIED WITH ITS REASON PIPED TO A STREAM NOBODY READ.
@@ -43,7 +43,7 @@ function harness() {
     onContext: () => undefined,
     onUsage: () => undefined,
     onDenial: () => undefined,
-    onSession: (cb) => cb('sess'),
+    onSession: (cb) => cb("sess"),
     onEvent: () => undefined,
     onStderr: (cb) => {
       emitErr = cb;
@@ -56,30 +56,32 @@ function harness() {
 }
 
 async function supervisor(handle: string, h: ReturnType<typeof harness>) {
-  const db = new DatabaseSync(':memory:');
+  const db = new DatabaseSync(":memory:");
   migrate(db);
 
-  const sup = await startSupervisor(supervisorOptions({
-    handle,
-    db,
-    extraDirs: [process.cwd()],
-    spawnChild: h.spawnChild,
-    log: (line: string) => h.lines.push(line),
-  }));
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: [process.cwd()],
+      spawnChild: h.spawnChild,
+      log: (line: string) => h.lines.push(line),
+    }),
+  );
 
   return { sup, db };
 }
 
-test('🚨 what the child wrote to stderr reaches the log', async () => {
+test("🚨 what the child wrote to stderr reaches the log", async () => {
   const h = harness();
   const { sup, db } = await supervisor(`cse-${process.pid}-a`, h);
 
   try {
-    assert.ok(h.emit(), 'the supervisor never subscribed to stderr');
-    h.emit()!('npm error code EACCES\n');
+    assert.ok(h.emit(), "the supervisor never subscribed to stderr");
+    h.emit()!("npm error code EACCES\n");
 
     assert.equal(
-      h.lines.some((l) => l.includes('npm error code EACCES')),
+      h.lines.some((l) => l.includes("npm error code EACCES")),
       true,
       `stderr never reached the log; got ${JSON.stringify(h.lines)}`,
     );
@@ -94,16 +96,20 @@ test('🚨 what the child wrote to stderr reaches the log', async () => {
  * also carries the supervisor's own output reads as the supervisor saying it,
  * which is how a container's error gets attributed to the host.
  */
-test('🚨 a stderr line is attributed to the child, not the supervisor', async () => {
+test("🚨 a stderr line is attributed to the child, not the supervisor", async () => {
   const h = harness();
   const { sup, db } = await supervisor(`cse-${process.pid}-b`, h);
 
   try {
-    h.emit()!('boom\n');
-    const line = h.lines.find((l) => l.includes('boom'));
+    h.emit()!("boom\n");
+    const line = h.lines.find((l) => l.includes("boom"));
 
-    assert.ok(line, 'nothing logged');
-    assert.match(line, /stderr/i, `the line does not say it came from stderr: ${line}`);
+    assert.ok(line, "nothing logged");
+    assert.match(
+      line,
+      /stderr/i,
+      `the line does not say it came from stderr: ${line}`,
+    );
   } finally {
     await sup.stop();
     db.close();
@@ -111,12 +117,12 @@ test('🚨 a stderr line is attributed to the child, not the supervisor', async 
 });
 
 /** Multi-line output must not collapse into one unreadable entry. */
-test('🚨 a multi-line stderr chunk is logged line by line', async () => {
+test("🚨 a multi-line stderr chunk is logged line by line", async () => {
   const h = harness();
   const { sup, db } = await supervisor(`cse-${process.pid}-c`, h);
 
   try {
-    h.emit()!('first\nsecond\n');
+    h.emit()!("first\nsecond\n");
 
     assert.equal(h.lines.filter((l) => /first|second/.test(l)).length, 2);
   } finally {
@@ -129,16 +135,20 @@ test('🚨 a multi-line stderr chunk is logged line by line', async () => {
  * ⚠️ THE NEGATIVE CONTROL. A logger that printed on every chunk regardless
  * would pass the tests above and would also spam a line per empty flush.
  */
-test('🚨 an empty or whitespace-only chunk logs nothing', async () => {
+test("🚨 an empty or whitespace-only chunk logs nothing", async () => {
   const h = harness();
   const { sup, db } = await supervisor(`cse-${process.pid}-d`, h);
 
   try {
     const before = h.lines.length;
-    h.emit()!('');
-    h.emit()!('   \n\n');
+    h.emit()!("");
+    h.emit()!("   \n\n");
 
-    assert.equal(h.lines.length, before, `logged ${JSON.stringify(h.lines.slice(before))}`);
+    assert.equal(
+      h.lines.length,
+      before,
+      `logged ${JSON.stringify(h.lines.slice(before))}`,
+    );
   } finally {
     await sup.stop();
     db.close();

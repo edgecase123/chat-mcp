@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile } from "node:child_process";
 
 export interface ScriptResult {
   readonly exitCode: number;
@@ -29,7 +29,12 @@ export type ScriptRunner = (
 ) => void;
 
 const realRunner: ScriptRunner = (file, args, options, callback) => {
-  execFile(file, [...args], options, callback as Parameters<typeof execFile>[3]);
+  execFile(
+    file,
+    [...args],
+    options,
+    callback as Parameters<typeof execFile>[3],
+  );
 };
 
 /**
@@ -56,7 +61,7 @@ export function runScript(
         return;
       }
 
-      if (err.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+      if (err.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") {
         reject(new Error(`command output exceeded ${options.maxBuffer} bytes`));
 
         return;
@@ -71,7 +76,7 @@ export function runScript(
         return;
       }
 
-      if (typeof err.code === 'number') {
+      if (typeof err.code === "number") {
         resolve({ exitCode: err.code, stdout, stderr });
 
         return;
@@ -80,7 +85,7 @@ export function runScript(
       // 🛑 NEVER forward `err.message`. `execFile` writes the absolute script
       // path into it on a spawn failure, and `broker.ts` makes this string the
       // reply an agent inside a container reads.
-      const code = typeof err.code === 'string' ? err.code : 'unknown';
+      const code = typeof err.code === "string" ? err.code : "unknown";
 
       reject(new Error(`the command could not be started (${code})`));
     });

@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto';
-import type { IncomingMessage, ServerResponse } from 'node:http';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { randomUUID } from "node:crypto";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 export interface McpHttpOptions {
   /**
@@ -81,11 +81,14 @@ export class McpHttpService {
     return new McpHttpService(opts);
   }
 
-  async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  async handleRequest(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
     const handle = this.authenticatedHandle(req);
 
     if (handle === null) {
-      refuse(res, 401, 'unauthorized', { 'www-authenticate': 'Bearer' });
+      refuse(res, 401, "unauthorized", { "www-authenticate": "Bearer" });
       return;
     }
 
@@ -100,18 +103,18 @@ export class McpHttpService {
       // as ECONNRESET rather than as the 413, so the refusal it is meant to
       // read never arrived. Nothing is buffered past the cap either way.
       req.resume();
-      refuse(res, 413, 'request body too large', { connection: 'close' });
+      refuse(res, 413, "request body too large", { connection: "close" });
       return;
     }
 
-    const sessionId = headerOf(req, 'mcp-session-id');
+    const sessionId = headerOf(req, "mcp-session-id");
 
     if (sessionId === null) {
       // 🛑 REFUSE BEFORE BUILDING. `serverFor` opens a database handle and a
       // NotifyBus, so building one for a request that cannot open a session
       // let an authenticated caller spend the host's descriptors at will.
       if (!isInitialize(body)) {
-        refuse(res, 400, 'no session, and this is not an initialize request');
+        refuse(res, 400, "no session, and this is not an initialize request");
         return;
       }
 
@@ -122,14 +125,14 @@ export class McpHttpService {
     const session = this.sessions.get(sessionId);
 
     if (session === undefined) {
-      refuse(res, 404, 'no such session');
+      refuse(res, 404, "no such session");
       return;
     }
 
     // 🛑 THE HOLE MY OWN PROBE HAD. It resolved the session once the token was
     // valid, so a valid token for any handle drove any live session.
     if (session.handle !== handle) {
-      refuse(res, 403, 'this session belongs to another handle');
+      refuse(res, 403, "this session belongs to another handle");
       return;
     }
 
@@ -210,7 +213,7 @@ export class McpHttpService {
   }
 
   private authenticatedHandle(req: IncomingMessage): string | null {
-    const header = headerOf(req, 'authorization');
+    const header = headerOf(req, "authorization");
 
     if (header === null) return null;
 
@@ -228,7 +231,9 @@ export class McpHttpService {
  */
 function isInitialize(body: unknown): boolean {
   const one = (m: unknown): boolean =>
-    typeof m === 'object' && m !== null && (m as { method?: unknown }).method === 'initialize';
+    typeof m === "object" &&
+    m !== null &&
+    (m as { method?: unknown }).method === "initialize";
 
   return Array.isArray(body) ? body.some(one) : one(body);
 }
@@ -236,7 +241,7 @@ function isInitialize(body: unknown): boolean {
 function headerOf(req: IncomingMessage, name: string): string | null {
   const value = req.headers[name];
 
-  if (typeof value === 'string') return value;
+  if (typeof value === "string") return value;
   if (Array.isArray(value)) return value[0] ?? null;
 
   return null;
@@ -261,7 +266,7 @@ class BodyTooLarge extends Error {}
  * up — and a reset is the honest answer there.
  */
 function declaredLengthOver(req: IncomingMessage, cap: number): boolean {
-  const header = headerOf(req, 'content-length');
+  const header = headerOf(req, "content-length");
 
   if (header === null) return false;
 
@@ -275,7 +280,7 @@ function declaredLengthOver(req: IncomingMessage, cap: number): boolean {
  * stream itself when nothing is passed and would then find it drained.
  */
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  if (req.method !== 'POST') return undefined;
+  if (req.method !== "POST") return undefined;
 
   if (declaredLengthOver(req, MAX_BODY_BYTES)) {
     throw new BodyTooLarge(`content-length exceeds ${MAX_BODY_BYTES} bytes`);
@@ -287,12 +292,13 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   for await (const chunk of req) {
     bytes += (chunk as Buffer).length;
 
-    if (bytes > MAX_BODY_BYTES) throw new BodyTooLarge(`body exceeds ${MAX_BODY_BYTES} bytes`);
+    if (bytes > MAX_BODY_BYTES)
+      throw new BodyTooLarge(`body exceeds ${MAX_BODY_BYTES} bytes`);
 
     chunks.push(chunk as Buffer);
   }
 
-  const raw = Buffer.concat(chunks).toString('utf8');
+  const raw = Buffer.concat(chunks).toString("utf8");
 
   if (raw.length === 0) return undefined;
 
@@ -313,8 +319,12 @@ export function refuse(
   message: string,
   headers: Record<string, string> = {},
 ): void {
-  res.writeHead(status, { 'content-type': 'application/json', ...headers });
+  res.writeHead(status, { "content-type": "application/json", ...headers });
   res.end(
-    JSON.stringify({ jsonrpc: '2.0', error: { code: -32001, message }, id: null }),
+    JSON.stringify({
+      jsonrpc: "2.0",
+      error: { code: -32001, message },
+      id: null,
+    }),
   );
 }

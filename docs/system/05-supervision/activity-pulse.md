@@ -39,19 +39,19 @@ bumped generation and `ifCurrent` drops it. `clearAgentPid` is called from both
 sites for exactly this reason — see `agent-liveness.md`. Deleting either one
 fails a different test.
 
-| | value | why |
-|---|---|---|
+|          | value             | why                                                         |
+| -------- | ----------------- | ----------------------------------------------------------- |
 | throttle | 250ms, ticks only | the dot is binary, so four a second is all a viewer can use |
-| failsafe | 30s | outlasts a child that dies without an `end` |
-| `end` | never throttled | it is what CLEARS the pulse |
+| failsafe | 30s               | outlasts a child that dies without an `end`                 |
+| `end`    | never throttled   | it is what CLEARS the pulse                                 |
 
 ⚠️ **THE FAILSAFE IS NOT THE NORMAL PATH.** It only has to outlast a child that
 dies without reaching either `end` site. A pulse that routinely ran to 30s
 would mean a working agent and a dead one look identical for half a minute,
 which is the ambiguity this feature removes.
 
-🛑 **NO POLLING ANYWHERE ON THIS PATH.** lee, 2026-11-14: *"I don't want more
-polling. Everything should be event based."* Two designs with a poll in them
+🛑 **NO POLLING ANYWHERE ON THIS PATH.** lee, 2026-11-14: _"I don't want more
+polling. Everything should be event based."_ Two designs with a poll in them
 were dropped.
 
 ## The supervisor is the client, not the server
@@ -115,18 +115,18 @@ any peer status change, so the working set lives in `state.activity` and
 `sidebarItem` re-reads it. Holding the pulse as a class alone means the next
 `wake` drops it **mid-turn**, which is the only moment it carries information.
 
-| | |
-|---|---|
-| the working set | `state.activity`, a `Set` of handles |
+|                   |                                                                        |
+| ----------------- | ---------------------------------------------------------------------- |
+| the working set   | `state.activity`, a `Set` of handles                                   |
 | an unchanged tick | `nextPulses` returns the SAME `Set`, so the caller skips its DOM write |
-| the failsafe | one re-armed `setTimeout` per handle, **never** an interval |
+| the failsafe      | one re-armed `setTimeout` per handle, **never** an interval            |
 
 🛑 **TWO SEPARATE ACCESSIBILITY OBLIGATIONS, AND THE TITLE ANSWERS ONLY ONE.**
 This section said the title settled both, and it did not.
 
-| | asks | answered by |
-|---|---|---|
-| WCAG 1.4.1 | is meaning carried in colour alone? | `dotTitle`, in words |
+|            | asks                                   | answered by                               |
+| ---------- | -------------------------------------- | ----------------------------------------- |
+| WCAG 1.4.1 | is meaning carried in colour alone?    | `dotTitle`, in words                      |
 | WCAG 2.2.2 | can motion running over 5s be STOPPED? | `@media (prefers-reduced-motion: reduce)` |
 
 A turn runs for minutes and `dot-pulse` is `infinite`, so 2.2.2 applies whatever
@@ -142,7 +142,7 @@ unreduced inverted that precedent rather than following it.
 🛑 **`role="img"` IS LOAD-BEARING ON THE DOT.** `aria-label` on a bare `span`
 is ignored, because a span has no role for the label to name.
 
-🛑 **ONLY THE WORKING STATE IS NAMED.** lee, 2026-11-14: *"no title"*. Online
+🛑 **ONLY THE WORKING STATE IS NAMED.** lee, 2026-11-14: _"no title"_. Online
 and offline keep carrying their meaning in colour alone, as they have since the
 sidebar was written. The consequence is deliberate: the tooltip appears and
 disappears with the work, and hovering an idle agent gives nothing.
@@ -160,15 +160,15 @@ construction rather than asserted. Found by claude1.
 
 ## Source files
 
-| File | Role |
-|---|---|
-| `src/supervise/activity.ts` | the reporter, the throttle, and resolving the target from `web-handshake` |
-| `src/supervise/index.ts` | the wiring: `tick` on `onEvent`, `end` on `onTurnEnd`, `onExit` and `replaceChild` |
-| `src/cli/web/server.ts` | `handleActivity`, and the SSE fan-out |
-| `src/cli/web/credential.ts` | `/api/activity`'s capability tier, and `tokenMatches` |
-| `web/assets/logic.js` | `activityEvent`, `nextPulses`, `dotTitle`, `PULSE_FAILSAFE_MS` |
-| `web/assets/app.js` | the SSE listener, `paintPulse`, the per-handle failsafe |
-| `web/assets/style.css` | `.sidebar__item.is-working` and `@keyframes dot-pulse` |
+| File                        | Role                                                                               |
+| --------------------------- | ---------------------------------------------------------------------------------- |
+| `src/supervise/activity.ts` | the reporter, the throttle, and resolving the target from `web-handshake`          |
+| `src/supervise/index.ts`    | the wiring: `tick` on `onEvent`, `end` on `onTurnEnd`, `onExit` and `replaceChild` |
+| `src/cli/web/server.ts`     | `handleActivity`, and the SSE fan-out                                              |
+| `src/cli/web/credential.ts` | `/api/activity`'s capability tier, and `tokenMatches`                              |
+| `web/assets/logic.js`       | `activityEvent`, `nextPulses`, `dotTitle`, `PULSE_FAILSAFE_MS`                     |
+| `web/assets/app.js`         | the SSE listener, `paintPulse`, the per-handle failsafe                            |
+| `web/assets/style.css`      | `.sidebar__item.is-working` and `@keyframes dot-pulse`                             |
 
 ## Related docs
 

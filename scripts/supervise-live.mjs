@@ -25,19 +25,21 @@
  *                      reply cannot wake the child that sent it.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { startSupervisor } from '../src/supervise/index.ts';
-import { spawnClaude } from '../src/supervise/child.ts';
-import { childHandleFor } from '../src/supervise/grant.ts';
-import { deliverToSupervisor } from '../src/supervise/socket.ts';
-import { openDb } from '../src/storage/db.ts';
-import * as dao from '../src/storage/dao.ts';
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { startSupervisor } from "../src/supervise/index.ts";
+import { spawnClaude } from "../src/supervise/child.ts";
+import { childHandleFor } from "../src/supervise/grant.ts";
+import { deliverToSupervisor } from "../src/supervise/socket.ts";
+import { openDb } from "../src/storage/db.ts";
+import * as dao from "../src/storage/dao.ts";
 
 if (!process.env.CHAT_MCP_LIVE) {
-  console.error('Refusing to run: this spawns a real agent CLI and spends money.');
-  console.error('Set CHAT_MCP_LIVE=1 to opt in.');
+  console.error(
+    "Refusing to run: this spawns a real agent CLI and spends money.",
+  );
+  console.error("Set CHAT_MCP_LIVE=1 to opt in.");
   process.exit(2);
 }
 
@@ -55,14 +57,14 @@ const TURN_TIMEOUT_MS = Number(process.env.TURN_TIMEOUT_SECONDS ?? 180) * 1000;
  * attempted tool calls and then reasoned about being denied. An empty dir
  * keeps this harness measuring the supervisor rather than somebody's repo.
  */
-const childCwd = mkdtempSync(join(tmpdir(), 'chat-mcp-live-'));
+const childCwd = mkdtempSync(join(tmpdir(), "chat-mcp-live-"));
 
 const db = openDb();
 const events = [];
 const logLines = [];
 
 /** Every `result` event is one completed turn. Nothing else ends a turn. */
-const results = () => events.filter((e) => e.type === 'result');
+const results = () => events.filter((e) => e.type === "result");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -75,7 +77,9 @@ async function until(pred, timeoutMs, label) {
     await sleep(500);
   }
 
-  console.error(`  TIMEOUT after ${Math.round(timeoutMs / 1000)}s waiting for ${label}`);
+  console.error(
+    `  TIMEOUT after ${Math.round(timeoutMs / 1000)}s waiting for ${label}`,
+  );
 
   return false;
 }
@@ -101,7 +105,9 @@ const checks = [];
 
 function record(name, ok, detail) {
   checks.push({ name, ok, detail });
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}`);
+  console.log(
+    `${ok ? "PASS" : "FAIL"}  ${name}${detail ? `  — ${detail}` : ""}`,
+  );
 }
 
 /** Deliver over the SOCKET, which is the path a real sender takes. */
@@ -109,9 +115,9 @@ async function deliver(id, token) {
   const ack = await deliverToSupervisor(HANDLE, {
     id,
     to: HANDLE,
-    from: 'live-harness',
+    from: "live-harness",
     body: prompt(token),
-    kind: 'chat',
+    kind: "chat",
     ts: Date.now(),
   });
 
@@ -120,7 +126,9 @@ async function deliver(id, token) {
 
 async function awaitToken(token, expectedTurns) {
   const ok = await until(
-    () => probeBodies().some((b) => b.includes(token)) && results().length >= expectedTurns,
+    () =>
+      probeBodies().some((b) => b.includes(token)) &&
+      results().length >= expectedTurns,
     TURN_TIMEOUT_MS,
     `${token} and ${expectedTurns} result event(s)`,
   );
@@ -142,7 +150,7 @@ dao.upsertAgent(db, {
   pid: process.pid,
   session_id: `live-harness-${Date.now()}`,
   display_name: PROBE,
-  metadata: { kind: 'agent' },
+  metadata: { kind: "agent" },
 });
 
 console.log(`supervisor=${HANDLE}  child=${CHILD}  probe=${PROBE}`);
@@ -168,74 +176,92 @@ const sup = await startSupervisor({
 
 try {
   // ── 1. One message wakes an idle agent and it answers ──────────────────
-  const ack1 = await deliver(1, 'TOKEN-1');
-  record('the socket ACKs the delivery', ack1?.ok === true, JSON.stringify(ack1));
-  record('turn 1 completes and the child answers on the bus', await awaitToken('TOKEN-1', 1));
+  const ack1 = await deliver(1, "TOKEN-1");
+  record(
+    "the socket ACKs the delivery",
+    ack1?.ok === true,
+    JSON.stringify(ack1),
+  );
+  record(
+    "turn 1 completes and the child answers on the bus",
+    await awaitToken("TOKEN-1", 1),
+  );
 
   // ── 2. THE CORE UNPROVEN CLAIM: turn 2 on the SAME child ───────────────
-  await deliver(2, 'TOKEN-2');
-  const twoTurns = await awaitToken('TOKEN-2', 2);
-  record('turn 2 completes on the SAME long-lived child', twoTurns, `${results().length} result events`);
+  await deliver(2, "TOKEN-2");
+  const twoTurns = await awaitToken("TOKEN-2", 2);
+  record(
+    "turn 2 completes on the SAME long-lived child",
+    twoTurns,
+    `${results().length} result events`,
+  );
 
   // ── 3. Two deliveries mid-flight must not merge into one turn ──────────
   // Measured on #33: two user messages written at once produced ONE result
   // and the first question went unanswered. That is what the queue exists to
   // prevent, and it has only ever been tested against a fake child.
-  await deliver(3, 'TOKEN-3');
-  await deliver(4, 'TOKEN-4');
+  await deliver(3, "TOKEN-3");
+  await deliver(4, "TOKEN-4");
 
   const bothAnswered = await until(
     () => {
       const bodies = probeBodies();
       return (
-        bodies.some((b) => b.includes('TOKEN-3')) &&
-        bodies.some((b) => b.includes('TOKEN-4')) &&
+        bodies.some((b) => b.includes("TOKEN-3")) &&
+        bodies.some((b) => b.includes("TOKEN-4")) &&
         results().length >= 4
       );
     },
     TURN_TIMEOUT_MS * 2,
-    'TOKEN-3 and TOKEN-4 and 4 result events',
+    "TOKEN-3 and TOKEN-4 and 4 result events",
   );
-  record('two messages arriving together produce TWO turns, not one', bothAnswered,
-    `${results().length} result events`);
+  record(
+    "two messages arriving together produce TWO turns, not one",
+    bothAnswered,
+    `${results().length} result events`,
+  );
 
   // ── 4. The child survives being idle ──────────────────────────────────
   console.log(`\n  idling ${IDLE_GAP_MS / 1000}s ...`);
   await sleep(IDLE_GAP_MS);
 
-  await deliver(5, 'TOKEN-5');
+  await deliver(5, "TOKEN-5");
   record(
     `turn 5 completes after a ${IDLE_GAP_MS / 1000}s idle gap`,
-    await awaitToken('TOKEN-5', 5),
+    await awaitToken("TOKEN-5", 5),
   );
 
   // ── 5. What a turn COSTS, per turn, so growth is visible ───────────────
-  console.log('\nper-turn usage, from each result event:');
-  console.log('turn  input   cache_read  cache_creation  output  cost_usd');
+  console.log("\nper-turn usage, from each result event:");
+  console.log("turn  input   cache_read  cache_creation  output  cost_usd");
 
   results().forEach((r, i) => {
     const u = r.usage ?? {};
     const row = [
       String(i + 1).padEnd(4),
-      String(u.input_tokens ?? '?').padEnd(7),
-      String(u.cache_read_input_tokens ?? '?').padEnd(11),
-      String(u.cache_creation_input_tokens ?? '?').padEnd(15),
-      String(u.output_tokens ?? '?').padEnd(7),
-      String(r.total_cost_usd ?? '?'),
+      String(u.input_tokens ?? "?").padEnd(7),
+      String(u.cache_read_input_tokens ?? "?").padEnd(11),
+      String(u.cache_creation_input_tokens ?? "?").padEnd(15),
+      String(u.output_tokens ?? "?").padEnd(7),
+      String(r.total_cost_usd ?? "?"),
     ];
-    console.log(row.join(' '));
+    console.log(row.join(" "));
   });
 
-  const costs = results().map((r) => r.total_cost_usd).filter((c) => typeof c === 'number');
+  const costs = results()
+    .map((r) => r.total_cost_usd)
+    .filter((c) => typeof c === "number");
   if (costs.length > 0) {
-    console.log(`\ntotal cost reported: $${costs.reduce((a, b) => a + b, 0).toFixed(4)}`);
+    console.log(
+      `\ntotal cost reported: $${costs.reduce((a, b) => a + b, 0).toFixed(4)}`,
+    );
   }
 
   // ── 6. A reply must not have woken the child that sent it ─────────────
   // The probe handle is unsupervised on purpose. If turn count exceeds the
   // number of messages delivered, a reply fed itself back in.
   record(
-    'no feedback loop: turns never exceeded deliveries',
+    "no feedback loop: turns never exceeded deliveries",
     results().length <= 5,
     `5 delivered, ${results().length} turns`,
   );
@@ -250,25 +276,33 @@ const failed = checks.filter((c) => !c.ok);
 // diagnosed by hand, re-running the child's command and reading its stream.
 // The answer was in the assistant text all along.
 if (failed.length > 0) {
-  console.log('\nwhat the child actually said:');
+  console.log("\nwhat the child actually said:");
 
   for (const e of events) {
-    if (e.type !== 'assistant') continue;
+    if (e.type !== "assistant") continue;
 
     for (const part of e.message?.content ?? []) {
-      if (part.type === 'text') console.log(`  text: ${part.text.slice(0, 300)}`);
-      if (part.type === 'tool_use') console.log(`  call: ${part.name} ${JSON.stringify(part.input).slice(0, 200)}`);
+      if (part.type === "text")
+        console.log(`  text: ${part.text.slice(0, 300)}`);
+      if (part.type === "tool_use")
+        console.log(
+          `  call: ${part.name} ${JSON.stringify(part.input).slice(0, 200)}`,
+        );
     }
   }
 
   const probeSeen = probeBodies();
-  console.log(`\nprobe inbox held ${probeSeen.length} message(s): ${JSON.stringify(probeSeen).slice(0, 300)}`);
+  console.log(
+    `\nprobe inbox held ${probeSeen.length} message(s): ${JSON.stringify(probeSeen).slice(0, 300)}`,
+  );
 }
 
-console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);
+console.log(
+  `\n${checks.length - failed.length}/${checks.length} checks passed`,
+);
 
 if (failed.length > 0) {
-  console.log('\nFAILED:');
+  console.log("\nFAILED:");
   for (const f of failed) console.log(`  - ${f.name}`);
 }
 

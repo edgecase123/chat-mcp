@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 interface McpServerEntry {
   command?: string;
@@ -13,7 +13,7 @@ interface McpJson {
 // The handle appears on chat-mcp's own CLI (`chat-mcp --handle X` or
 // `npx github:edgecase123/chat-mcp --handle X`). Any server entry whose args
 // carry a --handle flag counts — key name is a hint, not a contract.
-const CHAT_SERVER_KEY_HINTS = ['chat', 'chat-mcp'];
+const CHAT_SERVER_KEY_HINTS = ["chat", "chat-mcp"];
 
 export interface DetectedHandle {
   serverKey: string;
@@ -23,10 +23,10 @@ export interface DetectedHandle {
 
 function extractHandle(args: unknown): string | null {
   if (!Array.isArray(args)) return null;
-  const idx = args.indexOf('--handle');
+  const idx = args.indexOf("--handle");
   if (idx < 0 || idx + 1 >= args.length) return null;
   const next = args[idx + 1];
-  return typeof next === 'string' && next.length > 0 ? next : null;
+  return typeof next === "string" && next.length > 0 ? next : null;
 }
 
 /**
@@ -36,12 +36,12 @@ function extractHandle(args: unknown): string | null {
  * args carry --handle (covers non-standard key names).
  */
 export function detectChatHandleInCwd(cwd: string): DetectedHandle | null {
-  const path = join(cwd, '.mcp.json');
+  const path = join(cwd, ".mcp.json");
   if (!existsSync(path)) return null;
 
   let parsed: McpJson;
   try {
-    parsed = JSON.parse(readFileSync(path, 'utf8')) as McpJson;
+    parsed = JSON.parse(readFileSync(path, "utf8")) as McpJson;
   } catch {
     return null;
   }

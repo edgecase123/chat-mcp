@@ -1,4 +1,4 @@
-import type { VendorSpawn } from '../supervise/vendor.js';
+import type { VendorSpawn } from "../supervise/vendor.js";
 
 export interface AdapterInstallOptions {
   handle: string;

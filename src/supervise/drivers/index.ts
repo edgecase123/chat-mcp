@@ -1,4 +1,4 @@
-import type { SandboxMode } from '../vendor.js';
+import type { SandboxMode } from "../vendor.js";
 
 /**
  * How a CLI name and a `--container` flag become a (vendor, mode) pair.
@@ -17,26 +17,33 @@ import type { SandboxMode } from '../vendor.js';
  * `opts.vendor`) does that resolution.
  */
 const ALIASES: Record<string, { vendor: string; mode: SandboxMode }> = {
-  claude: { vendor: 'claude', mode: 'host' },
-  'docker-claude': { vendor: 'claude', mode: 'docker' },
+  claude: { vendor: "claude", mode: "host" },
+  "docker-claude": { vendor: "claude", mode: "docker" },
 };
 
-const DEFAULT_VENDOR = 'claude';
+const DEFAULT_VENDOR = "claude";
 
 export interface DriverSelection {
   readonly vendor: string;
   readonly mode: SandboxMode;
 }
 
-export function resolveDriver(o: { driver?: string; container?: boolean }): DriverSelection {
-  const mode: SandboxMode = o.container ? 'docker' : 'host';
+export function resolveDriver(o: {
+  driver?: string;
+  container?: boolean;
+}): DriverSelection {
+  const mode: SandboxMode = o.container ? "docker" : "host";
 
   if (!o.driver) return { vendor: DEFAULT_VENDOR, mode };
 
   const alias = ALIASES[o.driver];
   // An alias names its own mode. `--container` can only tighten it, never
   // loosen it, so an explicit `--driver docker-claude` stays containerized.
-  if (alias) return { vendor: alias.vendor, mode: alias.mode === 'docker' ? 'docker' : mode };
+  if (alias)
+    return {
+      vendor: alias.vendor,
+      mode: alias.mode === "docker" ? "docker" : mode,
+    };
 
   return { vendor: o.driver, mode };
 }

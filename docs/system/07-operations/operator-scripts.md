@@ -26,41 +26,41 @@ and is kept in the script, not here, so it cannot drift from the code.
 
 ### `./scripts/agent <verb> [handle] [dir|--now]`
 
-| Call | Meaning |
-|---|---|
-| `agent start <handle>` | Project dir comes from `projects.json` |
-| `agent start <handle> <dir>` | `<dir>` overrides it and must already exist |
-| `agent stop <handle>` | Graceful, via `chat-mcp agents stop` |
-| `agent stop <handle> --now` | Skips the notice wait only |
-| `agent restart <handle>` | In-place reload, or cold start — the socket decides |
-| `agent status <handle>` | That one handle |
-| `agent status` | Every **running** agent; stale sockets are skipped |
+| Call                         | Meaning                                             |
+| ---------------------------- | --------------------------------------------------- |
+| `agent start <handle>`       | Project dir comes from `projects.json`              |
+| `agent start <handle> <dir>` | `<dir>` overrides it and must already exist         |
+| `agent stop <handle>`        | Graceful, via `chat-mcp agents stop`                |
+| `agent stop <handle> --now`  | Skips the notice wait only                          |
+| `agent restart <handle>`     | In-place reload, or cold start — the socket decides |
+| `agent status <handle>`      | That one handle                                     |
+| `agent status`               | Every **running** agent; stale sockets are skipped  |
 
 ### `./scripts/web <verb> [handle]`
 
-| Call | Meaning |
-|---|---|
-| `web start` | Handle defaults to `$CHAT_MCP_WEB_HANDLE`, then `leejenkins` |
-| `web start <handle>` | Joins the bus as `<handle>` instead |
-| `web stop` | No handle — there is one server per port |
-| `web restart [handle]` | Stop then start. **Mints a new token** |
-| `web status` | Pid, port, both url files, log path |
+| Call                   | Meaning                                                      |
+| ---------------------- | ------------------------------------------------------------ |
+| `web start`            | Handle defaults to `$CHAT_MCP_WEB_HANDLE`, then `leejenkins` |
+| `web start <handle>`   | Joins the bus as `<handle>` instead                          |
+| `web stop`             | No handle — there is one server per port                     |
+| `web restart [handle]` | Stop then start. **Mints a new token**                       |
+| `web status`           | Pid, port, both url files, log path                          |
 
 ### Arguments
 
-| Argument | Rule |
-|---|---|
+| Argument   | Rule                                                                                                                            |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `<handle>` | Lowercase, `[a-z0-9][a-z0-9_-]{0,63}`. It becomes a filename and a socket path, so it is validated **before any path is built** |
-| `[dir]` | `agent start` only. Must exist. Register one instead with `node dist/index.js project set <handle> <dir>` |
-| `--now` | `agent stop` only. 🛑 **Not "immediately"** — the container still waits out its own shutdown grace |
+| `[dir]`    | `agent start` only. Must exist. Register one instead with `node dist/index.js project set <handle> <dir>`                       |
+| `--now`    | `agent stop` only. 🛑 **Not "immediately"** — the container still waits out its own shutdown grace                              |
 
 ### Exit codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Done, or already in the state you asked for. A second `stop` is `0` |
-| `1` | Refused, or it failed. The reason is on stderr |
-| `2` | Bad usage. `--help` is `0`, no arguments is `2` |
+| Code | Meaning                                                             |
+| ---- | ------------------------------------------------------------------- |
+| `0`  | Done, or already in the state you asked for. A second `stop` is `0` |
+| `1`  | Refused, or it failed. The reason is on stderr                      |
+| `2`  | Bad usage. `--help` is `0`, no arguments is `2`                     |
 
 🛑 **This table is pinned by `test/scripts/operator-scripts.test.ts`**, which
 asserts the exit code of every documented call. It exists because
@@ -73,20 +73,20 @@ exit codes caught it, and the mutant is re-run in that file's last test.
 
 ## What each verb does
 
-| Verb | `agent <handle>` | `web` |
-|---|---|---|
-| `start` | Builds `dist/` if stale, answers the container confirmation banner, detaches, waits for the supervisor to listen | Builds `dist/` if stale, detaches, waits for a url, **prints the token-bearing url** |
-| `stop` | Delegates to `chat-mcp agents stop`, which is graceful and waits out its own grace period | Sends `SIGTERM`, escalates to `SIGKILL` after 10s |
-| `restart` | In-place reload if something is listening, otherwise a cold start | Stop then start |
-| `status` | Listening, supervisor pid, container state, log path | Server pid, port, url file, log path |
+| Verb      | `agent <handle>`                                                                                                 | `web`                                                                                |
+| --------- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `start`   | Builds `dist/` if stale, answers the container confirmation banner, detaches, waits for the supervisor to listen | Builds `dist/` if stale, detaches, waits for a url, **prints the token-bearing url** |
+| `stop`    | Delegates to `chat-mcp agents stop`, which is graceful and waits out its own grace period                        | Sends `SIGTERM`, escalates to `SIGKILL` after 10s                                    |
+| `restart` | In-place reload if something is listening, otherwise a cold start                                                | Stop then start                                                                      |
+| `status`  | Listening, supervisor pid, container state, log path                                                             | Server pid, port, url file, log path                                                 |
 
 With no handle, `agent status` lists every agent that is actually running.
 
 ## 🛑 The web server is not a daemon, and that is deliberate
 
 `server.ts:188` arms a **60-second idle shutdown at boot**, and `server.ts:196`
-calls `shutdown(0)`. The comment there says it *"keeps us honest about the
-no-persistent-daemon design principle."* Nothing disarms that timer until a
+calls `shutdown(0)`. The comment there says it _"keeps us honest about the
+no-persistent-daemon design principle."_ Nothing disarms that timer until a
 browser opens an SSE stream on `/api/events`.
 
 ```
@@ -100,7 +100,7 @@ So **`web start` gives you 60 seconds to paste the url.** Miss it and the
 server exits by design. Run `web start` again.
 
 ⚠️ **An already-open tab does not revive itself after a restart.** `EventSource`
-auto-reconnects, but it presents the *previous* server's cookie, the auth gate
+auto-reconnects, but it presents the _previous_ server's cookie, the auth gate
 returns 401 before `sseClients.add` is reached, and the client only logs the
 error. A 401 therefore cannot hold the server open either. **Pasting the new
 url is the only thing that revives that tab.**
@@ -109,7 +109,7 @@ url is the only thing that revives that tab.**
 
 **1. The web url you need is not the url in the state file.** Every web start
 mints a fresh API token, and the banner is the only place the token-bearing url
-is published. `~/.chat-mcp/web-url` holds the *plain* url deliberately, because
+is published. `~/.chat-mcp/web-url` holds the _plain_ url deliberately, because
 a container can read that file. So `web start` scrapes the handshake url out of
 its own log and prints it, and `web restart` prints the new one. Detaching the
 server without that step leaves the UI unreachable with no visible error.
@@ -139,7 +139,7 @@ character class.** A bash `[a-z]` range uses locale collation: under
 `en_US.UTF-8` it matched `álice` while the TypeScript twin refused it, measured
 on darwin. `LC_ALL=C [[ ... ]]` is **not** the fix — `[[` is a shell keyword, so
 the prefix is parsed as a command name, bash reports `[[: command not found`,
-and the guard then refuses *every* handle while looking like it works.
+and the guard then refuses _every_ handle while looking like it works.
 
 Why it is validated at all: A handle becomes a
 filename in three places — the pidfile, the logfile and the supervisor socket —
@@ -148,7 +148,7 @@ and all three are constructed before `node` runs. So `src/util/naming.ts`'s
 would have written outside the state directory. `pc_assert_handle` carries a
 copy of that regex, `[a-z0-9][a-z0-9_-]{0,63}`. **Keep the two identical.**
 
-A listing *skips* a junk filename rather than aborting on it. Only a handle the
+A listing _skips_ a junk filename rather than aborting on it. Only a handle the
 operator typed is worth refusing.
 
 **The log holds a credential, so it is `0600` and its directories are `0700`.**
@@ -207,7 +207,7 @@ through its pipeline, failed the assignment, and `set -e` killed the script with
 **no output at all**. Any new pipeline reading an optional file or an unbound
 port needs `|| true` inside the braces.
 
-⚠️ **`docker inspect` on a missing container exits 1 *and* prints a bare
+⚠️ **`docker inspect` on a missing container exits 1 _and_ prints a bare
 newline.** A `|| printf 'absent'` fallback appends to that newline. Capture,
 strip whitespace, then default.
 
@@ -217,23 +217,23 @@ OS-assigned port when its preferred one is taken, which would leave `stop` and
 
 ## Environment overrides
 
-| Variable | Default | Effect |
-|---|---|---|
-| `CHAT_MCP_HOME` | `~/.chat-mcp` | State dir. Honoured by the scripts **and** the CLI, so they cannot disagree |
-| `CHAT_MCP_WEB_PORT` | `3737` | Web UI port |
-| `CHAT_MCP_WEB_HANDLE` | `leejenkins` | Bus handle the web UI joins as |
-| `AGENT_START_TIMEOUT` | `300` | Seconds to wait for a supervisor to listen |
-| `WEB_START_TIMEOUT` | `60` | Seconds to wait for a web url |
+| Variable              | Default       | Effect                                                                      |
+| --------------------- | ------------- | --------------------------------------------------------------------------- |
+| `CHAT_MCP_HOME`       | `~/.chat-mcp` | State dir. Honoured by the scripts **and** the CLI, so they cannot disagree |
+| `CHAT_MCP_WEB_PORT`   | `3737`        | Web UI port                                                                 |
+| `CHAT_MCP_WEB_HANDLE` | `leejenkins`  | Bus handle the web UI joins as                                              |
+| `AGENT_START_TIMEOUT` | `300`         | Seconds to wait for a supervisor to listen                                  |
+| `WEB_START_TIMEOUT`   | `60`          | Seconds to wait for a web url                                               |
 
 ---
 
 ## Source files
 
-| File | Role |
-|---|---|
-| `scripts/lib/procctl.sh` | Sourced by both. Pidfiles, logs, detached spawn, liveness, the socket probe |
-| `scripts/agent` | Supervisor and container lifecycle for one handle |
-| `scripts/web` | Browser chat UI lifecycle |
+| File                                    | Role                                                                                                             |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `scripts/lib/procctl.sh`                | Sourced by both. Pidfiles, logs, detached spawn, liveness, the socket probe                                      |
+| `scripts/agent`                         | Supervisor and container lifecycle for one handle                                                                |
+| `scripts/web`                           | Browser chat UI lifecycle                                                                                        |
 | `test/scripts/operator-scripts.test.ts` | Pins the exit-code table above. Every case is side-effect free — nothing here starts a container or binds a port |
 
 ## Related docs

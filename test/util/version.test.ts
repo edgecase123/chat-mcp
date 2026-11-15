@@ -1,25 +1,25 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { createServer, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
-import { migrate } from '../../src/storage/db.js';
-import * as dao from '../../src/storage/dao.js';
-import { route, type RouteContext } from '../../src/cli/web/server.js';
-import { ALL_CAPABILITIES } from '../../src/cli/web/credential.js';
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { migrate } from "../../src/storage/db.js";
+import * as dao from "../../src/storage/dao.js";
+import { route, type RouteContext } from "../../src/cli/web/server.js";
+import { ALL_CAPABILITIES } from "../../src/cli/web/credential.js";
 
 /** The api credential every request below presents. Minted per process in production. */
-const TEST_TOKEN = 'test-token-for-route-tests';
+const TEST_TOKEN = "test-token-for-route-tests";
 const COOKIE = `chat_mcp_api=${TEST_TOKEN}`;
 
-import { packageVersion } from '../../src/util/version.js';
+import { packageVersion } from "../../src/util/version.js";
 
-const ROOT = new URL('../../', import.meta.url).pathname;
+const ROOT = new URL("../../", import.meta.url).pathname;
 
 /** Walked, not globbed, so a new file is covered the day it lands. */
-const SCAN_ROOTS = ['src', 'scripts'];
+const SCAN_ROOTS = ["src", "scripts"];
 
 /**
  * 🛑 CARVED OUT BY CAUSE, NOT BY FILENAME: this literal is the SMOKE CLIENT's
@@ -27,10 +27,15 @@ const SCAN_ROOTS = ['src', 'scripts'];
  * and tracking chat-mcp's would be wrong. The test below asserts the hit is
  * still there, so the carve-out cannot outlive its reason.
  */
-const ALLOWED = new Map([['scripts/smoke.mjs', "version: '0.0.1'"]]);
+const ALLOWED = new Map([
+  ["scripts/smoke.mjs", /^version:\s*['"]0\.0\.1['"]$/],
+]);
 
 function declaredVersion(): string {
-  const raw = readFileSync(new URL('../../package.json', import.meta.url), 'utf8');
+  const raw = readFileSync(
+    new URL("../../package.json", import.meta.url),
+    "utf8",
+  );
 
   return (JSON.parse(raw) as { version: string }).version;
 }
@@ -57,12 +62,12 @@ const SEMVER_LITERAL = String.raw`['"\`]v?\d+\.\d+\.\d+[-.\w]*['"\`]`;
 const HARDCODED = new RegExp(
   `(?:\\bVERSION\\s*[:=]|\\bversion\\s*[:=]|\\.?\\bversion\\(\\s*)\\s*${SEMVER_LITERAL}` +
     `|['"\`]v\\d+\\.\\d+\\.\\d+[-.\\w]*['"\`]`,
-  'g',
+  "g",
 );
 
-test('packageVersion() returns what package.json declares', () => {
+test("packageVersion() returns what package.json declares", () => {
   assert.equal(packageVersion(), declaredVersion());
-  assert.notEqual(packageVersion(), '0.0.0-unknown');
+  assert.notEqual(packageVersion(), "0.0.0-unknown");
 });
 
 /**
@@ -70,7 +75,7 @@ test('packageVersion() returns what package.json declares', () => {
  * nothing and a tree that hardcodes nothing produce the same green, and the
  * three stale banners this guard exists for were found by hand.
  */
-test('the drift scanner catches the shapes it is looking for', () => {
+test("the drift scanner catches the shapes it is looking for", () => {
   const bad = [
     "const VERSION = '0.3.0';",
     "{ name: 'chat-mcp', version: '0.4.4' },",
@@ -83,24 +88,35 @@ test('the drift scanner catches the shapes it is looking for', () => {
     assert.match(sample, new RegExp(HARDCODED.source), `missed: ${sample}`);
   }
   // Must NOT fire on an IPv4 address or on the fallback sentinel.
-  assert.doesNotMatch("server.listen(port, '127.0.0.1')", new RegExp(HARDCODED.source));
-  assert.doesNotMatch(".version ?? '0.0.0-unknown'", new RegExp(HARDCODED.source));
+  assert.doesNotMatch(
+    "server.listen(port, '127.0.0.1')",
+    new RegExp(HARDCODED.source),
+  );
+  assert.doesNotMatch(
+    ".version ?? '0.0.0-unknown'",
+    new RegExp(HARDCODED.source),
+  );
 });
 
-test('no source file hardcodes a version — every surface reads package.json', () => {
+test("no source file hardcodes a version — every surface reads package.json", () => {
   const files = SCAN_ROOTS.flatMap((r) => sourceFiles(join(ROOT, r)));
   // Denominator: a walk that silently matched nothing would otherwise pass.
-  assert.ok(files.length >= 70, `scanned only ${files.length} files across ${SCAN_ROOTS}`);
+  assert.ok(
+    files.length >= 70,
+    `scanned only ${files.length} files across ${SCAN_ROOTS}`,
+  );
 
   const hits: string[] = [];
   const allowedSeen = new Set<string>();
   let callers = 0;
   for (const f of files) {
     const rel = f.slice(ROOT.length);
-    const text = readFileSync(f, 'utf8');
-    if (text.includes('packageVersion(')) callers += 1;
+    const text = readFileSync(f, "utf8");
+    if (text.includes("packageVersion(")) callers += 1;
     for (const m of text.matchAll(HARDCODED)) {
-      if (ALLOWED.get(rel) === m[0]) {
+      // Anchored, so the carve-out still cannot absorb an unrelated hit. A
+      // pattern rather than a literal because prettier picks the quote.
+      if (ALLOWED.get(rel)?.test(m[0]) === true) {
         allowedSeen.add(rel);
         continue;
       }
@@ -109,31 +125,45 @@ test('no source file hardcodes a version — every surface reads package.json', 
   }
 
   // The scanner read real content, not empty strings.
-  assert.ok(callers >= 8, `only ${callers} of ${files.length} files call packageVersion()`);
+  assert.ok(
+    callers >= 8,
+    `only ${callers} of ${files.length} files call packageVersion()`,
+  );
   // A carve-out whose hit has gone needs its reason re-examined, not keeping.
   assert.deepEqual(
     [...allowedSeen].sort(),
     [...ALLOWED.keys()].sort(),
-    'an ALLOWED literal no longer exists — delete the carve-out',
+    "an ALLOWED literal no longer exists — delete the carve-out",
   );
-  assert.deepEqual(hits, [], `hardcoded version in ${hits.length} of ${files.length} files`);
+  assert.deepEqual(
+    hits,
+    [],
+    `hardcoded version in ${hits.length} of ${files.length} files`,
+  );
 });
 
-test('the browser UI reports the package version', async () => {
-  const db = new DatabaseSync(':memory:');
+test("the browser UI reports the package version", async () => {
+  const db = new DatabaseSync(":memory:");
   migrate(db);
   dao.upsertAgent(db, {
-    handle: 'operator',
+    handle: "operator",
     pid: 1,
-    session_id: 'operator',
-    display_name: 'operator',
+    session_id: "operator",
+    display_name: "operator",
     metadata: {},
   });
-  const ctx: RouteContext = { handle: 'operator', db, sseClients: new Set(), port: 0, token: TEST_TOKEN, capabilities: ALL_CAPABILITIES };
+  const ctx: RouteContext = {
+    handle: "operator",
+    db,
+    sseClients: new Set(),
+    port: 0,
+    token: TEST_TOKEN,
+    capabilities: ALL_CAPABILITIES,
+  };
   const server: Server = createServer((req, res) => {
     void route(req, res, ctx);
   });
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   ctx.port = port;
 

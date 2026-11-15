@@ -1,4 +1,4 @@
-import { notifyPathFor } from '../util/paths.js';
+import { notifyPathFor } from "../util/paths.js";
 
 /**
  * 🛑 THE SEAM BETWEEN "A WAKE ARRIVED" AND "HOW IT ARRIVED".
@@ -17,7 +17,7 @@ import { notifyPathFor } from '../util/paths.js';
  *  its own rather than bending this one. */
 export interface WakeSubscription {
   /** A long-running process whose stdout lines are wakes. */
-  readonly kind: 'process';
+  readonly kind: "process";
   /** Verbatim command for the host to run. */
   readonly command: string;
   /** Shown in host UI, so it says what is being watched. */
@@ -59,26 +59,26 @@ const HOUR_MS = 3_600_000;
 function watchCommand(path: string): string {
   const js =
     `const fs=require('fs'),p='${path}';let seen=0;` +
-    'fs.watch(p,()=>{' +
+    "fs.watch(p,()=>{" +
     "let s='';try{s=fs.readFileSync(p,'utf8').trim()}catch{return}" +
-    'if(!s)return;' +
-    'let id=0;try{id=JSON.parse(s).id|0}catch{}' +
-    'if(id>0){if(id===seen)return;seen=id}' +
-    'console.log(s)})';
+    "if(!s)return;" +
+    "let id=0;try{id=JSON.parse(s).id|0}catch{}" +
+    "if(id>0){if(id===seen)return;seen=id}" +
+    "console.log(s)})";
 
   return `node -e "${js}"`;
 }
 
 /** Today's transport: a file per handle, whose writes are the wakes. */
 export const fileWatchTransport: WakeTransport = {
-  id: 'file-watch',
+  id: "file-watch",
   summary: (handle) =>
     `Incoming messages for "${handle}" land in ${notifyPathFor(handle)}`,
   subscribe: (handle) => {
     const path = notifyPathFor(handle);
 
     return {
-      kind: 'process',
+      kind: "process",
       command: watchCommand(path),
       description: `chat-mcp inbound for ${handle}`,
       // 🛑 RIGHT-ANCHORED ON THE CLOSING QUOTE, because a handle can be a

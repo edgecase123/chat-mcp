@@ -1,10 +1,15 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import type { Socket } from 'node:net';
-import { BIND_ADDRESS, listenOnLoopback } from './loopback.js';
-import { McpHttpService, refuse, type McpHttpOptions } from './mcp-http.js';
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
+import type { Socket } from "node:net";
+import { BIND_ADDRESS, listenOnLoopback } from "./loopback.js";
+import { McpHttpService, refuse, type McpHttpOptions } from "./mcp-http.js";
 
 /** The only path served. A token is a credential for this path, not for the socket. */
-const MCP_PATH = '/mcp';
+const MCP_PATH = "/mcp";
 
 /**
  * 🛑 PRE-AUTH SOCKETS ARE A HOST-WIDE RESOURCE. `host.docker.internal` reaches
@@ -89,16 +94,23 @@ export class McpHttpListener {
 
   static async bind(options: McpListenerOptions): Promise<McpHttpListener> {
     const server = createServer();
-    const listener = new McpHttpListener(server, McpHttpService.create(options));
-
-    server.maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
-    reclaimIdleSockets(server, options.receiveTimeoutMs ?? DEFAULT_RECEIVE_TIMEOUT_MS);
-    budgetUnauthenticatedRefusals(
+    const listener = new McpHttpListener(
       server,
-      options.maxUnauthenticatedRefusals ?? DEFAULT_MAX_UNAUTHENTICATED_REFUSALS,
+      McpHttpService.create(options),
     );
 
-    server.on('request', (req, res) => {
+    server.maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
+    reclaimIdleSockets(
+      server,
+      options.receiveTimeoutMs ?? DEFAULT_RECEIVE_TIMEOUT_MS,
+    );
+    budgetUnauthenticatedRefusals(
+      server,
+      options.maxUnauthenticatedRefusals ??
+        DEFAULT_MAX_UNAUTHENTICATED_REFUSALS,
+    );
+
+    server.on("request", (req, res) => {
       void listener.serve(req, res);
     });
 
@@ -139,7 +151,10 @@ export class McpHttpListener {
     await closed;
   }
 
-  private async serve(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  private async serve(
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
     try {
       if (pathOf(req) !== MCP_PATH) {
         // 🛑 BEFORE `handleRequest`, so an off-path `initialize` opens no
@@ -152,9 +167,9 @@ export class McpHttpListener {
     } catch (err) {
       // A throw out of the request handler is an unhandled rejection, which
       // takes the supervisor down with the agent's bad request.
-      console.error('[mcp-listener] request failed:', err);
+      console.error("[mcp-listener] request failed:", err);
 
-      if (!res.headersSent) refuse(res, 500, 'internal error');
+      if (!res.headersSent) refuse(res, 500, "internal error");
       else res.end();
     }
   }
@@ -195,12 +210,12 @@ function reclaimIdleSockets(server: Server, receiveMs: number): void {
     deadlines.delete(socket);
   };
 
-  server.on('connection', (socket) => {
-    socket.on('close', () => disarm(socket));
+  server.on("connection", (socket) => {
+    socket.on("close", () => disarm(socket));
     arm(socket);
   });
 
-  server.on('request', (req, res) => {
+  server.on("request", (req, res) => {
     const { socket } = req;
 
     // 🛑 NOT RE-ARMED HERE. The clock runs from the connection, or from the end
@@ -211,14 +226,14 @@ function reclaimIdleSockets(server: Server, receiveMs: number): void {
     // handler never reads it, and waiting for `end` would cut it.
     if (declaresBody(req)) {
       owed.add(req);
-      req.on('end', () => {
+      req.on("end", () => {
         if (owed.delete(req)) disarm(socket);
       });
     } else {
       disarm(socket);
     }
 
-    res.on('close', () => {
+    res.on("close", () => {
       // 🛑 THE DROP IS WHAT MAKES THE RE-ARM STICK. A refusal answers while the
       // caller still owes a body, and the `end` arriving on a later tick would
       // otherwise disarm what this re-armed.
@@ -245,11 +260,11 @@ function budgetUnauthenticatedRefusals(server: Server, limit: number): void {
 
   const refusals = new WeakMap<Socket, number>();
 
-  server.on('request', (req, res) => {
+  server.on("request", (req, res) => {
     const { socket } = req;
     const offPath = pathOf(req) !== MCP_PATH;
 
-    res.on('close', () => {
+    res.on("close", () => {
       // 🛑 `headersSent` IS WHAT MAKES A REFUSAL REAL. `statusCode` reads 200 on
       // a response that was never written, so a socket destroyed mid-request
       // would otherwise be scored as though it had been answered.
@@ -266,9 +281,12 @@ function budgetUnauthenticatedRefusals(server: Server, limit: number): void {
 }
 
 function declaresBody(req: IncomingMessage): boolean {
-  return req.headers['content-length'] !== undefined || req.headers['transfer-encoding'] !== undefined;
+  return (
+    req.headers["content-length"] !== undefined ||
+    req.headers["transfer-encoding"] !== undefined
+  );
 }
 
 function pathOf(req: IncomingMessage): string {
-  return new URL(req.url ?? '/', 'http://localhost').pathname;
+  return new URL(req.url ?? "/", "http://localhost").pathname;
 }

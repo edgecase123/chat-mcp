@@ -1,15 +1,15 @@
-import React from 'react';
-import { Box, Text } from 'ink';
-import type { AgentStatus } from '../../../storage/dao.js';
-import { renderGauge } from '../util/gauge-render.js';
+import React from "react";
+import { Box, Text } from "ink";
+import type { AgentStatus } from "../../../storage/dao.js";
+import { renderGauge } from "../util/gauge-render.js";
 
 const STATUS_COLOR: Record<AgentStatus, string> = {
-  idle: 'green',
-  thinking: 'yellow',
-  tool: 'cyan',
-  blocked: 'red',
-  error: 'red',
-  offline: 'gray',
+  idle: "green",
+  thinking: "yellow",
+  tool: "cyan",
+  blocked: "red",
+  error: "red",
+  offline: "gray",
 };
 
 export interface HeaderProps {
@@ -29,31 +29,36 @@ export function Header({
   contextUsed,
   contextTotal,
 }: HeaderProps): React.ReactElement {
-  const gauge = renderGauge({ context_used: contextUsed, context_total: contextTotal });
+  const gauge = renderGauge({
+    context_used: contextUsed,
+    context_total: contextTotal,
+  });
   return (
     <Box borderStyle="round" borderColor="gray" paddingX={1} flexShrink={0}>
       <Text>
-        <Text bold>chat-mcp</Text>{' '}
-        <Text dimColor>v{version}-ink</Text> ·{' '}
+        <Text bold>chat-mcp</Text> <Text dimColor>v{version}-ink</Text> ·{" "}
         <Text color="cyan">{handle}</Text>
         {status && (
           <>
-            {' '}· <Text color={STATUS_COLOR[status]}>●</Text> <Text>{status}</Text>
+            {" "}
+            · <Text color={STATUS_COLOR[status]}>●</Text> <Text>{status}</Text>
             {focus && (
               <>
-                {' '}
+                {" "}
                 <Text dimColor>({focus})</Text>
               </>
             )}
           </>
-        )}{gauge.reported && (
+        )}
+        {gauge.reported && (
           <>
-            {' '}· <Text dimColor>ctx</Text>{' '}
+            {" "}
+            · <Text dimColor>ctx</Text>{" "}
             <Text color={gauge.color} bold={gauge.bold} dimColor={gauge.dim}>
               {gauge.label}
             </Text>
           </>
-        )}{' '}
+        )}{" "}
         <Text dimColor>· /help · Ctrl-C</Text>
       </Text>
     </Box>

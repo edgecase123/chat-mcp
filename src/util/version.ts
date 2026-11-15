@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync } from "node:fs";
 
 /** The running build's version, read from `package.json`.
  *
@@ -10,10 +10,13 @@ import { readFileSync } from 'node:fs';
  *  let four surfaces print three different numbers. */
 export function packageVersion(): string {
   try {
-    const raw = readFileSync(new URL('../../package.json', import.meta.url), 'utf8');
+    const raw = readFileSync(
+      new URL("../../package.json", import.meta.url),
+      "utf8",
+    );
 
-    return (JSON.parse(raw) as { version?: string }).version ?? '0.0.0-unknown';
+    return (JSON.parse(raw) as { version?: string }).version ?? "0.0.0-unknown";
   } catch {
-    return '0.0.0-unknown';
+    return "0.0.0-unknown";
   }
 }

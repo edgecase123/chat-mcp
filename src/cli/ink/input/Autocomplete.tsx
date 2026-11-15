@@ -1,6 +1,6 @@
-import React from 'react';
-import { Box, Text } from 'ink';
-import type { Completion } from './completions.js';
+import React from "react";
+import { Box, Text } from "ink";
+import type { Completion } from "./completions.js";
 
 export interface AutocompleteProps {
   completions: Completion[];
@@ -13,7 +13,11 @@ export interface AutocompleteProps {
  * as the user arrows up/down through more items than fit. Also surfaces
  * "N more above/below" indicators at the window edges.
  */
-export function Autocomplete({ completions, selectedIndex, maxRows = 6 }: AutocompleteProps): React.ReactElement | null {
+export function Autocomplete({
+  completions,
+  selectedIndex,
+  maxRows = 6,
+}: AutocompleteProps): React.ReactElement | null {
   if (completions.length === 0) return null;
 
   // Window start: keep selected in view. If selectedIndex is within [0, maxRows)
@@ -29,18 +33,26 @@ export function Autocomplete({ completions, selectedIndex, maxRows = 6 }: Autoco
   const below = completions.length - windowEnd;
 
   return (
-    <Box borderStyle="round" borderColor="cyan" flexDirection="column" paddingX={1} flexShrink={0}>
+    <Box
+      borderStyle="round"
+      borderColor="cyan"
+      flexDirection="column"
+      paddingX={1}
+      flexShrink={0}
+    >
       {above > 0 && <Text dimColor>↑ {above} more</Text>}
       {visible.map((c, i) => {
         const absoluteIndex = windowStart + i;
         const active = absoluteIndex === selectedIndex;
         return (
           <Text key={c.value + absoluteIndex}>
-            {active ? <Text color="cyan">▸ </Text> : <Text>  </Text>}
-            <Text bold={active} color={active ? 'cyan' : undefined}>{c.display ?? c.value}</Text>
+            {active ? <Text color="cyan">▸ </Text> : <Text> </Text>}
+            <Text bold={active} color={active ? "cyan" : undefined}>
+              {c.display ?? c.value}
+            </Text>
             {c.description && (
               <>
-                {'  '}
+                {"  "}
                 <Text dimColor>— {c.description}</Text>
               </>
             )}

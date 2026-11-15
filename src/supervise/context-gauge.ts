@@ -32,12 +32,12 @@ export interface ContextSnapshot {
  */
 export function describeContextGauge(reportsContext: boolean): string {
   if (!reportsContext) {
-    return 'context gauge: UNREPORTED — this driver reports no context, so the gauge stays blank';
+    return "context gauge: UNREPORTED — this driver reports no context, so the gauge stays blank";
   }
 
   // ⚠️ DELIBERATELY NOT "not yet observed". The rate-limit line already uses
   // that phrase, and an existing test asserts an UNMETERED driver never logs
   // it — reusing the wording made two independent gauges indistinguishable in
   // the log and broke that test.
-  return 'context gauge: reported by this driver; awaiting the first reading';
+  return "context gauge: reported by this driver; awaiting the first reading";
 }
