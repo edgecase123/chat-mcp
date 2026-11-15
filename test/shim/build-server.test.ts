@@ -85,10 +85,17 @@ function contextFor(handle: string, adapterStatus?: AdapterStatus): ShimContext 
 }
 
 /**
- * 🛑 22 TOOLS, NOT 21 INSTALLERS. The two numbers are different claims and
- * both read "22" in prose, which is how a count test ends up pinning the wrong
- * one. `index.ts` makes 21 `install*` calls; `claims.ts` registers three tools
- * and `installInboxResource` registers none, so 20 tool installers give 22.
+ * 🛑 24 TOOLS, NOT 22 INSTALLERS. The two numbers are different claims and
+ * both read like a count of the same thing, which is how a count test ends up
+ * pinning the wrong one. `index.ts` makes 22 `install*` calls;
+ * `installInboxResource` registers no tool, so 21 of them are tool installers.
+ * `claims.ts` registers three and `run_command.ts` registers two, so 21
+ * installers give 24.
+ *
+ * 🛑 `list_commands` AND `run_command` ARE HERE UNCONDITIONALLY. An agent with
+ * no command manifest is refused when it calls them, rather than never being
+ * offered them — nothing in `src/` writes a manifest, so a file appearing
+ * mid-session is the ordinary case.
  *
  * The SET, not the count. A count alone passes a rename.
  */
@@ -98,6 +105,7 @@ const TOOLS = [
   'health',
   'inbox',
   'list_agents',
+  'list_commands',
   'register',
   'release',
   'report_context',
@@ -109,6 +117,7 @@ const TOOLS = [
   'room_list',
   'room_members',
   'room_send',
+  'run_command',
   'search',
   'send',
   'set_status',
@@ -117,7 +126,7 @@ const TOOLS = [
   'whoami',
 ];
 
-test('🛑 buildServer SERVES exactly these 22 TOOLS, so neither a drop nor a rename passes', async (t) => {
+test('🛑 buildServer SERVES exactly these 24 TOOLS, so neither a drop nor a rename passes', async (t) => {
   const ctx = contextFor('build-server-probe');
 
   t.after(async () => {
