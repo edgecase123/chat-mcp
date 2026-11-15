@@ -1,0 +1,117 @@
+---
+title: Container Isolation
+updated: 2026-11-15
+covers:
+  - src/supervise/drivers/containerized.ts
+  - src/supervise/index.ts
+---
+
+# Container Isolation
+
+What a containerized agent can reach, which of its two containers holds the
+credentials, and why the dependency install is not one of them.
+
+---
+
+## Two containers per spawn, and only one holds a credential
+
+```
+1  INSTALL   docker run --rm                         NO -e flags at all
+             -v <project>:/work
+             -v <volume>:/work/node_modules
+             sh -c '<lockfile-guarded npm ci>'
+
+2  AGENT     docker run -i --rm --name chat-mcp-<handle>
+             -e <vendor auth>  -e GH_TOKEN  -e CHAT_MCP_MCP_CONFIG
+             -v <project>:/work
+             -v <volume>:/work/node_modules
+             -v <each mounts.json dir>:ro
+             sh -c '(write mcp config) && exec "$@"'
+```
+
+The install runs to completion first. The agent container never installs
+anything.
+
+## Why the install is a separate container
+
+A dependency's lifecycle script runs as `agent`, the same uid as everything
+else in the container. Docker hands the credentials to PID 1, which was the
+prelude shell. So a script could read all three out of `/proc/1/environ`.
+
+The lockfile that decides which packages install comes from the mounted project
+tree. **So the tree chose the code that read them.**
+
+🛑 **No in-container scrub can close that.** The `env -u` that used to wrap the
+`npm ci` altered only its own child's environment, never PID 1's. It was
+measured open on both routes and has been deleted — a scrub left in place reads
+as a boundary it never was.
+
+## Exactly two mounts on the install
+
+Per lee's ruling of 2026-11-14: the project bind and the `node_modules` volume,
+nothing else.
+
+The agent's extra `mounts.json` directories do not come here. The only one
+configured in practice is the whole local-context store, and an install script
+has no business in it.
+
+## What is still open
+
+🚨 **A substituted package still executes inside the agent container, which
+holds every credential.** Splitting the install does not change that — the
+agent needs its dependencies and its tokens in the same place.
+
+⚠️ **It is cross-handle, not just self-inflicted.** The volume is keyed on
+handle × tree, and a tree is reachable by several handles. So handle A can
+write an `.npmrc` into the shared read-write tree, handle B's install pulls the
+substituted package into B's own volume, and B executes it with B's
+credentials.
+
+🛑 **There is no `--network=none` on either container.** `npm ci` has to reach a
+registry, so egress is available to anything that runs.
+
+## Where the install is called from, and why it matters
+
+`runDependencyInstall` is synchronous, so it blocks the supervisor's event
+loop.
+
+| call site                         | path | cost                                   |
+| --------------------------------- | ---- | -------------------------------------- |
+| `startSupervisor`, above the bind | cold | a full `npm ci`, nothing listening yet |
+| `spawnContainerized`, every spawn | warm | one container start                    |
+
+**The pre-bind call is what makes the first start's cold install harmless.**
+Nothing is waiting on the socket yet, so a caller blocking is honest.
+
+**The per-spawn call is what keeps a restart correct.** A lockfile that changed
+mid-session must not leave the agent on the previous dependency tree.
+
+## Common pitfalls
+
+⚠️ **A restart after a lockfile change is still a cold install on a bound
+loop.** It is accepted rather than fixed. Refusing that restart was the
+alternative and it is worse: `doRestart` kills the child before it spawns, so a
+refusal leaves the handle with no agent at all and no remedy short of
+restarting the supervisor.
+
+⚠️ **The volume outlives `--rm`.** One install's output is reused by every
+later spawn for that handle and tree. `docker volume rm` is the only reset, and
+nothing prunes them.
+
+⚠️ **The install's stderr is inherited by the supervisor, not the agent.** That
+is where `NO_LOCK_HASH_WARNING` lands.
+
+---
+
+## Source files
+
+| File                                     | Role                                                                |
+| ---------------------------------------- | ------------------------------------------------------------------- |
+| `src/supervise/drivers/containerized.ts` | Both plans, the install runner, the shared mount and target helpers |
+| `src/supervise/index.ts`                 | The pre-bind install call                                           |
+
+## Related docs
+
+- [agent-liveness.md](agent-liveness.md) — whether anybody is actually in the container
+- [child-output.md](child-output.md) — which of a child's streams reach the log
+- [state-directory.md](../03-infrastructure/state-directory.md) — the host state the container is denied

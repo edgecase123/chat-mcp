@@ -147,10 +147,7 @@ test(
 
     try {
       // The real step, against the real lockfile, inside the real image.
-      const install = inImage(
-        volume,
-        prelude([nodeModulesInstallStep(claudeSpawn)]),
-      );
+      const install = inImage(volume, prelude([nodeModulesInstallStep()]));
 
       assert.equal(
         install.status,

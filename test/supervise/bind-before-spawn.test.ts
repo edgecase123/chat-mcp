@@ -323,3 +323,47 @@ test("🛑 topLevelYields: the pinned truth table", () => {
     assert.equal(topLevelYields(window).length, want, name);
   }
 });
+
+/**
+ * 🚨 #231. `runDependencyInstall` IS SYNCHRONOUS AND A COLD `npm ci` TAKES
+ * MINUTES, so where it is called from decides whether the supervisor's event
+ * loop is frozen while somebody is waiting on the socket.
+ *
+ * lee's ruling of 2026-11-15, carried in `index.ts`'s own comments at both
+ * restart sites: the supervisor stays up and the socket handler answers
+ * `ok: false`. A frozen loop answers nothing, and this socket exists because
+ * the notify-file watch lost 8 of 10 signals (#33) — so a frozen listener is
+ * the exact failure it was built to remove.
+ *
+ * Calling it ABOVE the bind makes the first start's cold install happen while
+ * nothing is listening, which is honest rather than a lie.
+ *
+ * 🛑 ANCHORED ON SYMBOL NAMES, NEVER ON LINE NUMBERS. A prettier reflow moves
+ * every line in this file and must not move this guard's meaning.
+ *
+ * ⚠️ IT DOES NOT PROVE THE WARM PATH IS CHEAP. That is one container start,
+ * measured nowhere here; this pins only the order.
+ */
+test("🚨 the dependency install runs BEFORE the wake listener binds", () => {
+  const src = readFileSync(
+    new URL("../../src/supervise/index.ts", import.meta.url),
+    "utf8",
+  );
+  const lines = src.split("\n");
+
+  // 🛑 CALLS, NOT MENTIONS. The import names `runDependencyInstall` too, and
+  // an import line sits above the bind in every arrangement — so matching the
+  // bare name would pass with no call site at all.
+  const callAt = lines.findIndex((l) => /^\s*runDependencyInstall\(/.test(l));
+  const bindAt = lines.findIndex((l) => l.includes("WakeListener.bind("));
+
+  assert.ok(
+    callAt >= 0,
+    "startSupervisor never installs dependencies, so a cold first spawn has none",
+  );
+  assert.ok(bindAt >= 0, "bind call not found");
+  assert.ok(
+    callAt < bindAt,
+    `the install freezes a bound loop: install at ${callAt + 1}, bind at ${bindAt + 1}`,
+  );
+});
