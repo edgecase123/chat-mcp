@@ -148,10 +148,13 @@ export async function runWeb(opts: ServeOptions): Promise<void> {
   const actualPort = await listenWithFallback(server, opts.port, PREFERRED_PORT);
   boundPort = actualPort;
   const url = `http://127.0.0.1:${actualPort}/`;
-  // 🛑 THE ONLY PLACE THE TOKEN IS PUBLISHED. The banner is the terminal,
-  // which a container cannot read; `webUrlFile()` is under `stateDir()`,
-  // which it can. So the handshake url goes to the operator and the plain
-  // url goes to the file.
+  // 🛑 TWO SINKS FOR THIS URL AND BOTH ARE DELIBERATE: the terminal banner for
+  // the operator, and `web-handshake` at 0600 for `scripts/web` and the
+  // supervisor's activity reporter. This claimed the banner was the only one,
+  // on the since-corrected belief that a container can read `stateDir()`.
+  // Evidence in `test/cli/web/handshake-file.test.ts`.
+  //
+  // `webUrlFile()` stays tokenless.
   const handshakeUrl = `${url}?${HANDSHAKE_PARAM}=${token}`;
 
   const banner = [

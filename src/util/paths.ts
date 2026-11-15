@@ -55,7 +55,7 @@ export function dbPath(): string {
  * because #162 measured the whole state dir bind-mounted into every container.
  * Re-measured 2026-11-14 against the real mount set: the state dir is not
  * present in the container at all, and `assertProjectDirOutsideState` refuses
- * any registered mount that overlaps it. See `test/cli/web/handshake-file.ts`
+ * any registered mount that overlaps it. See `test/cli/web/handshake-file.test.ts`
  * for the commands and their output.
  */
 export function webHandshakeFile(): string {
