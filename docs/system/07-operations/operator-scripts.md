@@ -166,7 +166,8 @@ a credential world-readable while this page claimed `0600`. Point
 `CHAT_MCP_HOME` at a real unix filesystem or the scripts refuse to start.
 
 ✅ **The token is no longer scraped from the log.** `src/cli/web/credential.ts`
-states the invariant that the token is never written under `stateDir()`, because
+used to state the invariant that the token is never written under `stateDir()`,
+because
 #162 measured the whole state dir bind-mounted into every container. **That was
 re-measured on 2026-11-14 and is no longer true** — with the real mount set
 (`/work` plus one configured extra mount at `/mnt/<key>`) the state dir is not present in the container

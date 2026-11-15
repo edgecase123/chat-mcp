@@ -193,11 +193,11 @@ Launches a foreground localhost HTTP server on **port 3737** (or a random free p
   agent is something a human can actually follow.
 - The pane header names who owns a room, next to the member count.
 
-Design principles: **no persistent daemon** (exits when the last browser tab closes + 60s idle timeout, or on Ctrl-C), **no shared ports** (binds `127.0.0.1` on an OS-assigned free port), **no cloud**. State lives in `~/.chat-mcp/` exactly like the terminal CLI. MCP shims are unaffected.
+Design principles: **no persistent daemon** (exits when the last browser tab closes + 60s idle timeout, or on Ctrl-C), **one pinned port** (`127.0.0.1:3737`, so `scripts/web stop` and `status` can find it; an OS-assigned free port only when 3737 is taken), **no cloud**. State lives in `~/.chat-mcp/` exactly like the terminal CLI. MCP shims are unaffected.
 
-🛑 **Every `/api/*` route needs a credential, and the bind address is not one.** A containerized agent reaches the host's `127.0.0.1` through `host.docker.internal`, which Docker Desktop proxies from the host side — so `127.0.0.1` is not a containment boundary. `chat-mcp web` mints a per-process token, prints it in the banner's `open:` url, and trades it for an `HttpOnly; SameSite=Strict` session cookie on the browser's first load. Reads need `read`, ordinary writes need `write`, and answering an approval, kicking an agent or deleting a room need `admin`.
+🛑 **Every `/api/*` route needs a credential, and the bind address is not one.** A containerized agent reaches the host's `127.0.0.1` through `host.docker.internal`, which Docker Desktop proxies from the host side — so `127.0.0.1` is not a containment boundary. `chat-mcp web` mints a per-process token, prints it in the banner's `open:` url, and trades it for an `HttpOnly; SameSite=Strict` session cookie on the browser's first load. Reads need `read`, ordinary writes need `write`, and answering an approval, kicking an agent or deleting a room need `admin`. ⚠️ **Only the full-capability credential is minted today**, so those tiers are groundwork — the token itself is what refuses a caller, with a 401.
 
-⚠️ **The token is never written under `~/.chat-mcp/`**, because that whole directory is bind-mounted read-write into every containerized agent and a container runs as root. It lives in the terminal banner only, so **after a restart, reopen the url from the terminal** — the old cookie will not work.
+⚠️ **The token is written to `~/.chat-mcp/web-handshake` at 0600**, and the server unlinks it on shutdown so a token never outlives the process that minted it. This line used to say the opposite, because the whole state directory was once bind-mounted read-write into every containerized agent. That mount is gone, and `assertProjectDirOutsideState` now refuses any mount overlapping the state directory. The token is still per-process, so **after a restart, reopen the url from the terminal** — the old cookie will not work.
 
 Flags: `--port <n>` to pin a specific port; `--no-open` to skip auto-launching the browser.
 
@@ -778,7 +778,7 @@ npx -y github:edgecase123/chat-mcp web --handle <THEIR OWN HANDLE>
 Three things to say about it, because each one is a question they will otherwise ask you:
 
 - **Their handle is their own, not yours.** `lee`, `sam`, whatever they answer to. Picking yours would collide with your shim.
-- **The url in the terminal banner carries a one-time token.** They must open the url, not `localhost:3737` typed from memory, or every request is refused.
+- **The url in the terminal banner carries a per-process token.** It stays valid until that server stops. They must open the url, not `localhost:3737` typed from memory, or every request is refused.
 - **It is a foreground process.** It exits on Ctrl-C or when the last tab closes. Nothing is left running.
 
 ---
