@@ -240,7 +240,7 @@ test("🛑 NO CLASS IN dao.ts WRITES, so no method can inherit another's guard",
  * that turns a replaced file into PARTIAL state — `joinRoom` writes
  * `room_members` before it announces.
  */
-test("🛑 the check is the FIRST statement of each writer, not merely present", () => {
+test("🛑 the check precedes each writer's first write, not merely present", () => {
   const source = stripComments(readFileSync(DAO, "utf8"));
   const writers = functionsOf(source).filter(
     (f) => isWriter(f) && f.name !== "insertMessage",
