@@ -92,6 +92,35 @@ to refuse a spawn.
 check would have written into nothing in either arm — a guard that always fails
 open is worse than no guard.
 
+## 🔴 The install can fail before any of this matters
+
+A cold `npm ci` as `agent` died `EACCES: mkdir /root/.npm/_cacache/...` and no
+agent started at all. The cause is `Dockerfile` layer order: the `useradd`
+chowns `/root`, and the `npm ci` BELOW it runs as root with `HOME=/root`, so it
+repopulated the cache afterwards and left 1073 root-owned paths behind. #242.
+
+🛑 **A WARM SPAWN HID IT FOR WEEKS.** The install guard skips on a matching
+lockfile hash, so only a fresh volume reaches the install — a new handle, a new
+project directory, or a pruned volume.
+
+⚠️ **THE BUILD SEEDS THE CACHE WITH PROD DEPS ONLY.** `Dockerfile`'s build-time
+install is `npm ci --omit=dev`, so the dev dependencies a runtime install adds
+are the entries needing a NEW cache directory. That is the `mkdir` that was
+denied, and it is why a prod-only install could succeed while a full one could
+not.
+
+Guarded two ways, because one fails on the cause and one on the consequence:
+
+| test | fails on | runs in CI? |
+|---|---|---|
+| `/root is chowned to agent AFTER the last root-run npm` | the ORDERING, read off the `Dockerfile` | **yes** |
+| `nothing under /root … is owned by anyone but agent` | the CAUSE, read off the built image | no — docker lane |
+| `the node_modules the install step builds can … TRANSFORM TypeScript` | the CONSEQUENCE | no — docker lane |
+
+🛑 **THE CI COLUMN IS THE POINT.** `ci.yml` runs plain `npm test`, which skips
+the docker lane. Without the first row nothing stops the ordering regressing on
+`main`.
+
 ## 🛑 Why `onStderr` goes through the generation guard
 
 Every child callback registered in `wireChild` is wrapped in `ifCurrent`, which

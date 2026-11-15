@@ -35,6 +35,16 @@ const LINES = DOCKERFILE.split('\n').filter((l) => !l.trimStart().startsWith('#'
 /** `\`-continuations joined, so a directive split across lines is one string. */
 const LOGICAL = LINES.join('\n').replace(/\\\n\s*/g, ' ');
 
+/**
+ * One entry per LOGICAL directive, so a `\`-continuation chain is one string.
+ *
+ * 🛑 INDEXING `LINES` IS WHAT FAILED OPEN. A root-run `npm` written as a chain
+ * puts `RUN` on one line and `npm` on the next, so a single-line pattern
+ * matches neither — and four of this file's `RUN` directives already use that
+ * shape. Found by claude2 on PR 243 with a single-line positive control.
+ */
+const DIRECTIVES = LOGICAL.split('\n');
+
 test('🛑 the image pre-creates the node_modules mount point, which is what gives the volume agent ownership', () => {
   assert.match(
     LOGICAL,
@@ -85,5 +95,68 @@ test('⚠️ control — the path the image pre-creates is the path the driver m
     LOGICAL,
     new RegExp(`mkdir\\s+(-p\\s+)?['"]?${CONTAINER_PROJECT_DIR}/node_modules['"]?`),
     `the driver mounts the volume at ${CONTAINER_PROJECT_DIR}/node_modules; the image must pre-create THAT path`,
+  );
+});
+
+/**
+ * 🔴 #242, AND IT IS THE SAME CLASS AS THE ORDERING TEST ABOVE. The `useradd`
+ * chowns `/root`, and a later `npm ci` runs as ROOT with `HOME=/root` — so it
+ * repopulates `/root/.npm/_cacache` AFTER that chown. 1073 paths were left
+ * root-owned in a cache the agent then has to write, a cold `npm ci` as `agent`
+ * died `EACCES: mkdir /root/.npm/_cacache/...`, the prelude's `&&` held, and NO
+ * AGENT STARTED.
+ *
+ * 🛑 THIS RUNS IN CI AND THE IMAGE TEST DOES NOT. `container-toolchain.test.ts`
+ * reads the BUILT image, which is stronger — and it is docker-lane-only, so
+ * `ci.yml`'s plain `npm test` skips it. Nothing would stop the ordering
+ * regressing on `main`. Raised by claude2 on PR 243.
+ *
+ * ⚠️ THE TWO ARE NOT REDUNDANT. This proves the instruction is in the right
+ * PLACE; the image test proves the built result. A Dockerfile can be correct
+ * and the published image stale, and a build can be correct while a future
+ * root-run layer lands below this chown.
+ *
+ * 🛑 THE CHOWN OF `/root` MUST BE ITS OWN DIRECTIVE. Joining `\`-continuations
+ * is what closes the fail-open below, and it also hides order WITHIN a chain —
+ * so a chown placed after the npm in the SAME `&&` chain is correct and still
+ * fails here. Fail-closed is the trade. Raised by claude2 on PR 243.
+ */
+test('🔴 /root is chowned to agent AFTER the last root-run npm, or a cold npm ci dies EACCES', () => {
+  const userAt = DIRECTIVES.findIndex((d) => /^\s*USER\s+agent\b/.test(d));
+  const isRootNpm = (d: string) => /^\s*RUN\b[\s\S]*\bnpm\s+(ci|install)\b/.test(d);
+  // 🛑 `\s/root\b` ALSO MATCHED `/root/.config`, because `/` ends a word. A
+  // chown narrowed to a subdirectory left /root/.npm root-owned and passed.
+  const chownsRoot = (d: string) => /chown\s+(-R\s+)?agent:agent\b[^\n]*\s\/root(\s|$)/.test(d);
+
+  assert.notEqual(userAt, -1, 'no `USER agent` line — has the image stopped dropping root?');
+
+  // 🛑 INDICES, NOT THE DIRECTIVES THEMSELVES. Collecting the strings and
+  // recovering a position with `lastIndexOf` searches by VALUE, so a directive
+  // duplicated below `USER agent` — where it runs as agent and is harmless —
+  // resolved to the later copy and failed the test with a false message.
+  const rootNpmAt = DIRECTIVES.map((d, i) => (isRootNpm(d) && i < userAt ? i : -1)).filter(
+    (i) => i !== -1,
+  );
+  const chownRootAt = DIRECTIVES.map((d, i) => (chownsRoot(d) ? i : -1)).filter((i) => i !== -1);
+
+  assert.ok(rootNpmAt.length > 0, 'no root-run `npm ci`/`npm install` found before USER agent');
+  assert.ok(
+    chownRootAt.length > 0,
+    'nothing chowns /root to agent at all; the npm cache lives at /root/.npm (#242)',
+  );
+
+  const lastNpmAt = Math.max(...rootNpmAt);
+  const lastChownAt = Math.max(...chownRootAt);
+
+  assert.ok(
+    lastChownAt > lastNpmAt,
+    `\`${DIRECTIVES[lastNpmAt]!.trim()}\` runs as root after the last chown of /root. It ` +
+      'repopulates /root/.npm as root, so a cold `npm ci` as agent dies EACCES and no agent ' +
+      'starts (#242).',
+  );
+  assert.ok(
+    lastChownAt < userAt,
+    `the chown of /root runs after \`USER agent\`: \`${DIRECTIVES[lastChownAt]!.trim()}\`. ` +
+      'Chowning /root needs root, so the build would fail.',
   );
 });

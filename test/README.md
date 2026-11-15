@@ -9,10 +9,26 @@ node --test --import tsx test/cli/ink/fuzzy.test.ts   # one file
 
 Pure-logic modules only. UI components smoked via `npm run smoke` and manual `npm run dev -- cli --experimental --handle testuser`.
 
-## 🛑 One test is skipped in CI, on purpose
+## 🛑 The docker lane is skipped in CI, on purpose
 
-`test/supervise/drivers/container-removal.test.ts` starts a real Docker
-container. It is the only test in the suite that needs a live daemon.
+Two files start a real Docker container, and they are the only tests in the
+suite that need a live daemon.
+
+| file | what it needs |
+|---|---|
+| `test/supervise/drivers/container-removal.test.ts` | any image — it runs `alpine` |
+| `test/supervise/drivers/container-toolchain.test.ts` | **`chat-mcp-agent:local` must already be BUILT** |
+
+🛑 **`container-toolchain.test.ts` SKIPS WHEN THE AGENT IMAGE IS ABSENT, and
+says so.** Building it is 1.18 GB and minutes, which is the same startup-budget
+problem #150 ruled on — a test must not spend an image build inside its own
+budget. Build it once with `./scripts/agent start <handle>`.
+
+⚠️ **It runs the PRODUCTION install step in that image, on a throwaway named
+volume it removes in a `finally`.** That is a cold `npm ci` of the whole
+lockfile, so the file costs roughly 10s warm and longer on a cold npm cache. It
+is also what found #242 — nothing else in the suite performs an in-container
+install.
 
 **It runs locally and is skipped in CI, by lee's ruling of 2026-11-11.**
 `docker run` pulls the image inside the test's own startup budget, so a runner
@@ -31,8 +47,10 @@ The decision lives in `test/support/docker-lane.ts` and is unit-tested in
 `test/support/docker-lane.test.ts`, including a control proving
 `DOCKER_TESTS=0` does not force it on.
 
-⚠️ **`npm test` reports `skipped 1` in CI and `skipped 0` locally.** A local
-`skipped 1` means docker is not running, not that the lane was retired.
+⚠️ **A local skip count above zero means the LANE did not run, not that it was
+retired.** Docker not running skips all of them; a missing `chat-mcp-agent:local`
+skips only `container-toolchain.test.ts`. Both reasons are printed with the skip,
+so read it rather than counting.
 
 ## 🛑 One test goes red with no code change, on purpose
 

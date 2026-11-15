@@ -94,7 +94,22 @@ RUN npm ci --omit=dev --ignore-scripts
 # Prebuilt on the HOST before `docker build` runs — see container.ts's
 # buildImage(), which runs `npm run build` first. This image never runs tsc.
 COPY dist ./dist
-RUN chown -R agent:agent /opt/chat-mcp
+
+# 🛑 `/root` IS RE-CHOWNED HERE, NOT ONLY AT THE `useradd`. The `npm ci` above
+# runs as root with HOME=/root, so it repopulates `/root/.npm/_cacache` AFTER
+# the chown beside `useradd` — leaving 1073 root-owned paths in a cache the
+# agent then has to write. A cold `npm ci` as `agent` died `EACCES: mkdir
+# /root/.npm/_cacache/...`, the prelude chains on `&&`, and NO AGENT STARTED.
+# Measured 4 times on a fresh volume: 4 failures, 0 agents. #242.
+#
+# ⚠️ IT IS THE ORDER THAT BREAKS, NOT THE CHOWN. Moving either line is enough;
+# both are chowned here so no later root-run layer can reintroduce it without
+# also moving past this point.
+#
+# Rejected: pointing `npm_config_cache` at a writable path. It leaves the
+# root-owned files in the image and trades a hard failure for a cold cache on
+# every single spawn.
+RUN chown -R agent:agent /opt/chat-mcp /root
 
 # 🛑 MUST STAY ABOVE `USER agent`, AND THE OWNERSHIP IS THE POINT. The driver
 # mounts a container-owned `node_modules` as a NAMED VOLUME here, and docker
