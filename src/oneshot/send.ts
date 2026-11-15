@@ -2,6 +2,7 @@ import * as dao from "../storage/dao.js";
 import { openDb } from "../storage/db.js";
 import { notifyPeer } from "../notify/bus.js";
 import { readStdinAll, resolveHandle } from "./common.js";
+import { roomTargetRefusal } from "../util/naming.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -28,6 +29,14 @@ export async function runSend(opts: SendOpts): Promise<void> {
   try {
     const recipient = dao.getAgent(db, opts.to);
     if (!recipient) {
+      if (opts.to.startsWith("#")) {
+        throw new Error(
+          roomTargetRefusal(
+            opts.to,
+            `There is no one-shot room send: run 'chat-mcp cli --handle ${from}', then '/join ${opts.to}', then type.`,
+          ),
+        );
+      }
       throw new Error(
         `Unknown peer: ${opts.to}. Run 'chat-mcp list --all' to see registered handles.`,
       );

@@ -3,6 +3,7 @@ import { z } from "zod";
 import * as dao from "../../storage/dao.js";
 import { notifyPeer } from "../../notify/bus.js";
 import type { ShimContext } from "../index.js";
+import { roomTargetRefusal } from "../../util/naming.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -12,9 +13,13 @@ export function installSend(server: McpServer, ctx: ShimContext): void {
     {
       title: "Send a 1:1 message to a peer",
       description:
-        "Send a message to another peer on the chat bus. body is UTF-8 text, max 64 KB. The recipient must be a known peer (call list_agents first if unsure).",
+        "Send a message to another peer on the chat bus. body is UTF-8 text, max 64 KB. The recipient must be a known peer (call list_agents first if unsure). A room is NOT a peer — use room_send for a #room target.",
       inputSchema: {
-        to: z.string().describe("Handle of the recipient peer"),
+        to: z
+          .string()
+          .describe(
+            "Handle of the recipient peer (never a #room — see room_send)",
+          ),
         body: z.string().describe("Message body (UTF-8, max 64 KB)"),
         kind: z
           .enum(["chat", "dispatch", "alert"])
@@ -33,6 +38,14 @@ export function installSend(server: McpServer, ctx: ShimContext): void {
       }
       const recipient = dao.getAgent(ctx.db, to);
       if (!recipient) {
+        if (to.startsWith("#")) {
+          throw new Error(
+            roomTargetRefusal(
+              to,
+              `Use room_send with room: "${to}", and room_join first if you are not a member.`,
+            ),
+          );
+        }
         throw new Error(
           `Unknown peer: ${to}. Call list_agents to see who is registered.`,
         );
