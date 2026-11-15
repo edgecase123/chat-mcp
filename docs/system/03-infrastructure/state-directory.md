@@ -37,7 +37,7 @@ importing anything that resolves a path.
 | `sock/<handle>` | `src/supervise/socket.ts` | Where a supervisor listens for direct delivery. **Kept short deliberately** — a unix socket path caps at ~104 bytes on macOS and a too-long one fails as a truncated bind, not a clear error |
 | `notify/<handle>` | `src/notify/bus.ts` | The wake file an adapter watches. A write here is what pulls an idle agent back into its inference loop |
 | `projects.json` | `src/index.ts` (`project` command) | Which directory each handle's agent works in |
-| `mounts.json` | `src/supervise/mounts.ts` | Extra mounts a containerized handle gets beyond `/work` |
+| `mounts.json` | `src/supervise/mounts.ts` | Extra mounts a containerized handle gets beyond `/work`, each attached **read-only** at `/mnt/<key>` — the tree chooses the code that runs in the container, so a writable extra mount is a write path onto the host directory it names (#231) |
 | `container.json` | `src/supervise/container.ts` | Which handles have accepted the container confirmation banner, and the image fingerprint |
 | `secrets.env` | `src/supervise/auth.ts` | `CLAUDE_CODE_OAUTH_TOKEN` and `GH_TOKEN`. Mode `0600` |
 | `tokens/` | `src/supervise/handle-tokens.ts` | Per-handle bus bearer tokens |

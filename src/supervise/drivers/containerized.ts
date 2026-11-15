@@ -409,12 +409,18 @@ export function dockerRunPlan(vendor: VendorSpawn, opts: SpawnOptions): DockerRu
     args.push('-v', `${host}:${CONTAINER_PROJECT_DIR}/${inner}:ro`);
   }
 
-  // 🛑 AN EXTRA MOUNT CARRIES NO `:ro`, so it is the project-tree hole through a
-  // different door. Re-checked here because `mounts.json` outlives the guard in
-  // `registerMount`.
+  // 🛑 `:ro`, BECAUSE THE TREE CHOOSES THE CODE THAT RUNS HERE. A project
+  // `.npmrc` picks the registry, the container reaches it, and the substituted
+  // package executes later as the agent — all three legs measured on #231. An
+  // extra mount attached read-write made that a write path onto the host
+  // directory it names, and the one configured in practice is the whole
+  // local-context store.
+  //
+  // `assertProjectDirOutsideState` is re-checked here because `mounts.json`
+  // outlives the guard in `registerMount`.
   for (const [key, hostDir] of Object.entries(mountsFor(supervisorHandle))) {
     assertProjectDirOutsideState(hostDir);
-    args.push('-v', `${hostDir}:${containerPathFor(key)}`);
+    args.push('-v', `${hostDir}:${containerPathFor(key)}:ro`);
   }
 
   const env: NodeJS.ProcessEnv = { ...process.env, [vendor.authEnvVar]: token };
