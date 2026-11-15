@@ -476,6 +476,35 @@ export function runDependencyInstall(
 ): void {
   const plan = dockerInstallPlan(vendor, opts);
 
+  // 🛑 THE IMAGE IS CHECKED SEPARATELY, BECAUSE ITS ABSENCE IS AN OPERATOR
+  // SETUP ERROR AND NOT A DEPENDENCY PROBLEM. Reported through the wrapper
+  // below it reads "the dependency install container failed", which sends the
+  // operator to npm when the fix is one flag.
+  //
+  // 🚨 `--driver docker-claude` IS THE COMMON WAY TO MEET THIS, AND IT IS WHY
+  // THIS EXISTS. `ALIASES["docker-claude"].mode` is `"docker"`, so the spawn is
+  // containerized — but the `imageNeedsBuild()`/`buildImage()` pair in
+  // `src/index.ts` sits inside the `if (o.container)` branch, which that flag
+  // does not enter. So docker mode is selected with no image built. Raised by
+  // claude1 on PR 259 after I claimed the image was always already present.
+  //
+  // ⚠️ IT STILL REFUSES, per lee's ruling of 2026-11-15 — a supervisor that is
+  // up with an agent that can never start is a worse lie than refusing. Only
+  // the sentence changes.
+  try {
+    execFileSync("docker", ["image", "inspect", vendor.image], {
+      stdio: "ignore",
+    });
+  } catch {
+    throw new Error(
+      `the container image '${vendor.image}' is not on this machine, so no ` +
+        "agent was started and no dependencies were installed. Start this " +
+        "handle once with `--container`, which builds it, rather than with " +
+        "`--driver docker-claude`, which selects a container without building " +
+        "one.",
+    );
+  }
+
   try {
     execFileSync("docker", plan.args, {
       stdio: ["ignore", "ignore", "inherit"],

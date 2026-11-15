@@ -2051,3 +2051,71 @@ test("🚨 an install that fails kills nothing and starts no agent, and the erro
     "the install's stderr is not inherited, so the no-hash warning vanishes",
   );
 });
+
+/**
+ * 🚨 `--driver docker-claude` SELECTS A CONTAINER WITHOUT BUILDING ONE, and
+ * that is a live path rather than a hypothetical.
+ *
+ * ```
+ * ALIASES["docker-claude"].mode === "docker"   -> isContainerSpawn is true
+ * src/index.ts  if (o.container) { … buildImage() }   <- the flag skips this
+ * ```
+ *
+ * 🛑 BEFORE #231 THIS FAILED ASYNCHRONOUSLY. `spawn()` reported a missing image
+ * on the child, so the supervisor came up and the agent failed later. The
+ * install is `execFileSync`, so it now fails synchronously and the supervisor
+ * refuses to start — which lee ruled is correct, so only the SENTENCE needed
+ * fixing.
+ *
+ * ⚠️ IT MUST NOT READ AS A DEPENDENCY FAILURE. "the dependency install
+ * container failed" sends the operator to npm when the fix is one flag. Raised
+ * by claude1 after I claimed the image was always already built.
+ */
+test("🚨 a missing image refuses by NAME, not as a dependency failure", async (t) => {
+  setToken("sk-ant-oat-x");
+
+  t.mock.module("node:child_process", {
+    namedExports: {
+      spawn: () => ({ on: () => undefined, unref: () => undefined }),
+      execFileSync: (_cmd: string, args: string[]) => {
+        if (args[0] === "image" && args[1] === "inspect") {
+          throw new Error("No such image");
+        }
+        return Buffer.from("");
+      },
+    },
+  });
+
+  const { runDependencyInstall } = await import(
+    `../../../src/supervise/drivers/containerized.js?no-image=${Date.now()}`
+  );
+
+  assert.throws(
+    () =>
+      runDependencyInstall(claudeSpawn, {
+        cwd: PROJECT_DIR,
+        supervisorHandle: "claude1",
+      }),
+    (err: Error) => {
+      assert.match(
+        err.message,
+        new RegExp(claudeSpawn.image.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+        "the refusal does not name the image that is missing",
+      );
+      assert.match(
+        err.message,
+        /--container/,
+        "the refusal does not name the flag that builds it",
+      );
+      // 🛑 THE NEGATIVE HALF, AND IT IS THE WHOLE POINT. The wrapper's own
+      // sentence is the wrong diagnosis for this cause.
+      assert.doesNotMatch(
+        err.message,
+        /dependency install container failed/,
+        "a missing image still reports as a dependency failure",
+      );
+
+      return true;
+    },
+  );
+});
