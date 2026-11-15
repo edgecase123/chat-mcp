@@ -35,6 +35,16 @@ const LINES = DOCKERFILE.split('\n').filter((l) => !l.trimStart().startsWith('#'
 /** `\`-continuations joined, so a directive split across lines is one string. */
 const LOGICAL = LINES.join('\n').replace(/\\\n\s*/g, ' ');
 
+/**
+ * One entry per LOGICAL directive, so a `\`-continuation chain is one string.
+ *
+ * 🛑 INDEXING `LINES` IS WHAT FAILED OPEN. A root-run `npm` written as a chain
+ * puts `RUN` on one line and `npm` on the next, so a single-line pattern
+ * matches neither — and four of this file's `RUN` directives already use that
+ * shape. Found by claude2 on PR 243 with a single-line positive control.
+ */
+const DIRECTIVES = LOGICAL.split('\n');
+
 test('🛑 the image pre-creates the node_modules mount point, which is what gives the volume agent ownership', () => {
   assert.match(
     LOGICAL,
@@ -107,35 +117,35 @@ test('⚠️ control — the path the image pre-creates is the path the driver m
  * root-run layer lands below this chown.
  */
 test('🔴 /root is chowned to agent AFTER the last root-run npm, or a cold npm ci dies EACCES', () => {
-  const userAt = LINES.findIndex((l) => /^\s*USER\s+agent\b/.test(l));
-  const isRootNpm = (l: string) => /^\s*RUN\b.*\bnpm\s+(ci|install)\b/.test(l);
-  const chownsRoot = (l: string) => /chown\s+(-R\s+)?agent:agent\b[^\n]*\s\/root\b/.test(l);
+  const userAt = DIRECTIVES.findIndex((d) => /^\s*USER\s+agent\b/.test(d));
+  const isRootNpm = (d: string) => /^\s*RUN\b[\s\S]*\bnpm\s+(ci|install)\b/.test(d);
+  // 🛑 `\s/root\b` ALSO MATCHED `/root/.config`, because `/` ends a word. A
+  // chown narrowed to a subdirectory left /root/.npm root-owned and passed.
+  const chownsRoot = (d: string) => /chown\s+(-R\s+)?agent:agent\b[^\n]*\s\/root(\s|$)/.test(d);
 
   assert.notEqual(userAt, -1, 'no `USER agent` line — has the image stopped dropping root?');
 
-  const rootNpmLines = LINES.map((l, i) => (isRootNpm(l) && i < userAt ? i : -1)).filter(
-    (i) => i !== -1,
-  );
-  const chownRootLines = LINES.map((l, i) => (chownsRoot(l) ? i : -1)).filter((i) => i !== -1);
+  const rootNpm = DIRECTIVES.filter((d, i) => isRootNpm(d) && i < userAt);
+  const chownRoot = DIRECTIVES.map((d, i) => (chownsRoot(d) ? i : -1)).filter((i) => i !== -1);
 
-  assert.ok(rootNpmLines.length > 0, 'no root-run `npm ci`/`npm install` found before USER agent');
+  assert.ok(rootNpm.length > 0, 'no root-run `npm ci`/`npm install` found before USER agent');
   assert.ok(
-    chownRootLines.length > 0,
+    chownRoot.length > 0,
     'nothing chowns /root to agent at all; the npm cache lives at /root/.npm (#242)',
   );
 
-  const lastNpm = Math.max(...rootNpmLines);
-  const lastChown = Math.max(...chownRootLines);
+  const lastNpmAt = DIRECTIVES.lastIndexOf(rootNpm[rootNpm.length - 1]!);
+  const lastChownAt = Math.max(...chownRoot);
 
   assert.ok(
-    lastChown > lastNpm,
-    `the last root-run npm is at line ${lastNpm + 1} and the last chown of /root at ` +
-      `${lastChown + 1}. That npm repopulates /root/.npm as root, so a cold \`npm ci\` as ` +
-      `agent dies EACCES and no agent starts (#242).`,
+    lastChownAt > lastNpmAt,
+    `\`${DIRECTIVES[lastNpmAt]!.trim()}\` runs as root after the last chown of /root. It ` +
+      'repopulates /root/.npm as root, so a cold `npm ci` as agent dies EACCES and no agent ' +
+      'starts (#242).',
   );
   assert.ok(
-    lastChown < userAt,
-    `the chown of /root is at line ${lastChown + 1}, after \`USER agent\` at ${userAt + 1}; ` +
-      'chowning /root needs root, so the build would fail',
+    lastChownAt < userAt,
+    `the chown of /root runs after \`USER agent\`: \`${DIRECTIVES[lastChownAt]!.trim()}\`. ` +
+      'Chowning /root needs root, so the build would fail.',
   );
 });
