@@ -889,6 +889,15 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
         supervisorHandle: opts.handle,
       });
     } catch (err) {
+      // 🛑 THE DEAD CHILD'S HANDLERS ARE STILL CURRENT WITHOUT THIS, AND ITS
+      // `onExit` DRAINS. `wireChild` is the only other place `childGeneration`
+      // moves, and the throw path never reaches it — so the exit of the child
+      // just killed passed `ifCurrent`, drained what was parked here, and
+      // logged it as UNSENT. The park was defeated. Found by claude2, who
+      // reproduced it twice; my own fake never fired an exit from `kill()`,
+      // so no test here could have said no.
+      childGeneration += 1;
+
       log(
         `FAILED to replace the child (${reason}): ${String(err)}; ` +
           `${unsent.length} prompt(s) parked, NO agent is running for this handle`,
@@ -1055,6 +1064,15 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
         resumeSessionId: undefined,
       });
     } catch (err) {
+      // 🛑 THE DEAD CHILD'S HANDLERS ARE STILL CURRENT WITHOUT THIS, AND ITS
+      // `onExit` DRAINS. `wireChild` is the only other place `childGeneration`
+      // moves, and the throw path never reaches it — so the exit of the child
+      // just killed passed `ifCurrent`, drained what was parked here, and
+      // logged it as UNSENT. The park was defeated. Found by claude2, who
+      // reproduced it twice; my own fake never fired an exit from `kill()`,
+      // so no test here could have said no.
+      childGeneration += 1;
+
       log(
         `FAILED to restart the child: ${String(err)}; ` +
           `${unsent.length} prompt(s) parked, NO agent is running for this handle`,

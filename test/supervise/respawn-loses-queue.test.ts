@@ -52,6 +52,11 @@ interface FakeChild {
  * child's kill spawns `docker stop` detached, so the exit is a later event.
  * A fake that exits synchronously lands before the generation bump and cannot
  * see this class of bug at all.
+ *
+ * 🛑 SO THE TEST MUST FIRE IT, AND THE FIRST VERSION OF THIS FILE DID NOT.
+ * A killed child really does exit, and that exit used to drain the prompts
+ * parked by a failed respawn. Nothing here could have said no. Found by
+ * claude2 on review, reproduced twice.
  */
 function recordingChild(children: FakeChild[]) {
   return (opts: SpawnOptions): AgentChild => {
@@ -163,6 +168,10 @@ test('🚨 a throwing respawn on an APPROVAL does not lose the queued prompts', 
     await deliver(handle, { id: 3, approval });
     assert.equal(children.length, 1, 'the replacement spawn was supposed to throw');
 
+    // 🛑 THE KILLED CHILD REALLY DOES EXIT, AND ITS HANDLER DRAINS. Without
+    // this line the park looks intact and is not.
+    children[0]!.fireExit();
+
     // The only reader the queue has is a child, so ask a LATER one.
     await deliver(handle, { id: 4, control: { kind: 'restart', mode: 'now' } });
 
@@ -188,6 +197,9 @@ test('🚨 a throwing respawn on an operator RESTART does not lose the queued pr
 
     await deliver(handle, { id: 3, control: { kind: 'restart', mode: 'now' } });
     assert.equal(children.length, 1, 'the restart spawn was supposed to throw');
+
+    // The same stale exit, on the restart path.
+    children[0]!.fireExit();
 
     await deliver(handle, { id: 4, control: { kind: 'restart', mode: 'now' } });
 
