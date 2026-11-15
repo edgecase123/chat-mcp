@@ -39,6 +39,10 @@ export function installListAgents(server: McpServer, ctx: ShimContext): void {
         // which is what both agents did for 28 days.
         ...gaugeFreshness(a.context_reported_at, now),
         context_warned_threshold: a.context_warned_threshold,
+        // #224 — a backlog looked identical to an empty inbox. Always a
+        // number, never omitted: `notify/bus.ts` documents an absent `unread`
+        // as "read if you care", so a missing key would read as idle.
+        unread: dao.totalUnreadFor(ctx.db, a.handle),
       }));
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],

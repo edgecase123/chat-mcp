@@ -39,6 +39,9 @@ export function installWhoami(server: McpServer, ctx: ShimContext): void {
         // #103 — emitted beside the number so a frozen reading cannot be read
         // as a live one. Both agents treated a 28-day-old 100% as current.
         ...gaugeFreshness(me.context_reported_at, now),
+        // #224 — one depth across DMs and every room I am in. A per-channel
+        // count licensed skipping the read, which is how a DM was lost.
+        unread: dao.totalUnreadFor(ctx.db, me.handle),
         online_peers: peers.map((a) => ({
           handle: a.handle,
           display_name: a.display_name,
@@ -47,6 +50,8 @@ export function installWhoami(server: McpServer, ctx: ShimContext): void {
           context_total: a.context_total,
           context_reported_at: a.context_reported_at,
           ...gaugeFreshness(a.context_reported_at, now),
+          // A peer's depth is what makes a hand-off decision possible.
+          unread: dao.totalUnreadFor(ctx.db, a.handle),
         })),
       };
       return {
