@@ -4,6 +4,7 @@ updated: 2026-11-15
 covers:
   - src/supervise/drivers/containerized.ts
   - src/supervise/index.ts
+  - src/index.ts
 ---
 
 # Container Isolation
@@ -54,6 +55,35 @@ nothing else.
 The agent's extra `mounts.json` directories do not come here. The only one
 configured in practice is the whole local-context store, and an install script
 has no business in it.
+
+## What has to happen before the first container starts
+
+Two one-time steps, both in the `supervise` action, and both keyed on the
+**resolved sandbox mode** rather than on the `--container` flag.
+
+```
+resolveDriver({driver, container}).mode === "docker"
+  |
+  1 CONFIRM   the plan is printed, the operator answers y        once per handle
+  2 BUILD     chat-mcp-agent:local, when the inputs hash moved   once per change
+  |
+  startSupervisor()
+```
+
+🛑 **The mode is the gate because `--container` is not the only spelling.**
+`--driver docker-claude` resolves to `mode: "docker"` on its own, and an alias
+added to `ALIASES` later will too. Keyed on the flag, those spellings reached
+`startSupervisor` with no image and no confirmed plan, and it refused the
+handle it had just been told to start.
+
+⚠️ **Confirmation comes first, then the build.** The build is minutes of
+docker, and an operator who answers `n` must not have paid for an image they
+refused.
+
+🛑 **With no terminal attached the confirmation REFUSES instead of asking.**
+`rl.question` resolves to `''` at EOF, which is not `y`, so a scripted start
+used to print `aborted` and exit 0 — a green exit code with no agent started.
+It now throws, and names approving the plan once from a terminal as the remedy.
 
 ## What is still open
 
@@ -109,6 +139,7 @@ is where `NO_LOCK_HASH_WARNING` lands.
 | ---------------------------------------- | ------------------------------------------------------------------- |
 | `src/supervise/drivers/containerized.ts` | Both plans, the install runner, the shared mount and target helpers |
 | `src/supervise/index.ts`                 | The pre-bind install call                                           |
+| `src/index.ts`                           | The `supervise` action's confirm-then-build gate                    |
 
 ## Related docs
 
