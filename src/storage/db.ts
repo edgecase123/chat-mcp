@@ -384,6 +384,64 @@ export function verifierFor(db: Db): Db | undefined {
   return verifiers.get(db);
 }
 
+/**
+ * True when this connection no longer holds the file at `dbPath()`.
+ *
+ * 🛑 THE ONE COPY OF THE COMPARISON. It lived inside `insertMessage`, which
+ * is why `messages` was the only table a swap could not silently eat: 23 other
+ * writers in `dao.ts` reached `.run()` with no mark check at all. A second copy
+ * is how the 24th drifts, so new writers call `assertLiveDatabase` and a guard
+ * test asserts every one of them does.
+ *
+ * ⚠️ AN UNSET MARK IS NOT A MISMATCH. `openDb` throws rather than handing
+ * back an unmarked connection, so this is reached only by a database that did
+ * not come from it — in practice `:memory:`, which has no file to compare.
+ * That also means this predicate is a NO-OP under most tests, so presence at a
+ * call site is not proof the mechanism works. One real-file swap test is.
+ */
+export function databaseWasReplaced(db: Db): boolean {
+  const atOpen = identityFor(db);
+  if (!atOpen) return false;
+
+  const now = identityOf(dbPath());
+
+  return !now || now.dev !== atOpen.dev || now.ino !== atOpen.ino;
+}
+
+/**
+ * A write was refused because nothing written through this connection can be
+ * read by anyone else.
+ *
+ * 🛑 NOT RETRYABLE ON THIS HANDLE, AND THE MESSAGE HAS TO SAY SO. The
+ * replacement is a property of the CONNECTION, so every retry lands in the same
+ * orphaned file. `MessageNotPersistedError` carries the same sentence for sends,
+ * which have a from and a to to name; this one is for the writers that do not.
+ */
+export class DatabaseReplacedError extends Error {
+  constructor(readonly operation: string) {
+    super(
+      `${operation} was refused. This connection holds a database file that is ` +
+        `no longer the file at ${dbPath()}, so nothing written through it can ` +
+        `be read by anyone else. RESTART this agent; retrying on this handle ` +
+        `writes to the same orphaned file.`,
+    );
+    this.name = "DatabaseReplacedError";
+  }
+}
+
+/**
+ * Refuse a write whose connection holds a replaced file.
+ *
+ * 🛑 CALL IT AS A WRITER'S FIRST LINE, BEFORE ANY STATEMENT. Checking
+ * mid-operation is what would turn a replaced file into PARTIAL state —
+ * `joinRoom` writes `room_members` before it announces, so a throw between them
+ * leaves a member joined with no announcement. Checked first, a refused writer
+ * has written nothing.
+ */
+export function assertLiveDatabase(db: Db, operation: string): void {
+  if (databaseWasReplaced(db)) throw new DatabaseReplacedError(operation);
+}
+
 export function openDb(): Db {
   ensureStateDir();
   const db = new DatabaseSync(dbPath());
