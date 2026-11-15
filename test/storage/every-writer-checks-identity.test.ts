@@ -69,13 +69,34 @@ function isWriter(fn: { body: string }): boolean {
   return /\.(?:run|exec)\(/.test(fn.body) && WRITES_A_TABLE.test(fn.body);
 }
 
-/** Every top-level `function` in a source file, as name plus its own body. */
+/**
+ * Any TOP-LEVEL DECLARATION, which is the boundary — not any declaration shape
+ * this test knows how to call a function.
+ *
+ * 🛑 THE FIRST VERSION MATCHED `function NAME` ALONE AND WAS BLIND TO TWO
+ * SHAPES. claude1 measured it on PR 272: an unguarded `export const w = () =>`
+ * and an unguarded `export async function w` both left all 1715 tests GREEN.
+ *
+ * 🛑 AND THE MECHANISM IS WORSE THAN A MISSED NAME. Slicing from one
+ * RECOGNISED start to the next ABSORBS an unrecognised declaration into the
+ * previous one's body. When that neighbour is guarded, the absorbed writer
+ * inherits its guard: presence passes and so does position. Appended at end of
+ * file it does fail, and blames whichever function happens to sit last.
+ *
+ * So the boundary is every top-level declaration of any kind. An unguarded
+ * writer then gets its OWN slice whatever keyword introduced it, and the
+ * splitter cannot launder it through a neighbour.
+ */
+const TOP_LEVEL_DECL =
+  /^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|const|let|var|class|type|interface)\s+(\w+)/;
+
+/** Every top-level declaration in a source file, as name plus its own body. */
 function functionsOf(src: string): { name: string; body: string }[] {
   const lines = src.split("\n");
   const starts: { name: string; line: number }[] = [];
 
   lines.forEach((line, i) => {
-    const m = /^(?:export\s+)?function\s+(\w+)/.exec(line);
+    const m = TOP_LEVEL_DECL.exec(line);
     if (m?.[1]) starts.push({ name: m[1], line: i });
   });
 
@@ -84,6 +105,64 @@ function functionsOf(src: string): { name: string; body: string }[] {
     body: lines.slice(s.line, starts[i + 1]?.line ?? lines.length).join("\n"),
   }));
 }
+
+/**
+ * 🛑 THE SPLITTER'S OWN NON-VACUITY, WHICH NOTHING PROVED BEFORE. Every
+ * assertion in this file is a statement about what `functionsOf` returned, so a
+ * splitter that silently stopped seeing a shape would make all of them pass
+ * while covering less. These rows are claude1's three mutants, kept as a
+ * property of the splitter rather than as source installed by hand.
+ */
+test("🛑 THE WRITER CENSUS SEES EVERY DECLARATION SHAPE, each in its OWN slice", () => {
+  const fixture = [
+    "export function guarded(db: Db): void {",
+    '  assertLiveDatabase(db, "guarded");',
+    '  db.prepare("INSERT INTO claims (resource) VALUES (?)").run(1);',
+    "}",
+    "",
+    "export function plain(db: Db): void {",
+    '  db.prepare("INSERT INTO claims (resource) VALUES (?)").run(1);',
+    "}",
+    "",
+    "export const arrow = (db: Db): void => {",
+    '  db.prepare("UPDATE claims SET released_at = ?").run(1);',
+    "};",
+    "",
+    "export async function waits(db: Db): Promise<void> {",
+    '  db.prepare("DELETE FROM claims WHERE id = ?").run(1);',
+    "}",
+    "",
+    "export function reader(db: Db): unknown {",
+    '  return db.prepare("SELECT * FROM claims").all();',
+    "}",
+  ].join("\n");
+
+  const found = functionsOf(fixture);
+
+  assert.deepEqual(
+    found.map((f) => f.name),
+    ["guarded", "plain", "arrow", "waits", "reader"],
+    "the splitter lost a declaration shape, so every census below under-counts",
+  );
+
+  // 🛑 EACH UNGUARDED WRITER IS NAMED SEPARATELY. A splitter that absorbed
+  // `arrow` into `guarded`'s slice reports two writers here, not three, and
+  // `arrow` inherits a guard it does not have.
+  assert.deepEqual(
+    found.filter(isWriter).map((f) => f.name),
+    ["guarded", "plain", "arrow", "waits"],
+    "a write shape was missed, or a read was counted as a write",
+  );
+
+  assert.deepEqual(
+    found
+      .filter(isWriter)
+      .filter((f) => !f.body.includes("assertLiveDatabase"))
+      .map((f) => f.name),
+    ["plain", "arrow", "waits"],
+    "an unguarded writer was laundered through a guarded neighbour's slice",
+  );
+});
 
 /**
  * 🛑 PER FUNCTION, SO THERE IS NO NUMBER TO BUMP. claude1's finding on the plan:

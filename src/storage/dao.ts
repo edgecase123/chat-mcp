@@ -5,8 +5,6 @@ import {
   assertLiveDatabase,
   currentSchemaVersion,
   databaseWasReplaced,
-  identityFor,
-  identityOf,
   verifierFor,
 } from "./db.js";
 import { dbPath } from "../util/paths.js";
