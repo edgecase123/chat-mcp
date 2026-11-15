@@ -25,6 +25,8 @@ const { registerMount, mountsPath } =
 const { claudeSpawn } = await import("../../../src/adapters/claude-spawn.js");
 const {
   dockerRunPlan,
+  dockerInstallPlan,
+  containerCredentialEnvVars,
   nodeModulesVolumeFor,
   nodeModulesInstallStep,
   prelude,
@@ -267,40 +269,63 @@ test("🛑 the composed volume name is a legal docker volume name", () => {
  * run, for a different reason. Something has to populate it, and `/work`
  * carries the lockfile to do it from.
  */
-test("🛑 the container installs its own node_modules when the volume is empty", () => {
+test("🛑 the install container installs node_modules when the volume is empty", () => {
   setToken("sk-ant-oat-x");
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
-  const prelude = args.find((a) => a.includes("npm ci"));
+  // 🛑 READ OFF THE INSTALL PLAN SINCE #231, NOT THE AGENT'S. The install left
+  // the agent container precisely so it is not beside the credentials, so
+  // finding it in the agent argv is now the FAILURE this guards against.
+  const { args } = dockerInstallPlan(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+  const step = args.find((a) => a.includes("npm ci"));
 
-  assert.ok(prelude, `no install step in ${args.join(" ")}`);
+  assert.ok(step, `no install step in ${args.join(" ")}`);
   // Only that the argv CARRIES a guarded install. What the guard decides is
   // measured in a real `sh` further down, not read off this string.
   assert.match(
-    prelude,
+    step,
     new RegExp(`${CONTAINER_PROJECT_DIR}/package-lock\\.json`),
     "the install is unconditional, so it reruns on every warm start",
   );
   assert.match(
-    prelude,
+    step,
     /node_modules\/\.lock-sha/,
     "no lockfile-hash stamp to compare against",
   );
 });
 
 /**
- * The paired control. A granted spawn has always been wrapped in `sh -c` to
- * write its MCP config, so an install step added only to that branch would
- * look right in every granted test and be absent from every plain one.
+ * 🛑 THE DIVERGENCE GUARD, REPOINTED. It used to catch an install step added
+ * to `dockerRunPlan`'s granted branch alone, which would have been present in
+ * every granted test and absent from every plain one. The install has its own
+ * plan now, and the same failure shape is a plan that varies with the grant —
+ * so an agent that happens to be granted would install and an ungranted one
+ * would not.
+ *
+ * ⚠️ `deepEqual` ON THE WHOLE ARGV, because the install needs nothing from the
+ * grant and must therefore be byte-identical either way. Asserting only that
+ * both contain `npm ci` would pass while the mounts differed.
  */
-test("🛑 the install step is there on a NON-granted spawn too", () => {
+test("🛑 the install plan is identical whether the spawn is granted or not", () => {
   setToken("sk-ant-oat-x");
-  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
 
+  const plain = dockerInstallPlan(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+  const granted = dockerInstallPlan(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    bus: BUS,
+    grant: { handle: "claude1-agent", configPath: "/unused.json", tools: [] },
+  });
+
+  assert.deepEqual(granted.args, plain.args);
   assert.ok(
-    !args.includes("--mcp-config"),
-    "this fixture was supposed to be ungranted",
+    plain.args.some((a) => a.includes("npm ci")),
+    "neither plan installs anything, so this proves nothing",
   );
-  assert.ok(args.some((a) => a.includes("npm ci")));
 });
 
 /**
@@ -586,15 +611,24 @@ test("🛑 the container name is force-cleared BEFORE docker run, or a restart h
     supervisorHandle: "claude1",
   });
 
-  assert.deepEqual(
-    calls[0],
-    ["rm", "-f", "chat-mcp-claude1"],
-    "the first docker call must be rm -f",
+  // 🛑 POSITIONS FOUND BY ARGV, NOT BY INDEX. This read `calls[0]` and
+  // `calls[1]` until #231 put the credential-free install container ahead of
+  // both — so the index was a proxy for "the agent's run", and the install
+  // broke the proxy while the invariant it stands for was untouched.
+  const removalAt = calls.findIndex((argv) => argv[0] === "rm");
+  const agentRunAt = calls.findIndex(
+    (argv) => argv[0] === "run" && argv.includes("chat-mcp-claude1"),
   );
-  assert.equal(
-    calls[1]?.[0],
-    "run",
-    "docker run must follow the rm -f, not precede it",
+
+  assert.deepEqual(
+    calls[removalAt],
+    ["rm", "-f", "chat-mcp-claude1"],
+    `no docker rm -f was issued: ${JSON.stringify(calls)}`,
+  );
+  assert.ok(agentRunAt >= 0, `the agent never ran: ${JSON.stringify(calls)}`);
+  assert.ok(
+    removalAt < agentRunAt,
+    `the rm -f clears nothing: rm at ${removalAt}, agent run at ${agentRunAt}`,
   );
 });
 
@@ -1232,8 +1266,15 @@ function stampFor(rig: InstallRig): string | undefined {
   return existsSync(stamp) ? readFileSync(stamp, "utf8") : undefined;
 }
 
+/**
+ * ⚠️ `AGENT_RAN` STANDS FOR "THE STEP EXITED 0", NOT FOR A REAL AGENT START.
+ * Since #231 the step runs in its own container and never execs the agent, so
+ * the `prelude` wrapper here is the rig's way of making the step's exit code
+ * observable. The exit code is what matters: `runDependencyInstall` throws on
+ * a non-zero one, and that throw is what stops the agent now.
+ */
 function runInstallStep(rig: InstallRig, extraEnv: NodeJS.ProcessEnv = {}) {
-  const script = prelude([nodeModulesInstallStep(claudeSpawn, rig.dir)]);
+  const script = prelude([nodeModulesInstallStep(rig.dir)]);
 
   return spawnSync("sh", ["-c", script, "sh", "echo", "AGENT_RAN"], {
     encoding: "utf8",
@@ -1326,57 +1367,14 @@ test("⚠️ control — an UNCHANGED lockfile does not reinstall", () => {
 });
 
 /**
- * 🚨 B4. `npm ci` fires every dependency's lifecycle scripts, and they inherit
- * this shell's environment — which holds the bus bearer token, the GitHub
- * token and the vendor auth key. Scrubbed rather than `--ignore-scripts`, so
- * esbuild's postinstall still resolves its platform binary.
+ * 🚨 B4 IS CLOSED BY A CONTAINER NOW, NOT BY A SCRUB, SO ITS TWO TESTS ARE
+ * GONE FROM HERE. They asserted that `env -u` removed three names from the
+ * `npm ci` child, which was true and was never the boundary — docker hands the
+ * credentials to PID 1, so a lifecycle script read them from
+ * `/proc/1/environ` regardless. #231 moved the install into a container that
+ * is handed none, and the replacements live beside `dockerInstallPlan`:
+ * "the install container is handed NO credential at all" and its control.
  */
-test("🚨 the install cannot see the bus token, the GitHub token or the vendor key", () => {
-  const rig = installRig('{"lockfileVersion":3}');
-  const secrets = {
-    [claudeSpawn.authEnvVar]: "sk-ant-oat-SENTINEL",
-    [CONTAINER_GH_TOKEN_ENV]: "ghp-SENTINEL",
-    [CONTAINER_MCP_CONFIG_ENV]: '{"SENTINEL":true}',
-  };
-
-  runInstallStep(rig, secrets);
-  const seen = readFileSync(rig.log, "utf8");
-
-  for (const [name, value] of Object.entries(secrets)) {
-    assert.ok(
-      !seen.includes(value),
-      `${name}'s VALUE reached a dependency install script`,
-    );
-    assert.doesNotMatch(
-      seen,
-      new RegExp(`^${name}=`, "m"),
-      `${name} was still in scope`,
-    );
-  }
-});
-
-/**
- * ⚠️ THE PAIRED CONTROL, AND IT IS WHAT SEPARATES SCRUBBING FROM AN EMPTY
- * ENVIRONMENT. `env -i` would pass the test above and break the install, which
- * needs PATH and HOME.
- */
-test("⚠️ control — the install still has the ordinary environment it needs", () => {
-  const rig = installRig('{"lockfileVersion":3}');
-
-  runInstallStep(rig, { HOME: "/tmp/chat-mcp-rig-home" });
-  const seen = readFileSync(rig.log, "utf8");
-
-  assert.match(
-    seen,
-    /^PATH=/m,
-    "the install lost PATH, so npm itself is unreachable",
-  );
-  assert.match(
-    seen,
-    /^HOME=\/tmp\/chat-mcp-rig-home$/m,
-    "the install lost HOME, where npm caches",
-  );
-});
 
 /**
  * 🚨 B5. `npm ci` ALWAYS RUNS THIS PROJECT'S OWN `prepare`, which is
@@ -1556,7 +1554,7 @@ function sealedBin(rig: InstallRig, shasum: ShasumState): string {
 }
 
 function runInstallStepSealed(rig: InstallRig, shasum: ShasumState) {
-  const script = prelude([nodeModulesInstallStep(claudeSpawn, rig.dir)]);
+  const script = prelude([nodeModulesInstallStep(rig.dir)]);
 
   return spawnSync("/bin/sh", ["-c", script, "sh", "echo", "AGENT_RAN"], {
     encoding: "utf8",
@@ -1683,19 +1681,172 @@ test("🛑 a missing shasum keeps REINSTALLING, which is the designed cheap fail
 });
 
 /**
- * 🛑 THE GUARD THAT WAS MISSING, AND ITS ABSENCE IS WHY THIS EXISTS. The scrub
- * list and the `-e` pushes were two hand-kept enumerations that happened to
- * coincide. A FOURTH credential added to the argv would have been in scope for
- * every dependency's lifecycle script and no test would have failed.
+ * 🚨 #231. THE INSTALL USED TO RUN INSIDE THE AGENT CONTAINER, which docker
+ * hands every credential as PID 1 — so a dependency's lifecycle script read
+ * the bus bearer token, `GH_TOKEN` and the Claude OAuth token out of
+ * `/proc/1/environ`. Both routes were MEASURED in a built image, not reasoned.
+ * The lockfile that picks which packages install comes from the mounted
+ * project tree, so the tree chose the code that read them.
  *
- * This derives the expectation from the argv rather than restating the three
- * names, so it fails on a credential nobody remembered to scrub.
- *
- * ⚠️ IT GUARDS THE DRIFT, NOT THE BOUNDARY. #231 is the boundary: the
- * credentials reach PID 1 regardless, so a lifecycle script recovers them from
- * `/proc/1/environ` whatever this asserts.
+ * ⚠️ DERIVED FROM `containerCredentialEnvVars`, NOT FROM A LIST OF THREE. A
+ * fourth credential added to the agent plan must not become a silent exception
+ * here, which is the drift that made the old `env -u` scrub rot.
  */
-test("🛑 the install scrubs EVERY credential the plan names with -e", () => {
+test("🚨 the install container is handed NO credential at all", (t) => {
+  setToken("sk-ant-oat-x");
+  setGhToken("ghp-x");
+
+  // 🛑 SET IN `process.env` FIRST, OR THE ENVIRONMENT HALF IS VACUOUS. The
+  // first cut of this asserted the three names were absent from the plan's
+  // `env` while the TEST PROCESS had never held them — `setToken` writes to
+  // disk, not to the environment — so deleting the implementation's whole
+  // removal loop left this green. Caught by the negative control.
+  const planted = `planted-${Date.now()}`;
+  const credentials = containerCredentialEnvVars(claudeSpawn);
+
+  for (const name of credentials) process.env[name] = planted;
+  t.after(() => {
+    for (const name of credentials) delete process.env[name];
+  });
+
+  const { args, env } = dockerInstallPlan(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    bus: BUS,
+    grant: { handle: "claude1-agent", configPath: "/unused.json", tools: [] },
+  });
+  const named = args.filter((_, i) => args[i - 1] === "-e");
+
+  assert.deepEqual(named, [], `the install plan names ${named.join(", ")}`);
+
+  // 🛑 THE CLIENT ENVIRONMENT TOO, BECAUSE `-e NAME` WITH NO `=` COPIES FROM
+  // IT. Guarding only the argv leaves a later stray `-e` one character from
+  // re-opening this, and the plan would again carry a credential it means to
+  // withhold.
+  for (const name of credentials) {
+    assert.equal(
+      env[name],
+      undefined,
+      `${name} is still in the install client's environment`,
+    );
+  }
+
+  // ⚠️ THE CONTROL FOR THE PLANT ITSELF. If `process.env` never took the
+  // value, the loop above asserts absence of something that was never there.
+  assert.equal(
+    process.env[credentials[0]],
+    planted,
+    "the plant did not land, so the assertions above are vacuous",
+  );
+
+  clearGhToken();
+});
+
+/**
+ * ⚠️ THE OTHER HALF OF THE CREDENTIAL TEST, AND IT IS WHAT SEPARATES DELETING
+ * THREE NAMES FROM HANDING THE INSTALL AN EMPTY ENVIRONMENT. `env -i` would
+ * satisfy "names no credential" perfectly and break the install, which needs
+ * `PATH` to find npm at all and `HOME` for npm's cache.
+ *
+ * 🛑 ASSERTED ON THE PLAN, NOT IN A RIG. `dockerInstallPlan` builds its `env`
+ * by DELETING from `process.env`, so a wrong implementation here is a wholesale
+ * replacement — which no shell-level rig can see, because the rig supplies its
+ * own environment.
+ */
+test("⚠️ control — the install container keeps the ordinary environment it needs", () => {
+  setToken("sk-ant-oat-x");
+
+  const { env } = dockerInstallPlan(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+
+  assert.equal(
+    env.PATH,
+    process.env.PATH,
+    "the install lost PATH, so npm itself is unreachable",
+  );
+  assert.equal(
+    env.HOME,
+    process.env.HOME,
+    "the install lost HOME, where npm caches",
+  );
+});
+
+/**
+ * ⚠️ THE CONTROL FOR THE CREDENTIAL TEST, AND IT IS THE ONE THAT CATCHES AN
+ * EMPTY PLAN. A `dockerInstallPlan` that returned no argv at all would satisfy
+ * "names no credential" perfectly and install nothing, which is a volume that
+ * stays empty and a suite that cannot run.
+ */
+test("⚠️ control — the install container really does install, into the shared volume", () => {
+  setToken("sk-ant-oat-x");
+
+  const { args } = dockerInstallPlan(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+  const script = args.find((a) => a.includes("npm ci"));
+
+  assert.ok(script, `no install script in ${args.join(" ")}`);
+  assert.ok(
+    args.includes(`${PROJECT_DIR}:${CONTAINER_PROJECT_DIR}`),
+    "the install cannot see the project tree it installs from",
+  );
+  assert.ok(
+    args.includes(
+      `${nodeModulesVolumeFor("claude1", PROJECT_DIR)}:${CONTAINER_PROJECT_DIR}/node_modules`,
+    ),
+    "the install writes somewhere the agent container will not read",
+  );
+});
+
+/**
+ * 🛑 lee's RULING, 2026-11-14 on #231: *"drop them"*. The only extra mount
+ * configured in practice is `local-context -> ~/context`, and it was attached
+ * read-write — so a dependency's install script could write to the whole
+ * local-context store. The install needs the project tree and the volume to do
+ * its job, and nothing else.
+ *
+ * ⚠️ ASSERTED AS AN EXACT MOUNT SET, not as the absence of one key. A future
+ * extra mount added to the agent plan would otherwise reach this container
+ * with no test failing.
+ */
+test("🛑 the install container gets EXACTLY two mounts, so a hostile install cannot reach a host dir", (t) => {
+  setToken("sk-ant-oat-x");
+  const home = mkdtempSync(join(tmpdir(), "chat-mcp-install-mounts-"));
+  const extra = mkdtempSync(join(tmpdir(), "chat-mcp-install-extra-"));
+
+  t.after(() => undefined);
+  registerMount("claude1", "local-context", extra);
+
+  const { args } = dockerInstallPlan(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+  const mounts = args.filter((_, i) => args[i - 1] === "-v");
+
+  assert.deepEqual(
+    mounts,
+    [
+      `${PROJECT_DIR}:${CONTAINER_PROJECT_DIR}`,
+      `${nodeModulesVolumeFor("claude1", PROJECT_DIR)}:${CONTAINER_PROJECT_DIR}/node_modules`,
+    ],
+    `the install container sees more than the project tree and its volume: ${mounts.join(", ")}`,
+  );
+  assert.ok(
+    !mounts.some((m) => m.startsWith(`${extra}:`)),
+    "a configured extra mount reached the install container",
+  );
+  assert.ok(home);
+});
+
+/**
+ * 🛑 THE OTHER HALF OF THE MOVE, AND WITHOUT IT NOTHING IS FIXED. A plan that
+ * builds a credential-free install container and ALSO leaves `npm ci` in the
+ * agent container's prelude has added a container and closed nothing.
+ */
+test("🚨 the AGENT container's prelude no longer installs anything", () => {
   setToken("sk-ant-oat-x");
   setGhToken("ghp-x");
 
@@ -1705,20 +1856,266 @@ test("🛑 the install scrubs EVERY credential the plan names with -e", () => {
     bus: BUS,
     grant: { handle: "claude1-agent", configPath: "/unused.json", tools: [] },
   });
-  const named = args.filter((_, i) => args[i - 1] === "-e");
+
+  assert.ok(
+    !args.some((a) => a.includes("npm ci")),
+    "the agent container still runs npm ci beside the credentials",
+  );
+
+  clearGhToken();
+});
+
+/**
+ * ⚠️ THE SCRUB IS DELETED, NOT MERELY BYPASSED. Left in, it reads as a
+ * boundary — which is the claim #231 retracted — and it is a textual promise
+ * about an environment this container does not have.
+ *
+ * 🛑 ASSERTED ON THE INSTALL PLAN'S SCRIPT, AND THE FIRST CUT OF THIS GOT IT
+ * WRONG. It sat on the AGENT argv, where the install step no longer appears at
+ * all, so it was vacuous: re-adding a real `env -u` to the step left it green.
+ * Caught by the negative control, not by reading the diff.
+ */
+test("🚨 the install step names no credential, because its container has none", () => {
+  setToken("sk-ant-oat-x");
+
+  const { args } = dockerInstallPlan(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
   const step = args.find((a) => a.includes("npm ci"));
 
   assert.ok(step, `no install step in ${args.join(" ")}`);
   assert.ok(
-    named.length >= 3,
-    `expected the granted plan to name every credential; got ${named.join(", ")}`,
+    !step.includes("env -u"),
+    `the env -u scrub survived in the step: ${step}`,
   );
-  for (const name of named) {
-    assert.ok(
-      step.includes(`-u '${name}'`),
-      `${name} is handed to the container and NOT scrubbed from the install`,
-    );
+  for (const name of containerCredentialEnvVars(claudeSpawn)) {
+    assert.ok(!step.includes(name), `the step still names ${name}`);
   }
+});
 
-  clearGhToken();
+/**
+ * ⚠️ THE CONTROL. An agent plan that lost its whole prelude would pass the
+ * test above and start a granted agent with no MCP config — an agent that
+ * answers nothing, with no error.
+ */
+test("⚠️ control — the agent container still writes its MCP config", () => {
+  setToken("sk-ant-oat-x");
+
+  const args = dockerArgsFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    bus: BUS,
+    grant: { handle: "claude1-agent", configPath: "/unused.json", tools: [] },
+  });
+  const script = args.find((a) => a.includes("umask 077"));
+
+  assert.ok(script, `no MCP config step in ${args.join(" ")}`);
+  assert.ok(
+    script.includes('exec "$@"'),
+    "the prelude no longer execs the agent",
+  );
+});
+
+/**
+ * 🛑 ORDERING IS THE WHOLE POINT. The agent container reads `node_modules`
+ * from the named volume, so an install that runs after it — or concurrently —
+ * starts the suite against an empty or half-written tree. That is the false
+ * green the old `&&` chain existed to prevent, and splitting the containers
+ * must not lose it.
+ */
+test("🛑 the install container runs to completion BEFORE the agent container starts", async (t) => {
+  setToken("sk-ant-oat-x");
+  const { calls } = mockDocker(t);
+
+  const { spawnContainerized } = await import(
+    `../../../src/supervise/drivers/containerized.js?install-order=${Date.now()}`
+  );
+  spawnContainerized(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+
+  const installAt = calls.findIndex((argv) =>
+    argv.some((a) => a.includes("npm ci")),
+  );
+  const agentAt = calls.findIndex(
+    (argv) => argv.includes("chat-mcp-claude1") && argv[0] === "run",
+  );
+
+  assert.ok(installAt >= 0, "no install container was run");
+  assert.ok(agentAt >= 0, "no agent container was run");
+  assert.ok(
+    installAt < agentAt,
+    `the agent started first: install at ${installAt}, agent at ${agentAt}`,
+  );
+});
+
+/**
+ * 🛑 A FAILED INSTALL MUST MEAN NO AGENT, which is what the prelude's `&&`
+ * guaranteed while both lived in one container. An agent that starts on a
+ * half-written volume produces a review claiming a green suite it never ran.
+ */
+test("🚨 an install that fails kills nothing and starts no agent, and the error names the cause", async (t) => {
+  setToken("sk-ant-oat-x");
+  const calls: string[][] = [];
+  let installStdio: unknown[] | undefined;
+
+  t.mock.module("node:child_process", {
+    namedExports: {
+      spawn: (_cmd: string, args: string[]) => {
+        calls.push(["spawn", ...args]);
+        return { on: () => undefined, unref: () => undefined };
+      },
+      execFileSync: (
+        _cmd: string,
+        args: string[],
+        o?: { stdio?: unknown[]; env?: NodeJS.ProcessEnv },
+      ) => {
+        calls.push(args);
+        // Only the install fails. The `rm -f` is left working on purpose, so
+        // that its ABSENCE below is the implementation's choice and not the
+        // mock's.
+        if (args.some((a) => a.includes("npm ci"))) {
+          installStdio = o?.stdio;
+          throw new Error("npm ci exited 1");
+        }
+        return Buffer.from("");
+      },
+    },
+  });
+
+  const { spawnContainerized } = await import(
+    `../../../src/supervise/drivers/containerized.js?install-fail=${Date.now()}`
+  );
+
+  let thrown: unknown;
+
+  assert.throws(() => {
+    try {
+      spawnContainerized(claudeSpawn, {
+        cwd: PROJECT_DIR,
+        supervisorHandle: "claude1",
+      });
+    } catch (err) {
+      thrown = err;
+      throw err;
+    }
+  }, /install/i);
+
+  const spawned = calls.filter((argv) => argv[0] === "spawn");
+
+  assert.deepEqual(
+    spawned,
+    [],
+    `an agent was spawned despite a failed install: ${JSON.stringify(spawned)}`,
+  );
+
+  // 🛑 THE `cause` IS ASSERTED BECAUSE A COMMENT CLAIMS IT. `runDependencyInstall`
+  // replaces `execFileSync`'s own "Command failed: docker run …" with a sentence
+  // that names the dependencies, and the original must still be reachable or
+  // the real exit reason is gone. Raised by `dry-solid-reviewer` on PR 259.
+  assert.match(
+    String((thrown as Error).message),
+    /the dependency install container failed/,
+    "the thrown message does not name what failed",
+  );
+  assert.match(
+    String(((thrown as Error).cause as Error)?.message),
+    /npm ci exited 1/,
+    "the underlying failure is unreachable from the wrapper",
+  );
+
+  // 🚨 THE INVARIANT `dockerRunPlan` IS ALREADY HELD TO, AND THE FIRST CUT OF
+  // THIS PR BROKE IT. `docker rm -f` SIGKILLs the container this handle is
+  // replacing, so a throw ordered after it means a spawn that could never
+  // succeed — a registry 503, say — destroys the agent on its way out.
+  //
+  // Its sibling is "a plan that cannot be built kills nothing", which covers
+  // the other throw source. Raised by claude1 on PR 259; my own test asserted
+  // only that nothing SPAWNED, which the broken order satisfied.
+  const removals = calls.filter((argv) => argv[0] === "rm");
+
+  assert.deepEqual(
+    removals,
+    [],
+    `a failed install removed the live container anyway: ${JSON.stringify(removals)}`,
+  );
+
+  // 🛑 STDERR INHERITED, AND A COMMENT CLAIMS THIS TOO. `NO_LOCK_HASH_WARNING`
+  // is written to the install's stderr, so piping it swallows #234's whole
+  // symptom. stdout is dropped on purpose — npm is chatty.
+  assert.deepEqual(
+    installStdio,
+    ["ignore", "ignore", "inherit"],
+    "the install's stderr is not inherited, so the no-hash warning vanishes",
+  );
+});
+
+/**
+ * 🚨 `--driver docker-claude` SELECTS A CONTAINER WITHOUT BUILDING ONE, and
+ * that is a live path rather than a hypothetical.
+ *
+ * ```
+ * ALIASES["docker-claude"].mode === "docker"   -> isContainerSpawn is true
+ * src/index.ts  if (o.container) { … buildImage() }   <- the flag skips this
+ * ```
+ *
+ * 🛑 BEFORE #231 THIS FAILED ASYNCHRONOUSLY. `spawn()` reported a missing image
+ * on the child, so the supervisor came up and the agent failed later. The
+ * install is `execFileSync`, so it now fails synchronously and the supervisor
+ * refuses to start — which lee ruled is correct, so only the SENTENCE needed
+ * fixing.
+ *
+ * ⚠️ IT MUST NOT READ AS A DEPENDENCY FAILURE. "the dependency install
+ * container failed" sends the operator to npm when the fix is one flag. Raised
+ * by claude1 after I claimed the image was always already built.
+ */
+test("🚨 a missing image refuses by NAME, not as a dependency failure", async (t) => {
+  setToken("sk-ant-oat-x");
+
+  t.mock.module("node:child_process", {
+    namedExports: {
+      spawn: () => ({ on: () => undefined, unref: () => undefined }),
+      execFileSync: (_cmd: string, args: string[]) => {
+        if (args[0] === "image" && args[1] === "inspect") {
+          throw new Error("No such image");
+        }
+        return Buffer.from("");
+      },
+    },
+  });
+
+  const { runDependencyInstall } = await import(
+    `../../../src/supervise/drivers/containerized.js?no-image=${Date.now()}`
+  );
+
+  assert.throws(
+    () =>
+      runDependencyInstall(claudeSpawn, {
+        cwd: PROJECT_DIR,
+        supervisorHandle: "claude1",
+      }),
+    (err: Error) => {
+      assert.match(
+        err.message,
+        new RegExp(claudeSpawn.image.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+        "the refusal does not name the image that is missing",
+      );
+      assert.match(
+        err.message,
+        /--container/,
+        "the refusal does not name the flag that builds it",
+      );
+      // 🛑 THE NEGATIVE HALF, AND IT IS THE WHOLE POINT. The wrapper's own
+      // sentence is the wrong diagnosis for this cause.
+      assert.doesNotMatch(
+        err.message,
+        /dependency install container failed/,
+        "a missing image still reports as a dependency failure",
+      );
+
+      return true;
+    },
+  );
 });

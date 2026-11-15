@@ -5,6 +5,7 @@ import { resolveDriver } from "./drivers/index.js";
 import { spawnOnHost } from "./drivers/host.js";
 import {
   spawnContainerized,
+  runDependencyInstall,
   DEFAULT_SHUTDOWN_GRACE_SECONDS,
 } from "./drivers/containerized.js";
 import { TurnQueue } from "./turn-queue.js";
@@ -111,6 +112,24 @@ export interface SupervisorOptions extends SpawnOptions {
 
   /** Injected so the supervisor is testable without spawning or spending. */
   readonly spawnChild?: (opts: SpawnOptions) => AgentChild;
+
+  /**
+   * The pre-bind dependency install, injectable for the same reason.
+   *
+   * 🚨 DEFAULTS TO A NO-OP WHEN `spawnChild` IS INJECTED, AND THAT COUPLING IS
+   * THE POINT. Installing dependencies is part of creating a containerized
+   * child, so a caller that replaced child creation has replaced this too.
+   *
+   * Two independent seams were the first cut and they were wrong: three tests
+   * injected `spawnChild`, inherited the real install, and shelled out to a
+   * real `docker run`. CI failed on a missing image; the author's host HAD the
+   * image, so the install really ran and left 40 volumes behind. Caught by
+   * claude1 on PR 259 against a local suite that read green.
+   *
+   * ⚠️ PASS IT EXPLICITLY to assert the install happened. The default only
+   * decides what an uninjected caller gets.
+   */
+  readonly installDeps?: (opts: SpawnOptions) => void;
   readonly log?: (line: string) => void;
 }
 
@@ -340,6 +359,45 @@ export async function startSupervisor(
    * the handler install would strand both the listener and the child. Nothing
    * there throws today.
    */
+  // 🚨 THE COLD INSTALL RUNS HERE, BEFORE `WakeListener.bind` BELOW, AND THE
+  // POSITION IS THE WHOLE POINT. `runDependencyInstall` is synchronous and a
+  // first `npm ci` takes minutes, so doing it once the listener is bound would
+  // freeze the event loop while senders wait on a socket that cannot answer.
+  // lee's ruling of 2026-11-15 is that the supervisor stays up and answers
+  // `ok: false`; a frozen loop answers nothing. Nothing is bound yet here, so
+  // a caller blocking is honest rather than a lie.
+  //
+  // ⚠️ THIS IS NOT THE ONLY CALL, ON PURPOSE. `spawnContainerized` calls it on
+  // every spawn including a restart, because a lockfile that changed
+  // mid-session must not leave the agent on the previous dependency tree. This
+  // call is what makes the FIRST start's install the cold one, so the
+  // per-spawn call is a warm no-op at around a second — the bar `docker rm -f`
+  // is already held to.
+  //
+  // 🛑 A RESTART AFTER A LOCKFILE CHANGE IS STILL A COLD INSTALL ON A BOUND
+  // LOOP. Accepted rather than fixed here. Refusing that restart was the
+  // alternative and it is worse: `doRestart` kills the child before it spawns,
+  // so a refusal leaves the handle with no agent at all and no remedy short of
+  // restarting the supervisor. A pause self-resolves.
+  //
+  // 🛑 ROUTED THROUGH THE SAME SEAM AS THE SPAWN. `spawnChild` means the caller
+  // owns child creation, and a containerized child is not created without its
+  // dependencies — so an injected spawn silences this by default rather than
+  // leaving a second real side effect for every test to remember.
+  const installDeps =
+    opts.installDeps ??
+    (opts.spawnChild
+      ? () => undefined
+      : (o: SpawnOptions) => runDependencyInstall(opts.vendor, o));
+
+  if (isContainerSpawn) {
+    installDeps({
+      ...opts,
+      cwd: childCwd,
+      supervisorHandle: opts.handle,
+    });
+  }
+
   /**
    * 🛑 OPENED BEFORE THE SPAWN, BECAUSE THE CHILD IS CONFIGURED WITH ITS URL.
    * A containerized child reaches the bus over HTTP and nothing else — the

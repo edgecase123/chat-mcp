@@ -126,11 +126,11 @@ function mcpConfigStep(vendor: VendorSpawn): string {
 /**
  * Every credential `dockerRunPlan` may name with `-e`, in ONE place.
  *
- * 🛑 THE `-e` PUSHES AND THE INSTALL SCRUB BOTH DERIVE FROM THIS. Two
- * hand-kept lists coincided exactly and nothing tied them together, so a
- * fourth credential added to the argv would have been in scope for every
- * dependency's lifecycle script with no test failing. Pinned by "the install
- * scrubs EVERY credential the plan names".
+ * 🛑 THE `-e` PUSHES AND `dockerInstallPlan`'s REMOVALS BOTH DERIVE FROM THIS.
+ * A fourth credential added to the agent's argv must become a fourth thing the
+ * install container is denied, in the same edit — and two hand-kept lists that
+ * merely coincided is how the old scrub rotted. Pinned by "the install
+ * container is handed NO credential at all".
  */
 export function containerCredentialEnvVars(
   vendor: VendorSpawn,
@@ -195,13 +195,17 @@ export const NO_LOCK_HASH_WARNING =
  * ⚠️ `shasum -a 256`, NOT `sha256sum`. Both the image and a macOS host carry
  * `shasum`; only the image carries `sha256sum`, and the suite runs on the host.
  *
- * 🚨 THE SCRUB IS NOT A BOUNDARY, AND #231 IS THE BOUNDARY. Docker hands the
- * credentials to PID 1, which is this very shell running as `agent`, so a
- * lifecycle script reads them from `/proc/1/environ` whatever `env -u` does to
- * its own child — measured, not reasoned. It is kept because it still stops
- * the careless case, a script that dumps its environment to a build log. Do
- * not describe it as anything more until the install runs in its own
- * credential-free container.
+ * 🛑 THIS RUNS IN ITS OWN CONTAINER NOW, AND THAT CONTAINER IS HANDED NO
+ * CREDENTIAL. The `env -u` scrub that used to wrap the `npm ci` was never a
+ * boundary: docker hands the credentials to PID 1, so a lifecycle script read
+ * them straight out of `/proc/1/environ` whatever `env -u` did to its own
+ * child. Both routes were MEASURED on #231, not reasoned. `dockerInstallPlan`
+ * is the boundary, and the scrub is DELETED rather than left in to read as
+ * one.
+ *
+ * ⚠️ SO THIS STEP NO LONGER NAMES A CREDENTIAL AT ALL, and it must not start
+ * naming one again. A `-u` list here is a textual claim about an environment
+ * this container does not have.
  *
  * 🛑 `--ignore-scripts`, BECAUSE `npm ci` RUNS THIS PROJECT'S OWN `prepare`.
  * That script is `npm run build`, so the install ran `tsc` against the host
@@ -220,21 +224,17 @@ export const NO_LOCK_HASH_WARNING =
  * suite can drive this step against a real directory in a real `sh`.
  */
 export function nodeModulesInstallStep(
-  vendor: VendorSpawn,
   containerWorkDir: string = CONTAINER_PROJECT_DIR,
 ): string {
   const lock = `${containerWorkDir}/package-lock.json`;
   const stamp = `${containerWorkDir}/${CONTAINER_NODE_MODULES_DIR}/.lock-sha`;
-  const scrubbed = containerCredentialEnvVars(vendor)
-    .map((name) => `-u '${name}'`)
-    .join(" ");
 
   return (
     `if [ ! -f '${lock}' ]; then :; else ` +
     `want=$(shasum -a 256 '${lock}' | cut -d' ' -f1); ` +
     `if [ -n "$want" ] && [ "$want" = "$(cat '${stamp}' 2>/dev/null)" ]; then :; else ` +
     `[ -n "$want" ] || echo '${NO_LOCK_HASH_WARNING}' >&2; ` +
-    `env ${scrubbed} npm ci --ignore-scripts && printf '%s' "$want" > '${stamp}'; fi; fi`
+    `npm ci --ignore-scripts && printf '%s' "$want" > '${stamp}'; fi; fi`
   );
 }
 
@@ -306,6 +306,64 @@ export function nodeModulesVolumeFor(
   return `chat-mcp-node-modules-${supervisorHandle}-${digest}`;
 }
 
+/**
+ * The handle and project dir both plans need, validated once.
+ *
+ * 🛑 ONE FUNCTION, BECAUSE THE TWO CONTAINERS MUST AGREE ON THE TREE. The
+ * install writes `node_modules` for the tree the agent then reads, so a
+ * containment check that ran for one plan and not the other would let the
+ * install populate a volume keyed to a directory the agent was refused.
+ */
+function containerTarget(opts: SpawnOptions): {
+  supervisorHandle: string;
+  projectDir: string;
+} {
+  const supervisorHandle = requireSupervisorHandle(opts);
+  const projectDir = opts.cwd;
+
+  if (!projectDir) {
+    throw new Error("a containerized spawn needs a resolved cwd");
+  }
+
+  // 🛑 CHECKED HERE AS WELL AS AT REGISTRATION. `projects.json` is a file on
+  // disk, so a registration made before this guard existed is still live, and
+  // `opts.cwd` can reach this from `resolveCwd` without passing
+  // `registerProject` at all. The argv below is what mounts it.
+  assertProjectDirOutsideState(projectDir);
+
+  return { supervisorHandle, projectDir };
+}
+
+/**
+ * The project bind and the `node_modules` volume — the two mounts BOTH
+ * containers get, and the only two the install container gets.
+ *
+ * 🛑 A DOCKER VOLUME, SO NO HOST DIRECTORY IS BOUND AT `node_modules`. `/work`
+ * carries the host's macOS copy, and `esbuild` resolves a platform-specific
+ * binary package, so a Linux container loading it dies before the first test
+ * runs. The volume hides the host's copy from the container without writing to
+ * it.
+ *
+ * 🛑 SHARED, SO THE TWO CONTAINERS CANNOT DRIFT APART. The install writing one
+ * volume while the agent reads another is a silently empty `node_modules`, and
+ * the symptom is a suite that fails on an import rather than on anything that
+ * names the cause.
+ *
+ * Argv position is incidental — the daemon sorts mount destinations, measured
+ * both ways. ⚠️ Docker 24.0.7 / macOS, UNRUN ON LINUX.
+ */
+function projectMountArgs(
+  supervisorHandle: string,
+  projectDir: string,
+): string[] {
+  return [
+    "-v",
+    `${projectDir}:${CONTAINER_PROJECT_DIR}`,
+    "-v",
+    `${nodeModulesVolumeFor(supervisorHandle, projectDir)}:${CONTAINER_PROJECT_DIR}/${CONTAINER_NODE_MODULES_DIR}`,
+  ];
+}
+
 /** The one place that validates the field both `dockerRunPlan` and `spawnContainerized` need. */
 function requireSupervisorHandle(opts: SpawnOptions): string {
   if (!opts.supervisorHandle) {
@@ -338,6 +396,133 @@ export interface DockerRunPlan {
   readonly env: NodeJS.ProcessEnv;
 }
 
+/**
+ * The argv and environment for the dependency install, as its OWN
+ * `docker run` — the one that is handed no credential.
+ *
+ * 🚨 THIS IS #231's BOUNDARY, AND IT IS STRUCTURAL RATHER THAN TEXTUAL. The
+ * install used to run in the agent's own container, which docker hands every
+ * credential as PID 1 — so a dependency's lifecycle script read the bus bearer
+ * token, `GH_TOKEN` and the Claude OAuth token out of `/proc/1/environ`. Both
+ * routes were measured in a built image. The lockfile that picks which
+ * packages install comes from the mounted project tree, so the tree chose the
+ * code that read them. A container with no credentials has none to leak.
+ *
+ * 🛑 EXACTLY TWO MOUNTS, per lee's ruling of 2026-11-14 on #231: *"drop
+ * them"*. The agent's extra `mounts.json` mounts do not come here. The only
+ * one configured in practice is the whole local-context store, and the install
+ * has no business in it.
+ *
+ * ⚠️ NO `--name`. The agent's container is named so `kill()` can address a
+ * `docker stop` to it; this one is synchronous and `--rm`, so a name would
+ * only create a collision for a restart to trip over.
+ *
+ * ⚠️ NO `--network=none`, AND THAT IS DELIBERATE. `npm ci` has to reach a
+ * registry. Egress control is a separate problem and #231 does not ask for it.
+ */
+export function dockerInstallPlan(
+  vendor: VendorSpawn,
+  opts: SpawnOptions,
+): DockerRunPlan {
+  const { supervisorHandle, projectDir } = containerTarget(opts);
+
+  const args = [
+    "run",
+    "--rm",
+    ...projectMountArgs(supervisorHandle, projectDir),
+    "-w",
+    CONTAINER_PROJECT_DIR,
+    vendor.image,
+    "sh",
+    "-c",
+    nodeModulesInstallStep(),
+  ];
+
+  // 🛑 REMOVED FROM THE CLIENT'S ENVIRONMENT TOO, NOT JUST LEFT OUT OF THE
+  // ARGV. `-e NAME` with no `=` tells docker to copy the value from its own
+  // environment, so an argv-only guard leaves this one stray `-e` away from
+  // re-opening #231. With the names gone from here, even that stray flag
+  // carries nothing.
+  const env: NodeJS.ProcessEnv = { ...process.env };
+
+  for (const name of containerCredentialEnvVars(vendor)) delete env[name];
+
+  return { args, env };
+}
+
+/**
+ * Run the install container to completion, or throw naming why.
+ *
+ * 🛑 SYNCHRONOUS, AND THE AGENT MUST NOT START WITHOUT IT. The agent reads
+ * `node_modules` from the volume this writes, so an install that runs
+ * afterwards or alongside hands the suite an empty or half-written tree. That
+ * is the false green the old prelude's `&&` existed to prevent, and splitting
+ * the containers must not lose it.
+ *
+ * ⚠️ IT BLOCKS THE EVENT LOOP, SO WHERE IT IS CALLED FROM MATTERS. A warm
+ * spawn is one container start, around a second, which is the bar `docker rm
+ * -f` is already held to. A COLD install is a full `npm ci` and blocks for as
+ * long as that takes — `startSupervisor` therefore calls this once BEFORE it
+ * binds the wake listener, so the first start's cold install happens while
+ * nothing is waiting for an answer.
+ *
+ * 🛑 STDERR IS INHERITED, BECAUSE `NO_LOCK_HASH_WARNING` GOES THERE. Piping it
+ * would swallow the one line that reports a `shasum` that cannot hash, which
+ * is #234's whole symptom. npm's chatty stdout is dropped instead.
+ */
+export function runDependencyInstall(
+  vendor: VendorSpawn,
+  opts: SpawnOptions,
+): void {
+  const plan = dockerInstallPlan(vendor, opts);
+
+  // 🛑 THE IMAGE IS CHECKED SEPARATELY, BECAUSE ITS ABSENCE IS AN OPERATOR
+  // SETUP ERROR AND NOT A DEPENDENCY PROBLEM. Reported through the wrapper
+  // below it reads "the dependency install container failed", which sends the
+  // operator to npm when the fix is one flag.
+  //
+  // 🚨 `--driver docker-claude` IS THE COMMON WAY TO MEET THIS, AND IT IS WHY
+  // THIS EXISTS. `ALIASES["docker-claude"].mode` is `"docker"`, so the spawn is
+  // containerized — but the `imageNeedsBuild()`/`buildImage()` pair in
+  // `src/index.ts` sits inside the `if (o.container)` branch, which that flag
+  // does not enter. So docker mode is selected with no image built. Raised by
+  // claude1 on PR 259 after I claimed the image was always already present.
+  //
+  // ⚠️ IT STILL REFUSES, per lee's ruling of 2026-11-15 — a supervisor that is
+  // up with an agent that can never start is a worse lie than refusing. Only
+  // the sentence changes.
+  try {
+    execFileSync("docker", ["image", "inspect", vendor.image], {
+      stdio: "ignore",
+    });
+  } catch {
+    throw new Error(
+      `the container image '${vendor.image}' is not on this machine, so no ` +
+        "agent was started and no dependencies were installed. Start this " +
+        "handle once with `--container`, which builds it, rather than with " +
+        "`--driver docker-claude`, which selects a container without building " +
+        "one.",
+    );
+  }
+
+  try {
+    execFileSync("docker", plan.args, {
+      stdio: ["ignore", "ignore", "inherit"],
+      env: plan.env,
+    });
+  } catch (err) {
+    // 🛑 NAMED, NOT RE-THROWN BARE. `execFileSync`'s own message is
+    // `Command failed: docker run …`, which reads as a docker fault rather
+    // than as this project's dependencies failing to install — and the argv it
+    // prints is 11 items of mount spec.
+    throw new Error(
+      "the dependency install container failed, so no agent was started; " +
+        `its stderr is above: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+}
+
 export function dockerRunPlan(
   vendor: VendorSpawn,
   opts: SpawnOptions,
@@ -353,17 +538,7 @@ export function dockerRunPlan(
     );
   }
 
-  const supervisorHandle = requireSupervisorHandle(opts);
-  const projectDir = opts.cwd;
-  if (!projectDir) {
-    throw new Error("a containerized spawn needs a resolved cwd");
-  }
-
-  // 🛑 CHECKED HERE AS WELL AS AT REGISTRATION. `projects.json` is a file on
-  // disk, so a registration made before this guard existed is still live, and
-  // `opts.cwd` can reach this from `resolveCwd` without passing
-  // `registerProject` at all. The argv below is what mounts it.
-  assertProjectDirOutsideState(projectDir);
+  const { supervisorHandle, projectDir } = containerTarget(opts);
 
   const args = [
     "run",
@@ -376,18 +551,11 @@ export function dockerRunPlan(
     // words. Docker copies it from this process's environment instead.
     "-e",
     vendor.authEnvVar,
-    "-v",
-    `${projectDir}:${CONTAINER_PROJECT_DIR}`,
-    // 🛑 A DOCKER VOLUME, SO NO HOST DIRECTORY IS BOUND HERE. `/work` carries
-    // the host's macOS `node_modules`, and `esbuild` resolves a
-    // platform-specific binary package, so a Linux container loading it dies
-    // before the first test runs. The volume hides the host's copy from the
-    // container without writing to it.
-    //
-    // Its argv position is incidental, per the measured note below: the daemon
-    // sorts mount destinations, so this does not rely on being emitted here.
-    "-v",
-    `${nodeModulesVolumeFor(supervisorHandle, projectDir)}:${CONTAINER_PROJECT_DIR}/${CONTAINER_NODE_MODULES_DIR}`,
+    // 🛑 THE SAME TWO MOUNTS THE INSTALL CONTAINER GETS, FROM ONE FUNCTION.
+    // The install populates this volume and this container reads it, so the
+    // two argvs agreeing is a correctness requirement rather than a tidiness
+    // one.
+    ...projectMountArgs(supervisorHandle, projectDir),
   ];
 
   // 🛑 NAMED ONLY WHEN THERE IS ONE, because `-e NAME` with no `=` copies
@@ -493,8 +661,11 @@ export function dockerRunPlan(
     steps.push(mcpConfigStep(vendor));
   }
 
-  steps.push(nodeModulesInstallStep(vendor));
-
+  // 🚨 NO INSTALL STEP HERE, AND THAT IS #231's FIX. This container holds
+  // every credential, so running `npm ci` in it put the project tree's choice
+  // of packages in the same process tree as the bus token, `GH_TOKEN` and the
+  // Claude OAuth token. `runDependencyInstall` does it first, in a container
+  // handed none of them.
   args.push("sh", "-c", prelude(steps), "sh", ...cli);
 
   return { args, env };
@@ -596,6 +767,28 @@ export function spawnContainerized(
   // running `docker rm -f` first meant a spawn that could never succeed
   // SIGKILLed the live agent on its way to the error. `dockerRunPlan` is pure.
   const plan = dockerRunPlan(vendor, opts);
+
+  // 🚨 THE CREDENTIAL-FREE INSTALL, AND IT RUNS BEFORE THE REMOVAL BELOW
+  // BECAUSE IT THROWS. The agent container holds every credential, so running
+  // `npm ci` in it put the project tree's choice of packages in the same
+  // process tree as the bus token, `GH_TOKEN` and the Claude OAuth token.
+  //
+  // 🛑 ABOVE `docker rm -f`, FOR THE SAME REASON `dockerRunPlan` IS. A
+  // registry 503 throws here, and ordered after the removal that throw cost a
+  // live container its life on the way out — a spawn that could not succeed
+  // taking down the agent it was replacing. Raised by claude1 on PR 259; the
+  // first cut had it on the wrong side and the test pinned it open.
+  //
+  // ⚠️ NOTHING IS RACED BY MOVING IT UP. `doRestart` and `replaceChild` both
+  // call `child.kill()` before they reach `spawnFn`, so no live container is
+  // reading this volume while the install writes it.
+  //
+  // ⚠️ EVERY SPAWN, INCLUDING A RESTART. `startSupervisor` also calls this once
+  // before binding its wake listener, which is what keeps the FIRST start's
+  // cold install off a loop anybody is waiting on. Dropping it here would leave
+  // a restart after a lockfile change running the agent against the previous
+  // dependency tree, with nothing saying so.
+  runDependencyInstall(vendor, opts);
 
   // 🛑 CLEAR THE NAME FIRST, SYNCHRONOUSLY. The name is fixed per handle, and
   // `kill()` no longer waits for the teardown — so restarting a handle inside

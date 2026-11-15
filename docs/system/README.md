@@ -30,12 +30,13 @@ listed here will not be found. Add the row in the same commit as the page.
 
 ### [05 — Supervision](05-supervision/)
 
-| File                                                      | What it covers                                                                                                                                                          |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [agent-liveness.md](05-supervision/agent-liveness.md)     | How `online` is computed, why a containerized child's row holds the supervisor's pid, and what the exit handler clears                                                  |
-| [child-output.md](05-supervision/child-output.md)         | The three streams a child writes to, which reach the log, and why stderr went unread                                                                                    |
-| [activity-pulse.md](05-supervision/activity-pulse.md)     | How the web UI learns an agent is working, why the supervisor is the HTTP client, and the 401 a url-as-token causes                                                     |
-| [project-commands.md](05-supervision/project-commands.md) | How an agent runs a declared project command on the host, the three limits that bound it, how an operator sets them in `limits.json`, and the second cap in `broker.ts` |
+| File                                                            | What it covers                                                                                                                                                          |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [agent-liveness.md](05-supervision/agent-liveness.md)           | How `online` is computed, why a containerized child's row holds the supervisor's pid, and what the exit handler clears                                                  |
+| [child-output.md](05-supervision/child-output.md)               | The three streams a child writes to, which reach the log, and why stderr went unread                                                                                    |
+| [activity-pulse.md](05-supervision/activity-pulse.md)           | How the web UI learns an agent is working, why the supervisor is the HTTP client, and the 401 a url-as-token causes                                                     |
+| [project-commands.md](05-supervision/project-commands.md)       | How an agent runs a declared project command on the host, the three limits that bound it, how an operator sets them in `limits.json`, and the second cap in `broker.ts` |
+| [container-isolation.md](05-supervision/container-isolation.md) | The two containers a spawn runs, which one holds the credentials, why the dependency install is not it, and what is still open                                          |
 
 ### [06 — Interfaces](06-interfaces/)
 
@@ -61,15 +62,15 @@ listed here will not be found. Add the row in the same commit as the page.
 
 Ranked by what would help most on arrival.
 
-| Section          | What belongs there                                                                                                            |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `01-overview`    | What the bus is, how the pieces fit, a glossary. Today that lives in `README.md` and `DESIGN.md` at the repo root             |
-| `05-supervision` | Still needed: drivers, the container boundary, the host/container split. Today partly in `AGENTS.md`. Liveness is now covered |
-| `02-setup`       | The three clones, `CHAT_MCP_HOME` isolation, wiring an MCP client. Today in `AGENTS.md` and `README.md`                       |
-| `04-messaging`   | DMs, rooms, read watermarks, claims, the notify wake path                                                                     |
-| `06-interfaces`  | Still needed: the MCP shim's tools and the web UI. The terminal surfaces are now covered                                      |
-| `08-testing`     | The node test runner, `CHAT_MCP_HOME` isolation, proving a guard non-vacuous                                                  |
-| `09-conventions` | Still needed: TDD, commit style, secret handling. Today in `AGENTS.md` § Conventions. Formatting is now covered               |
+| Section          | What belongs there                                                                                                                |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `01-overview`    | What the bus is, how the pieces fit, a glossary. Today that lives in `README.md` and `DESIGN.md` at the repo root                 |
+| `05-supervision` | Still needed: drivers, the host/container split. Today partly in `AGENTS.md`. Liveness and the container boundary are now covered |
+| `02-setup`       | The three clones, `CHAT_MCP_HOME` isolation, wiring an MCP client. Today in `AGENTS.md` and `README.md`                           |
+| `04-messaging`   | DMs, rooms, read watermarks, claims, the notify wake path                                                                         |
+| `06-interfaces`  | Still needed: the MCP shim's tools and the web UI. The terminal surfaces are now covered                                          |
+| `08-testing`     | The node test runner, `CHAT_MCP_HOME` isolation, proving a guard non-vacuous                                                      |
+| `09-conventions` | Still needed: TDD, commit style, secret handling. Today in `AGENTS.md` § Conventions. Formatting is now covered                   |
 
 ⚠️ **`AGENTS.md`, `README.md` and `DESIGN.md` at the repo root are not
 superseded by this tree.** Where a topic moves here, leave a one-line pointer
