@@ -59,19 +59,19 @@ not by reading every module. Verify before treating it as exhaustive.
 
 ### Supervisor: `chat-mcp supervise <handle>`
 
-| Flag                              | Default                                           | Mark | Note                                                                             |
-| --------------------------------- | ------------------------------------------------- | ---- | -------------------------------------------------------------------------------- |
-| `--model`                         | CLI default                                       | ✅   | applies on restart                                                               |
-| `--binary`                        | `claude`                                          | ✅   | applies on restart; validate path                                                |
-| `--driver`                        | `docker-claude` with `--container`, else `claude` | ✅   | applies on restart. No static default on purpose.                                |
-| `--cwd`                           | none                                              | ✅   | validate via `supervise/containment.ts`                                          |
-| `--resume <sessionId>`            | none                                              | ⛔   | per-launch                                                                       |
-| `--permission-mode`               | `manual` (enforces allowlist)                     | ✅   | applies on restart; confirm before loosening                                     |
-| `--auto`                          | off                                               | ✅   | confirm: replaces the written allowlist with the CLI's classifier                |
-| `--permission-prompts host\|none` | `none`                                            | ✅   | applies on restart                                                               |
-| `--no-reply`                      | off                                               | ✅   | doorbell mode; applies on restart                                                |
-| `--allowed-tools`                 | narrow default list                               | ✅   | applies on restart; confirm widening. Allowlist deliberately excludes Bash.      |
-| `--container`                     | off                                               | ✅   | applies on restart; first use needs the plan confirmation (see `container.json`) |
+| Flag                              | Default                                           | Mark | Note                                                                                                                                                                               |
+| --------------------------------- | ------------------------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--model`                         | CLI default                                       | ✅   | applies on restart                                                                                                                                                                 |
+| `--binary`                        | `claude`                                          | ✅   | applies on restart; validate path                                                                                                                                                  |
+| `--driver`                        | `docker-claude` with `--container`, else `claude` | ✅   | applies on restart. No static default on purpose.                                                                                                                                  |
+| `--cwd`                           | none                                              | ✅   | validate via `supervise/containment.ts`                                                                                                                                            |
+| `--resume <sessionId>`            | none                                              | ⛔   | per-launch                                                                                                                                                                         |
+| `--permission-mode`               | `manual` (enforces allowlist)                     | ✅   | applies on restart; confirm before loosening                                                                                                                                       |
+| `--auto`                          | off                                               | ✅   | confirm: replaces the written allowlist with the CLI's classifier                                                                                                                  |
+| `--permission-prompts host\|none` | `none`                                            | ✅   | applies on restart                                                                                                                                                                 |
+| `--no-reply`                      | off                                               | ✅   | doorbell mode; applies on restart                                                                                                                                                  |
+| `--allowed-tools`                 | narrow default list                               | ✅   | applies on restart; confirm widening. Allowlist deliberately excludes Bash.                                                                                                        |
+| `--container`                     | off                                               | ✅   | applies on restart. One of two spellings — any driver resolving to `mode: "docker"` needs the same plan confirmation, and refuses with no terminal attached (see `container.json`) |
 
 ### Per-invocation flags (never persistent config)
 

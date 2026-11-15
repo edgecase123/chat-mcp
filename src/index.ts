@@ -631,7 +631,23 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       false,
     )
     .action(async (handle: string, o: Record<string, string>) => {
-      if (o.container) {
+      const { spawnFor } = await import("./adapters/index.js");
+      const { resolveDriver } = await import("./supervise/drivers/index.js");
+      // commander stores `--container` as a boolean; the bag is typed for the
+      // dozen options that really are strings.
+      const selection = resolveDriver({
+        driver: o.driver,
+        container: (o as unknown as { container?: boolean }).container,
+      });
+      const vendor = spawnFor(selection.vendor);
+
+      // 🛑 THE RESOLVED MODE IS THE GATE, NOT THE `--container` FLAG.
+      // `--driver docker-claude` is containerized without the flag, so keying
+      // this block on the flag left that spelling with no image and no
+      // confirmed plan, and `startSupervisor` then refused the handle it had
+      // just been told to start. Keyed on the mode, a future alias is covered
+      // the day it is added to `ALIASES`.
+      if (selection.mode === "docker") {
         const {
           imageNeedsBuild,
           buildImage,
@@ -642,23 +658,12 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         const { readMounts } = await import("./supervise/mounts.js");
         const { execSync } = await import("node:child_process");
 
-        if (imageNeedsBuild()) {
-          console.log(
-            "building the chat-mcp-agent image (Dockerfile changed or image missing)...",
-          );
-          execSync("npm run build", { stdio: "inherit" });
-          buildImage();
-        }
-
+        // 🛑 CONSENT BEFORE THE BUILD. The build is minutes of docker, and
+        // spending it before asking leaves an operator who answers "n" having
+        // paid for an image they refused.
         if (!isConfirmed(handle)) {
           const extra = Object.keys(readMounts().agents[handle] ?? {}).map(
             (k) => `/mnt/${k}`,
-          );
-          const { spawnFor } = await import("./adapters/index.js");
-          const { resolveDriver } =
-            await import("./supervise/drivers/index.js");
-          const vendor = spawnFor(
-            resolveDriver({ driver: o.driver, container: true }).vendor,
           );
           const { hasGhToken } = await import("./supervise/auth.js");
           const { CONTAINER_GH_TOKEN_ENV } =
@@ -677,6 +682,20 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
                 "bridge (default, full outbound — narrowing is #134)",
             }),
           );
+
+          // 🛑 REFUSES RATHER THAN READING EOF AS "no". `rl.question` resolves
+          // to `''` with no terminal attached, which failed the `y` test and
+          // took the abort path below — printing one word and exiting 0. A
+          // scripted start of a new containerized agent reported success and
+          // started nothing.
+          if (!process.stdin.isTTY) {
+            throw new Error(
+              `the container plan for "${handle}" needs a terminal to confirm, ` +
+                `and this process has no stdin. Run this same command once from ` +
+                `a terminal and answer the prompt, then start it from a script.`,
+            );
+          }
+
           const { createInterface } = await import("node:readline/promises");
           const rl = createInterface({
             input: process.stdin,
@@ -690,17 +709,17 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
           }
           markConfirmed(handle);
         }
+
+        if (imageNeedsBuild()) {
+          console.log(
+            "building the chat-mcp-agent image (Dockerfile changed or image missing)...",
+          );
+          execSync("npm run build", { stdio: "inherit" });
+          buildImage();
+        }
       }
 
       const { startSupervisor } = await import("./supervise/index.js");
-      const { spawnFor } = await import("./adapters/index.js");
-      const { resolveDriver } = await import("./supervise/drivers/index.js");
-      const vendor = spawnFor(
-        resolveDriver({
-          driver: o.driver,
-          container: (o as unknown as { container?: boolean }).container,
-        }).vendor,
-      );
       const sup = await startSupervisor({
         handle,
         vendor,
