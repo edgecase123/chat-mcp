@@ -1567,8 +1567,10 @@ export interface SearchResult {
  *
  * 🛑 THE BIND ADDRESS IS NOT WHAT MAKES THAT SAFE, WHICH IS WHAT THIS COMMENT
  * USED TO SAY. A container reaches the host's `127.0.0.1` through
- * `host.docker.internal`, so the bind authorizes nothing. The `read` capability
- * on the api credential is the check, at `server.ts`'s `route`.
+ * `host.docker.internal`, so the bind authorizes nothing. The unguessable api
+ * credential is the check — `tokenMatches` in `server.ts`, else 401. The `read`
+ * capability is the tier above it and refuses nobody yet, because
+ * `ALL_CAPABILITIES` is the only credential minted today.
  *
  * ⚠️ `ESCAPE '\'` IS NOT OPTIONAL. Without it the backslashes `likePattern`
  * inserts are matched literally, so a query containing % finds nothing instead

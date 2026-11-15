@@ -18,8 +18,9 @@ import * as dao from '../../src/storage/dao.js';
  * scope stays opt-in.
  *
  * 🛑 THE BIND ADDRESS IS NOT WHAT MAKES THAT SAFE, WHICH IS WHAT THIS COMMENT
- * USED TO SAY. A container reaches the host's `127.0.0.1`, so the `read`
- * capability on the api credential is the check — see `api-credential.test.ts`.
+ * USED TO SAY. A container reaches the host's `127.0.0.1`, so the unguessable
+ * api credential is the check — `tokenMatches`, else 401, pinned in
+ * `api-credential.test.ts`. The `read` tier above it refuses nobody yet.
  */
 
 const NOW = Date.now();
