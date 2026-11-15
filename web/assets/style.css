@@ -282,6 +282,30 @@ html, body {
 .sidebar__item.is-online .sidebar__item-dot {
   background: #22c55e;
 }
+/* #240 — a working agent and a dead one looked identical in the browser.
+   The dot's `title` and `aria-label` carry the state in words, so the motion is
+   not the only signal. */
+.sidebar__item.is-working .sidebar__item-dot {
+  background: var(--accent);
+  animation: dot-pulse 1.1s ease-in-out infinite;
+}
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1;    transform: scale(1); }
+  50%      { opacity: 0.35; transform: scale(0.72); }
+}
+/* 🛑 THIS IS WCAG 2.2.2, WHICH THE TITLE DOES NOT ANSWER. 1.4.1 asks whether
+   meaning is carried in colour alone, and the title settles that. 2.2.2 asks
+   whether motion running over five seconds can be STOPPED, and a turn runs for
+   minutes. The colour alone still separates working from online — --accent is
+   a different hue from .is-online's #22c55e — so stopping it costs nothing.
+   ⚠️ THE `.is-fresh` CAVEAT ABOVE DOES NOT APPLY. It warns that `animation:
+   none` fires no `animationend`; nothing listens for `animationend` anywhere in
+   app.js. Found by claude1, whose sharper point is that `.is-fresh` is a
+   one-shot 4px translate that IS reduced, so leaving an infinite opacity loop
+   unreduced inverted that precedent rather than following it. */
+@media (prefers-reduced-motion: reduce) {
+  .sidebar__item.is-working .sidebar__item-dot { animation: none; }
+}
 .sidebar__item-label {
   flex: 1;
   overflow: hidden;

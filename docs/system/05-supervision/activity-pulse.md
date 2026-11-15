@@ -6,6 +6,9 @@ covers:
   - src/supervise/index.ts
   - src/cli/web/server.ts
   - src/cli/web/credential.ts
+  - web/assets/logic.js
+  - web/assets/app.js
+  - web/assets/style.css
 ---
 
 # Activity Pulse
@@ -25,6 +28,9 @@ child dies          ->  onExit        ->  'end'                    |
 child is REPLACED   ->  replaceChild  ->  'end'                    |
                                                                    |
                                        SSE `event: activity` to every browser
+                                                   |
+browser                                `nextPulses` -> one row repainted
+turn ends / 30s with no tick           the dot stops
 ```
 
 🛑 **THERE ARE TWO `end` SITES FOR A DEPARTING CHILD AND NEITHER IS REDUNDANT.**
@@ -94,11 +100,61 @@ returns `void` on purpose. A failed POST is swallowed with no log hook: the web
 server is down most of the time, so a line per failure is one log entry per
 tool call forever.
 
-## Not done yet
+## The browser half
 
-**The browser does not render this.** Nothing consumes `event: activity`. The
-SSE frame is emitted and no page listens, so the pulse is observable only with
-a client of your own. #240 tracks the renderer.
+The dot beside a peer in the sidebar pulses while that handle is working.
+
+🛑 **A PULSE NEVER GOES THROUGH `renderSidebar()`.** That function does
+`el.sidebar.innerHTML = ''` and rebuilds every row. A tick arrives every 250ms,
+so routing one through it would rewrite the sidebar four times a second and
+close an open `(...)` menu under the operator's cursor on every tool call.
+`paintPulse` finds one row by `data-handle` and mutates it.
+
+🛑 **AND THE PULSE STILL HAS TO SURVIVE A REBUILD.** `renderSidebar` runs on
+any peer status change, so the working set lives in `state.activity` and
+`sidebarItem` re-reads it. Holding the pulse as a class alone means the next
+`wake` drops it **mid-turn**, which is the only moment it carries information.
+
+| | |
+|---|---|
+| the working set | `state.activity`, a `Set` of handles |
+| an unchanged tick | `nextPulses` returns the SAME `Set`, so the caller skips its DOM write |
+| the failsafe | one re-armed `setTimeout` per handle, **never** an interval |
+
+🛑 **TWO SEPARATE ACCESSIBILITY OBLIGATIONS, AND THE TITLE ANSWERS ONLY ONE.**
+This section said the title settled both, and it did not.
+
+| | asks | answered by |
+|---|---|---|
+| WCAG 1.4.1 | is meaning carried in colour alone? | `dotTitle`, in words |
+| WCAG 2.2.2 | can motion running over 5s be STOPPED? | `@media (prefers-reduced-motion: reduce)` |
+
+A turn runs for minutes and `dot-pulse` is `infinite`, so 2.2.2 applies whatever
+the title says. The colour alone still separates working from online, so
+stopping the animation costs the signal nothing.
+
+⚠️ **THE `.is-fresh` CAVEAT IN `style.css` DOES NOT TRANSFER.** It warns that
+`animation: none` fires no `animationend`. Nothing in `app.js` listens for
+`animationend` — its four mentions are all comments. And `.is-fresh` is a
+one-shot 4px translate that IS reduced, so leaving an infinite opacity loop
+unreduced inverted that precedent rather than following it.
+
+🛑 **`role="img"` IS LOAD-BEARING ON THE DOT.** `aria-label` on a bare `span`
+is ignored, because a span has no role for the label to name.
+
+🛑 **ONLY THE WORKING STATE IS NAMED.** lee, 2026-11-14: *"no title"*. Online
+and offline keep carrying their meaning in colour alone, as they have since the
+sidebar was written. The consequence is deliberate: the tooltip appears and
+disappears with the work, and hovering an idle agent gives nothing.
+
+⚠️ **SO `paintPulse` MUST REMOVE THE ATTRIBUTES, NOT SKIP THEM.** A null title
+on an `end` is the normal case now, and an early return would leave "Working"
+on the dot of an agent that stopped minutes ago.
+
+🛑 **ROOM ROWS CARRY `data-handle` TOO**, because `renderSidebar` passes a room
+NAME as `target`. The bypass lookup is therefore scoped
+`[data-kind="peer"][data-handle=...]`, which makes `kind: 'peer'` true by
+construction rather than asserted. Found by claude1.
 
 ---
 
@@ -110,6 +166,9 @@ a client of your own. #240 tracks the renderer.
 | `src/supervise/index.ts` | the wiring: `tick` on `onEvent`, `end` on `onTurnEnd`, `onExit` and `replaceChild` |
 | `src/cli/web/server.ts` | `handleActivity`, and the SSE fan-out |
 | `src/cli/web/credential.ts` | `/api/activity`'s capability tier, and `tokenMatches` |
+| `web/assets/logic.js` | `activityEvent`, `nextPulses`, `dotTitle`, `PULSE_FAILSAFE_MS` |
+| `web/assets/app.js` | the SSE listener, `paintPulse`, the per-handle failsafe |
+| `web/assets/style.css` | `.sidebar__item.is-working` and `@keyframes dot-pulse` |
 
 ## Related docs
 
