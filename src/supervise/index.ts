@@ -22,6 +22,7 @@ import {
 import { openHostBus, type HostBus } from './host-bus.js';
 import { applyContextReport } from '../shim/gauge-report.js';
 import type { ContextSnapshot } from './context-gauge.js';
+import { createActivityReporter } from './activity.js';
 import { describeContextGauge } from './context-gauge.js';
 
 /**
@@ -478,6 +479,17 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
    */
   let childGeneration = 0;
 
+  /**
+   * Tells the web UI this agent is working, #240.
+   *
+   * 🛑 ONE PER SUPERVISOR, AND IT TAKES `childBusHandle` ITSELF. A reporter per
+   * child would reset the throttle on every replacement, and a captured handle
+   * would go stale against the rule on `childBusHandle` above. The pulse lands
+   * on the CHILD row because that is the one `list_agents` shows — the same
+   * finding `context-gauge.test.ts` records for the gauge.
+   */
+  const reportActivity = createActivityReporter({ handle: childBusHandle });
+
   let childSession: string | null = null;
 
   /**
@@ -581,6 +593,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
 
     child.onEvent(
       ifCurrent('onEvent', (event) => {
+        // 🛑 NOT AWAITED, AND INSIDE `ifCurrent`. This runs while draining the
+        // child's stdout, and a dead child must not pulse a live dot.
+        reportActivity('tick');
+
         const said = describeChildOutput(event);
 
         if (said) log(`← child: ${said}`);
@@ -594,6 +610,10 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     child.onTurnEnd(
       ifCurrent('onTurnEnd', () => {
         turnEndCount++;
+        // 🛑 CLEARS THE PULSE, AND IT IS NEVER THROTTLED. A dropped `end`
+        // leaves the dot running to the 30s failsafe, which reads as an agent
+        // that never finished.
+        reportActivity('end');
         queue.turnEnded();
         log(`← turn complete; ${queue.depth} queued, ${held.length} held`);
 

@@ -99,8 +99,16 @@ export function activityTarget(dir: string = defaultStateDir()): ActivityTarget 
 }
 
 export interface ActivityReporterOptions {
-  /** The supervised agent this reporter speaks for. */
-  handle: string;
+  /**
+   * The supervised agent this reporter speaks for.
+   *
+   * 🛑 A THUNK IS ACCEPTED BECAUSE THE CALLER'S HANDLE IS DERIVED, NOT FIXED.
+   * `index.ts` builds it from `currentGrant`, which is reassigned on a child
+   * replacement, and that file's own rule is to READ it rather than cache it.
+   * A captured string would survive a replacement the rest of the supervisor
+   * treats as a new handle.
+   */
+  handle: string | (() => string);
   /** Overridable for tests. */
   stateDir?: () => string;
   /** Overridable for tests, so the throttle window can be stepped. */
@@ -141,7 +149,8 @@ export function createActivityReporter(
 
     if (target === null) return;
 
-    const body = JSON.stringify({ handle: opts.handle, phase });
+    const handle = typeof opts.handle === 'string' ? opts.handle : opts.handle();
+    const body = JSON.stringify({ handle, phase });
 
     // Fire and forget. `void` is the contract: nothing upstream may wait.
     void fetch(`${target.origin}/api/activity`, {
