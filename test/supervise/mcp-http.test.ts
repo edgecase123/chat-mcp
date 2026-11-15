@@ -52,6 +52,7 @@ async function harness(): Promise<Harness> {
     serverFor: (handle) => {
       const ctx: ShimContext = {
         handle,
+        sandbox: "host",
         session_id: randomUUID(),
         db: openDb(),
         notify: new NotifyBus(handle),

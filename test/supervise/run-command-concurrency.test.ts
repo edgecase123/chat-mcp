@@ -90,13 +90,13 @@ test("🚨 TWO DIFFERENT HANDLES DO NOT BLOCK EACH OTHER, which is what per-hand
     a,
     "slow",
     {},
-    { maxConcurrent: 1, run: runner.run },
+    { sandbox: "host", maxConcurrent: 1, run: runner.run },
   );
   const second = runCommandFor(
     b,
     "slow",
     {},
-    { maxConcurrent: 1, run: runner.run },
+    { sandbox: "host", maxConcurrent: 1, run: runner.run },
   );
 
   await settle();
@@ -123,13 +123,13 @@ test("🛑 A SECOND COMMAND FOR THE SAME HANDLE WAITS, and starts only once the 
     handle,
     "slow",
     {},
-    { maxConcurrent: 1, run: runner.run },
+    { sandbox: "host", maxConcurrent: 1, run: runner.run },
   );
   const second = runCommandFor(
     handle,
     "slow",
     {},
-    { maxConcurrent: 1, run: runner.run },
+    { sandbox: "host", maxConcurrent: 1, run: runner.run },
   );
 
   await settle();
@@ -158,7 +158,12 @@ test("a cap of 3 lets 3 start and holds the 4th", async () => {
 
   const runner = heldRunner();
   const all = [0, 1, 2, 3].map(() =>
-    runCommandFor(handle, "slow", {}, { maxConcurrent: 3, run: runner.run }),
+    runCommandFor(
+      handle,
+      "slow",
+      {},
+      { sandbox: "host", maxConcurrent: 3, run: runner.run },
+    ),
   );
 
   await settle();
@@ -185,7 +190,12 @@ test("🛑 A FAILED COMMAND RETURNS ITS SLOT, so one failure does not wedge the 
   }) as ScriptRunner;
 
   await assert.rejects(
-    runCommandFor(handle, "slow", {}, { maxConcurrent: 1, run: boom }),
+    runCommandFor(
+      handle,
+      "slow",
+      {},
+      { sandbox: "host", maxConcurrent: 1, run: boom },
+    ),
   );
 
   // Would hang rather than fail if the permit leaked, so the assertion is that
@@ -195,7 +205,7 @@ test("🛑 A FAILED COMMAND RETURNS ITS SLOT, so one failure does not wedge the 
     handle,
     "slow",
     {},
-    { maxConcurrent: 1, run: runner.run },
+    { sandbox: "host", maxConcurrent: 1, run: runner.run },
   );
 
   await settle();
@@ -220,7 +230,7 @@ test("🛑 A REFUSED NAME TAKES NO SLOT AT ALL, so it never queues behind runnin
     handle,
     "slow",
     {},
-    { maxConcurrent: 1, run: runner.run },
+    { sandbox: "host", maxConcurrent: 1, run: runner.run },
   );
 
   await settle();
@@ -232,7 +242,7 @@ test("🛑 A REFUSED NAME TAKES NO SLOT AT ALL, so it never queues behind runnin
       handle,
       "no-such-command",
       {},
-      { maxConcurrent: 1, run: runner.run },
+      { sandbox: "host", maxConcurrent: 1, run: runner.run },
     ),
     /no command/,
   );
@@ -251,7 +261,7 @@ test("a cap below 1 is read as 1 rather than waiting forever", async () => {
     handle,
     "slow",
     {},
-    { maxConcurrent: 0, run: runner.run },
+    { sandbox: "host", maxConcurrent: 0, run: runner.run },
   );
 
   await settle();
@@ -293,13 +303,13 @@ test("🛑 AN EXPLICIT OPTION BEATS THE FILE, so the 11 tests above still pin wh
     handle,
     "slow",
     {},
-    { maxConcurrent: 3, run: runner.run },
+    { sandbox: "host", maxConcurrent: 3, run: runner.run },
   );
   const second = runCommandFor(
     handle,
     "slow",
     {},
-    { maxConcurrent: 3, run: runner.run },
+    { sandbox: "host", maxConcurrent: 3, run: runner.run },
   );
 
   await settle();
@@ -323,8 +333,18 @@ test("⚠️ control — with NO option the file's cap really does bind, so the 
 
   const runner = heldRunner();
 
-  const first = runCommandFor(handle, "slow", {}, { run: runner.run });
-  const second = runCommandFor(handle, "slow", {}, { run: runner.run });
+  const first = runCommandFor(
+    handle,
+    "slow",
+    {},
+    { sandbox: "host", run: runner.run },
+  );
+  const second = runCommandFor(
+    handle,
+    "slow",
+    {},
+    { sandbox: "host", run: runner.run },
+  );
 
   await settle();
 
@@ -357,9 +377,24 @@ test("🛑 A PARKED COMMAND KEEPS THE LIMIT IT ARRIVED WITH, even if the file is
 
   const runner = heldRunner();
 
-  const first = runCommandFor(handle, "slow", {}, { run: runner.run });
-  const second = runCommandFor(handle, "slow", {}, { run: runner.run });
-  const third = runCommandFor(handle, "slow", {}, { run: runner.run });
+  const first = runCommandFor(
+    handle,
+    "slow",
+    {},
+    { sandbox: "host", run: runner.run },
+  );
+  const second = runCommandFor(
+    handle,
+    "slow",
+    {},
+    { sandbox: "host", run: runner.run },
+  );
+  const third = runCommandFor(
+    handle,
+    "slow",
+    {},
+    { sandbox: "host", run: runner.run },
+  );
 
   await settle();
   assert.equal(runner.started, 2, "the cap of 2 did not hold");
@@ -394,7 +429,8 @@ test("🛑 AN UNREADABLE limits.json REFUSES THE COMMAND rather than running it 
   // state directory, which the container boundary exists to hide, and the
   // caller here is the agent. The path rides in `detail`, for the host's log.
   await assert.rejects(
-    () => runCommandFor(handle, "slow", {}, { run: runner.run }),
+    () =>
+      runCommandFor(handle, "slow", {}, { sandbox: "host", run: runner.run }),
     (err: Error & { detail?: string }) =>
       err.name === "Refusal" &&
       !err.message.includes(limitsFile) &&

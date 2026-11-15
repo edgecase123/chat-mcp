@@ -27,6 +27,12 @@ export async function openHostBus(childHandle: string): Promise<HostBus> {
       const ctx = shimContextFor({
         handle,
 
+        // 🛑 DERIVED, NOT ASSUMED. `startSupervisor` opens this listener only
+        // under `isContainerSpawn`, and the docblock above says a container has
+        // no other route to the bus. So every session served here is a
+        // containerized one, and `run_command` is refused for it.
+        sandbox: "docker",
+
         // 🛑 NOT `checkWakeAdapter(handle)`. That reports whether a HOST wake
         // adapter is installed, and a supervised child is woken by the
         // supervisor writing to its stdin. Reporting the host's answer here

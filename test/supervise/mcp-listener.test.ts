@@ -44,6 +44,7 @@ async function listener(
     serverFor: (handle: string) => {
       const ctx: ShimContext = {
         handle,
+        sandbox: "host",
         session_id: randomUUID(),
         db: openDb(),
         notify: new NotifyBus(handle),

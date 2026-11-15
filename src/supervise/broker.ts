@@ -1,4 +1,5 @@
 import { createServer, type Server, type Socket } from "node:net";
+import type { SandboxMode } from "./vendor.js";
 import { StringDecoder } from "node:string_decoder";
 import { isRecord, type ListedCommand } from "./commands.js";
 import { BIND_ADDRESS, listenOnLoopback } from "./loopback.js";
@@ -33,6 +34,17 @@ export interface BrokerOptions {
    * nothing stops an immediate reconnect.
    */
   readonly authenticate: (token: string) => string | null;
+  /**
+   * 🛑 WHERE THE AGENTS THIS BROKER SERVES RUN. `run_command` is refused for a
+   * containerized one, whose project directory is bind-mounted writable.
+   *
+   * ⚠️ REQUIRED BECAUSE THIS TRANSPORT HAS NO PRODUCTION CALLER YET. Nothing
+   * in `src/` constructs a `CommandBroker` — only tests do. An optional field
+   * on an unwired listener is a guard that is absent on the day someone wires
+   * it, and `BIND_ADDRESS` is loopback, which a container reaches through
+   * `host.docker.internal` on this setup.
+   */
+  readonly sandbox: SandboxMode;
   readonly timeoutMs?: number;
   readonly maxBuffer?: number;
   /** Dispatches allowed to be in flight at once, across all connections. */
@@ -276,6 +288,7 @@ export class CommandBroker {
         // 🛑 PASSED THROUGH UNSET, NOT DEFAULTED HERE. Resolving the two
         // constants in this class put a SECOND copy of the defaults in front of
         // `limits.json`, so a configured value was overridden on every call.
+        sandbox: this.options.sandbox,
         timeoutMs: this.options.timeoutMs,
         maxBuffer: this.options.maxBuffer,
         run: this.options.run,
