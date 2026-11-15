@@ -100,10 +100,7 @@ async function post(
 }
 
 /** Initialize, acknowledge, and call `run_command` once over the host bus. */
-async function callRunCommand(
-  t: TestContext,
-  handle: string,
-): Promise<string> {
+async function callRunCommand(t: TestContext, handle: string): Promise<string> {
   const bus = await openHostBus(handle);
   t.after(() => bus.close());
 
@@ -130,12 +127,7 @@ async function callRunCommand(
 
   // The SDK's server serves no request until the client acknowledges, so this
   // notification is part of the handshake and not an optional courtesy.
-  await post(
-    url,
-    token,
-    rpc("notifications/initialized", {}, null),
-    session,
-  );
+  await post(url, token, rpc("notifications/initialized", {}, null), session);
 
   const call = await post(
     url,
@@ -165,7 +157,7 @@ test("🚨 run_command over the HOST BUS refuses, and the script never runs", as
   assert.ok(
     !existsSync(marker),
     "the command RAN for a containerized agent — host-bus.ts is no longer " +
-      "passing sandbox: \"docker\"",
+      'passing sandbox: "docker"',
   );
 
   assert.match(
@@ -186,10 +178,7 @@ const ENTRY = new URL("../../src/index.ts", import.meta.url).pathname;
  * would race the teardown and this test would be flaky in the direction that
  * looks like a refusal.
  */
-async function callOverStdio(
-  t: TestContext,
-  handle: string,
-): Promise<string> {
+async function callOverStdio(t: TestContext, handle: string): Promise<string> {
   const { spawn } = await import("node:child_process");
 
   const child = spawn(
@@ -215,7 +204,9 @@ async function callOverStdio(
   const reply = new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(
-        new Error(`no reply to tools/call in 20s.\nstdout:\n${out}\nstderr:\n${err}`),
+        new Error(
+          `no reply to tools/call in 20s.\nstdout:\n${out}\nstderr:\n${err}`,
+        ),
       );
     }, 20_000);
 
@@ -245,7 +236,9 @@ async function callOverStdio(
     child.on("exit", (code) => {
       clearTimeout(timer);
       reject(
-        new Error(`the shim exited (${code}) before replying.\nstderr:\n${err}`),
+        new Error(
+          `the shim exited (${code}) before replying.\nstderr:\n${err}`,
+        ),
       );
     });
   });
