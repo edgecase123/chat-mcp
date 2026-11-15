@@ -763,6 +763,12 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       // 🛑 Anything queued is UNSENT. Reporting it is the difference between a
       // visible gap and silence, and silence is the ambiguity this whole change
       // exists to remove.
+        // 🛑 CLEARS THE DOT. `onTurnEnd` does not fire for a child that dies
+        // mid-turn, so without this the 30s failsafe is the only thing that
+        // ends the pulse — and for those 30 seconds a working agent and a dead
+        // one look identical, which is the ambiguity #240 exists to remove.
+        reportActivity('end');
+
         const unsent = queue.drain();
         log(`child exited code=${code} signal=${signal}; ${unsent.length} prompt(s) never sent`);
 
@@ -833,6 +839,13 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     // ⚠️ BEFORE `spawnFn`, deliberately. A spawn that throws then leaves
     // `pid = NULL` and the bus honest rather than advertising a child that
     // never started.
+    // 🛑 HERE TOO, AND FOR THE REASON THE PID CLEAR BELOW IS HERE. `kill()`
+    // returns before the exit lands, so `onExit` sees a bumped generation and
+    // `ifCurrent` drops it — the handler above would never run and the
+    // outgoing child's dot would pulse on. Before `currentGrant` is
+    // reassigned, so the `end` names the child that is leaving.
+    reportActivity('end');
+
     try {
       if (!dao.clearAgentPid(approvalsDb, childBusHandle())) {
         // More surprising here than on an exit: a replace means the child has

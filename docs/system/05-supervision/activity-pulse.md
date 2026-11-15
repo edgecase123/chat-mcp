@@ -19,17 +19,30 @@ anything to the `/api/activity` path or changing what `web-handshake` holds.
 ## The path
 
 ```
-child stdout event  ->  onEvent        ->  reportActivity('tick')  ->  POST /api/activity
-child turn complete ->  onTurnEnd      ->  reportActivity('end')   ->  POST /api/activity
-                                                                        |
-                                            SSE `event: activity` to every browser
+child stdout event  ->  onEvent       ->  'tick'  ->  POST /api/activity
+child turn complete ->  onTurnEnd     ->  'end'   ->  POST /api/activity
+child dies          ->  onExit        ->  'end'                    |
+child is REPLACED   ->  replaceChild  ->  'end'                    |
+                                                                   |
+                                       SSE `event: activity` to every browser
 ```
+
+🛑 **THERE ARE TWO `end` SITES FOR A DEPARTING CHILD AND NEITHER IS REDUNDANT.**
+`kill()` returns before the exit lands, so on a replacement `onExit` sees a
+bumped generation and `ifCurrent` drops it. `clearAgentPid` is called from both
+sites for exactly this reason — see `agent-liveness.md`. Deleting either one
+fails a different test.
 
 | | value | why |
 |---|---|---|
 | throttle | 250ms, ticks only | the dot is binary, so four a second is all a viewer can use |
 | failsafe | 30s | outlasts a child that dies without an `end` |
 | `end` | never throttled | it is what CLEARS the pulse |
+
+⚠️ **THE FAILSAFE IS NOT THE NORMAL PATH.** It only has to outlast a child that
+dies without reaching either `end` site. A pulse that routinely ran to 30s
+would mean a working agent and a dead one look identical for half a minute,
+which is the ambiguity this feature removes.
 
 🛑 **NO POLLING ANYWHERE ON THIS PATH.** lee, 2026-11-14: *"I don't want more
 polling. Everything should be event based."* Two designs with a poll in them
@@ -94,7 +107,7 @@ a client of your own. #240 tracks the renderer.
 | File | Role |
 |---|---|
 | `src/supervise/activity.ts` | the reporter, the throttle, and resolving the target from `web-handshake` |
-| `src/supervise/index.ts` | the three wiring lines, inside `ifCurrent` so a dead child cannot pulse |
+| `src/supervise/index.ts` | the wiring: `tick` on `onEvent`, `end` on `onTurnEnd`, `onExit` and `replaceChild` |
 | `src/cli/web/server.ts` | `handleActivity`, and the SSE fan-out |
 | `src/cli/web/credential.ts` | `/api/activity`'s capability tier, and `tokenMatches` |
 
