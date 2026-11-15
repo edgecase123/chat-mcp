@@ -799,6 +799,44 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
   wireChild();
 
   /**
+   * Take the outgoing child offline on the bus and stop its activity dot.
+   *
+   * 🛑 HERE, NOT IN `onExit`. `kill()` returns immediately — a containerized
+   * child spawns `docker stop` detached — so the exit lands after the
+   * generation has moved and `ifCurrent` drops it as stale. The handler would
+   * never run, and `online` stayed true for a child that no longer existed,
+   * forever if the respawn then failed. The dot pulsed on for the same reason.
+   *
+   * ⚠️ Moving the `onExit` clear outside `ifCurrent` is NOT the alternative:
+   * that clears a LIVE child's pid on every stale signal. The replacement
+   * re-registers its own pid moments later, so a brief offline window here is
+   * the honest reading.
+   *
+   * ⚠️ CALL IT BEFORE `spawnFn`, deliberately. A spawn that throws then leaves
+   * `pid = NULL` and the dot cleared, rather than advertising a child that
+   * never started.
+   *
+   * 🛑 `doRestart` HAD NEITHER STEP AND RELIED ENTIRELY ON `onExit`. Bumping
+   * the generation on its throw path suppressed that exit, so a failed restart
+   * left a dead child reading online with its dot still moving. Found by
+   * claude2 on review; shared from one place so the next respawn path cannot
+   * miss a step.
+   */
+  const takeChildOffline = (verb: string): void => {
+    reportActivity('end');
+
+    try {
+      if (!dao.clearAgentPid(approvalsDb, childBusHandle())) {
+        // More surprising here than on an exit: a replace or restart means the
+        // child has been running, so its shim should long since have registered.
+        log(`${verb} ${childBusHandle()}, which has no bus row to take offline`);
+      }
+    } catch (err) {
+      log(`FAILED to take ${childBusHandle()} offline across a ${verb}: ${String(err)}`);
+    }
+  };
+
+  /**
    * Replace the live child, resuming its session, with different flags.
    *
    * 🛑 ONE OPERATION, THREE CALLERS, AND THAT IS THE POINT. An approval
@@ -825,40 +863,7 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     log(`replacing child (${reason}); ${unsent.length} prompt(s) carried over`);
     child.kill();
 
-    // 🛑 HERE, NOT IN `onExit`. `kill()` returns immediately — a containerized
-    // child spawns `docker stop` detached — so the exit lands after
-    // `wireChild()` has bumped the generation and `ifCurrent` drops it as
-    // stale. The handler below would never run, and `online` stayed true for a
-    // child that no longer existed, forever if the respawn then failed.
-    //
-    // ⚠️ Moving the `onExit` clear outside `ifCurrent` is NOT the alternative:
-    // that clears a LIVE child's pid on every stale signal. The replacement
-    // re-registers its own pid moments later, so a brief offline window here
-    // is the honest reading.
-    //
-    // ⚠️ BEFORE `spawnFn`, deliberately. A spawn that throws then leaves
-    // `pid = NULL` and the bus honest rather than advertising a child that
-    // never started.
-    // 🛑 HERE TOO, AND FOR THE REASON THE PID CLEAR BELOW IS HERE. `kill()`
-    // returns before the exit lands, so `onExit` sees a bumped generation and
-    // `ifCurrent` drops it — the handler above would never run and the
-    // outgoing child's dot would pulse on.
-    //
-    // ⚠️ BEFORE `spawnFn`, for the same reason the pid clear is: a spawn that
-    // throws then leaves the dot cleared rather than pulsing for a child that
-    // never started. NOT because `currentGrant` is about to change — the
-    // reassignment below spreads `handle` through untouched.
-    reportActivity('end');
-
-    try {
-      if (!dao.clearAgentPid(approvalsDb, childBusHandle())) {
-        // More surprising here than on an exit: a replace means the child has
-        // been running, so its shim should long since have registered.
-        log(`replacing ${childBusHandle()}, which has no bus row to take offline`);
-      }
-    } catch (err) {
-      log(`FAILED to take ${childBusHandle()} offline across a replace: ${String(err)}`);
-    }
+    takeChildOffline('replacing');
 
     if (change.model) currentModel = change.model;
 
@@ -867,22 +872,51 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       currentGrant = { ...currentGrant, allowed, available: availableBuiltins(allowed) };
     }
 
-    child = spawnFn({
-      ...opts,
-      cwd: childCwd,
-      grant: currentGrant,
-      model: currentModel,
-      // 🛑 THE SESSION, SO A CHANGE IS NOT A RESTART. Measured 2026-10-31:
-      // resuming works 3 of 3 with an explicit prompt, 0 of 2 with a vague
-      // one, so the prompt below is as load-bearing as the flag.
-      resumeSessionId: childSession ?? opts.resumeSessionId,
-      supervisorHandle: opts.handle,
-    });
+    // 🛑 THE SUPERVISOR STAYS UP, per lee's ruling of 2026-11-15. It already
+    // did — the socket handler catches this and answers `ok: false` — so the
+    // only thing missing was saying so and keeping the work.
+    //
+    // ⚠️ PARKED, NOT RE-OFFERED. There is no child now, so a re-offer would
+    // write to the process just killed. The next successful respawn drains
+    // these and hands them over.
+    //
+    // The throw is re-raised so the caller still learns the spawn failed.
+    try {
+      child = spawnFn({
+        ...opts,
+        cwd: childCwd,
+        grant: currentGrant,
+        model: currentModel,
+        // 🛑 THE SESSION, SO A CHANGE IS NOT A RESTART. Measured 2026-10-31:
+        // resuming works 3 of 3 with an explicit prompt, 0 of 2 with a vague
+        // one, so the prompt below is as load-bearing as the flag.
+        resumeSessionId: childSession ?? opts.resumeSessionId,
+        supervisorHandle: opts.handle,
+      });
+    } catch (err) {
+      // 🛑 THE DEAD CHILD'S HANDLERS ARE STILL CURRENT WITHOUT THIS, AND ITS
+      // `onExit` DRAINS. `wireChild` is the only other place `childGeneration`
+      // moves, and the throw path never reaches it — so the exit of the child
+      // just killed passed `ifCurrent`, drained what was parked here, and
+      // logged it as UNSENT. The park was defeated. Found by claude2, who
+      // reproduced it twice; my own fake never fired an exit from `kill()`,
+      // so no test here could have said no.
+      childGeneration += 1;
+
+      log(
+        `FAILED to replace the child (${reason}): ${String(err)}; ` +
+          `${unsent.length} prompt(s) parked, NO agent is running for this handle`,
+      );
+
+      for (const p of unsent) queue.park(p);
+
+      throw err;
+    }
 
     wireChild();
     queue.offer({ text: prompt, messageIds: [] });
 
-    for (const p of unsent) queue.offer(p);
+    for (const p of unsent) queue.reoffer(p);
   };
 
   /**
@@ -1013,20 +1047,50 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     const unsent = queue.drain();
     log(`restarting child (${unsent.length} prompt(s) carried over)`);
     child.kill();
+    takeChildOffline('restarting');
     childSession = null;
     needsMountBanner = isContainerSpawn;
 
-    child = spawnFn({
-      ...opts,
-      cwd: childCwd,
-      grant: currentGrant,
-      model: currentModel,
-      supervisorHandle: opts.handle,
-      resumeSessionId: undefined,
-    });
+    // 🛑 THE SUPERVISOR STAYS UP, per lee's ruling of 2026-11-15. It already
+    // did — the socket handler catches this and answers `ok: false` — so the
+    // only thing missing was saying so and keeping the work.
+    //
+    // ⚠️ PARKED, NOT RE-OFFERED. There is no child now, so a re-offer would
+    // write to the process just killed. The next successful respawn drains
+    // these and hands them over.
+    //
+    // The throw is re-raised so the caller still learns the spawn failed.
+    try {
+      child = spawnFn({
+        ...opts,
+        cwd: childCwd,
+        grant: currentGrant,
+        model: currentModel,
+        supervisorHandle: opts.handle,
+        resumeSessionId: undefined,
+      });
+    } catch (err) {
+      // 🛑 THE DEAD CHILD'S HANDLERS ARE STILL CURRENT WITHOUT THIS, AND ITS
+      // `onExit` DRAINS. `wireChild` is the only other place `childGeneration`
+      // moves, and the throw path never reaches it — so the exit of the child
+      // just killed passed `ifCurrent`, drained what was parked here, and
+      // logged it as UNSENT. The park was defeated. Found by claude2, who
+      // reproduced it twice; my own fake never fired an exit from `kill()`,
+      // so no test here could have said no.
+      childGeneration += 1;
+
+      log(
+        `FAILED to restart the child: ${String(err)}; ` +
+          `${unsent.length} prompt(s) parked, NO agent is running for this handle`,
+      );
+
+      for (const p of unsent) queue.park(p);
+
+      throw err;
+    }
 
     wireChild();
-    for (const p of unsent) queue.offer(p);
+    for (const p of unsent) queue.reoffer(p);
   };
 
   const restartChild = (mode: 'graceful' | 'now'): void => {
