@@ -619,24 +619,23 @@ test('🛑 chat-mcp SHIPS NO DEFAULT: no declared paths means no :ro mount at al
   setToken('sk-ant-oat-x');
   const dir = projectWithScripts();
 
+  // 🛑 A HANDLE WITH NO REGISTERED MOUNT, SO THE ASSERTION CAN STAY STRONG.
+  // This file shares one `CHAT_MCP_HOME` with no reset, so `registerMount`
+  // above leaves `claude1` holding an extra mount — which is `:ro` since #231
+  // and would be caught here. Narrowing the assertion to the work dir was the
+  // first fix and it lost the broader claim: a shipped default mounted
+  // anywhere else stopped failing. Raised by claude2 on PR 245.
   for (const opts of [
-    { cwd: dir, supervisorHandle: 'claude1' },
-    { cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: [] },
+    { cwd: dir, supervisorHandle: 'nodefault' },
+    { cwd: dir, supervisorHandle: 'nodefault', readOnlyPaths: [] },
   ]) {
     const args = dockerArgsFor(opts);
     // Deriving `scripts/` from a script path is what lee objected to: it would
     // encode one consumer's layout into chat-mcp.
-    //
-    // 🛑 SCOPED TO THE PROJECT DIR. A bare `endsWith(':ro')` also caught the
-    // `mounts.json` extra mounts once those became read-only for #231, and an
-    // extra mount is a different subject from a DECLARED path. This file shares
-    // one `CHAT_MCP_HOME` with no reset, so a `registerMount` from an earlier
-    // test is still registered here.
-    const declared = args.filter(
-      (a) => a.endsWith(':ro') && a.includes(`:${CONTAINER_PROJECT_DIR}/`),
+    assert.ok(
+      !args.some((arg) => arg.endsWith(':ro')),
+      `expected no :ro mount, got ${args.filter((a) => a.endsWith(':ro')).join(', ')}`,
     );
-
-    assert.deepEqual(declared, [], `expected no :ro mount under the work dir, got ${declared.join(', ')}`);
   }
 });
 
