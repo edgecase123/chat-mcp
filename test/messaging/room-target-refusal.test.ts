@@ -74,6 +74,31 @@ async function oneshotRefusal(to: string): Promise<string> {
   return err.message;
 }
 
+/**
+ * 🛑 THE SHARED CLAUSE IS THE ONLY REASON `roomTargetRefusal` EXISTS rather
+ * than two inline strings, and nothing asserted it. claude1 deleted it on
+ * PR 276, keeping only `nextStep`, and the full suite passed 1728/1728 twice.
+ * Reproduced here before this test was written.
+ */
+test("🚨 BOTH surfaces say the target is a room and send is peer-only", async () => {
+  const ctx = contextFor(`rr-${process.pid}-d`);
+  const text = await sendToolRefusal(ctx, "#mcp");
+  ctx.db.close();
+
+  assert.match(
+    text,
+    /#mcp is a room, and send is peer-only\./,
+    "the shared clause names the target and the contract",
+  );
+
+  const message = await oneshotRefusal("#mcp");
+  assert.match(
+    message,
+    /#mcp is a room, and send is peer-only\./,
+    "the one-shot surface carries the same clause, not a second wording",
+  );
+});
+
 test("🚨 the send TOOL points a #room at room_send, not at list_agents", async () => {
   const ctx = contextFor(`rr-${process.pid}-a`);
   const text = await sendToolRefusal(ctx, "#mcp");
@@ -121,7 +146,7 @@ test("🚨 a mistyped PEER still gets the peer advice on both surfaces", async (
 });
 
 /**
- * 🛑 THE `#` PREFIX DECIDES IT, AND `isRoomName` ONLY DECIDES VALID.
+ * 🛑 THE `#` PREFIX DECIDES ROOM-OR-PEER, AND `isRoomName` ONLY DECIDES VALID.
  *
  * `#Ops` carries a capital, so `isRoomName` is false for it while the user's
  * intent is unmistakable. `handleMessagesClear` carries a comment about the
@@ -139,4 +164,67 @@ test("🚨 an INVALID room name is still a room attempt, not a peer miss", async
   const message = await oneshotRefusal("#Ops");
   assert.match(message, /\/join/);
   assert.doesNotMatch(message, /chat-mcp list/);
+});
+
+/**
+ * 🛑 THE ADVICE MUST BE FOLLOWABLE IN ONE HOP, WHICH IS THE WHOLE TICKET.
+ *
+ * Raised by claude1 on PR 276: the tests above assert the STRING, never the
+ * OUTCOME of following it. `/join #Ops` and `room_send room: "#Ops"` are both
+ * refused again by `assertRoomName`, so a refusal that only named them sent
+ * the reader to a second dead end — the same defect one hop later.
+ */
+test("🚨 an unusable room name carries its own CORRECTION, not just the verb", async () => {
+  const ctx = contextFor(`rr-${process.pid}-e`);
+  const text = await sendToolRefusal(ctx, "#Ops");
+  ctx.db.close();
+
+  assert.match(
+    text,
+    /not a valid room name/,
+    "naming room_send alone leaves #Ops refused at the next hop",
+  );
+  assert.match(text, /"#ops"/, "the correction must be the name that works");
+
+  const message = await oneshotRefusal("#Ops");
+  assert.match(message, /"#ops"/);
+});
+
+/**
+ * 🛑 THE CONTROL FOR THE CORRECTION. Lowercasing does not rescue every
+ * invalid name, and suggesting `"#a b"` as the fix would be worse than saying
+ * nothing. An unfixable name states the rule and suggests no replacement.
+ */
+test("🚨 a room name lowercasing cannot rescue states the RULE instead", async () => {
+  const ctx = contextFor(`rr-${process.pid}-f`);
+  const text = await sendToolRefusal(ctx, "#a b");
+  ctx.db.close();
+
+  assert.match(text, /not a valid room name/);
+  assert.match(
+    text,
+    /\[a-z0-9\]\[a-z0-9_-\]\{0,63\}/,
+    "it must state the rule when it has no working name to offer",
+  );
+  assert.doesNotMatch(
+    text,
+    /the one you want is/,
+    'there is no lowercase form of "#a b" that works',
+  );
+});
+
+/**
+ * 🛑 THE CONTROL FOR THE NOTE BEING CONDITIONAL. A note appended
+ * unconditionally would pass every assertion above while telling a reader
+ * with a perfectly good room name that it is invalid.
+ */
+test("🚨 a VALID room name gets no validity note at all", async () => {
+  const ctx = contextFor(`rr-${process.pid}-g`);
+  const text = await sendToolRefusal(ctx, "#mcp");
+  ctx.db.close();
+
+  assert.doesNotMatch(text, /not a valid room name/);
+
+  const message = await oneshotRefusal("#mcp");
+  assert.doesNotMatch(message, /not a valid room name/);
 });

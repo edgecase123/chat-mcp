@@ -53,13 +53,26 @@ export function assertHandle(s: string): void {
  *
  * `nextStep` differs per surface because the surfaces differ: the MCP shim has
  * a `room_send` tool, the one-shot CLI has no room-send verb at all. Only the
- * first sentence is common, so only the first sentence lives here.
+ * sentences common to both live here.
  *
- * 🛑 CALL THIS ON THE `#` PREFIX, NEVER ON `isRoomName`. `isRoomName` decides
- * VALID, not room-or-peer, and `#Ops` is invalid while being unmistakably a
- * room attempt. `handleMessagesClear` carries a comment about that exact
- * discrimination sending `#Ops` down the DM branch.
+ * 🛑 THE CALLER DECIDES ROOM-OR-PEER ON THE `#` PREFIX, NEVER ON
+ * `isRoomName`. `isRoomName` decides VALID, and `#Ops` is invalid while being
+ * unmistakably a room attempt. `handleMessagesClear` carries a comment about
+ * that exact discrimination sending `#Ops` down the DM branch.
+ *
+ * ⚠️ `isRoomName` IS read below, and that is a different question. It refines
+ * the ADVICE once the target is already known to be a room, because
+ * `nextStep` tells the reader to use the name they typed and an invalid one
+ * is refused again at the next hop. Raised by claude1 on PR 276: a refusal
+ * whose advice needs two hops is the same defect this function exists to fix.
  */
 export function roomTargetRefusal(target: string, nextStep: string): string {
-  return `${target} is a room, and send is peer-only. ${nextStep}`;
+  const lower = target.toLowerCase();
+  let note = "";
+  if (!isRoomName(target)) {
+    note = isRoomName(lower)
+      ? ` "${target}" is not a valid room name, because rooms are lowercase — the one you want is "${lower}".`
+      : ` "${target}" is not a valid room name: after the # it must match [a-z0-9][a-z0-9_-]{0,63}.`;
+  }
+  return `${target} is a room, and send is peer-only. ${nextStep}${note}`;
 }
