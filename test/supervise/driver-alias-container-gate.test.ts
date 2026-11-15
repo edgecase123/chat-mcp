@@ -138,8 +138,11 @@ test("🛑 the container gate reads the resolved mode, never a driver name", () 
     "the gate's own condition is gone or duplicated — this guard is now blind",
   );
 
+  // ⚠️ BOTH ARMS ARE ANCHORED ON `===`, AND A BARE `"docker-<name>"` ARM WAS
+  // DROPPED. Unscoped, it matched the whole file, so quoting the alias in a
+  // comment reported the gate as name-matching while the gate was untouched.
   const nameChecks = [
-    ...src.matchAll(/o\.driver\s*===|===\s*"docker-[a-z]+"|"docker-[a-z]+"/g),
+    ...src.matchAll(/o\.driver\s*===|===\s*"docker-[a-z]+"/g),
   ].map((m) => m[0]);
 
   assert.deepEqual(
