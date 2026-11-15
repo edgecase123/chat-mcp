@@ -79,6 +79,38 @@ test("an explicit enum value overrides the default", () => {
   );
 });
 
+test("🛑 THE FLAG CARRIES THE PARAM NAME'S DECLARED SPELLING, byte for byte", () => {
+  // 🛑 THE ONLY ASSERTION IN THE SUITE THAT SPELLS A NAME, SO THE ONLY ONE
+  // THAT CAN CATCH A MANGLING. A param name is matched case-INSENSITIVELY, so
+  // `Mode` is legal, and lowercasing it inside `toArgv` left all 1708 tests
+  // green. claude1's measurement, reproduced here as a test.
+  //
+  // The consequence is this ticket's own defect class one layer in: a host
+  // declares `Mode`, their script matches `--Mode=*`, a later name change
+  // makes it recover nothing, and the script still exits 0 with an empty
+  // value. Nothing refuses the call.
+  //
+  // ⚠️ THIS IS NOT A RULE ABOUT NAME CASE. The `/i` in the name pattern may
+  // well be deliberate. The gap was that the spelling was untested either way.
+  const m = parseManifest({
+    commands: [
+      {
+        name: "g",
+        script: "a.sh",
+        params: [
+          { name: "Mode", type: "enum", values: ["all"], default: "all" },
+          { name: "Dry-Run", type: "enum", values: ["Yes"] },
+        ],
+      },
+    ],
+  });
+
+  assert.deepEqual(resolveArgv(m, "g", { "Dry-Run": "Yes" }).argv, [
+    "--Mode=all",
+    "--Dry-Run=Yes",
+  ]);
+});
+
 test("a command with no params resolves to an empty argv", () => {
   assert.deepEqual(resolveArgv(parseManifest(GATE), "run-deploy", {}).argv, []);
 });
@@ -418,8 +450,10 @@ test('🛑 a free-form "string" param type no longer exists', () => {
 });
 
 test('🛑 an enum value that starts with "-" is refused', () => {
-  // `-e/bin/sh` and `--upload-pack=…` are flags to whatever the script execs.
-  // execFile without a shell does not neutralise that.
+  // ⚠️ NOT because a leading `-` reaches the callee as a flag any more. A
+  // value now rides after the `=` of its own flag, so it is never its own argv
+  // entry. What this refuses is the author who writes `-rf` expecting a bare
+  // switch and silently gets `--m=-rf`.
   assert.throws(
     () =>
       parseManifest({
