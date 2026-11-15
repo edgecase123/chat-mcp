@@ -377,7 +377,32 @@ test('a registered extra mount appears at /mnt/<key>', () => {
   setToken('sk-ant-oat-x');
   registerMount('claude1', 'local-context', extraDir);
   const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
-  assert.ok(args.includes(`${extraDir}:${containerPathFor('local-context')}`));
+  assert.ok(args.includes(`${extraDir}:${containerPathFor('local-context')}:ro`));
+});
+
+/**
+ * 🔴 #231. An extra mount was attached READ-WRITE, so a package the tree chose
+ * could write to the whole host directory it names. The only one configured in
+ * practice is `local-context -> ~/context`, which is every task's `status.md`.
+ *
+ * 🛑 THE REGISTRY ROUTE IS MEASURED AND LIVE, so this is not theoretical: a
+ * project `.npmrc` picks the registry, the container reaches it, and the
+ * substituted package runs later as the agent. #231's last comment carries the
+ * probe and its `--network=none` control.
+ */
+test('🔴 a registered extra mount is READ-ONLY, or the tree can write to the host dir', () => {
+  const extraDir = mkdtempSync(join(tmpdir(), 'chat-mcp-docker-ro-extra-'));
+  setToken('sk-ant-oat-x');
+  registerMount('claude1', 'local-context', extraDir);
+
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: 'claude1' });
+  const spec = args.find((a) => a.startsWith(`${extraDir}:`));
+
+  assert.ok(spec, `no mount spec for ${extraDir}; got ${args.join(' ')}`);
+  // 🛑 THE WHOLE SPEC, NOT AN `endsWith(':ro')`. A spec can end in `:ro` and
+  // still name the wrong destination, and the collision test above was written
+  // because `endsWith` could not see a `:ro` suffix at all.
+  assert.equal(spec, `${extraDir}:${containerPathFor('local-context')}:ro`);
 });
 
 /**
@@ -594,9 +619,15 @@ test('🛑 chat-mcp SHIPS NO DEFAULT: no declared paths means no :ro mount at al
   setToken('sk-ant-oat-x');
   const dir = projectWithScripts();
 
+  // 🛑 A HANDLE WITH NO REGISTERED MOUNT, SO THE ASSERTION CAN STAY STRONG.
+  // This file shares one `CHAT_MCP_HOME` with no reset, so `registerMount`
+  // above leaves `claude1` holding an extra mount — which is `:ro` since #231
+  // and would be caught here. Narrowing the assertion to the work dir was the
+  // first fix and it lost the broader claim: a shipped default mounted
+  // anywhere else stopped failing. Raised by claude2 on PR 245.
   for (const opts of [
-    { cwd: dir, supervisorHandle: 'claude1' },
-    { cwd: dir, supervisorHandle: 'claude1', readOnlyPaths: [] },
+    { cwd: dir, supervisorHandle: 'nodefault' },
+    { cwd: dir, supervisorHandle: 'nodefault', readOnlyPaths: [] },
   ]) {
     const args = dockerArgsFor(opts);
     // Deriving `scripts/` from a script path is what lee objected to: it would
