@@ -1950,6 +1950,7 @@ test("🛑 the install container runs to completion BEFORE the agent container s
 test("🚨 an install that fails starts no agent, and the error names the cause", async (t) => {
   setToken("sk-ant-oat-x");
   const calls: string[][] = [];
+  let installStdio: unknown[] | undefined;
 
   t.mock.module("node:child_process", {
     namedExports: {
@@ -1957,10 +1958,15 @@ test("🚨 an install that fails starts no agent, and the error names the cause"
         calls.push(["spawn", ...args]);
         return { on: () => undefined, unref: () => undefined };
       },
-      execFileSync: (_cmd: string, args: string[]) => {
+      execFileSync: (
+        _cmd: string,
+        args: string[],
+        o?: { stdio?: unknown[]; env?: NodeJS.ProcessEnv },
+      ) => {
         calls.push(args);
         // The `rm -f` must still succeed; only the install fails.
         if (args.some((a) => a.includes("npm ci"))) {
+          installStdio = o?.stdio;
           throw new Error("npm ci exited 1");
         }
         return Buffer.from("");
@@ -1972,14 +1978,19 @@ test("🚨 an install that fails starts no agent, and the error names the cause"
     `../../../src/supervise/drivers/containerized.js?install-fail=${Date.now()}`
   );
 
-  assert.throws(
-    () =>
+  let thrown: unknown;
+
+  assert.throws(() => {
+    try {
       spawnContainerized(claudeSpawn, {
         cwd: PROJECT_DIR,
         supervisorHandle: "claude1",
-      }),
-    /install/i,
-  );
+      });
+    } catch (err) {
+      thrown = err;
+      throw err;
+    }
+  }, /install/i);
 
   const spawned = calls.filter((argv) => argv[0] === "spawn");
 
@@ -1987,5 +1998,29 @@ test("🚨 an install that fails starts no agent, and the error names the cause"
     spawned,
     [],
     `an agent was spawned despite a failed install: ${JSON.stringify(spawned)}`,
+  );
+
+  // 🛑 THE `cause` IS ASSERTED BECAUSE A COMMENT CLAIMS IT. `runDependencyInstall`
+  // replaces `execFileSync`'s own "Command failed: docker run …" with a sentence
+  // that names the dependencies, and the original must still be reachable or
+  // the real exit reason is gone. Raised by `dry-solid-reviewer` on PR 259.
+  assert.match(
+    String((thrown as Error).message),
+    /the dependency install container failed/,
+    "the thrown message does not name what failed",
+  );
+  assert.match(
+    String(((thrown as Error).cause as Error)?.message),
+    /npm ci exited 1/,
+    "the underlying failure is unreachable from the wrapper",
+  );
+
+  // 🛑 STDERR INHERITED, AND A COMMENT CLAIMS THIS TOO. `NO_LOCK_HASH_WARNING`
+  // is written to the install's stderr, so piping it swallows #234's whole
+  // symptom. stdout is dropped on purpose — npm is chatty.
+  assert.deepEqual(
+    installStdio,
+    ["ignore", "ignore", "inherit"],
+    "the install's stderr is not inherited, so the no-hash warning vanishes",
   );
 });
