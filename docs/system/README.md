@@ -33,7 +33,7 @@ listed here will not be found. Add the row in the same commit as the page.
 | [agent-liveness.md](05-supervision/agent-liveness.md) | How `online` is computed, why a containerized child's row holds the supervisor's pid, and what the exit handler clears |
 | [child-output.md](05-supervision/child-output.md) | The three streams a child writes to, which reach the log, and why stderr went unread |
 | [activity-pulse.md](05-supervision/activity-pulse.md) | How the web UI learns an agent is working, why the supervisor is the HTTP client, and the 401 a url-as-token causes |
-| [project-commands.md](05-supervision/project-commands.md) | How an agent runs a declared project command on the host, the per-handle concurrency cap, and the second cap in `broker.ts` |
+| [project-commands.md](05-supervision/project-commands.md) | How an agent runs a declared project command on the host, the three limits that bound it, how an operator sets them in `limits.json`, and the second cap in `broker.ts` |
 
 ### [06 — Interfaces](06-interfaces/)
 | File | What it covers |

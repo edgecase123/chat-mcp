@@ -2,13 +2,7 @@ import { createServer, type Server, type Socket } from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
 import { isRecord, type ListedCommand } from './commands.js';
 import { BIND_ADDRESS, listenOnLoopback } from './loopback.js';
-import {
-  DEFAULT_MAX_BUFFER,
-  DEFAULT_TIMEOUT_MS,
-  Refusal,
-  listCommandsFor,
-  runCommandFor,
-} from './run-command-service.js';
+import { Refusal, listCommandsFor, runCommandFor } from './run-command-service.js';
 import { type ScriptResult, type ScriptRunner } from './run-script.js';
 
 const DEFAULT_MAX_IN_FLIGHT = 4;
@@ -95,14 +89,6 @@ export class CommandBroker {
     this.open.clear();
 
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
-  }
-
-  private get timeoutMs(): number {
-    return this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  }
-
-  private get maxBuffer(): number {
-    return this.options.maxBuffer ?? DEFAULT_MAX_BUFFER;
   }
 
   private accept(socket: Socket): void {
@@ -267,8 +253,11 @@ export class CommandBroker {
     }
 
     return runCommandFor(handle, envelope.name, params as Record<string, string>, {
-      timeoutMs: this.timeoutMs,
-      maxBuffer: this.maxBuffer,
+      // 🛑 PASSED THROUGH UNSET, NOT DEFAULTED HERE. Resolving the two
+      // constants in this class put a SECOND copy of the defaults in front of
+      // `limits.json`, so a configured value was overridden on every call.
+      timeoutMs: this.options.timeoutMs,
+      maxBuffer: this.options.maxBuffer,
       run: this.options.run,
     });
   }

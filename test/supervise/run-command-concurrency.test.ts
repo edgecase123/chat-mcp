@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 // A type-only import is erased, so it resolves no state path at load time.
@@ -195,4 +195,123 @@ test('a cap below 1 is read as 1 rather than waiting forever', async () => {
 
   runner.releaseOne();
   await only;
+});
+
+// ---------------------------------------------------------------------------
+// limits.json — the cap an operator sets, and what it does to a parked command
+// ---------------------------------------------------------------------------
+
+const limitsFile = join(process.env.CHAT_MCP_HOME as string, 'limits.json');
+
+/** Writes `limits.json` and removes it again, so no other test inherits it. */
+function withLimits(t: { after: (fn: () => void) => void }, body: unknown): void {
+  writeFileSync(limitsFile, JSON.stringify(body));
+  t.after(() => rmSync(limitsFile, { force: true }));
+}
+
+test('🛑 AN EXPLICIT OPTION BEATS THE FILE, so the 11 tests above still pin what they claim', async (t) => {
+  const handle = handleFor('opt-wins');
+
+  projectFor(handle);
+  withLimits(t, { maxConcurrent: 1 });
+
+  const runner = heldRunner();
+
+  const first = runCommandFor(handle, 'slow', {}, { maxConcurrent: 3, run: runner.run });
+  const second = runCommandFor(handle, 'slow', {}, { maxConcurrent: 3, run: runner.run });
+
+  await settle();
+
+  assert.equal(runner.started, 2, "the file's cap of 1 overrode an explicit option of 3");
+
+  runner.releaseOne();
+  runner.releaseOne();
+  await Promise.all([first, second]);
+});
+
+test("⚠️ control — with NO option the file's cap really does bind, so the test above is not vacuous", async (t) => {
+  const handle = handleFor('file-binds');
+
+  projectFor(handle);
+  withLimits(t, { maxConcurrent: 1 });
+
+  const runner = heldRunner();
+
+  const first = runCommandFor(handle, 'slow', {}, { run: runner.run });
+  const second = runCommandFor(handle, 'slow', {}, { run: runner.run });
+
+  await settle();
+
+  assert.equal(runner.started, 1, 'the file was ignored and both commands started');
+
+  runner.releaseOne();
+  await settle();
+  runner.releaseOne();
+  await Promise.all([first, second]);
+});
+
+/**
+ * 🛑 THE LIMIT IS RESOLVED ONCE, BEFORE ANY WAIT. `acquireSlot` takes a number,
+ * so a parked command keeps the limit it arrived with.
+ *
+ * 🛑 THE FILE IS LOWERED, NOT RAISED, AND THAT IS THE WHOLE TEST. Nothing wakes
+ * a parked waiter until a slot frees, so RAISING the limit cannot distinguish a
+ * frozen limit from a live one — both let the waiter through. Only lowering it
+ * does: a live limit makes the woken waiter re-park.
+ */
+test('🛑 A PARKED COMMAND KEEPS THE LIMIT IT ARRIVED WITH, even if the file is LOWERED', async (t) => {
+  const handle = handleFor('frozen');
+
+  projectFor(handle);
+  withLimits(t, { maxConcurrent: 2 });
+
+  const runner = heldRunner();
+
+  const first = runCommandFor(handle, 'slow', {}, { run: runner.run });
+  const second = runCommandFor(handle, 'slow', {}, { run: runner.run });
+  const third = runCommandFor(handle, 'slow', {}, { run: runner.run });
+
+  await settle();
+  assert.equal(runner.started, 2, 'the cap of 2 did not hold');
+
+  // One slot frees, so the parked third wakes and re-checks. Its own limit is
+  // 2 and one command is left running, so it must start.
+  writeFileSync(limitsFile, JSON.stringify({ maxConcurrent: 1 }));
+  runner.releaseOne();
+  await settle();
+
+  assert.equal(
+    runner.started,
+    3,
+    'the parked command re-checked against the NEW cap of 1 and stayed parked',
+  );
+
+  runner.releaseOne();
+  runner.releaseOne();
+  await Promise.all([first, second, third]);
+});
+
+test('🛑 AN UNREADABLE limits.json REFUSES THE COMMAND rather than running it uncapped', async (t) => {
+  const handle = handleFor('bad-file');
+
+  projectFor(handle);
+  writeFileSync(limitsFile, '{ "maxConcurrent": 1,, }');
+  t.after(() => rmSync(limitsFile, { force: true }));
+
+  const runner = heldRunner();
+
+  // 🛑 THE PUBLIC MESSAGE MUST NOT NAME THE PATH. `limits.json` sits inside the
+  // state directory, which the container boundary exists to hide, and the
+  // caller here is the agent. The path rides in `detail`, for the host's log.
+  await assert.rejects(
+    () => runCommandFor(handle, 'slow', {}, { run: runner.run }),
+    (err: Error & { detail?: string }) =>
+      err.name === 'Refusal' &&
+      !err.message.includes(limitsFile) &&
+      !err.message.includes('/') &&
+      err.detail !== undefined &&
+      err.detail.includes(limitsFile),
+  );
+
+  assert.equal(runner.started, 0, 'the script ran despite an unreadable limits file');
 });

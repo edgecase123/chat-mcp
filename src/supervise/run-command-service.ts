@@ -6,14 +6,15 @@ import {
   type CommandManifest,
   type ListedCommand,
 } from './commands.js';
+import { commandLimits } from './command-limits.js';
 import { checkedScriptPath } from './containment.js';
 import { runScript, type ScriptResult, type ScriptRunner } from './run-script.js';
 
-export const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
-export const DEFAULT_MAX_BUFFER = 8 * 1024 * 1024;
-
-/** How many of ONE handle's commands may be running at once. */
-export const DEFAULT_MAX_CONCURRENT = 4;
+export {
+  DEFAULT_MAX_BUFFER,
+  DEFAULT_MAX_CONCURRENT,
+  DEFAULT_TIMEOUT_MS,
+} from './command-limits.js';
 
 /**
  * A refusal with two faces: what the caller is told, and what the operator can
@@ -130,6 +131,21 @@ export async function runCommandFor(
   params: Readonly<Record<string, string>>,
   opts: RunCommandOptions = {},
 ): Promise<ScriptResult> {
+  // 🛑 RESOLVED ONCE, BEFORE ANY WAIT. `acquireSlot` takes a number, so a
+  // command that parks keeps the limit it arrived with even if the file is
+  // edited while it waits. The counter and the limit cannot disagree.
+  let limits;
+
+  try {
+    limits = commandLimits();
+  } catch (err) {
+    // 🛑 A FIXED SENTENCE, NOT THE COLLABORATOR'S. Its message names
+    // `limits.json` by absolute path, and that path is inside the directory the
+    // container boundary exists to hide. `manifestFor` below is the same shape:
+    // a fixed public sentence, the detail in `Refusal.detail`.
+    throw new Refusal('the command limits on this host are not readable', err);
+  }
+
   const { dir, manifest } = manifestFor(handle);
 
   // The caller named this command and supplied these values, so this message
@@ -159,7 +175,7 @@ export async function runCommandFor(
   //
   // A limit below 1 is read as 1. Honouring a 0 would wait forever, and a
   // caller that passes one wants throttling, never a deadlock.
-  await acquireSlot(handle, Math.max(1, opts.maxConcurrent ?? DEFAULT_MAX_CONCURRENT));
+  await acquireSlot(handle, Math.max(1, opts.maxConcurrent ?? limits.maxConcurrent));
 
   try {
     return await runScript(
@@ -167,8 +183,8 @@ export async function runCommandFor(
       resolved.argv,
       {
         cwd: dir,
-        timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        maxBuffer: opts.maxBuffer ?? DEFAULT_MAX_BUFFER,
+        timeout: opts.timeoutMs ?? limits.timeoutMs,
+        maxBuffer: opts.maxBuffer ?? limits.maxBuffer,
       },
       opts.run,
     );
