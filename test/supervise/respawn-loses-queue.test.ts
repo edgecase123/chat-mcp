@@ -28,9 +28,10 @@ import type { AgentChild, SpawnOptions } from '../../src/supervise/child.js';
  * ⚠️ THE DOCBLOCK ON `replaceChild` SAYS THE OPPOSITE — "THE QUEUE IS DRAINED,
  * NOT DISCARDED". That is the claim these tests falsify.
  *
- * A throwing spawn is a SECOND, independent defect on the same two lines: the
- * spawn sits outside any `try`, so the re-offer never runs at all. Fixing the
- * duplicate-drop does not fix the throw, and the two have separate tests here.
+ * A throwing spawn was a SECOND, independent defect on the same two lines: the
+ * spawn sat outside any `try`, so the re-offer never ran at all. The
+ * supervisor now STAYS UP and PARKS what it drained, per lee's ruling of
+ * 2026-11-15, and the throw is re-raised so the caller still learns of it.
  *
  * The queue has no reader but a child, so "the prompts survived" can only be
  * asked of a later spawn. That is why each supervisor test performs a second
@@ -150,7 +151,7 @@ const approval = {
   sessionId: 'sess-1',
 };
 
-test('🚨 a throwing respawn on an APPROVAL does not lose the queued prompts', { todo: 'defect 2 — the spawn sits outside a try. Behaviour is open question 1 on #236.' }, async () => {
+test('🚨 a throwing respawn on an APPROVAL does not lose the queued prompts', async () => {
   const children: FakeChild[] = [];
   const handle = `rt-${process.pid}-approve`;
   // Call 1 is the initial child. Call 2 is the approval's replacement.
@@ -177,7 +178,7 @@ test('🚨 a throwing respawn on an APPROVAL does not lose the queued prompts', 
   }
 });
 
-test('🚨 a throwing respawn on an operator RESTART does not lose the queued prompts', { todo: 'defect 2 — the spawn sits outside a try. Behaviour is open question 1 on #236.' }, async () => {
+test('🚨 a throwing respawn on an operator RESTART does not lose the queued prompts', async () => {
   const children: FakeChild[] = [];
   const handle = `rt-${process.pid}-restart`;
   const { sup, db } = await supervisorFor(handle, spawnFailingOn([2], children));

@@ -867,17 +867,37 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
       currentGrant = { ...currentGrant, allowed, available: availableBuiltins(allowed) };
     }
 
-    child = spawnFn({
-      ...opts,
-      cwd: childCwd,
-      grant: currentGrant,
-      model: currentModel,
-      // 🛑 THE SESSION, SO A CHANGE IS NOT A RESTART. Measured 2026-10-31:
-      // resuming works 3 of 3 with an explicit prompt, 0 of 2 with a vague
-      // one, so the prompt below is as load-bearing as the flag.
-      resumeSessionId: childSession ?? opts.resumeSessionId,
-      supervisorHandle: opts.handle,
-    });
+    // 🛑 THE SUPERVISOR STAYS UP, per lee's ruling of 2026-11-15. It already
+    // did — the socket handler catches this and answers `ok: false` — so the
+    // only thing missing was saying so and keeping the work.
+    //
+    // ⚠️ PARKED, NOT RE-OFFERED. There is no child now, so a re-offer would
+    // write to the process just killed. The next successful respawn drains
+    // these and hands them over.
+    //
+    // The throw is re-raised so the caller still learns the spawn failed.
+    try {
+      child = spawnFn({
+        ...opts,
+        cwd: childCwd,
+        grant: currentGrant,
+        model: currentModel,
+        // 🛑 THE SESSION, SO A CHANGE IS NOT A RESTART. Measured 2026-10-31:
+        // resuming works 3 of 3 with an explicit prompt, 0 of 2 with a vague
+        // one, so the prompt below is as load-bearing as the flag.
+        resumeSessionId: childSession ?? opts.resumeSessionId,
+        supervisorHandle: opts.handle,
+      });
+    } catch (err) {
+      log(
+        `FAILED to replace the child (${reason}): ${String(err)}; ` +
+          `${unsent.length} prompt(s) parked, NO agent is running for this handle`,
+      );
+
+      for (const p of unsent) queue.park(p);
+
+      throw err;
+    }
 
     wireChild();
     queue.offer({ text: prompt, messageIds: [] });
@@ -1016,14 +1036,34 @@ export async function startSupervisor(opts: SupervisorOptions): Promise<Supervis
     childSession = null;
     needsMountBanner = isContainerSpawn;
 
-    child = spawnFn({
-      ...opts,
-      cwd: childCwd,
-      grant: currentGrant,
-      model: currentModel,
-      supervisorHandle: opts.handle,
-      resumeSessionId: undefined,
-    });
+    // 🛑 THE SUPERVISOR STAYS UP, per lee's ruling of 2026-11-15. It already
+    // did — the socket handler catches this and answers `ok: false` — so the
+    // only thing missing was saying so and keeping the work.
+    //
+    // ⚠️ PARKED, NOT RE-OFFERED. There is no child now, so a re-offer would
+    // write to the process just killed. The next successful respawn drains
+    // these and hands them over.
+    //
+    // The throw is re-raised so the caller still learns the spawn failed.
+    try {
+      child = spawnFn({
+        ...opts,
+        cwd: childCwd,
+        grant: currentGrant,
+        model: currentModel,
+        supervisorHandle: opts.handle,
+        resumeSessionId: undefined,
+      });
+    } catch (err) {
+      log(
+        `FAILED to restart the child: ${String(err)}; ` +
+          `${unsent.length} prompt(s) parked, NO agent is running for this handle`,
+      );
+
+      for (const p of unsent) queue.park(p);
+
+      throw err;
+    }
 
     wireChild();
     for (const p of unsent) queue.reoffer(p);
