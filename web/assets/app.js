@@ -306,7 +306,11 @@ function renderSidebar() {
 
 function sidebarItem({ label, target, online, active, kind, unread = 0, gauge = null }) {
   const open = state.openMenuFor === target;
-  const working = state.activity.has(target);
+  // 🛑 THE KIND GATE BELONGS ON BOTH PATHS, NOT JUST THE LOOKUP. `target` is a
+  // room NAME for a room row, so without this a pulse naming `#mcp` animates
+  // that room's dot on the next rebuild — `paintPulse`'s scoped selector
+  // refuses it, and then `renderSidebar` does it anyway.
+  const working = kind === 'peer' && state.activity.has(target);
   // 🛑 role="img" IS WHAT MAKES THE LABEL REACH A SCREEN READER. aria-label on
   // a bare span is ignored, because a span has no role to name.
   const dotState = dotTitle({ kind, working });

@@ -131,6 +131,21 @@ test('🛑 the bypass can only reach a PEER row, by construction', () => {
 });
 
 /**
+ * 🛑 THE GATE HAS TO BE ON BOTH PATHS, AND SCOPING THE SELECTOR ONLY FIXED ONE.
+ * `paintPulse` refuses a room row now, so `renderSidebar` did it instead on the
+ * next `wake` — the room's dot animated. The selector test above cannot see
+ * this path at all, which is why it needs its own assertion. Found by claude1
+ * on the re-review of PR 246, after the first fix.
+ */
+test('🛑 a rebuilt ROOM row can never be marked working', () => {
+  assert.match(
+    sidebarItemBody(),
+    /kind === 'peer' && state\.activity\.has\(target\)/,
+    'the rebuild path is not gated on kind — a room dot will animate',
+  );
+});
+
+/**
  * 🛑 AN `end` MUST UNDO WHAT A TICK DID. An early return on a null title left
  * "Working" on the dot of an agent that stopped minutes ago, and only a full
  * rebuild cleared it. The bug arrived with lee's "no title" ruling, which made
