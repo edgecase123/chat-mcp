@@ -1,6 +1,6 @@
 import * as dao from "../storage/dao.js";
 import { openDb } from "../storage/db.js";
-import { notifyPeer } from "../notify/bus.js";
+import { announceToRoom } from "../messaging/room-announce.js";
 import { assertRoomName } from "../util/naming.js";
 import { resolveHandle } from "./common.js";
 
@@ -34,26 +34,22 @@ export async function runBoot(opts: BootOpts): Promise<void> {
 
     const removed = dao.bootFromRoom(db, opts.room, target);
 
-    const now = Date.now();
     const body = `${caller} booted ${target} from ${opts.room}`;
-    const sysInfo = db
-      .prepare(
-        `INSERT INTO messages (from_handle, to_handle, body, sent_at) VALUES (?, ?, ?, ?)`,
-      )
-      .run(dao.SYSTEM_HANDLE, opts.room, body, now);
-    const sysId = Number(sysInfo.lastInsertRowid);
 
-    const remaining = dao.roomMembers(db, opts.room);
-    for (const member of remaining) {
-      if (member === caller) continue;
-      notifyPeer(member, {
-        id: sysId,
-        to: opts.room,
-        from: dao.SYSTEM_HANDLE,
-        ts: now,
-        body,
-      });
-    }
+    // 🛑 ONE WRITER. The raw insert this replaced skipped every guard in
+    // `insertMessage` and fanned out a `lastInsertRowid` that a swallowed
+    // insert takes from another table. #138.
+    //
+    // ⚠️ THE THROW IS LET OUT ON PURPOSE. A oneshot verb exits non-zero, which
+    // is already loud; `sendOrReason` is for the two surfaces that must stay up.
+    announceToRoom(db, {
+      room: opts.room,
+      body,
+      actor: caller,
+      // This verb prints and exits, so there is no inbox of its own to keep
+      // clear. The REPL is the one surface that advances.
+      advanceActorRead: false,
+    });
 
     if (opts.json) {
       process.stdout.write(

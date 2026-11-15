@@ -219,8 +219,9 @@ test("🛑 src/ opens a database in exactly one place, so every handle gets a ve
 test("🛑 the TUI and the REPL route every send through sendOrReason", () => {
   for (const file of ["src/cli/ink/App.tsx", "src/cli/index.ts"]) {
     const src = readFileSync(file, "utf8");
-    const sends = [...src.matchAll(/(?:dao\.insertMessage|sendToRoom)\s*\(/g)]
-      .length;
+    const sends = [
+      ...src.matchAll(/(?:dao\.insertMessage|sendToRoom|announceToRoom)\s*\(/g),
+    ].length;
     const wrapped = [...src.matchAll(/sendOrReason\s*\(/g)].length;
 
     // Denominator: a file with no sends would otherwise pass this vacuously.
@@ -235,6 +236,60 @@ test("🛑 the TUI and the REPL route every send through sendOrReason", () => {
     );
   }
 });
+
+/**
+ * 🛑 FOUR SURFACES WROTE `messages` WITH THEIR OWN INSERT, AND NONE OF THEM
+ * CHECKED `changes`. `joinRoom`, the REPL's boot, the oneshot boot verb and the
+ * `room_boot` tool each read `lastInsertRowid` straight back — which a swallowed
+ * insert takes from ANOTHER TABLE — and two of them fed that id into a read
+ * watermark. claude1 named one of the four; a whole-tree grep found the rest, so
+ * this guard exists to count rather than to trust a grep somebody remembers to
+ * run. #138.
+ */
+test("🛑 src/ writes the messages table in exactly one place", () => {
+  const files = sourceFiles();
+
+  // Denominator: a listing that matched nothing would otherwise pass.
+  assert.ok(files.length >= 100, `found only ${files.length} source files`);
+
+  const writers = files.filter((f) =>
+    /INSERT\s+INTO\s+messages/i.test(stripComments(readFileSync(f, "utf8"))),
+  );
+
+  assert.deepEqual(writers, ["src/storage/dao.ts"]);
+});
+
+/**
+ * 🛑 THE STRIPPER IS THE HALF THAT CAN FAIL SILENTLY, SO IT IS TESTED.
+ * `room-announce.ts` QUOTES `INSERT INTO messages` in its docblock, to say what
+ * it replaced. An unstripped grep counts that as a fifth writer and the guard
+ * above then fails for a reason that has nothing to do with the code — the trap
+ * being that the FIX quotes the defect it fixed.
+ */
+test("🛑 the comment stripper removes a quoted INSERT but not a real one", () => {
+  const quoted = readFileSync("src/messaging/room-announce.ts", "utf8");
+  const real = readFileSync("src/storage/dao.ts", "utf8");
+
+  // The positive control: the string really is in that file, so a stripper that
+  // deleted everything would pass the negative half below vacuously.
+  assert.match(quoted, /INSERT INTO messages/);
+
+  assert.doesNotMatch(
+    stripComments(quoted),
+    /INSERT\s+INTO\s+messages/i,
+    "room-announce.ts has a real messages insert, not just a quoted one",
+  );
+  assert.match(
+    stripComments(real),
+    /INSERT\s+INTO\s+messages/i,
+    "the stripper ate dao.ts's real insert, so the guard above is blind",
+  );
+});
+
+/** Line and block comments out, so a docblock quoting SQL is not a call site. */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+}
 
 function sourceFiles(): string[] {
   return execFileSync("git", ["ls-files", "src"], { encoding: "utf8" })

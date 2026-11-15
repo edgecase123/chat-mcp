@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { openDb } from "../storage/db.js";
 import { NotifyBus, notifyPeer } from "../notify/bus.js";
 import { sendToRoom } from "../messaging/room-send.js";
+import { announceToRoom } from "../messaging/room-announce.js";
 import { sendOrReason } from "../messaging/send-or-reason.js";
 import * as dao from "../storage/dao.js";
 import type { Message } from "../storage/dao.js";
@@ -319,29 +320,27 @@ export async function runCli(opts: CliOptions): Promise<void> {
     }
     dao.bootFromRoom(db, roomName, target);
 
-    const now = Date.now();
     const body = `${opts.handle} booted ${target} from ${roomName}`;
-    const sysInfo = db
-      .prepare(
-        `INSERT INTO messages (from_handle, to_handle, body, sent_at) VALUES (?, ?, ?, ?)`,
-      )
-      .run(dao.SYSTEM_HANDLE, roomName, body, now);
-    const sysId = Number(sysInfo.lastInsertRowid);
-    // Advance the caller's watermark past the announcement so it doesn't
-    // echo back to them on next flushInbox.
-    dao.advanceRoomRead(db, roomName, opts.handle, sysId);
 
-    const remaining = dao.roomMembers(db, roomName);
-    for (const member of remaining) {
-      if (member === opts.handle) continue;
-      notifyPeer(member, {
-        id: sysId,
-        to: roomName,
-        from: dao.SYSTEM_HANDLE,
-        ts: now,
+    // 🛑 THROUGH `sendOrReason`, LIKE EVERY OTHER SEND IN THIS FILE. The REPL
+    // must stay up and report in-band, and `insertMessage` can now throw.
+    // `advanceActorRead` keeps the announcement from echoing back on the next
+    // flushInbox, which is the one thing this surface wants and the other two
+    // boot paths do not.
+    const out = sendOrReason(() =>
+      announceToRoom(db, {
+        room: roomName,
         body,
-      });
+        actor: opts.handle,
+        advanceActorRead: true,
+      }),
+    );
+
+    if ("reason" in out) {
+      console.log(dim(`  ${out.reason}`));
+      return;
     }
+
     console.log(dim(`  booted ${target} from ${roomName}`));
   };
 
