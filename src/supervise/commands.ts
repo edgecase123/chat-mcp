@@ -19,12 +19,17 @@ import {
  */
 
 /**
- * 🛑 `string` WAS HERE AND IS DELIBERATELY GONE. A free-form positional is
+ * 🛑 `string` WAS HERE AND IS DELIBERATELY GONE. A free-form value is
  * unconstrained argv, and `execFile` without a shell does NOT neutralise that:
  * the callee parses its own flags, so `-e/bin/sh`, `--upload-pack=…` and
- * `--checkpoint-action=exec=…` all reach it intact. Every real command so far
- * is an enumerated mode. A free-form type needs a mandatory anchored pattern
+ * `--checkpoint-action=exec=…` reach it intact. Every real command so far is
+ * an enumerated mode. A free-form type needs a mandatory anchored pattern
  * before it comes back.
+ *
+ * ⚠️ NAMED ARGV NARROWED THIS AND DID NOT CLOSE IT. A value rides after the
+ * `=` of its own flag, so it can no longer arrive as a separate option — but
+ * `--mode=--upload-pack=…` is still one argv entry whose meaning is the
+ * callee's to decide, and nothing here can know how the callee splits it.
  */
 export type ParamType = "enum";
 
@@ -108,6 +113,15 @@ interface ParamKind {
     param: CommandParam,
     context: string,
   ) => void;
+  /**
+   * Spell the resolved value as ONE argv entry.
+   *
+   * 🛑 IT LIVES HERE SO A NEW TYPE CANNOT LAND WITH A VALUE RULE AND NO
+   * FLAG RULE. A type whose values need different quoting from an enum's, and
+   * whose author only filled in `assertValue`, would otherwise inherit the
+   * enum's spelling silently.
+   */
+  readonly toArgv: (value: string, param: CommandParam) => string;
 }
 
 const PARAM_KINDS: Record<ParamType, ParamKind> = {
@@ -124,9 +138,11 @@ const PARAM_KINDS: Record<ParamType, ParamKind> = {
       }
 
       for (const value of raw.values as string[]) {
-        // 🛑 A VALUE STARTING WITH `-` IS A FLAG TO THE CALLEE. The manifest
-        // author controls this list, so this catches their mistake rather than
-        // an agent's attack — but it is the same consequence either way.
+        // 🛑 KEPT THOUGH NAMED ARGV NARROWED IT. A value now rides after
+        // the `=` of its own flag, so it is never its own argv entry and a
+        // leading `-` no longer reaches the callee as a flag. What it still
+        // catches is the manifest author writing `-x` and expecting a bare
+        // switch, which named form silently turns into `--name=-x`.
         if (value.startsWith("-")) {
           throw new Error(
             `${context}: value "${value}" must not start with "-"`,
@@ -143,6 +159,7 @@ const PARAM_KINDS: Record<ParamType, ParamKind> = {
         );
       }
     },
+    toArgv: (value, param) => `--${param.name}=${value}`,
   },
 };
 
@@ -376,10 +393,16 @@ export function listCommands(manifest: CommandManifest): ListedCommand[] {
 }
 
 /**
- * Turn a named call plus its params into a script and a positional argv.
+ * Turn a named call plus its params into a script and a NAMED argv.
  *
- * Positional order follows the DECLARED param order, so a caller's key order
- * cannot reorder the arguments.
+ * 🛑 EVERY ENTRY IS `--name=value`, SO POSITION CARRIES NOTHING. The values
+ * used to arrive as bare positionals in declared order, which meant a host
+ * inserting a param into the middle of a command's list shifted every argument
+ * after it. The agent saw no change and every value was still individually
+ * valid, so nothing refused the call and the script ran with the right number
+ * of arguments in the wrong places.
+ *
+ * Ruled by lee, 2026-11-15: *"params would have to be named"*.
  */
 export function resolveArgv(
   manifest: CommandManifest,
@@ -406,19 +429,29 @@ export function resolveArgv(
     const supplied = Object.hasOwn(params, param.name)
       ? params[param.name]
       : undefined;
+    let value: string;
 
     if (supplied === undefined) {
-      if (param.default !== undefined) return param.default;
-      throw new Error(`command "${name}" needs a value for "${param.name}"`);
+      if (param.default === undefined) {
+        throw new Error(`command "${name}" needs a value for "${param.name}"`);
+      }
+
+      value = param.default;
+    } else {
+      if (typeof supplied !== "string") {
+        throw new Error(`${context} must be a string`);
+      }
+
+      PARAM_KINDS[param.type].assertValue(supplied, param, context);
+      value = supplied;
     }
 
-    if (typeof supplied !== "string") {
-      throw new Error(`${context} must be a string`);
-    }
-
-    PARAM_KINDS[param.type].assertValue(supplied, param, context);
-
-    return supplied;
+    // 🛑 ONE SPELLING CALL FOR BOTH BRANCHES. The default branch used to
+    // return early, so spelling only the supplied branch left a half-migrated
+    // argv in which a defaulted param stayed positional. The shape tests
+    // cannot see that, because a defaulted param is the one case they assert
+    // with no caller key to compare against.
+    return PARAM_KINDS[param.type].toArgv(value, param);
   });
 
   return { script: { relative: command.script }, argv };

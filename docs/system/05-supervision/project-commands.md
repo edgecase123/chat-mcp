@@ -2,6 +2,7 @@
 title: Project commands
 updated: 2026-11-15
 covers:
+  - src/supervise/commands.ts
   - src/supervise/run-command-service.ts
   - src/supervise/command-limits.ts
   - src/supervise/run-script.ts
@@ -69,6 +70,42 @@ and `execFile`.
 
 **Running such a command INSIDE the container is a separate piece of work.**
 This refusal closes the hole; it does not add the capability back.
+
+## How a parameter reaches the script
+
+**As `--name=value`, one argv entry per declared param.** A command declaring
+`lane` and called with `{ lane: "php" }` runs its script with a single argument,
+`--lane=php`.
+
+🛑 **BREAKING FOR EVERY EXISTING MANIFEST'S SCRIPTS, AND NOTHING WARNS.** The
+values used to arrive as bare positionals, so a script read them as `$1`, `$2`.
+A script still reading `$1` now receives the literal `--lane=php`. Nothing in
+`src/` ships a manifest, so the count of affected scripts is whatever hosts
+have on disk and is unmeasured.
+
+The migration is flag parsing:
+
+```sh
+for arg in "$@"; do
+  case "$arg" in --lane=*) lane="${arg#--lane=}" ;; esac
+done
+```
+
+**Why, in one line:** a host that inserted a param into the middle of a
+command's list used to shift every argument after it. The agent saw no change,
+every value was still individually valid, so nothing refused the call and the
+script ran the right number of arguments in the wrong places.
+
+lee, 2026-11-15: _"params would have to be named"_.
+
+⚠️ **ARGV ORDER STILL FOLLOWS THE DECLARATION.** Nothing sorts it. What the
+named form buys is that no entry's MEANING depends on that order, which is a
+weaker and more useful guarantee than a stable order would be.
+
+**A value is never its own argv entry**, because it rides after the `=`. That
+narrows the free-form-value problem that keeps `ParamType` at `enum` alone; it
+does not close it, since `--mode=--upload-pack=…` is still one entry whose
+meaning is the callee's to decide.
 
 ## The three limits
 
