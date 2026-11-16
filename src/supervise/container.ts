@@ -170,7 +170,7 @@ export function buildInputsHash(context: string = contextPath()): string {
   return hash.digest("hex");
 }
 
-type Runner = (cmd: string, args: readonly string[]) => Buffer;
+export type Runner = (cmd: string, args: readonly string[]) => Buffer;
 
 export function imageNeedsBuild(run: Runner = realExecFileSync): boolean {
   const state = readContainerState();
@@ -199,6 +199,47 @@ export function buildImage(run: Runner = realExecFileSync): void {
     ...readContainerState(),
     builtHash: buildInputsHash(),
   });
+}
+
+/**
+ * Compile the TypeScript, then rebuild the image if its inputs moved.
+ *
+ * 🛑 THE COMPILE IS UNCONDITIONAL AND IT RUNS FIRST. It used to sit INSIDE the
+ * `if (imageNeedsBuild())` branch, and `BUILD_INPUT_PATHS` names `dist` — build
+ * OUTPUT. So editing `src/` moved nothing the hash could see, the branch never
+ * ran, the compile never ran, and the container started on the last-compiled
+ * `dist` while the check reported the image as current. lee ruled option B on
+ * 2026-11-16: make the compile unconditional and leave the hash alone.
+ *
+ * 🛑 A HOIST, NOT A DEDENT, AND THAT IS THE WHOLE FIX. A compile left below
+ * the check — even dedented out of the branch — still hashes the stale `dist`,
+ * because the freshness verdict has already been computed. The order is the
+ * property; a test asserts it.
+ *
+ * ⚠️ IT DOES NOT MAKE EVERY START PAY FOR A DOCKER BUILD. A no-op `tsc` is
+ * ~1.34s, and `buildInputsHash` is a CONTENT hash — identical bytes produce
+ * the same hash, so the docker build is still skipped.
+ */
+export function prepareAgentImage(
+  compile: () => void,
+  opts: {
+    run?: Runner;
+    needsBuild?: (run: Runner) => boolean;
+    logLine?: (line: string) => void;
+  } = {},
+): void {
+  const run = opts.run ?? realExecFileSync;
+  const needsBuild = opts.needsBuild ?? imageNeedsBuild;
+  const logLine = opts.logLine ?? ((line: string) => console.log(line));
+
+  compile();
+
+  if (!needsBuild(run)) return;
+
+  logLine(
+    "building the chat-mcp-agent image (sources, Dockerfile or image changed)...",
+  );
+  buildImage(run);
 }
 
 export function isConfirmed(handle: string): boolean {
