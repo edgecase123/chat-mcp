@@ -1,8 +1,10 @@
 ---
 title: Agent Liveness
-updated: 2026-11-14
+updated: 2026-11-16
 covers:
   - src/storage/dao.ts
+  - src/supervise/exit-event.ts
+  - src/messaging/room-announce.ts
   - src/messaging/room-send.ts
   - src/supervise/index.ts
   - src/supervise/host-bus.ts
@@ -64,6 +66,54 @@ the `-agent` suffix, or by the grant. Clearing `opts.handle` would take a live
 supervisor offline — a worse fault than the original. `childBusHandle()` is the
 one reader, and it is a function rather than a captured value because
 `currentGrant` is reassigned on a child replace.
+
+## A death is an EVENT, and the supervisor goes with the child
+
+Clearing the pid made the handle read offline, which an operator sees as a
+**gap** — indistinguishable from an agent that was never started. And closing
+the wake socket left a second defect: `stop` and `restart` arrive only as
+`envelope.control` over that socket, so a supervisor that outlived its child
+had nothing it could be asked. `kill <pid>` was the only end.
+
+lee ruled on 2026-11-16: announce the exit, then exit.
+
+```
+child exits on its own        (a stop and a replace are excluded, see below)
+  1  clearAgentPid            the handle reads offline
+  2  announceChildExit        kind "alert", in every room either handle is in
+  3  hasStopped = true
+  4  finishShutdown           socket + host bus closed, then onStopped fires
+  5  process.exit(0)          wired to onStopped in src/index.ts
+```
+
+### The audience is BOTH handles' rooms
+
+🛑 **The handle that goes offline is the CHILD's, and announcing to only its
+rooms reaches nobody.** Measured on 2026-11-16: `room_members` held 11 rows and
+none was an `-agent` handle. Peers address the agent by the **supervisor's**
+handle; the child handle is an implementation detail only `clearAgentPid`
+reads. So the audience is the union of both handles' rooms, deduplicated.
+
+⚠️ **A peer who only ever DMs this agent and shares no room is not reached.**
+Rooms are the bus's broadcast. A fan-out to every past correspondent would be a
+different feature.
+
+### Two exits are not deaths
+
+| exit                | announced? | excluded by      |
+| ------------------- | ---------- | ---------------- |
+| the child's own     | **yes**    | —                |
+| `agents stop`       | no         | `hasStopped`     |
+| a replace / restart | no         | `replacingChild` |
+
+The operator asked for the other two, so a siren for either is how an alert
+lane goes stale. Both have a test that fails if the exclusion is dropped.
+
+⚠️ **`hasStopped = true` on this path is load-bearing and it was not obvious.**
+It is what makes a later SIGINT-driven `doStop` return early instead of
+tearing down a second time and firing `onStopped` twice. A mutant deleting it
+broke nothing until a test was written for the state it guards: a stop arriving
+_after_ the child already died.
 
 ## `online_members` is the room-level answer
 

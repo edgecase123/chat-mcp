@@ -24,6 +24,7 @@ import {
   defaultAllowed,
   type ChildGrant,
 } from "./grant.js";
+import { announceChildExit } from "./exit-event.js";
 import { dirsFor } from "./projects.js";
 import { allowlistWith, resolveCwd } from "./allowlist.js";
 import { commandFromGrant, grantFor, grantVariants } from "./denial.js";
@@ -584,6 +585,33 @@ export async function startSupervisor(
   let hasStopped = false;
 
   /**
+   * Tear down everything a gone child leaves behind, then report stopped.
+   *
+   * 🛑 DECLARED HERE BECAUSE `onExit` CALLS IT TOO, and `wireChild` runs long
+   * before `doStop` is defined. A child can exit during startup.
+   *
+   * ⚠️ NOT `doStop("now")` FROM `onExit`. `doStop` kills the child and awaits
+   * its teardown, and on the own-exit path the child is already gone — for the
+   * containerized driver that `kill()` spawns `docker stop` against a
+   * container that no longer exists.
+   */
+  const finishShutdown = async (): Promise<void> => {
+    // 🛑 THE SOCKET GOES LAST, SO ITS DISAPPEARANCE MEANS THE CHILD IS REALLY
+    // GONE. What makes that true differs per caller: `doStop` awaits the
+    // child's teardown before calling this, and the own-exit path is called BY
+    // the exit. Envelopes arriving in this window are refused above, not
+    // delivered to a dead child.
+    await listener.close();
+    await hostBus?.close();
+
+    // Registration happens in the CHILD, via the shim. So this deletes a row
+    // this process did not write, which is why it is opt-in and not default.
+    if (opts.ephemeral === true) dao.deleteAgent(approvalsDb, opts.handle);
+
+    for (const cb of stoppedListeners) cb();
+  };
+
+  /**
    * Whether a replace or a restart is between the kill and the respawn.
    *
    * 🛑 `ifCurrent` ASSUMES THE EXIT IS ASYNC, and the generation only moves
@@ -933,10 +961,49 @@ export async function startSupervisor(
         // teardown, so the socket's disappearance keeps meaning "fully
         // stopped" rather than moving earlier.
         if (!hasStopped && !replacingChild) {
-          void listener.close().catch((err: unknown) => {
+          // 🛑 SET BEFORE THE TEARDOWN, NOT AFTER. The SIGINT handler in
+          // `src/index.ts` can still reach `doStop` while this runs, and the
+          // early return on this flag is what stops a second teardown and a
+          // second `onStopped` — which is wired to `process.exit(0)`.
+          hasStopped = true;
+
+          // 🛑 THE EVENT GOES FIRST, AND THE ORDER IS THE RULING. lee,
+          // 2026-11-16: *"yes, i like the idea of a exist event"*, on top of
+          // shutting the supervisor down. `finishShutdown` fires `onStopped`,
+          // which `src/index.ts` wires to `process.exit(0)` — so an
+          // announcement after it is an announcement that never happens.
+          //
+          // ⚠️ GUARDED FOR THE REASON `clearAgentPid` ABOVE IS. A throw here
+          // must not cost the shutdown; an unreachable supervisor is worse
+          // than an unannounced death.
+          try {
+            const told = announceChildExit(approvalsDb, {
+              supervisorHandle: opts.handle,
+              childHandle: childBusHandle(),
+              code,
+              signal,
+            });
+
             log(
-              `FAILED to close the wake socket after the child exited: ${String(err)}`,
+              told.length > 0
+                ? `announced the exit in ${told.join(" ")}`
+                : `nobody to announce the exit to: neither ${opts.handle} nor ${childBusHandle()} is in a room`,
             );
+          } catch (err) {
+            log(`FAILED to announce the child's exit: ${String(err)}`);
+          }
+
+          // 🛑 THE SUPERVISOR EXITS WITH ITS CHILD, per lee's ruling of
+          // 2026-11-16. The close below takes away the ONLY way to reach this
+          // process: `stop` and `restart` arrive solely as `envelope.control`
+          // over this listener. Staying up left a supervisor with no child, no
+          // socket and nothing it could be asked, endable only by `kill <pid>`.
+          //
+          // ⚠️ `onStopped` IS THE EXIT. `src/index.ts` wires it to
+          // `process.exit(0)`, so `finishShutdown` firing it is what ends this
+          // process.
+          void finishShutdown().catch((err: unknown) => {
+            log(`FAILED to shut down after the child exited: ${String(err)}`);
           });
         }
       }),
@@ -1328,18 +1395,10 @@ export async function startSupervisor(
     current.kill();
     await current.awaitTeardown?.();
 
-    // 🛑 CLOSED AFTER THE TEARDOWN, NOT BEFORE, SO THE SOCKET'S DISAPPEARANCE
-    // MEANS "FULLY STOPPED". That is the one signal `agents stop` can wait on
-    // for every driver — a host child has no container to poll. Envelopes
-    // arriving in this window are refused above, not delivered to a dead child.
-    await listener.close();
-    await hostBus?.close();
-
-    // Registration happens in the CHILD, via the shim. So this deletes a row
-    // this process did not write, which is why it is opt-in and not default.
-    if (opts.ephemeral === true) dao.deleteAgent(approvalsDb, opts.handle);
-
-    for (const cb of stoppedListeners) cb();
+    // 🛑 THE TEARDOWN IS AWAITED BEFORE THE SOCKET CLOSES, AND THAT ORDER IS
+    // THE ONE SIGNAL `agents stop` CAN WAIT ON for every driver — a host child
+    // has no container to poll.
+    await finishShutdown();
   };
 
   onWake = (envelope): WakeAck => {

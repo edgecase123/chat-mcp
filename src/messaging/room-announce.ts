@@ -1,4 +1,5 @@
 import * as dao from "../storage/dao.js";
+import type { MessageKind } from "../storage/dao.js";
 import type { Db } from "../storage/db.js";
 import { notifyPeer } from "../notify/bus.js";
 
@@ -19,6 +20,15 @@ export interface AnnounceToRoomInput {
    * copied three times. A default would re-hide it.
    */
   advanceActorRead: boolean;
+  /**
+   * The coordination kind, which defaults to `insertMessage`'s own `chat`.
+   *
+   * 🛑 PASSED TO THE NOTIFY PAYLOAD TOO, NOT ONLY TO THE ROW. `NotifyEnvelope`
+   * says dropping it is a correctness bug: an `alert` delivered without it
+   * arrives as an ordinary message and misses the recipient's alert lane,
+   * which is the one layer built to deliver it faster.
+   */
+  kind?: MessageKind;
 }
 
 export interface AnnounceToRoomResult {
@@ -46,12 +56,13 @@ export function announceToRoom(
   db: Db,
   input: AnnounceToRoomInput,
 ): AnnounceToRoomResult {
-  const { room, body, actor, advanceActorRead } = input;
+  const { room, body, actor, advanceActorRead, kind } = input;
 
   const sent = dao.insertMessage(db, {
     from: dao.SYSTEM_HANDLE,
     to: room,
     body,
+    kind,
   });
 
   if (advanceActorRead) dao.advanceRoomRead(db, room, actor, sent.id);
@@ -67,6 +78,7 @@ export function announceToRoom(
       from: dao.SYSTEM_HANDLE,
       ts: sent.sent_at,
       body,
+      kind,
     });
 
     notified += 1;
