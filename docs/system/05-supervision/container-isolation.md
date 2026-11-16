@@ -58,17 +58,34 @@ has no business in it.
 
 ## What has to happen before the first container starts
 
-Two one-time steps, both in the `supervise` action, and both keyed on the
-**resolved sandbox mode** rather than on the `--container` flag.
+Three steps, all in the `supervise` action, and all keyed on the **resolved
+sandbox mode** rather than on the `--container` flag.
 
 ```
 resolveDriver({driver, container}).mode === "docker"
   |
   1 CONFIRM   the plan is printed, the operator answers y        once per handle
-  2 BUILD     chat-mcp-agent:local, when the inputs hash moved   once per change
+  2 COMPILE   npm run build                                      EVERY start
+  3 BUILD     chat-mcp-agent:local, when the inputs hash moved   when dist moved
   |
   startSupervisor()
 ```
+
+🛑 **STEP 2 IS UNCONDITIONAL, AND IT HAS TO COME BEFORE STEP 3.** The inputs
+hash covers `dist`, which is build OUTPUT. The compile used to sit inside step
+3's branch, so a `src/` edit moved nothing the hash could see: the branch did
+not run, the compile did not run, and the container started on the
+last-compiled `dist` while the check reported the image as current.
+
+🛑 **A HOIST, NOT A DEDENT.** A compile placed after the freshness verdict —
+even outside the branch — still hashes the stale `dist`. The order is the
+property, and `prepareAgentImage` in `supervise/container.ts` owns it.
+`build-before-freshness.test.ts` asserts the sequence; the dedent is one of
+the two mutants it is measured against.
+
+⚠️ **An unconditional compile is not an unconditional docker build.** A no-op
+`tsc` is ~1.34s, and `buildInputsHash` is a content hash — identical bytes
+produce the same hash, so step 3 still skips.
 
 🛑 **The mode is the gate because `--container` is not the only spelling.**
 `--driver docker-claude` resolves to `mode: "docker"` on its own, and an alias
@@ -76,9 +93,9 @@ added to `ALIASES` later will too. Keyed on the flag, those spellings reached
 `startSupervisor` with no image and no confirmed plan, and it refused the
 handle it had just been told to start.
 
-⚠️ **Confirmation comes first, then the build.** The build is minutes of
-docker, and an operator who answers `n` must not have paid for an image they
-refused.
+⚠️ **Confirmation comes first, then the compile and the build.** The docker
+build is minutes, and an operator who answers `n` must not have paid for an
+image they refused. The compile sits on the same side of that question.
 
 🛑 **With no terminal attached the confirmation REFUSES instead of asking.**
 `rl.question` resolves to `''` at EOF, which is not `y`, so a scripted start

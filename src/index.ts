@@ -648,13 +648,8 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       // just been told to start. Keyed on the mode, a future alias is covered
       // the day it is added to `ALIASES`.
       if (selection.mode === "docker") {
-        const {
-          imageNeedsBuild,
-          buildImage,
-          isConfirmed,
-          markConfirmed,
-          describePlan,
-        } = await import("./supervise/container.js");
+        const { prepareAgentImage, isConfirmed, markConfirmed, describePlan } =
+          await import("./supervise/container.js");
         const { readMounts } = await import("./supervise/mounts.js");
         const { execSync } = await import("node:child_process");
 
@@ -710,13 +705,9 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
           markConfirmed(handle);
         }
 
-        if (imageNeedsBuild()) {
-          console.log(
-            "building the chat-mcp-agent image (Dockerfile changed or image missing)...",
-          );
-          execSync("npm run build", { stdio: "inherit" });
-          buildImage();
-        }
+        prepareAgentImage(() =>
+          execSync("npm run build", { stdio: "inherit" }),
+        );
       }
 
       const { startSupervisor } = await import("./supervise/index.js");
