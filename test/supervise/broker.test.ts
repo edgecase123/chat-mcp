@@ -77,38 +77,76 @@ function registerWith(handle: string, dir: string): void {
 }
 
 /**
- * Send lines and collect whatever comes back, then report whether the peer
- * closed.
+ * Send lines and wait for the named OUTCOME, never for a clock.
  *
  * 🛑 RETURNS THE RAW BYTES, NOT PARSED OBJECTS. A refusal that writes NOTHING
  * and a refusal that writes an error envelope are the two outcomes under test,
  * and parsing first would make the empty case indistinguishable from a parse
  * failure.
+ *
+ * 🛑 `expect` IS THE ASSERTION, AND `waitMs` ONLY REJECTS. `0` means the peer
+ * must CLOSE, which is what every refusal path does; `n` means `n` complete
+ * lines must arrive. Resolving on the clock instead made "no reply yet" and
+ * "refused with no reply" the same observation, so a reply slower than the
+ * wait read as a refusal and a refusal that replied late read as silence.
  */
 function exchange(
   port: number,
   lines: readonly string[],
   waitMs = 250,
+  expect = 0,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const socket = connect(port, "127.0.0.1");
     let received = "";
+    let settled = false;
     let timer: NodeJS.Timeout;
 
-    const finish = () => {
+    const settle = (outcome: () => void) => {
+      if (settled) return;
+
+      settled = true;
       clearTimeout(timer);
       socket.destroy();
-      resolve(received);
+      outcome();
     };
 
-    socket.on("error", reject);
+    // One write site in the broker and it terminates every reply, so a newline
+    // count is the number of COMPLETE lines rather than of arrived fragments.
+    const complete = () => received.split("\n").length - 1;
+
+    socket.on("error", (cause) => settle(() => reject(cause)));
     socket.on("data", (chunk) => {
       received += chunk.toString();
+
+      if (expect > 0 && complete() >= expect) settle(() => resolve(received));
     });
-    socket.on("close", finish);
+    socket.on("close", () =>
+      settle(() => {
+        if (expect === 0 || complete() >= expect) return resolve(received);
+
+        reject(
+          new Error(
+            `the peer closed carrying ${complete()} of ${expect} reply lines: ${JSON.stringify(received)}`,
+          ),
+        );
+      }),
+    );
     socket.once("connect", () => {
       for (const line of lines) socket.write(`${line}\n`);
-      timer = setTimeout(finish, waitMs);
+      timer = setTimeout(
+        () =>
+          settle(() =>
+            reject(
+              new Error(
+                expect === 0
+                  ? `the peer never closed inside ${waitMs}ms; it wrote ${JSON.stringify(received)}`
+                  : `${complete()} of ${expect} reply lines arrived inside ${waitMs}ms: ${JSON.stringify(received)}`,
+              ),
+            ),
+          ),
+        waitMs,
+      );
     });
   });
 }
@@ -122,6 +160,7 @@ async function replies(
     port,
     envelopes.map((e) => JSON.stringify(e)),
     waitMs,
+    envelopes.length,
   );
 
   return raw
@@ -472,15 +511,19 @@ test("rewriting the registration does not move where a command runs", async (t) 
   });
   t.after(() => broker.close());
 
-  const [reply] = await replies(broker.port, [
-    {
-      id: 1,
-      token: "tok-secret",
-      op: "run-command",
-      name: "gate",
-      params: { lane: "php" },
-    },
-  ]);
+  const [reply] = await replies(
+    broker.port,
+    [
+      {
+        id: 1,
+        token: "tok-secret",
+        op: "run-command",
+        name: "gate",
+        params: { lane: "php" },
+      },
+    ],
+    1500,
+  );
 
   assert.equal(reply?.ok, true, `the broker refused: ${String(reply?.error)}`);
   assert.match(reply?.stdout as string, /real/);
@@ -524,15 +567,19 @@ test("a handle with a manifest but no registration still runs its command", asyn
   });
   t.after(() => broker.close());
 
-  const [reply] = await replies(broker.port, [
-    {
-      id: 1,
-      token: "tok-secret",
-      op: "run-command",
-      name: "gate",
-      params: { lane: "php" },
-    },
-  ]);
+  const [reply] = await replies(
+    broker.port,
+    [
+      {
+        id: 1,
+        token: "tok-secret",
+        op: "run-command",
+        name: "gate",
+        params: { lane: "php" },
+      },
+    ],
+    1500,
+  );
 
   assert.equal(reply?.ok, true, `the broker refused: ${String(reply?.error)}`);
   assert.match(reply?.stdout as string, /unregistered/);
