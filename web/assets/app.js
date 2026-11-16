@@ -500,14 +500,7 @@ function prefillComposer(text) {
 }
 
 async function copyTargetName(label) {
-  try {
-    await writeClipboard(label);
-    toast(`copied ${label}`, "info");
-  } catch (e) {
-    // Never a success toast on a failed write; the clipboard is unreadable
-    // from here, so the toast is the only thing that could mislead.
-    toast(`copy failed: ${e.message}`, "error");
-  }
+  await copyToClipboard(label, `copied ${label}`);
 }
 
 /**
@@ -1062,17 +1055,30 @@ async function copyMessage(m, attributed) {
     { from: m.from_handle, time: fmtTime(m.sent_at), body: m.body },
     { attributed },
   );
+  await copyToClipboard(text, attributed ? "copied with author" : "copied");
+}
+
+/**
+ * 🛑 NEVER A SUCCESS TOAST ON A FAILED WRITE. The clipboard cannot be read
+ * back from here, so the toast is the only thing that could mislead.
+ *
+ * 🛑 ONE FAILURE SHAPE FOR EVERY COPY ON THE PAGE. Three call sites had three
+ * answers for a blocked clipboard — one `error`, two `warn`, and one pasted
+ * the exception text into the toast. Which of those a reader saw depended on
+ * which button they pressed.
+ */
+async function copyToClipboard(text, successToast) {
   try {
     await writeClipboard(text);
   } catch (err) {
-    // 🛑 Never a success toast on a failed write. The clipboard is the only
-    // place the result shows, so a wrong toast is undetectable.
     console.error("copy failed", err);
     toast("could not copy — clipboard blocked", "warn");
 
-    return;
+    return false;
   }
-  toast(attributed ? "copied with author" : "copied", "info");
+  toast(successToast, "info");
+
+  return true;
 }
 
 /** navigator.clipboard needs a secure context. 127.0.0.1 counts as one, but a
@@ -1096,8 +1102,9 @@ async function writeClipboard(text) {
   }
 }
 
-/** Client-only panels, rendered as TEXT. There is no server-side markdown
- *  pass for these, and text children mean no innerHTML and nothing to escape. */
+/** Client-only panels. Text children or `h()` elements, never `innerHTML`, so
+ *  there is nothing to escape — and no server-side markdown pass reaches
+ *  these. The `sections` branch renders ELEMENTS; the `text` branch a <pre>. */
 function appendEphemeral() {
   for (const e of state.ephemeral) {
     el.messages.appendChild(
@@ -1162,25 +1169,10 @@ function commandCopyButton(row) {
       type: "button",
       title: label,
       "aria-label": label,
-      onclick: () => copyCommand(row.copy),
+      onclick: () => copyToClipboard(row.copy, `copied ${row.copy}`),
     },
     ["\u29c9"],
   );
-}
-
-async function copyCommand(command) {
-  try {
-    await writeClipboard(command);
-  } catch (err) {
-    // 🛑 Never a success toast on a failed write. Same rule as copyMessage —
-    // the clipboard is the only place the result shows, so a wrong toast
-    // cannot be noticed.
-    console.error("copy failed", err);
-    toast("could not copy — clipboard blocked", "warn");
-
-    return;
-  }
-  toast(`copied ${command}`, "info");
 }
 
 /** `text` for a <pre> panel, or `{ sections }` for rows carrying a control.
