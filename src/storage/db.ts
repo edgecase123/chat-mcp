@@ -288,13 +288,37 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
  */
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
-function tx(db: Db, fn: () => void): void {
-  db.exec("BEGIN");
+/**
+ * Run `fn` as one transaction, rolling back on a throw.
+ *
+ * ⚠️ `IMMEDIATE` TAKES THE WRITE LOCK AT `BEGIN`. A plain `BEGIN` is deferred,
+ * so a writer only contends on its first statement and can then fail part-way
+ * with `SQLITE_BUSY` — which is the partial state a transaction is here to
+ * prevent. Writers pass `IMMEDIATE`; `migrate` holds the database alone.
+ *
+ * 🛑 NESTING THROWS. `node:sqlite` exposes no `isTransaction`, so this cannot
+ * detect an outer transaction and SQLite refuses the inner `BEGIN`.
+ */
+export function tx(
+  db: Db,
+  fn: () => void,
+  mode: "DEFERRED" | "IMMEDIATE" = "DEFERRED",
+): void {
+  db.exec(mode === "IMMEDIATE" ? "BEGIN IMMEDIATE" : "BEGIN");
   try {
     fn();
     db.exec("COMMIT");
   } catch (e) {
-    db.exec("ROLLBACK");
+    // 🛑 THE CAUSE WINS OVER THE CLEANUP. A severe failure rolls the
+    // transaction back itself, so this `ROLLBACK` then throws "no transaction
+    // is active" — an error naming nothing about what failed. Nothing is
+    // swallowed: `e` is rethrown either way.
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      /* the rethrow below carries the real cause */
+    }
+
     throw e;
   }
 }
