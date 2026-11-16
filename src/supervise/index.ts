@@ -596,10 +596,11 @@ export async function startSupervisor(
    * container that no longer exists.
    */
   const finishShutdown = async (): Promise<void> => {
-    // 🛑 CLOSED AFTER THE TEARDOWN, NOT BEFORE, SO THE SOCKET'S DISAPPEARANCE
-    // MEANS "FULLY STOPPED". That is the one signal `agents stop` can wait on
-    // for every driver — a host child has no container to poll. Envelopes
-    // arriving in this window are refused above, not delivered to a dead child.
+    // 🛑 THE SOCKET GOES LAST, SO ITS DISAPPEARANCE MEANS THE CHILD IS REALLY
+    // GONE. What makes that true differs per caller: `doStop` awaits the
+    // child's teardown before calling this, and the own-exit path is called BY
+    // the exit. Envelopes arriving in this window are refused above, not
+    // delivered to a dead child.
     await listener.close();
     await hostBus?.close();
 
@@ -1394,6 +1395,9 @@ export async function startSupervisor(
     current.kill();
     await current.awaitTeardown?.();
 
+    // 🛑 THE TEARDOWN IS AWAITED BEFORE THE SOCKET CLOSES, AND THAT ORDER IS
+    // THE ONE SIGNAL `agents stop` CAN WAIT ON for every driver — a host child
+    // has no container to poll.
     await finishShutdown();
   };
 
