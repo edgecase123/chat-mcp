@@ -28,6 +28,7 @@ import {
   messageMarkdown,
   cheatSheet,
   commandBlock,
+  commandRows,
   atTokenAt,
   pathSuggestionsFor,
   pathsFromUriList,
@@ -1116,16 +1117,78 @@ function appendEphemeral() {
             ["\u00d7"],
           ),
         ]),
-        h("pre", { className: "message__pre" }, [e.text]),
+        e.sections
+          ? commandPanel(e.sections)
+          : h("pre", { className: "message__pre" }, [e.text]),
       ]),
     );
   }
 }
 
-function showEphemeral(title, text) {
+/**
+ * The command list as ROWS, each with a button that copies the command.
+ *
+ * 🛑 THE BUTTON CARRIES `row.copy`, NOT `row.usage`. `usage` holds the
+ * `<peer>` placeholder so the reader can see an argument is wanted, and a
+ * clipboard holding that placeholder is undetectable until someone pastes it
+ * and sends. `commandRows` is what keeps the two apart.
+ */
+function commandPanel(sections) {
+  return h(
+    "div",
+    { className: "command-panel" },
+    sections.map((section) =>
+      h("div", { className: "command-panel__section" }, [
+        h("div", { className: "command-panel__heading" }, [section.heading]),
+        ...section.rows.map((row) =>
+          h("div", { className: "command-panel__row" }, [
+            h("code", { className: "command-panel__usage" }, [row.usage]),
+            h("span", { className: "command-panel__desc" }, [row.desc]),
+            commandCopyButton(row),
+          ]),
+        ),
+      ]),
+    ),
+  );
+}
+
+function commandCopyButton(row) {
+  const label = `Copy ${row.copy} to the clipboard`;
+
+  return h(
+    "button",
+    {
+      className: "command-panel__copy",
+      type: "button",
+      title: label,
+      "aria-label": label,
+      onclick: () => copyCommand(row.copy),
+    },
+    ["\u29c9"],
+  );
+}
+
+async function copyCommand(command) {
+  try {
+    await writeClipboard(command);
+  } catch (err) {
+    // 🛑 Never a success toast on a failed write. Same rule as copyMessage —
+    // the clipboard is the only place the result shows, so a wrong toast
+    // cannot be noticed.
+    console.error("copy failed", err);
+    toast("could not copy — clipboard blocked", "warn");
+
+    return;
+  }
+  toast(`copied ${command}`, "info");
+}
+
+/** `text` for a <pre> panel, or `{ sections }` for rows carrying a control.
+ *  One of the two, never both — `appendEphemeral` branches on `sections`. */
+function showEphemeral(title, text, { sections = null } = {}) {
   state.ephemeral = [
     ...state.ephemeral,
-    { id: `eph-${Date.now()}`, title, text },
+    { id: `eph-${Date.now()}`, title, text, sections },
   ];
   renderMessages({ forceBottom: true });
 }
@@ -1469,6 +1532,12 @@ const COMMANDS = [
     desc: "the same commands plus every gesture, in the stream",
     cat: "system",
   },
+  {
+    name: "cli-commands",
+    arg: "",
+    desc: "the same commands, each with a button that copies it",
+    cat: "system",
+  },
 ];
 
 // Grouped, because a flat list reads as unrelated things. Same builder as the
@@ -1729,6 +1798,12 @@ async function tryDispatchSlashCommand(input) {
     }
     case "cheat-sheet": {
       showEphemeral("/cheat-sheet", cheatSheet(COMMANDS, CATEGORY_LABELS));
+      return true;
+    }
+    case "cli-commands": {
+      showEphemeral("/cli-commands", null, {
+        sections: commandRows(COMMANDS, CATEGORY_LABELS),
+      });
       return true;
     }
     // Same wire as a normal send, only the kind differs. The recipient's
