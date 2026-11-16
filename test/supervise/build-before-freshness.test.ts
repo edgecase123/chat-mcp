@@ -147,3 +147,28 @@ test("🚨 the injected freshness check is the one that is consulted", () => {
     "the two verdicts produced the same docker calls, so the fake is not what decides",
   );
 });
+
+/**
+ * 🛑 THE CLAIM THIS PINS: `prepareAgentImage` BUILDS A DIFFERENT THING FROM
+ * WHAT `runDependencyInstall` INSPECTS.
+ *
+ * The build only ever produces `IMAGE_TAG`, and
+ * `containerized.ts:runDependencyInstall` inspects `vendor.image`. They agree
+ * today because `claudeSpawn` sets its image to `IMAGE_TAG` — a coincidence,
+ * not a constraint. A second vendor naming its own image would reach the
+ * install step with nothing built, which is why that refusal stays.
+ *
+ * ⚠️ THIS TEST EXISTS BECAUSE A COMMENT IN `containerized.ts` ASSERTS IT. If
+ * it ever fails, fix the comment in the same change — a vendor whose image is
+ * NOT the built tag makes the refusal load-bearing rather than defensive.
+ */
+test("🚨 the only vendor's image IS the tag the build produces, and nothing else guarantees it", async () => {
+  const { IMAGE_TAG } = await import("../../src/supervise/container.js");
+  const { claudeSpawn } = await import("../../src/adapters/claude-spawn.js");
+
+  assert.equal(
+    claudeSpawn.image,
+    IMAGE_TAG,
+    "the vendor names an image prepareAgentImage never builds, so a containerized start refuses after a successful build",
+  );
+});

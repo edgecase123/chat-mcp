@@ -481,16 +481,25 @@ export function runDependencyInstall(
   // below it reads "the dependency install container failed", which sends the
   // operator to npm when the fix is one flag.
   //
-  // 🚨 `--driver docker-claude` IS THE COMMON WAY TO MEET THIS, AND IT IS WHY
-  // THIS EXISTS. `ALIASES["docker-claude"].mode` is `"docker"`, so the spawn is
-  // containerized — but the `imageNeedsBuild()`/`buildImage()` pair in
-  // `src/index.ts` sits inside the `if (o.container)` branch, which that flag
-  // does not enter. So docker mode is selected with no image built. Raised by
-  // claude1 on PR 259 after I claimed the image was always already present.
+  // 🛑 `prepareAgentImage` CANNOT COVER THIS, BECAUSE IT BUILDS A DIFFERENT
+  // THING FROM WHAT IS INSPECTED HERE. It only ever builds `IMAGE_TAG`, while
+  // this line inspects `vendor.image` — a per-vendor field. `claudeSpawn` is
+  // the only vendor today and sets them equal, so they agree by coincidence;
+  // a second vendor naming its own image would reach here with nothing built.
   //
-  // ⚠️ IT STILL REFUSES, per lee's ruling of 2026-11-15 — a supervisor that is
-  // up with an agent that can never start is a worse lie than refusing. Only
-  // the sentence changes.
+  // ⚠️ `startSupervisor` IS ALSO A LIBRARY EXPORT. Its one production caller
+  // is `src/index.ts`, immediately after `prepareAgentImage` — but nothing in
+  // the type stops another entry point calling it with no image on the
+  // machine.
+  //
+  // ⚠️ IT REFUSES RATHER THAN BUILDING, per lee's ruling of 2026-11-15 — a
+  // supervisor that is up with an agent that can never start is a worse lie
+  // than refusing.
+  //
+  // 🛑 THE ORIGINAL REASON HERE WAS A `--driver docker-claude` HOLE AND IT IS
+  // GONE, in both halves. `src/index.ts` now keys the block on
+  // `selection.mode`, so that flag does enter it, and the
+  // `imageNeedsBuild()`/`buildImage()` pair it named no longer exists there.
   try {
     execFileSync("docker", ["image", "inspect", vendor.image], {
       stdio: "ignore",
