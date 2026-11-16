@@ -101,17 +101,38 @@ test("a handler that ACCEPTS a # declares kind: target, and the reverse", () => 
 
   // Slice the `doCommand` switch into one body per `case "name":`, so a branch
   // is attributed to the command that owns it rather than to the file.
+  //
+  // 🛑 IT MATCHES THE LABEL AND NOTHING AFTER IT. Two earlier versions each
+  // undercounted, and the count assertion below is what caught both:
+  //
+  //   `case "x": {`   required a brace  -> 15 of 23, the 8 brace-less cases
+  //                                        invisible. claude1's mutant in
+  //                                        `case "who":` passed the guard.
+  //   consuming `\n`  ate the separator -> 22 of 23, because `case "quit":`
+  //                                        and `case "exit":` are adjacent.
+  //
+  // ONE regex, used for both the split and the census, so the two cannot
+  // disagree about what a label is.
+  const CASE_LABEL = /\n[ \t]*case "([a-z-]+)":/;
+  const parts = src.split(new RegExp(CASE_LABEL, "g"));
   const bodies = new Map<string, string>();
-  const parts = src.split(/\n\s*case "([a-z-]+)": \{\n/);
   for (let i = 1; i < parts.length; i += 2) {
-    bodies.set(parts[i]!, parts[i + 1]!.split(/\n\s*case "/)[0]!);
+    bodies.set(parts[i]!, parts[i + 1]!);
   }
 
-  // NON-VACUITY. The splitter has to have found the commands under test, or
-  // every assertion below passes over an empty map.
-  for (const name of ["dm", "dispatch", "alert", "kick"]) {
-    assert.ok(bodies.has(name), `the splitter did not find case "${name}"`);
-  }
+  // NON-VACUITY, AS A COUNT RATHER THAN AS NAMES. Pinning four names was the
+  // gap: it proved the splitter found those four and said nothing about the
+  // other nineteen, so an undercount of 8 reported a clean census.
+  const labels = [...src.matchAll(new RegExp(CASE_LABEL, "g"))].map(
+    (m) => m[1]!,
+  );
+  assert.equal(
+    bodies.size,
+    new Set(labels).size,
+    `the splitter built ${bodies.size} bodies for ${new Set(labels).size} ` +
+      `case labels; missed = ${labels.filter((n) => !bodies.has(n)).join(",")}`,
+  );
+  assert.ok(labels.length > 0, "no case labels were found at all");
 
   const declaresTarget = [
     ...new Set(
