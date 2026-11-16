@@ -14,7 +14,7 @@ import type {
   Agent,
 } from "../../storage/dao.js";
 import { sendOrReason } from "../../messaging/send-or-reason.js";
-import { assertRoomName } from "../../util/naming.js";
+import { assertRoomName, roomTargetRefusal } from "../../util/naming.js";
 import { stampOf as timeOf } from "../../util/time.js";
 import { wrappedRowCount, rehydrateEscapedNewlines } from "../../util/wrap.js";
 import type { View } from "./views.js";
@@ -379,6 +379,27 @@ export function App({
         // Strip trailing whitespace but keep internal \n.
         return s.replace(/\s+$/, "");
       };
+
+      /**
+       * What is wrong with a `#room` target, or `null` when it is usable.
+       *
+       * 🛑 FOUR COMMANDS OWED THE SAME TWO CHECKS AND EACH HAD ITS OWN COPY.
+       * A valid name is not enough — a caller who is not a member would send
+       * into a room they cannot read back, so membership is the second half.
+       */
+      const roomTargetProblem = (room: string): string | null => {
+        try {
+          assertRoomName(room);
+        } catch (e) {
+          return (e as Error).message;
+        }
+        if (!dao.isRoomMember(db, room, handle)) {
+          return `not a member of ${room} — /join first`;
+        }
+
+        return null;
+      };
+
       switch (cmd) {
         case "quit":
         case "exit":
@@ -507,7 +528,17 @@ export function App({
           return;
         case "dm": {
           const t = args[0];
-          if (!t) return setStatus("usage: /dm <peer>");
+          if (!t) return setStatus("usage: /dm <peer|#room>");
+          // A `#` target opens the room rather than reporting it unknown. The
+          // room form was `/join`, and the refusal named neither it nor rooms
+          // at all. #277.
+          if (t.startsWith("#")) {
+            const problem = roomTargetProblem(t);
+            if (problem) return setStatus(problem);
+            setView({ kind: "room", room: t });
+            setStatus(null);
+            return;
+          }
           if (t === handle) return setStatus("cannot dm yourself");
           if (!dao.getAgent(db, t)) return setStatus(`unknown peer: ${t}`);
           setView({ kind: "dm", peer: t });
@@ -571,7 +602,17 @@ export function App({
         case "dispatch": {
           const [to, ...rest] = args;
           if (!to || rest.length === 0)
-            return setStatus("usage: /dispatch <peer> <text...>");
+            return setStatus("usage: /dispatch <peer|#room> <text...>");
+          // A `#` target broadcasts rather than reporting it unknown. The room
+          // form was `/broadcast`, nine lines below, and the refusal named
+          // neither it nor rooms at all. #277.
+          if (to.startsWith("#")) {
+            const problem = roomTargetProblem(to);
+            if (problem) return setStatus(problem);
+            sendTo({ kind: "room", room: to }, bodyAfter(1), "dispatch");
+            setStatus(`dispatched → ${to}`);
+            return;
+          }
           if (!dao.getAgent(db, to)) return setStatus(`unknown peer: ${to}`);
           sendTo({ kind: "dm", peer: to }, bodyAfter(1), "dispatch");
           setStatus(`dispatched → ${to}`);
@@ -581,14 +622,8 @@ export function App({
           const [room, ...rest] = args;
           if (!room || rest.length === 0)
             return setStatus("usage: /broadcast #<room> <text...>");
-          try {
-            assertRoomName(room);
-          } catch (e) {
-            return setStatus((e as Error).message);
-          }
-          if (!dao.isRoomMember(db, room, handle)) {
-            return setStatus(`not a member of ${room} — /join first`);
-          }
+          const problem = roomTargetProblem(room);
+          if (problem) return setStatus(problem);
           sendTo({ kind: "room", room }, bodyAfter(1), "dispatch");
           setStatus(`broadcast → ${room}`);
           return;
@@ -599,14 +634,8 @@ export function App({
             return setStatus("usage: /alert <peer|#room> <text...>");
           const body = bodyAfter(1);
           if (target.startsWith("#")) {
-            try {
-              assertRoomName(target);
-            } catch (e) {
-              return setStatus((e as Error).message);
-            }
-            if (!dao.isRoomMember(db, target, handle)) {
-              return setStatus(`not a member of ${target} — /join first`);
-            }
+            const problem = roomTargetProblem(target);
+            if (problem) return setStatus(problem);
             sendTo({ kind: "room", room: target }, body, "alert");
             setStatus(`🚨 alert → ${target}`);
           } else {
@@ -834,6 +863,14 @@ export function App({
             return setStatus("cannot kick yourself — /quit instead");
           if (target === dao.SYSTEM_HANDLE)
             return setStatus("cannot kick system");
+          // 🛑 TEXT ONLY, AND DELIBERATELY NO REDIRECT TO A VERB. `/rooms` has
+          // three — `delete` destroys the room, `remove` drops a peer — so
+          // naming one could tell someone to destroy a room they meant to
+          // leave. The family is as specific as this refusal may safely get.
+          if (target.startsWith("#"))
+            return setStatus(
+              roomTargetRefusal(target, "Room operations are /rooms.", "kick"),
+            );
           if (!dao.getAgent(db, target))
             return setStatus(`unknown peer: ${target}`);
           const removed = dao.deleteAgent(db, target);

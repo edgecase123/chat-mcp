@@ -36,8 +36,8 @@ export interface Command {
 export const COMMANDS: Command[] = [
   {
     name: "/dm",
-    args: [{ name: "peer", kind: "peer" }],
-    description: "open a DM",
+    args: [{ name: "target", kind: "target" }],
+    description: "open a DM, or a room by #name",
     category: "conversation",
   },
   {
@@ -72,10 +72,10 @@ export const COMMANDS: Command[] = [
   {
     name: "/dispatch",
     args: [
-      { name: "peer", kind: "peer" },
+      { name: "target", kind: "target" },
       { name: "text", kind: "text", variadic: true },
     ],
-    description: "send tagged [DISPATCH] to peer",
+    description: "send tagged [DISPATCH] to a peer or #room",
     category: "messaging",
   },
   {

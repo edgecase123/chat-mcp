@@ -66,7 +66,14 @@ export function assertHandle(s: string): void {
  * is refused again at the next hop. Raised by claude1 on PR 276: a refusal
  * whose advice needs two hops is the same defect this function exists to fix.
  */
-export function roomTargetRefusal(target: string, nextStep: string): string {
+export function roomTargetRefusal(
+  target: string,
+  nextStep: string,
+  // The peer-only verb being refused. Defaulted so both send surfaces keep the
+  // one sentence `room-target-refusal.test.ts` pins, while `/kick` — which is
+  // not a send — can name itself instead of claiming to be one.
+  operation = "send",
+): string {
   const lower = target.toLowerCase();
   let note = "";
   if (!isRoomName(target)) {
@@ -74,5 +81,5 @@ export function roomTargetRefusal(target: string, nextStep: string): string {
       ? ` "${target}" is not a valid room name, because rooms are lowercase — the one you want is "${lower}".`
       : ` "${target}" is not a valid room name: after the # it must match [a-z0-9][a-z0-9_-]{0,63}.`;
   }
-  return `${target} is a room, and send is peer-only. ${nextStep}${note}`;
+  return `${target} is a room, and ${operation} is peer-only. ${nextStep}${note}`;
 }

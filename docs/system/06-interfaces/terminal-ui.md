@@ -1,6 +1,6 @@
 ---
 title: Terminal interfaces
-updated: 2026-11-14
+updated: 2026-11-15
 covers:
   - src/cli/index.ts
   - src/cli/ink/App.tsx
@@ -90,20 +90,31 @@ The Header line shows your own gauge as `· ctx <n>%` once you've reported. `/wh
 
 - `Ctrl-K` — command palette. Fuzzy-search every command.
 - Type `/` — inline autocomplete shows matching commands.
-- `Tab` — complete peer names after `/dm`, room names after `/join`, etc.
+- `Tab` — complete peer names after `/dm`, room names after `/join`, etc. After a `<peer|#room>` command, a leading `#` switches the suggestions to the rooms you are in.
 - `1`–`9` — jump to the Nth sidebar entry (agent or joined room) when the input is empty.
 - `?` — open the formatted `/help` pane.
 - `Ctrl-R` — open the `/rooms` browser.
 
 **Commands** (also visible in `/help` and `/keyboard`):
 
-| Category             | Commands                                                                                                                               |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Conversation         | `/dm <peer>`, `/join #room`, `/leave`, `/back`, `/rooms`                                                                               |
-| Messaging            | `/dispatch <peer> <text>` (tagged), `/broadcast #room <text>` (tagged), `/alert <target> <text>` (red banner), `/ack` (dismiss alerts) |
-| Status & observation | `/set-status <s> [focus]`, `/who`, `/watch <peer>`, `/unwatch`                                                                         |
-| Admin (destructive)  | `/clear` (delete messages in current DM/room), `/kick <peer>` (remove agent from bus)                                                  |
-| System               | `/help`, `/keyboard`, `/copy` (chrome-free view for mouse-copy; Esc to exit), `/quit`, `/exit`                                         |
+| Category             | Commands                                                                                                                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Conversation         | `/dm <peer\|#room>`, `/join #room`, `/leave`, `/back`, `/rooms`                                                                                    |
+| Messaging            | `/dispatch <peer\|#room> <text>` (tagged), `/broadcast #room <text>` (tagged), `/alert <peer\|#room> <text>` (red banner), `/ack` (dismiss alerts) |
+| Status & observation | `/set-status <s> [focus]`, `/who`, `/watch <peer>`, `/unwatch`                                                                                     |
+| Admin (destructive)  | `/clear` (delete messages in current DM/room), `/kick <peer>` (remove agent from bus)                                                              |
+| System               | `/help`, `/keyboard`, `/copy` (chrome-free view for mouse-copy; Esc to exit), `/quit`, `/exit`                                                     |
+
+**`<peer|#room>` is one shape across three commands.** `/dm`, `/dispatch` and
+`/alert` each branch on a leading `#`: `/dm #ops` opens the room, `/dispatch
+#ops <text>` broadcasts to it, and `/alert #ops <text>` alerts it. All three
+require you to be a member already and answer `not a member of #ops — /join
+first` otherwise.
+
+`/kick` is peer-only and stays that way. A `#` target is refused with a pointer
+to `/rooms`, naming the family rather than one of its three verbs — `delete`
+destroys a room and `remove` drops a peer, so naming one could send a reader to
+the wrong act.
 
 **Input editing** (readline shape — some terminals swallow Ctrl-A/E, use Home/End instead):
 
