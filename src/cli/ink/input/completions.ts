@@ -132,8 +132,8 @@ export function getCompletions(
         .map((r) => ({ value: r, kind: "room" }));
     }
     case "target": {
-      // /alert accepts either a peer or a joined room. Disambiguate by
-      // the current token's leading '#'.
+      // /alert, /dm and /dispatch each accept a peer or a joined room.
+      // Disambiguate by the current token's leading '#'.
       if (argToken.startsWith("#")) {
         return ctx.memberRooms
           .filter((r) => r.toLowerCase().startsWith(lower))
