@@ -93,10 +93,31 @@ see it.
   `DatabaseReplacedError` naming the function. `insertMessage` keeps its own
   `MessageNotPersistedError` because a send has a from and a to to report.
 - 🛑 **THE CHECK IS A WRITER'S FIRST LINE, AND THAT IS THE POINT.** Checking
-  mid-operation would turn a replaced file into PARTIAL state: `joinRoom` writes
-  `room_members` before it announces, so a throw between them leaves a member
-  joined with no announcement. Checked first, a refused writer has written
-  nothing. A test asserts the position, not just the presence.
+  mid-operation would turn a replaced file into PARTIAL state. Checked first, a
+  refused writer has written nothing. A test asserts the position, not just the
+  presence.
+- 🛑 **`joinRoom` ANNOUNCES FIRST, THEN COMMITS ITS TWO STATE ROWS TOGETHER**,
+  and neither half of that order is a preference.
+  - The announce goes through `insertMessage`, which proves its row landed by
+    re-reading it on the SECOND connection. That connection cannot see an
+    uncommitted row, so an announce inside the transaction makes every
+    file-backed join throw `row-absent-on-reread`.
+  - The announce cannot move after the commit either: the new joiner's
+    watermark is anchored to the id the announce returns, so there would be
+    nothing to write.
+  - `room_members` and `room_reads` are wrapped in one `BEGIN IMMEDIATE`. A
+    member row committed without its watermark row sends `roomWatermark` to its
+    `0` fallback, and the idempotence short-circuit then returns before the
+    watermark write — so the agent re-reads the room's whole history on every
+    poll, permanently, and a retry repairs nothing.
+  - ⚠️ **The residual is an orphan announce**, if the transaction fails after
+    the announce committed. Nothing reads that line as state and a rejoin
+    writes a second one.
+- ⚠️ **A `:memory:` DATABASE CANNOT TEST ANY OF THAT.** It has no second
+  connection, so the witness falls back to the writing connection and sees
+  uncommitted rows. The announce-outside-the-transaction guard therefore opens
+  a real database through `openDb`, and asserts `verifierFor` is defined before
+  it asserts anything else.
 - ⚠️ **PRESENCE OF THE CALL PROVES NOTHING ON ITS OWN.** The comparison is a
   no-op for a connection with no mark, which is every `:memory:` database — so
   most of the suite exercises a call that cannot fire. Two tests replace a real

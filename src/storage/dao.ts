@@ -5,6 +5,7 @@ import {
   assertLiveDatabase,
   currentSchemaVersion,
   databaseWasReplaced,
+  tx,
   verifierFor,
 } from "./db.js";
 import { dbPath } from "../util/paths.js";
@@ -685,26 +686,44 @@ export function joinRoom(db: Db, room: string, handle: string): JoinResult {
     return { room: hydrateRoom(db, room), was_new_member: false };
   }
 
-  db.prepare(
-    `INSERT INTO room_members (room_name, handle, joined_at) VALUES (?, ?, ?)`,
-  ).run(room, handle, now);
-
   const body = `${handle} joined ${room}`;
 
   // 🛑 THROUGH `insertMessage`, NOT A RAW INSERT. Its own statement read
   // `lastInsertRowid` with no `changes` check, so a swallowed insert handed back
-  // a rowid from another table — and that id is what anchors the watermark two
-  // lines below. A bogus high one makes `room_inbox` skip real messages, which
-  // the joiner reads as an empty room. #138.
+  // a rowid from another table — and that id is what anchors the watermark
+  // below. A bogus high one makes `room_inbox` skip real messages, which the
+  // joiner reads as an empty room. #138.
+  //
+  // 🛑 BEFORE THE TRANSACTION, AND THE ORDER IS FORCED BOTH WAYS. This call
+  // proves its row landed by re-reading it on a SECOND connection, which
+  // cannot see an uncommitted row — so inside the transaction every
+  // file-backed join throws `row-absent-on-reread`. It cannot move after the
+  // commit either, because the watermark below is anchored to the id this
+  // returns.
   const sent = insertMessage(db, { from: SYSTEM_HANDLE, to: room, body });
 
-  // Anchor the new joiner's watermark AT the system message so they don't
-  // see their own "joined" line. Existing members have lower watermarks
-  // and will pick it up on their next room_inbox / notify.
-  db.prepare(
-    `INSERT INTO room_reads (room_name, handle, last_read_id) VALUES (?, ?, ?)
-     ON CONFLICT(room_name, handle) DO UPDATE SET last_read_id = excluded.last_read_id`,
-  ).run(room, handle, sent.id);
+  // 🛑 ONE TRANSACTION, BECAUSE A THROW BETWEEN THESE TWO IS UNREPAIRABLE. A
+  // committed member row with no `room_reads` row sends `roomWatermark` to its
+  // 0 fallback, and the idempotence check above returns before the watermark
+  // write — so every retry reports `was_new_member: false` and fixes nothing.
+  // The agent re-reads the room's whole history, permanently.
+  tx(
+    db,
+    () => {
+      db.prepare(
+        `INSERT INTO room_members (room_name, handle, joined_at) VALUES (?, ?, ?)`,
+      ).run(room, handle, now);
+
+      // Anchor the new joiner's watermark AT the system message so they don't
+      // see their own "joined" line. Existing members have lower watermarks
+      // and will pick it up on their next room_inbox / notify.
+      db.prepare(
+        `INSERT INTO room_reads (room_name, handle, last_read_id) VALUES (?, ?, ?)
+         ON CONFLICT(room_name, handle) DO UPDATE SET last_read_id = excluded.last_read_id`,
+      ).run(room, handle, sent.id);
+    },
+    "IMMEDIATE",
+  );
 
   return {
     room: hydrateRoom(db, room),
