@@ -103,36 +103,43 @@ test("a handler that ACCEPTS a # declares kind: target, and the reverse", () => 
   // is attributed to the command that owns it rather than to the file.
   //
   // 🛑 IT MATCHES THE LABEL AND NOTHING AFTER IT. Two earlier versions each
-  // undercounted, and the count assertion below is what caught both:
+  // undercounted:
   //
   //   `case "x": {`   required a brace  -> 15 of 23, the 8 brace-less cases
   //                                        invisible. claude1's mutant in
   //                                        `case "who":` passed the guard.
   //   consuming `\n`  ate the separator -> 22 of 23, because `case "quit":`
   //                                        and `case "exit":` are adjacent.
-  //
-  // ONE regex, used for both the split and the census, so the two cannot
-  // disagree about what a label is.
-  const CASE_LABEL = /\n[ \t]*case "([a-z-]+)":/;
-  const parts = src.split(new RegExp(CASE_LABEL, "g"));
+  const parts = src.split(/\n[ \t]*case "([a-z-]+)":/);
   const bodies = new Map<string, string>();
   for (let i = 1; i < parts.length; i += 2) {
     bodies.set(parts[i]!, parts[i + 1]!);
   }
 
-  // NON-VACUITY, AS A COUNT RATHER THAN AS NAMES. Pinning four names was the
-  // gap: it proved the splitter found those four and said nothing about the
-  // other nineteen, so an undercount of 8 reported a clean census.
-  const labels = [...src.matchAll(new RegExp(CASE_LABEL, "g"))].map(
-    (m) => m[1]!,
+  // 🛑 THE DENOMINATOR COMES FROM A DELIBERATELY LOOSER, INDEPENDENT PATTERN.
+  // Counting with the SPLITTER's own regex is a tautology: both narrow
+  // together, so a splitter that saw 15 of 23 compared 15 against 15 and
+  // reported a clean census. Proven by claude1, who re-narrowed the splitter
+  // against a pristine App.tsx and watched this test pass.
+  const caseLines = src.match(/^[ \t]*case\b[^\n]*/gm) ?? [];
+  const named = caseLines.map((l) => /case "([a-z-]+)"/.exec(l)?.[1]);
+
+  assert.ok(caseLines.length > 0, "the census pattern found no case at all");
+  assert.ok(
+    named.every((n) => n !== undefined),
+    `a case label the census cannot name: ${caseLines
+      .filter((_, i) => named[i] === undefined)
+      .map((l) => l.trim())
+      .join(" | ")}`,
   );
   assert.equal(
     bodies.size,
-    new Set(labels).size,
-    `the splitter built ${bodies.size} bodies for ${new Set(labels).size} ` +
-      `case labels; missed = ${labels.filter((n) => !bodies.has(n)).join(",")}`,
+    new Set(named).size,
+    `the splitter built ${bodies.size} bodies for ${new Set(named).size} ` +
+      `case labels; missed = ${named
+        .filter((n) => n !== undefined && !bodies.has(n))
+        .join(",")}`,
   );
-  assert.ok(labels.length > 0, "no case labels were found at all");
 
   const declaresTarget = [
     ...new Set(
