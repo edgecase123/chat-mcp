@@ -1129,6 +1129,84 @@ body {
   color: var(--fg);
 }
 
+/* The /cli-commands panel. Rows rather than a <pre>, because each one carries
+   a copy button and text has nowhere to put a click target. */
+.command-panel {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.command-panel__section + .command-panel__section {
+  margin-top: 8px;
+}
+.command-panel__heading {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--fg-faint);
+  margin-bottom: 2px;
+}
+.command-panel__row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 1px 0;
+}
+.command-panel__usage {
+  flex: none;
+  font-family: var(--font-mono);
+  color: var(--accent);
+  white-space: nowrap;
+}
+.command-panel__desc {
+  color: var(--fg-faint);
+  overflow-wrap: anywhere;
+}
+.command-panel__copy {
+  margin-left: auto;
+  flex: none;
+  background: none;
+  border: 0;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--fg-faint);
+  cursor: pointer;
+  /* Visible without hover, because a touch screen has none. Same rule as
+     .message__copy, which this deliberately mirrors. */
+  opacity: 0.75;
+}
+.command-panel__copy:hover,
+.command-panel__copy:focus-visible {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--border);
+}
+
+/* Narrow: the description drops under the usage so neither is truncated.
+   🛑 THE USAGE MUST GIVE UP `nowrap` TOO. Wrapping only the description still
+   clipped `/broadcast <#room> <text>` at 420px, and the row does not scroll,
+   so the clipped half was unreachable rather than merely offscreen. */
+@media (max-width: 560px) {
+  .command-panel__row {
+    flex-wrap: wrap;
+  }
+  .command-panel__usage {
+    /* 🛑 `flex: none` AT FULL WIDTH MEANS flex-shrink: 0, and an item that
+       cannot shrink never wraps however `white-space` is set. Dropping only
+       `nowrap` left `/broadcast <#room> <text>` at 181px in a 158px row. */
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .command-panel__desc {
+    flex-basis: 100%;
+    padding-left: 0;
+  }
+}
+
 /* A drag carrying files is over the window. Inset rather than a border, so
    nothing in the layout moves and no scrollbar appears mid-drag. */
 .app-shell.is-dropping::after {

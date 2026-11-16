@@ -613,6 +613,42 @@ export function commandBlock(
     .join("\n\n");
 }
 
+/**
+ * The same command table as `commandBlock`, but as DATA rather than a padded
+ * string, so a surface can hang a control off each row.
+ *
+ * 🛑 `/help` AND `/cheat-sheet` CANNOT CARRY A BUTTON. Both render into a
+ * single `<pre>`, and text has nowhere to put a click target. That is the
+ * whole reason this builder exists beside `commandBlock` rather than
+ * replacing it.
+ *
+ * 🛑 `usage` AND `copy` ARE DIFFERENT STRINGS ON PURPOSE. The row must SHOW
+ * `/dm <peer>` so the reader knows an argument is wanted, and must COPY `/dm`
+ * so a paste is sendable. A clipboard carrying `<peer>` is invisible until
+ * someone pastes it and sends.
+ *
+ * A category with no commands is dropped. An empty heading and a heading
+ * whose rows failed to build look identical on screen.
+ *
+ * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
+ * @param {Record<string, string>} labels category key -> heading
+ */
+export function commandRows(commands, labels) {
+  return Object.keys(labels)
+    .map((cat) => ({
+      cat,
+      heading: labels[cat],
+      rows: commands
+        .filter((c) => c.cat === cat)
+        .map((c) => ({
+          usage: commandUsage(c),
+          desc: c.desc,
+          copy: `/${c.name}`,
+        })),
+    }))
+    .filter((section) => section.rows.length > 0);
+}
+
 /** Gestures, as data, so one measurement can cover them and the commands. */
 const GESTURE_SECTIONS = [
   [

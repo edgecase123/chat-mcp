@@ -28,6 +28,7 @@ import {
   atTokenAt,
   cheatSheet,
   commandBlock,
+  commandRows,
   dashColumn,
   messageMarkdown,
   pathSuggestionsFor,
@@ -2170,4 +2171,78 @@ test("no room at all is an empty line, never the word undefined", () => {
   // renderPaneHeader passes the result of `.find()`, which misses.
   assert.equal(roomMetaLabel(undefined), "");
   assert.equal(roomMetaLabel(null), "");
+});
+
+// ── /cli-commands ───────────────────────────────────────────────────────
+
+test("🛑 /cli-commands carries EVERY command the text surfaces print", () => {
+  // The whole point of a third surface is that it cannot drift from the other
+  // two. A hand-kept row list is the defect; this fails the moment the
+  // structured builder and the text builder disagree on the command SET.
+  const structured = commandRows(WIDE, LABELS).flatMap((s) =>
+    s.rows.map((r) => r.usage),
+  );
+  const text = commandBlock(WIDE, LABELS, { headingIndent: "" })
+    .split("\n")
+    .filter((l) => l.trim().startsWith("/"))
+    .map((l) =>
+      l
+        .trim()
+        .split(/\s+—\s+/)[0]
+        .replace(/\s+/g, " "),
+    );
+
+  assert.deepEqual(
+    structured,
+    text,
+    "the two surfaces list different commands",
+  );
+  // The denominator, so a builder that returned [] cannot pass the compare.
+  assert.equal(structured.length, WIDE.length);
+  assert.equal(WIDE.length, 9);
+});
+
+test("🛑 each row's copy payload is the BARE command, ready to paste", () => {
+  // The clipboard is the only place this shows, so a payload carrying the
+  // `<peer>` placeholder is undetectable until someone pastes it and sends.
+  const rows = commandRows(WIDE, LABELS).flatMap((s) => s.rows);
+  const withPlaceholder = rows.filter((r) => /[<>]/.test(r.copy));
+  assert.deepEqual(withPlaceholder, [], "a copy payload carried a placeholder");
+
+  const byUsage = (usage: string) => {
+    const row = rows.find((r) => r.usage === usage);
+    assert.ok(row, `no row for ${usage}`);
+    return row;
+  };
+  assert.equal(byUsage("/dm <peer>").copy, "/dm");
+  // A command with no argument must not pick up a trailing space.
+  assert.equal(byUsage("/who").copy, "/who");
+});
+
+test("🛑 a category with no commands is DROPPED, not rendered empty", () => {
+  // An empty heading reads as a section that failed to load.
+  const only = [{ name: "who", arg: "", desc: "list peers", cat: "status" }];
+  const sections = commandRows(only, LABELS);
+  assert.deepEqual(
+    sections.map((s) => s.cat),
+    ["status"],
+  );
+  // The denominator: LABELS really does offer the other four.
+  assert.equal(Object.keys(LABELS).length, 5);
+});
+
+test("🛑 every category that HAS commands keeps its heading and its order", () => {
+  // A mutant keeping only the first command per category passes a set compare,
+  // so this asserts the per-section counts too. CMDS carries 2+ in four cats.
+  const sections = commandRows(CMDS, LABELS);
+  assert.deepEqual(
+    sections.map((s) => [s.cat, s.heading, s.rows.length]),
+    [
+      ["conversation", "CONVERSATION", 2],
+      ["messaging", "MESSAGING", 2],
+      ["status", "STATUS", 1],
+      ["admin", "ADMIN — destructive", 1],
+      ["system", "SYSTEM", 2],
+    ],
+  );
 });
