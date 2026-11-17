@@ -361,8 +361,55 @@ export const CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
   "claude-haiku-4-5": 200_000,
 };
 
+/**
+ * A dated release suffix, which the CLI appends and the map does not carry.
+ *
+ * 🛑 EXACTLY 8 DIGITS, ANCHORED AT THE END. Every mapped id ends in a version
+ * segment — `claude-opus-5`, `claude-sonnet-4-6` — so a looser rule would
+ * strip `-5` and look up `claude-opus`.
+ */
+const DATED_RELEASE_SUFFIX = /-\d{8}$/;
+
+/**
+ * 🛑 THE CLI EMITS A DATED ID FOR HAIKU AND AN UNDATED ONE FOR THE REST, so an
+ * exact match alone could never resolve haiku's window. Measured over four
+ * real `claude -p --output-format stream-json` spawns on 2026-11-17: both
+ * `--model claude-haiku-4-5` and `--model claude-haiku-4-5-20251001` put
+ * `claude-haiku-4-5-20251001` on the wire, while `claude-opus-5` and
+ * `claude-sonnet-5` came back unchanged. The CLI normalises a haiku alias and
+ * leaves the others alone, so the map's haiku row was unreachable.
+ *
+ * ⚠️ IT READ CORRECTLY ANYWAY, WHICH IS WHY NOTHING CAUGHT IT. Every
+ * supervised haiku child fell through to `FALLBACK_CONTEXT_WINDOW`, which is
+ * derived as the smallest mapped window — haiku's own 200k. The right answer
+ * by coincidence, and the coincidence ends the day a smaller model is mapped.
+ *
+ * 🛑 STRIPPING A DATE IS NOT THE PREFIX RULE THIS REFUSES. An unmapped family
+ * stays unmapped however it is dated, which is what keeps the next model
+ * family from being absorbed silently.
+ */
 export function contextWindowForModel(model: string): number | null {
-  return CONTEXT_WINDOWS[model] ?? null;
+  return (
+    mappedWindow(model) ??
+    mappedWindow(model.replace(DATED_RELEASE_SUFFIX, "")) ??
+    null
+  );
+}
+
+/**
+ * One mapped window, or undefined — and `Object.hasOwn` is the load-bearing
+ * part.
+ *
+ * 🛑 AN INHERITED MEMBER IS NOT NULLISH, so a bare `CONTEXT_WINDOWS[id] ?? …`
+ * answered `"toString"` with a FUNCTION where the signature promises a number,
+ * `totalIsFallback` came back FALSE so nothing logged, and
+ * `Math.min(used, total)` was NaN. Raised by claude2 reviewing this fix.
+ *
+ * ⚠️ ONE HOME FOR THE LOOKUP, because the dated retry above would otherwise be
+ * a second copy of the same guard.
+ */
+function mappedWindow(id: string): number | undefined {
+  return Object.hasOwn(CONTEXT_WINDOWS, id) ? CONTEXT_WINDOWS[id] : undefined;
 }
 
 /**
