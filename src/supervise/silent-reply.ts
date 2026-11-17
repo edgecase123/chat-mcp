@@ -6,10 +6,15 @@
  * `send`, so the peer receives nothing while both transcripts read as
  * answered.
  *
- * ⚠️ IT NEVER READS A TOOL CALL'S INPUT, so it cannot tell who a send
- * reached and does not try. `drivers/claude-events.ts` forbids capturing that
- * input — a `mcp__chat__send` input IS the message body. Ruled by lee
- * 2026-11-16: flag a turn with no send at all.
+ * ⚠️ IT READS NEITHER A CALL'S INPUT NOR ITS RESULT, so `sent` means the
+ * child ATTEMPTED a send, never that one landed.
+ * `drivers/claude-events.ts` forbids capturing the input — a
+ * `mcp__chat__send` input IS the message body. Ruled by lee 2026-11-16: flag
+ * a turn with no send at all.
+ *
+ * 🛑 SO A REFUSED SEND CLEARS THE WARNING. `shim/tools/send.ts` throws before
+ * `insertMessage` on an over-cap body, a send to self, a `#room` target and an
+ * unknown peer. Pinned by a test, so closing the gap turns that test red.
  */
 
 /** The bus tools that put a message in front of somebody else. */

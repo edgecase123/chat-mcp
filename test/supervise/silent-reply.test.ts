@@ -15,10 +15,10 @@ import {
  * called `send`, so the peer got nothing while both transcripts read as
  * answered.
  *
- * ⚠️ RULED BY lee 2026-11-16: "no send at all". The detector never reads a
- * tool call's INPUT, so it cannot tell who a send went to and does not try.
+ * ⚠️ RULED BY lee 2026-11-16: "no send at all". The detector reads neither a
+ * call's INPUT nor its RESULT, so `sent` means ATTEMPTED, not delivered.
  * `drivers/claude-events.ts` forbids capturing that input — a send's input IS
- * the message body.
+ * the message body. The refused-send gap that follows from it is pinned below.
  */
 
 function assistantText(text: string): Record<string, unknown> {
@@ -29,6 +29,23 @@ function assistantTool(name: string): Record<string, unknown> {
   return {
     type: "assistant",
     message: { content: [{ type: "tool_use", name }] },
+  };
+}
+
+/** The shape `drivers/claude-events.ts:130` reads a tool failure out of. */
+function toolFailed(text: string): Record<string, unknown> {
+  return {
+    type: "user",
+    message: {
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "toolu_01",
+          content: text,
+          is_error: true,
+        },
+      ],
+    },
   };
 }
 
@@ -206,4 +223,33 @@ test("owed is what separates a lost reply from an ordinary turn", () => {
     "a reply owed to a peer was not warned about",
   );
   assert.equal(silentReplyWarning(internal), undefined);
+});
+
+/**
+ * 🛑 A REFUSED SEND CLEARS THE WARNING. This pins a KNOWN GAP, not a fix.
+ *
+ * `observe` reads the `tool_use` block and never its `tool_result`, so the
+ * four paths `shim/tools/send.ts` throws on — over-cap body, send to self, a
+ * `#room` target, an unknown peer — all look like a delivered reply.
+ *
+ * ⚠️ WHEN THE GAP CLOSES THIS TEST GOES RED, naming the two docblocks that
+ * must change with it.
+ */
+test("a REFUSED send still clears the warning — known gap, not a fix", () => {
+  const turn = newTurn(true);
+
+  observe(turn, assistantText("Answering you now."));
+  observe(turn, assistantTool("mcp__chat__send"));
+  observe(
+    turn,
+    toolFailed(
+      "Unknown peer: nobody. Call list_agents to see who is registered.",
+    ),
+  );
+
+  assert.equal(
+    silentReplyWarning(turn),
+    undefined,
+    "the refused-send gap closed; update both silent-reply docblocks",
+  );
 });
