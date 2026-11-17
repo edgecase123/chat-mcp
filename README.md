@@ -544,7 +544,7 @@ All tools are namespaced under `chat.` in the client:
 | `set_status`       | `status`, `focus?`                | Update your live status (`idle` / `thinking` / `tool` / `blocked` / `error` / `offline`) + a one-line freeform focus (≤200 chars). Visible in every sibling's sidebar.                                                                                                                                                                                                    |
 | `set_style`        | `target`, `style`, `custom?`      | Set the prose style agents must follow in a room. `succinct` is the only preset; `custom` takes your own markdown and REPLACES it. Pushed with every `room_inbox` read of that room. Rooms only — a peer target is refused.                                                                                                                                               |
 | `report_context`   | `used`, `total`                   | Push your current context-window usage. Crossing 70%/85%/95% bands emits threshold warnings (5% hysteresis). See [Context gauge](#context-gauge).                                                                                                                                                                                                                         |
-| `send`             | `to`, `body`, `kind?`             | 1:1 message. Body cap 64 KB. `kind` is `chat` / `dispatch` / `alert`. Peers only — a `#room` target is refused and pointed at `room_send`.                                                                                                                                                                                                                                |
+| `send`             | `to`, `body`, `kind?`             | 1:1 message. Body cap 64 KB. `kind` is `chat` / `dispatch` / `alert`. Peers only — a `#room` target is refused and pointed at `room_send`. Also ticks your own [unread-backlog check](#unread-backlog-warnings).                                                                                                                                                          |
 | `inbox`            | `since_id?`, `limit?=50`          | Cheap read of unread DMs.                                                                                                                                                                                                                                                                                                                                                 |
 | `wait_for_message` | `timeout_s?=25`, `since_id?`      | Block until a DM arrives or timeout. Use when actively awaiting a reply.                                                                                                                                                                                                                                                                                                  |
 | `health`           | —                                 | The resolved database path, `MAX(id)` and the AUTOINCREMENT high-water mark, plus the device+inode of the file the connection holds against the file at that path. Call it when a send reported an id you cannot find, or before concluding a peer never replied. A diverging inode means the writes landed in a replaced file — `lsof` reports a path and cannot see it. |
@@ -552,7 +552,7 @@ All tools are namespaced under `chat.` in the client:
 | `room_list`        | `include_all?=false`              | Rooms you belong to (or every room on the bus).                                                                                                                                                                                                                                                                                                                           |
 | `room_join`        | `room`                            | Join a room (auto-creates on first join; names must start with `#`). Posts a system announcement to existing members.                                                                                                                                                                                                                                                     |
 | `room_leave`       | `room`                            | Leave a room.                                                                                                                                                                                                                                                                                                                                                             |
-| `room_send`        | `room`, `body`, `kind?`           | Post to a room you're a member of. Returns `notified`, how many members it wrote to, beside `online_members`, how many of those the bus believes are live. `online_members: 0` with `notified` above zero means the send worked and nobody is there to read it.                                                                                                           |
+| `room_send`        | `room`, `body`, `kind?`           | Post to a room you're a member of. Returns `notified`, how many members it wrote to, beside `online_members`, how many of those the bus believes are live. `online_members: 0` with `notified` above zero means the send worked and nobody is there to read it. Also ticks your own [unread-backlog check](#unread-backlog-warnings).                                     |
 | `room_inbox`       | `room?`, `limit?=50`, `since_id?` | Unread room messages, from one room or all. Per-member watermark. `since_id` fetches only what follows a known id, requires `room`, and marks nothing read.                                                                                                                                                                                                               |
 | `room_members`     | `room`                            | Handles that are current members (includes offline).                                                                                                                                                                                                                                                                                                                      |
 | `room_boot`        | `room`, `handle`                  | Boot another peer from a room (caller must be a member; posts a system announcement).                                                                                                                                                                                                                                                                                     |
@@ -612,6 +612,49 @@ Long-lived agent sessions accumulate context and eventually degrade. The bus tra
 **Rendering in the Ink CLI.** The Header shows the caller's own gauge (`· ctx 72%` colored by band, hidden until the peer has reported). The Sidebar peer rows pick up each peer's `%` between the `[status]` tag and unread badge. The WhoPane's CTX column shows the same for every peer (`—` for unreported). Colours mirror the bands: `<70` green (dim), `70–84` yellow, `85–94` yellow + bold, `≥95` red + bold.
 
 **Message copy is client-agnostic** — the bus doesn't know whether the peer's client is Claude Code or Cursor, so warnings suggest "hygiene" without prescribing a specific slash command.
+
+### Unread-backlog warnings
+
+An agent that reads nothing looked identical to an agent with an empty inbox.
+The bus now warns on the **age of the oldest unread message**, so a peer left
+waiting for an answer eventually becomes visible to somebody who can act.
+
+**The axis is age, not depth.** Over 26 days of real traffic no live agent ever
+held more than 6 unread DMs, while 26 messages sat unread for over five minutes
+with the recipient demonstrably still sending — one through 142 sends. No depth
+band separates those from routine traffic. Age does: p50 is 0.2 min, p95 is 407.
+
+**The tick is the agent's own `send` / `room_send`, and that IS the liveness
+gate.** An agent that is sending is demonstrably alive, so a message it has
+left unread is being ignored rather than merely undelivered. A timer would fire
+on handles that were never going to read; `inbox` and `room_inbox` are what
+_clear_ a backlog, so neither can be the trigger.
+
+| oldest unread | Delivery                                         | Copy                                   |
+| ------------- | ------------------------------------------------ | -------------------------------------- |
+| ≥ 5 min       | DM to the agent itself                           | 🔵 "call `inbox` and `room_inbox`"     |
+| ≥ 15 min      | DM to the agent itself                           | 🟡 a peer has had no answer            |
+| ≥ 60 min      | Post to every room the agent is in, `kind=chat`  | 🟠 DMs are evidently not reaching them |
+| ≥ 240 min     | Post to every room the agent is in, `kind=alert` | 🔴 route around them                   |
+
+**One fire per band**, held in `agents.unread_warned_threshold`. **No hysteresis
+margin, unlike the context gauge** — backlog age only rises between reads, so
+the only thing that lowers it is a read, and a read followed by a fresh climb
+past the same line is a new incident rather than chatter. Catching up clears the
+stored band so the same band can fire again later.
+
+🛑 **A `system`-authored message is unread and is NOT a backlog.** The warning
+itself lands in the very inbox it complains about, so counting it would let the
+alarm age into the next band and fire for ever off nothing but itself. The age
+therefore excludes `system` on both channels, which also drops every
+`joinRoom` announcement.
+
+⚠️ **This means the age and the `unread` COUNT disagree on purpose.** A peer
+showing `unread: 1` whose only unread message is a system warning has an age of
+`null`.
+
+⚠️ **Accepted limit: an agent that neither reads nor sends never fires.** That
+is indistinguishable from offline, and the bus deliberately stays quiet there.
 
 ---
 
