@@ -285,3 +285,29 @@ test("🛑 app.js never decides a stop button's danger colour itself", () => {
     "app.js sets the danger colour itself",
   );
 });
+
+/**
+ * 🛑 THE ROW BUTTONS PASS THE ROW'S HANDLE, NEVER `null`. A null here turns a
+ * per-row Stop into a SWEEP, so an operator stopping one agent stops every
+ * one of them.
+ *
+ * ⚠️ THE PAIRED CONTROL TO "both sweep buttons target null". That test filters
+ * on the "Stop all" label, so it still finds its 2 when the ROW buttons become
+ * sweeps, and the `>= 7` call count does not move either. MEASURED: both row
+ * buttons turned into sweeps passed 36 of 36 before this test existed.
+ * Raised by claude1 reviewing PR 303.
+ */
+test("🛑 both row stop buttons target the row's handle", () => {
+  const rows = APP_CODE.match(/stopButton\("Stop(?! all)[^)]*\)/g);
+
+  assert.notEqual(rows, null, "no per-row stop button is built");
+  assert.equal(rows!.length, 2, `expected 2 row buttons, got ${rows!.length}`);
+
+  for (const call of rows!) {
+    assert.match(
+      call,
+      /,\s*a\.handle\s*,/,
+      `a row button lost its handle: ${call}`,
+    );
+  }
+});

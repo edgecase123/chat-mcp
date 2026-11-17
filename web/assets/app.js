@@ -403,6 +403,22 @@ function renderSidebar() {
  * The context-usage chip. ONE copy, because the peer row and the agent row
  * both show it and a second would be free to drift from `gaugeDisplay`.
  */
+function gaugeChip(gauge) {
+  // #103 — a stale reading shows a dash, never its last number. The digits
+  // are what people act on, so a greyed-out 100% would repeat the 28-day
+  // incident rather than end it.
+  return gauge?.show
+    ? h(
+        "span",
+        {
+          className: `sidebar__item-gauge is-${gauge.band}`,
+          title: gauge.title,
+        },
+        [gauge.percent === null ? "\u2013" : `${gauge.percent}%`],
+      )
+    : null;
+}
+
 /**
  * One stop control (#40). `target` is a supervisor handle, or null for the
  * sweep.
@@ -419,22 +435,6 @@ function stopButton(label, target, mode) {
     },
     [label],
   );
-}
-
-function gaugeChip(gauge) {
-  // #103 — a stale reading shows a dash, never its last number. The digits
-  // are what people act on, so a greyed-out 100% would repeat the 28-day
-  // incident rather than end it.
-  return gauge?.show
-    ? h(
-        "span",
-        {
-          className: `sidebar__item-gauge is-${gauge.band}`,
-          title: gauge.title,
-        },
-        [gauge.percent === null ? "\u2013" : `${gauge.percent}%`],
-      )
-    : null;
 }
 
 function sidebarItem({
