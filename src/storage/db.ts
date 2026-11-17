@@ -367,12 +367,29 @@ export function currentSchemaVersion(db: Db): number | null {
  * version. The pin in `migration-content.test.ts` is what catches that.
  */
 export function migrateTo(db: Db, target: number): void {
+  // 🛑 BEFORE ANY WRITE, AND IT REFUSES RATHER THAN CLAMPS. A clamp answered
+  // `migrateTo(db, 999)` with a CURRENT database and no complaint, which is
+  // the vacuous fixture this seam exists to remove.
+  if (!Number.isInteger(target) || target < 1 || target > MIGRATIONS.length) {
+    throw new Error(
+      `migrateTo: target ${target} is not a version. Pass 1..${MIGRATIONS.length} (SCHEMA_VERSION).`,
+    );
+  }
+
   db.exec(
     `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)`,
   );
-  const stop = Math.min(target, MIGRATIONS.length);
   const current = currentSchemaVersion(db) ?? 0;
-  for (let i = current; i < stop; i++) {
+
+  // A migration cannot be undone, so a lower target is a caller mistake, not
+  // a no-op to swallow.
+  if (current > target) {
+    throw new Error(
+      `migrateTo: database is already at version ${current}, cannot go back to ${target}.`,
+    );
+  }
+
+  for (let i = current; i < target; i++) {
     const version = i + 1;
     const migration = MIGRATIONS[i];
     if (!migration) throw new Error(`Missing migration ${version}`);

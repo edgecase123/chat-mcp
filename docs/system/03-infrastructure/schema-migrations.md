@@ -30,6 +30,12 @@ migrateTo(db, n)                        applies only up to version n
 `migrate` resumes from the version the database already stores. That one line
 is the source of the rule below.
 
+`migrateTo` refuses rather than clamps. A target outside `1..SCHEMA_VERSION`
+throws before it writes anything, and so does a target below the version the
+database already holds. An earlier cut clamped with `Math.min`, which answered
+`migrateTo(db, 999)` with a fully migrated database and no complaint — the same
+vacuous fixture the seam exists to remove.
+
 ## Never edit a shipped migration
 
 **Append a new one instead.** A database that already recorded version `n` will
