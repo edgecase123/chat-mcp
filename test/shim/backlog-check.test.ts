@@ -373,12 +373,18 @@ test("🛑 a failed WAKE does not re-send the DM warning either", () => {
 
 /**
  * Make the member lookup fail while the room lookup and the room write keep
- * working. A view without `joined_at` fails at prepare for the one query that
- * orders by it, so `myRooms` still finds the room and the warning row still
- * commits — only the wake's audience cannot be enumerated.
+ * working. A view over `room_members` without `joined_at` fails at prepare for
+ * EVERY query naming that column, so `myRooms`, the membership check and
+ * `roomUnread` all still work and the warning row still commits — only the
+ * wake's audience cannot be enumerated.
  *
- * 🛑 THAT IS THE ONE THROW THE PER-ROOM CATCH SEES. Everything else in the
- * fanout is inside `wakeQuietly`, so no other failure can reach it.
+ * 🛑 CALL THIS AFTER ALL ROOM SETUP. `joinRoom` reads `joined_at` too, so a
+ * join below this line throws instead of joining, and the test then measures
+ * an empty fixture. claude2 found that reviewing PR 292.
+ *
+ * 🛑 `roomMembers` IS THE ONLY THROW THE PER-ROOM CATCH SEES on the fire path.
+ * Everything else in the fanout is inside `wakeQuietly`, so no other failure
+ * can reach it.
  */
 function breakMemberLookup(db: DatabaseSync): void {
   db.exec(`ALTER TABLE room_members RENAME TO room_members_real`);
@@ -403,6 +409,11 @@ test("🛑 a failed MEMBER LOOKUP does not re-warn a room whose row committed", 
 
   // Counting the room BELOW the fanout loses the count to this throw, which
   // leaves the band unspent and writes the same warning on every later send.
+  //
+  // The DM branch needs no twin of this test, and not because `wakeQuietly`
+  // catches there: `delivered` is assigned only in the room branch, so
+  // `notified.dm` cannot reach the band at all. A change that made `delivered`
+  // read the DM count would need its own test.
   assert.equal(warningsIn(db, "#aaa").length, 1, "warned once, not per tick");
   assert.equal(warningsIn(db, "#zzz").length, 1, "warned once, not per tick");
   assert.equal(dao.getAgent(db, "me")?.unread_warned_threshold, 60);
