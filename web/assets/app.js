@@ -39,6 +39,10 @@ import {
   gaugeDisplay,
   claimRow,
   claimsPanelEmpty,
+  agentRow,
+  agentsPanelEmpty,
+  stopConfirmText,
+  stopOutcomeText,
   matchPositionLabel,
   messageHash,
   messageIdFromHash,
@@ -67,6 +71,9 @@ const state = {
   version: null,
   peers: [],
   claims: [], // #101 — live claims on shared resources
+  // #40 — supervisors answering on their socket right now. NOT the `agents`
+  // table, which records a pid nothing keeps fresh.
+  agents: [],
   rooms: [],
   discoverRooms: [],
   currentTarget: null, // e.g. "#poker" or "@alice"
@@ -282,6 +289,52 @@ function renderSidebar() {
   ]);
   el.sidebar.appendChild(claimsSection);
 
+  // Running agents (#40) — BELOW Claims and ABOVE Peers. A claim says what is
+  // locked; this says what is RUNNING, and stopping one is the most
+  // consequential thing this page can do.
+  const agents = state.agents.map((a) => agentRow(a));
+  const agentsSection = h("div", { className: "sidebar__section" }, [
+    h("div", { className: "sidebar__heading" }, ["Agents"]),
+    ...(agents.length === 0
+      ? // 🛑 SAYS it is empty, for the same reason as the claims panel: a
+        // blank panel and a failed fetch look identical.
+        [h("div", { className: "sidebar__empty" }, [agentsPanelEmpty()])]
+      : agents.map((a) =>
+          h("div", { className: "agent" }, [
+            h("div", { className: "agent__head" }, [
+              h("span", { className: "agent__handle" }, [a.handle]),
+              gaugeChip(a.gauge),
+            ]),
+            h("div", { className: "agent__meta", title: a.boundTitle }, [
+              a.childHandle === null
+                ? a.bound
+                : `${a.bound} \u00b7 ${a.childHandle}`,
+            ]),
+            h("div", { className: "agent__actions" }, [
+              h(
+                "button",
+                {
+                  className: "agent__stop",
+                  type: "button",
+                  onclick: () => stopAgent(a.handle, "graceful"),
+                },
+                ["Stop"],
+              ),
+              h(
+                "button",
+                {
+                  className: "agent__stop is-destructive",
+                  type: "button",
+                  onclick: () => stopAgent(a.handle, "now"),
+                },
+                ["Stop now"],
+              ),
+            ]),
+          ]),
+        )),
+  ]);
+  el.sidebar.appendChild(agentsSection);
+
   // Peers
   const peersSection = h("div", { className: "sidebar__section" }, [
     h("div", { className: "sidebar__heading" }, ["Peers"]),
@@ -344,6 +397,26 @@ function renderSidebar() {
   }
 }
 
+/**
+ * The context-usage chip. ONE copy, because the peer row and the agent row
+ * both show it and a second would be free to drift from `gaugeDisplay`.
+ */
+function gaugeChip(gauge) {
+  // #103 — a stale reading shows a dash, never its last number. The digits
+  // are what people act on, so a greyed-out 100% would repeat the 28-day
+  // incident rather than end it.
+  return gauge?.show
+    ? h(
+        "span",
+        {
+          className: `sidebar__item-gauge is-${gauge.band}`,
+          title: gauge.title,
+        },
+        [gauge.percent === null ? "\u2013" : `${gauge.percent}%`],
+      )
+    : null;
+}
+
 function sidebarItem({
   label,
   target,
@@ -387,19 +460,7 @@ function sidebarItem({
       unread > 0
         ? h("span", { className: "sidebar__item-unread" }, [`(${unread})`])
         : null,
-      // #103 — a stale reading shows a dash, never its last number. The digits
-      // are what people act on, so a greyed-out 100% would repeat the 28-day
-      // incident rather than end it.
-      gauge?.show
-        ? h(
-            "span",
-            {
-              className: `sidebar__item-gauge is-${gauge.band}`,
-              title: gauge.title,
-            },
-            [gauge.percent === null ? "–" : `${gauge.percent}%`],
-          )
-        : null,
+      gaugeChip(gauge),
       h(
         "button",
         {
@@ -1261,11 +1322,56 @@ async function fetchClaims() {
   state.claims = data.claims;
 }
 
+/**
+ * Supervisors answering on their socket right now (#40).
+ *
+ * 🛑 A FAILED FETCH KEEPS THE LAST KNOWN LIST, like `fetchApprovals`. A
+ * blanked panel makes a RUNNING agent look stopped, and the operator's next
+ * action on that reading is to walk away.
+ */
+async function fetchLiveAgents() {
+  try {
+    const data = await api("/api/agents/live");
+    state.agents = data.agents ?? [];
+  } catch (e) {
+    console.error("live agents fetch failed", e);
+  }
+}
+
+/**
+ * Stop one supervisor (#40).
+ *
+ * 🛑 POSTS THE SUPERVISOR HANDLE. The row shows the child's gauge beside it,
+ * and `/api/agents/stop` answers a child handle with a tested, honest-looking
+ * `ok: false`.
+ */
+async function stopAgent(handle, mode) {
+  if (!window.confirm(stopConfirmText(handle, mode))) return;
+
+  try {
+    const data = await api("/api/agents/stop", {
+      method: "POST",
+      body: JSON.stringify({ handle, mode }),
+    });
+    const outcome = stopOutcomeText(data.results ?? []);
+
+    toast(outcome.text, outcome.kind);
+  } catch (e) {
+    toast(`stop failed: ${e.message}`, "error");
+  }
+
+  // Refetched either way: a refused stop and a thrown request leave the panel
+  // showing a row whose state nobody has re-read.
+  await fetchLiveAgents();
+  renderSidebar();
+}
+
 async function refresh() {
   try {
     await fetchWhoami();
     await fetchApprovals();
     await fetchClaims();
+    await fetchLiveAgents();
     if (state.currentTarget) await fetchMessages(state.currentTarget);
     renderSidebar();
     renderPaneHeader();

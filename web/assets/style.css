@@ -1268,3 +1268,49 @@ body {
 .claim--mine {
   border-left-color: #4a9eda;
 }
+
+/* #40 — a supervisor answering on its socket right now. Shares .claim's
+   left-border shape, because both panels answer "what is going on". */
+.agent {
+  padding: 4px 8px;
+  border-left: 2px solid var(--border, #333);
+  margin-bottom: 6px;
+}
+.agent__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent__handle {
+  font-size: 12px;
+  word-break: break-all;
+}
+.agent__meta {
+  font-size: 11px;
+  opacity: 0.65;
+  word-break: break-all;
+}
+.agent__actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+.agent__stop {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.agent__stop:hover {
+  background: var(--bg-inset);
+}
+/* Only the cut-mid-stream one is coloured. Both buttons in the danger colour
+   would say the graceful stop costs what the immediate one costs. */
+.agent__stop.is-destructive:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
