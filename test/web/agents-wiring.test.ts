@@ -105,9 +105,9 @@ test("🛑 the outcome text is the helper's, and app.js reads neither reason nor
   assert.notEqual(found, null, "nothing calls stopOutcomeText");
   assert.equal(found!.length, 1);
 
-  // 🛑 SCOPED TO THE STOP PATH. `app.js:1489` renders an APPROVAL's reason,
-  // which is a different field on a different route — a file-wide assertion
-  // fails on a clean tree.
+  // 🛑 SCOPED TO THE STOP PATH. `renderApprovals` renders an APPROVAL's
+  // `reason`, which is a different field on a different route — a file-wide
+  // assertion fails on a clean tree.
   assert.doesNotMatch(
     fnBody("stopAgent"),
     /\.reason\b/,
