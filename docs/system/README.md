@@ -23,10 +23,11 @@ listed here will not be found. Add the row in the same commit as the page.
 
 ### [03 — Infrastructure](03-infrastructure/)
 
-| File                                                       | What it covers                                                                                              |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| [state-directory.md](03-infrastructure/state-directory.md) | Every entry under `~/.chat-mcp`, who owns it, what is safe to delete                                        |
-| [settings.md](03-infrastructure/settings.md)               | Every env var, CLI flag, state file and hardcoded tunable, and which of them a config UI could safely write |
+| File                                                           | What it covers                                                                                                      |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| [state-directory.md](03-infrastructure/state-directory.md)     | Every entry under `~/.chat-mcp`, who owns it, what is safe to delete                                                |
+| [settings.md](03-infrastructure/settings.md)                   | Every env var, CLI flag, state file and hardcoded tunable, and which of them a config UI could safely write         |
+| [schema-migrations.md](03-infrastructure/schema-migrations.md) | How the database is migrated, why a shipped migration may never be edited, and how to test one on an older database |
 
 ### [05 — Supervision](05-supervision/)
 
@@ -69,7 +70,7 @@ Ranked by what would help most on arrival.
 | `02-setup`       | The three clones, `CHAT_MCP_HOME` isolation, wiring an MCP client. Today in `AGENTS.md` and `README.md`                           |
 | `04-messaging`   | DMs, rooms, read watermarks, claims, the notify wake path                                                                         |
 | `06-interfaces`  | Still needed: the MCP shim's tools and the web UI. The terminal surfaces are now covered                                          |
-| `08-testing`     | The node test runner, `CHAT_MCP_HOME` isolation, proving a guard non-vacuous                                                      |
+| `08-testing`     | The node test runner, `CHAT_MCP_HOME` isolation, proving a guard non-vacuous. Migrations are now covered in `03-infrastructure`   |
 | `09-conventions` | Still needed: TDD, commit style, secret handling. Today in `AGENTS.md` § Conventions. Formatting is now covered                   |
 
 ⚠️ **`AGENTS.md`, `README.md` and `DESIGN.md` at the repo root are not
