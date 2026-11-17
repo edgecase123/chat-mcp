@@ -63,6 +63,14 @@ agents.pid = 41   never refreshed   ->  not consulted at all
 alone turned a refused stop into a silent no-op the operator waited out, which
 shipped once in the CLI and was found on PR #158.
 
+**That three-way branch has one home: `requestSupervisorControl()` in
+`src/supervise/socket.ts`.** The dashboard route and `chat-mcp agents stop`
+both call it, so the fix cannot drift between them.
+
+⚠️ **`graceSeconds` is omitted rather than defaulted.** It is overridable per
+handle, so a caller that substitutes its own default computes a wait ceiling
+that expires first and calls a healthy stop a failure.
+
 A sweep that stopped nothing returns `"results": []` and `"stopped": 0` rather
 than a bare success, so a refused stop never reads the same as an agent that
 was not running.

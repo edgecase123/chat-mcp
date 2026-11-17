@@ -482,3 +482,56 @@ export async function deliverToSupervisor(
     });
   });
 }
+
+/** What a control request did, normalized so every caller reports it alike. */
+export interface SupervisorControlResult {
+  readonly handle: string;
+  readonly ok: boolean;
+  readonly error?: string;
+  /** The supervisor's own shutdown grace, when its ack carried one. */
+  readonly graceSeconds?: number;
+}
+
+/**
+ * Send one control to one supervisor and say what happened.
+ *
+ * 🛑 THE THREE-WAY ACK BRANCH HAS ONE HOME, AND IT HAS TO. `null` means
+ * nothing was listening, `{ ok: false }` means the supervisor refused, and
+ * only the third case is a control that will happen. The web route and the
+ * `agents` CLI command each derived this separately, so the PR #158 fix for
+ * the TRUTHY `{ ok: false }` existed in two copies free to drift.
+ *
+ * ⚠️ `graceSeconds` IS OMITTED RATHER THAN DEFAULTED. It is overridable per
+ * handle, so a caller that substitutes its own default computes a wait ceiling
+ * that expires first and calls a healthy stop a failure. A caller with no
+ * other source may fall back, but it does so knowingly.
+ */
+export async function requestSupervisorControl(
+  handle: string,
+  control: SupervisorControl,
+  /** Who asked, for the envelope. The CLI and the dashboard differ. */
+  from = "operator",
+): Promise<SupervisorControlResult> {
+  const ack = await deliverToSupervisor(handle, {
+    id: 0,
+    to: handle,
+    from,
+    ts: Date.now(),
+    control,
+  });
+
+  if (ack === null) {
+    return { handle, ok: false, error: "no supervisor is listening" };
+  }
+
+  // 🛑 `{ ok: false }` IS A TRUTHY OBJECT, so a presence check alone reports a
+  // REFUSED control as accepted. That turned a refused `--now` into a silent
+  // no-op the operator waited out. Found by claude2 on PR #158.
+  if (!ack.ok) {
+    return { handle, ok: false, error: ack.error ?? "no reason given" };
+  }
+
+  return ack.graceSeconds === undefined
+    ? { handle, ok: true }
+    : { handle, ok: true, graceSeconds: ack.graceSeconds };
+}

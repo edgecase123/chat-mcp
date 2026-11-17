@@ -1111,7 +1111,7 @@ async function handleStopAgents(
     return respondJson(res, { error: handleRefusal(named) }, 400);
   }
 
-  const { listLiveSupervisors, deliverToSupervisor } =
+  const { listLiveSupervisors, requestSupervisorControl } =
     await import("../../supervise/socket.js");
   // ⚠️ A sweep enumerates live sockets; a named stop does NOT, so stopping one
   // agent never depends on every other socket answering a probe first.
@@ -1119,31 +1119,17 @@ async function handleStopAgents(
     ? (await listLiveSupervisors()).map((s) => s.handle)
     : [named];
 
+  // 🛑 ONE HOME FOR THE THREE-WAY ACK BRANCH, in `requestSupervisorControl`.
+  // The `agents` CLI command interprets the same ack, and the PR #158 fix for
+  // the truthy `{ ok: false }` used to exist in both copies.
   const results = await Promise.all(
-    targets.map(async (handle) => {
-      const ack = await deliverToSupervisor(handle, {
-        id: 0,
-        to: handle,
-        from: ctx.handle,
-        ts: Date.now(),
-        control: { kind: "stop", mode: mode as "graceful" | "now" },
-      });
-
-      if (ack === null) {
-        return { handle, ok: false, error: "no supervisor is listening" };
-      }
-
-      // 🛑 `{ ok: false }` IS A TRUTHY OBJECT. Reporting on the ack's presence
-      // alone turned a refused stop into a silent no-op the operator waited
-      // out — shipped once in the CLI and found on PR #158.
-      if (!ack.ok) {
-        return { handle, ok: false, error: ack.error ?? "no reason given" };
-      }
-
-      return ack.graceSeconds === undefined
-        ? { handle, ok: true }
-        : { handle, ok: true, graceSeconds: ack.graceSeconds };
-    }),
+    targets.map((handle) =>
+      requestSupervisorControl(
+        handle,
+        { kind: "stop", mode: mode as "graceful" | "now" },
+        ctx.handle,
+      ),
+    ),
   );
 
   respondJson(res, {
