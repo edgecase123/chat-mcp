@@ -15,7 +15,15 @@ import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..");
 
-/** `path/to/file.ext:123`, and the bare `` `:123` `` continuation form. */
+/**
+ * A path with a known source extension and a line number, and the bare
+ * backtick-colon-digits continuation form that follows one.
+ *
+ * 🛑 NEITHER FORM IS SPELT OUT ANYWHERE IN THIS FILE. This file is inside its
+ * own scan, so an illustrative example here is a real offence — and the first
+ * draft shipped one, which claude1 caught. Every example below is assembled at
+ * run time instead.
+ */
 const POINTER =
   /[A-Za-z0-9_/.-]+\.(?:ts|tsx|js|mjs|cjs|css|html|json|md|sh|yml):\d+/;
 const BARE_POINTER = /`:\d+`/;
@@ -57,42 +65,68 @@ function textFiles(): string[] {
     .filter((p) => p !== "package-lock.json");
 }
 
-test("the detector catches a pointer, so a clean scan is not vacuous", () => {
-  // Assembled, never written out, so this file stays inside its own scan.
-  const bad = "src/supervise/" + "index.ts" + ":" + "440";
-  const bareBad = "`" + ":" + "1148" + "`";
+/** Every pointer in `text`, each reported as `path:line — the match`. */
+function pointersIn(path: string, text: string): string[] {
+  const found: string[] = [];
 
-  assert.match(bad, POINTER, "the pointer regex cannot see a pointer");
-  assert.match(bareBad, BARE_POINTER, "the bare-pointer regex cannot see one");
-  assert.doesNotMatch(
-    "src/supervise/index.ts",
-    POINTER,
-    "a bare path is not a pointer",
+  text.split("\n").forEach((line, i) => {
+    const hit = POINTER.exec(line) ?? BARE_POINTER.exec(line);
+    if (hit) found.push(`${path}:${i + 1} — ${hit[0]}`);
+  });
+
+  return found;
+}
+
+/**
+ * Both forms, assembled rather than written out. A literal example would be a
+ * real offence, because this file is inside the scan below.
+ */
+const EXAMPLE_POINTER = "src/supervise/" + "index.ts" + ":" + "440";
+const EXAMPLE_BARE = "`" + ":" + "1148" + "`";
+
+/** The fixture's own name, assembled for the same reason as the examples. */
+const FIXTURE = "f" + ".ts";
+
+test("the scan reports what it finds, so a clean repo is not a vacuous pass", () => {
+  // 🛑 THROUGH `pointersIn`, NOT THE REGEX. Testing the regex alone leaves the
+  // line that RECORDS a hit unexercised whenever the repo is clean — gutting
+  // it left the whole suite green and the failure set identical. claude1's
+  // finding.
+  assert.deepEqual(
+    pointersIn(FIXTURE, `ok\nsee ${EXAMPLE_POINTER} there\nok`),
+    [`${FIXTURE}:2 — ${EXAMPLE_POINTER}`],
+    "a pointer on line 2 must be reported, with its line and its text",
   );
-  assert.doesNotMatch("TurnQueue.offer", POINTER, "a symbol is not a pointer");
+  assert.deepEqual(pointersIn(FIXTURE, `and ${EXAMPLE_BARE} too`), [
+    `${FIXTURE}:1 — ${EXAMPLE_BARE}`,
+  ]);
+  assert.deepEqual(
+    pointersIn(FIXTURE, "src/supervise/index.ts and TurnQueue.offer"),
+    [],
+    "a bare path and a symbol are not pointers",
+  );
 });
 
-test("no tracked file outside the allowlist carries a `file.ext:NNN` pointer", () => {
+test("no tracked file outside the allowlist carries a line-number pointer", () => {
   const files = textFiles();
+  const scanned = files.filter((p) => !allowedReason(p));
+
+  // 🛑 MEMBERSHIP, NOT A FLOOR. The first draft of this file was UNTRACKED
+  // when the suite ran, so `git ls-files` never offered it and its own
+  // offending line passed unseen. A count threshold cannot see one absence.
   assert.ok(
-    files.length > 200,
-    `only ${files.length} files scanned — the listing broke`,
+    scanned.includes("test/stale-line-pointers.test.ts"),
+    "this file is not in its own scan — commit it before trusting a pass",
+  );
+  assert.ok(
+    scanned.length > 200,
+    `only ${scanned.length} files reached the check`,
   );
 
-  const offences: string[] = [];
-  let scanned = 0;
+  const offences = scanned.flatMap((path) =>
+    pointersIn(path, readFileSync(join(ROOT, path), "utf8")),
+  );
 
-  for (const path of files) {
-    if (allowedReason(path)) continue;
-    scanned += 1;
-    const lines = readFileSync(join(ROOT, path), "utf8").split("\n");
-    lines.forEach((line, i) => {
-      const hit = POINTER.exec(line) ?? BARE_POINTER.exec(line);
-      if (hit) offences.push(`${path}:${i + 1} — ${hit[0]}`);
-    });
-  }
-
-  assert.ok(scanned > 200, `only ${scanned} files reached the pointer check`);
   assert.deepEqual(
     offences,
     [],
