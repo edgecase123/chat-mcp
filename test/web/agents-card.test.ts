@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import {
   agentRow,
   agentsPanelEmpty,
+  stopAllConfirmText,
+  stopAllVisible,
+  stopButtonClass,
   stopConfirmText,
   stopOutcomeText,
 } from "../../web/assets/logic.js";
@@ -202,4 +205,91 @@ test("an empty result set says nothing was running", () => {
 
   assert.match(out.text, /nothing/i);
   assert.equal(out.kind, "info");
+});
+
+// ── The Stop all sweep (#40) ─────────────────────────────────────────────
+
+/**
+ * 🛑 THE SWEEP IS HIDDEN FOR ONE AGENT, because that row's own Stop already
+ * stops it. Offering both is two controls for one outcome, which is the
+ * objection that kept the sweep out of PR 301.
+ */
+test("the sweep is offered only once a second agent is running", () => {
+  assert.equal(stopAllVisible(0), false);
+  assert.equal(stopAllVisible(1), false);
+  assert.equal(stopAllVisible(2), true);
+  assert.equal(stopAllVisible(9), true);
+});
+
+/**
+ * 🛑 VISIBILITY IS AN AFFORDANCE, NOT A PRECONDITION. The route enumerates
+ * live sockets itself, so a count that drops to 1 between render and click
+ * still sweeps correctly — this helper must never become a guard.
+ */
+test("the sweep's own count is not what the confirm promises", () => {
+  const text = stopAllConfirmText(3, "graceful");
+
+  assert.match(text, /panel shows 3 agents/);
+  assert.match(text, /whatever is answering/i);
+});
+
+test("a one-agent confirm still reads as English, because the helper is callable alone", () => {
+  assert.match(stopAllConfirmText(1, "graceful"), /shows 1 agent,/);
+});
+
+/**
+ * lee's ruling of 2026-10-31: graceful by default because a turn cut
+ * mid-stream spends its tokens and produces nothing. A sweep pays that cost
+ * once per agent, so the immediate copy is the one that must say it.
+ */
+test("only the immediate sweep mentions the cost, matching the per-row copy", () => {
+  const graceful = stopAllConfirmText(3, "graceful");
+  const now = stopAllConfirmText(3, "now");
+
+  assert.match(graceful, /finishes its current turn/i);
+  assert.doesNotMatch(graceful, /mid-stream/i);
+
+  assert.match(now, /mid-stream/i);
+  assert.match(now, /tokens/i);
+});
+
+/**
+ * ⚠️ THE SWEEP AND THE ROW ARE DIFFERENT QUESTIONS. A confirm naming one
+ * handle on a sweep is how an operator stops five agents believing they
+ * stopped one.
+ */
+test("the sweep confirm names no single handle", () => {
+  for (const mode of ["graceful", "now"] as const) {
+    const text = stopAllConfirmText(3, mode);
+
+    assert.match(text, /^Stop all agents/);
+    assert.doesNotMatch(text, /smoke-container/);
+  }
+});
+
+/**
+ * The sweep's outcome goes through `stopOutcomeText`, which already counts
+ * and already leads with failures. A second formatter would be free to drift
+ * from the per-row one.
+ */
+test("a sweep that stops every agent reports the count, not a handle list", () => {
+  const out = stopOutcomeText([
+    { handle: "a", ok: true },
+    { handle: "b", ok: true },
+    { handle: "c", ok: true },
+  ]);
+
+  assert.equal(out.kind, "info");
+  assert.match(out.text, /stopped 3 agents/);
+});
+
+/**
+ * 🛑 ONLY THE CUT-MID-STREAM BUTTON IS COLOURED. Both of a pair in the danger
+ * colour would say the graceful stop costs what the immediate one costs.
+ * MEASURED: a hardcoded destructive class passed the source-text count in
+ * `agents-wiring.test.ts`, which is why the decision moved here.
+ */
+test("only the immediate stop button takes the danger colour", () => {
+  assert.equal(stopButtonClass("graceful"), "agent__stop");
+  assert.equal(stopButtonClass("now"), "agent__stop is-destructive");
 });
