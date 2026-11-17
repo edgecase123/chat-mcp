@@ -19,7 +19,10 @@ const { WakeListener, requestSupervisorControl } =
 
 test("nothing listening is reported as a failure naming the handle", async () => {
   assert.deepEqual(
-    await requestSupervisorControl("nobody", { kind: "stop", mode: "graceful" }),
+    await requestSupervisorControl("nobody", {
+      kind: "stop",
+      mode: "graceful",
+    }),
     { handle: "nobody", ok: false, error: "no supervisor is listening" },
   );
 });
@@ -105,7 +108,10 @@ test("the control reaches the supervisor verbatim, kind and mode both", async ()
   });
 
   try {
-    await requestSupervisorControl("listener", { kind: "restart", mode: "now" });
+    await requestSupervisorControl("listener", {
+      kind: "restart",
+      mode: "now",
+    });
 
     assert.deepEqual(seen, [{ kind: "restart", mode: "now" }]);
   } finally {
