@@ -85,9 +85,54 @@ A sweep that stopped nothing returns `"results": []` and `"stopped": 0` rather
 than a bare success, so a refused stop never reads the same as an agent that
 was not running.
 
+## The panel
+
+**The sidebar's Agents section, between Claims and Peers.** One row per
+supervisor that answered a probe.
+
+```
+Agents
+  smoke-container              16%     <- the CHILD's context gauge
+  bound 2h · smoke-container-agent
+  [Stop]  [Stop now]
+```
+
+- **The row posts the SUPERVISOR handle.** The gauge beside it belongs to the
+  child, so the child's handle is the easy mistake — and the route answers it
+  with a tested, honest-looking `ok: false`.
+- **The age says "bound", never "uptime".** It is the socket's age, and a
+  restart respawns the child without rebinding.
+- **An empty panel says so in words.** A blank panel and a failed fetch look
+  identical, which is the frozen-gauge incident of #103 in a different place.
+- **A failed fetch keeps the last known list.** Blanking it shows a RUNNING
+  agent as stopped, and the operator's next action on that reading is to walk
+  away.
+- **Only `Stop now` is coloured.** Both buttons in the danger colour would say
+  the graceful stop costs what the immediate one costs.
+
+### Where the strings are decided
+
+| what                                 | where                                 |
+| ------------------------------------ | ------------------------------------- |
+| the row's labels                     | `agentRow()` in `web/assets/logic.js` |
+| the confirm copy                     | `stopConfirmText()`                   |
+| the toast after a stop               | `stopOutcomeText()`                   |
+| the panel is actually WIRED to those | `test/web/agents-wiring.test.ts`      |
+
+🛑 **The wiring test exists because every helper test passes with the panel
+unwired.** The helpers are pure, so they prove the strings and say nothing
+about whether a surface calls them. #224 shipped its bands three commits
+before anything invoked them.
+
+⚠️ **The toast branches on `reason` in ONE place.** `app.js` never reads that
+field; it hands the whole `results` array to `stopOutcomeText`.
+
 ## What is not covered here
 
-- **The dashboard controls themselves.** The Stop and Stop now buttons and the
-  running-agents card are the second half of #40.
+- ~~**The dashboard controls themselves.**~~ Shipped — see **The panel**
+  above.
+- **Stopping every agent at once.** The route takes `all: true` today and the
+  panel has no sweep button, deliberately: three ways to stop things in one
+  panel is one too many. Its own change, with its own confirm copy.
 - **`chat-mcp agents stop <handle>`**, the CLI surface that predates the
   web-only directive. It still works and sends the same control.
