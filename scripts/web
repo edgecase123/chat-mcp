@@ -175,9 +175,9 @@ do_start() {
   print_url || true
 
   # 🛑 SAY THE CLOCK IS RUNNING. `chat-mcp web` is deliberately not a daemon:
-  # server.ts:188 arms a 60s idle shutdown at boot and nothing disarms it until
-  # a browser opens an SSE stream. Starting it detached and saying nothing
-  # looked identical to a crash a minute later.
+  # server.ts's armIdleShutdown arms a 60s idle shutdown at boot and nothing
+  # disarms it until a browser opens an SSE stream. Starting it detached and
+  # saying nothing looked identical to a crash a minute later.
   pc_warn 'paste that url within 60 SECONDS or the server exits on its own'
   pc_info 'it is not a daemon — it lives only while a browser tab is connected'
   pc_info 'an old tab will NOT revive itself: its cookie is from the previous server and gets a 401'
@@ -199,8 +199,9 @@ do_stop() {
   fi
 
   # 🛑 CONFIRM IT IS STILL OUR SERVER BEFORE SIGNALLING. The server exits by
-  # itself after 60s with no client (server.ts:188), so a stale pidfile is the
-  # NORMAL resting state here, not an edge case — and the kernel recycles pids.
+  # itself after 60s with no client (server.ts's armIdleShutdown), so a stale
+  # pidfile is the NORMAL resting state here, not an edge case — and the
+  # kernel recycles pids.
   foreign="$(port_pid)"
   if [ "$pid" != "$foreign" ]; then
     pc_err "pid $pid is alive but is not the process bound to port $PORT — refusing to kill it"

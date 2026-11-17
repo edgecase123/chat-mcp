@@ -32,7 +32,8 @@ function assistantTool(name: string): Record<string, unknown> {
   };
 }
 
-/** The shape `drivers/claude-events.ts:130` reads a tool failure out of. */
+/** The shape `denialFromClaude` in `drivers/claude-events.ts` reads a tool
+ * failure out of. */
 function toolFailed(text: string): Record<string, unknown> {
   return {
     type: "user",
@@ -199,9 +200,10 @@ test("newTurn does not carry state over", () => {
  * supervisor prompts its child for internal reasons (a grant notice, a model
  * replacement) and nobody is waiting for a reply to those.
  *
- * `index.ts:1453` builds `messageIds: [envelope.id]` for an inbound bus
- * message, while `:1148`, `:1168` and `:1280` all offer `messageIds: []`. So
- * a non-empty id list IS the question "was a reply owed".
+ * `supervise/index.ts` builds `messageIds: [envelope.id]` on the inbound
+ * bus-message path and nowhere else; every other `queue.offer` in that file
+ * offers `messageIds: []`. So a non-empty id list IS the question "was a reply
+ * owed".
  */
 test("an internally prompted turn is never warned about", () => {
   const turn = newTurn(false);

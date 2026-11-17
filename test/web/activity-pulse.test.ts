@@ -52,7 +52,8 @@ test("a frame missing its handle yields null", () => {
 });
 
 /**
- * The server validates `phase` at `server.ts:691`, so this is defence in depth
+ * The server validates `phase` itself — `server.ts` rejects anything but
+ * `tick` or `end` — so this is defence in depth
  * against a future sender — but a phase this file does not know must not land
  * as a third state.
  */

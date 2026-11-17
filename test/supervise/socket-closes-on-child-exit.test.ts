@@ -308,8 +308,9 @@ test("🚨 a stop does not let the child exit close the socket before the teardo
  * the socket of a supervisor whose replacement is already running.
  *
  * ⚠️ THIS FAKE EXITS FROM `kill()` AND THE OTHERS IN THIS FILE DO NOT. The two
- * models disagree in this repo — `replace-child.test.ts:91` against
- * `respawn-loses-queue.test.ts:52` — and the guard is correct under both
+ * models disagree in this repo — the fake in `replace-child.test.ts` exits
+ * from `kill()`, the `FakeChild` in `respawn-loses-queue.test.ts` does not —
+ * and the guard is correct under both
  * rather than picking one.
  */
 test("🚨 a replace whose kill exits SYNCHRONOUSLY keeps the socket for the new child", async () => {

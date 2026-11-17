@@ -1,6 +1,6 @@
 ---
 title: Project commands
-updated: 2026-11-15
+updated: 2026-11-17
 covers:
   - src/supervise/commands.ts
   - src/supervise/run-command-service.ts
@@ -214,9 +214,9 @@ disagree for the life of a parked command.
 
 🛑 **`broker.ts` has a second cap, and the broker route is DEAD at runtime.**
 `maxInFlight` limits dispatches per broker, across all of that broker's handles,
-and `broker.ts:199` refuses the 5th envelope before dispatch reaches the
-per-handle cap. Both defaults are 4, so on that route the per-handle cap could
-never bite.
+and the guard in `Broker.accept` refuses the 5th envelope before dispatch
+reaches the per-handle cap. Both defaults are 4, so on that route the
+per-handle cap could never bite.
 
 **It cannot run today. Measured:** nothing in `src/` imports `broker.ts`,
 nothing in `src/` imports `broker-client.ts`, and nothing in `src/` sets

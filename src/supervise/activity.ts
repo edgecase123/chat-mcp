@@ -53,10 +53,10 @@ export interface ActivityTarget {
  * The running web server's origin and token, or `null` when none is up.
  *
  * 🛑 `web-handshake` IS A URL WITH THE TOKEN IN A QUERY PARAM, NOT A TOKEN.
- * `server.ts:155` builds `${url}?t=${token}` and `:183` writes that. Sending
- * the file's contents as the cookie value 401s every pulse: `tokenMatches`
- * compares lengths first, 68 against 43. Found by claude1 on PR 244, and the
- * fixtures hid it by writing a bare token no producer emits.
+ * `server.ts` builds `handshakeUrl` and writes it to `webHandshakeFile()`.
+ * Sending the file's contents as the cookie value 401s every pulse:
+ * `tokenMatches` compares lengths first, 68 against 43. Found by claude1 on
+ * PR 244, and the fixtures hid it by writing a bare token no producer emits.
  *
  * 🛑 THE EXISTENCE CHECK IS THE OTHER HALF. The web server is DOWN most of the
  * time — `server.ts` arms a 60-second idle shutdown at boot and exits once no

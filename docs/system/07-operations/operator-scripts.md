@@ -1,6 +1,6 @@
 ---
 title: Operator scripts
-updated: 2026-11-14
+updated: 2026-11-17
 covers:
   - scripts/agent
   - scripts/web
@@ -84,10 +84,10 @@ With no handle, `agent status` lists every agent that is actually running.
 
 ## 🛑 The web server is not a daemon, and that is deliberate
 
-`server.ts:188` arms a **60-second idle shutdown at boot**, and `server.ts:196`
-calls `shutdown(0)`. The comment there says it _"keeps us honest about the
-no-persistent-daemon design principle."_ Nothing disarms that timer until a
-browser opens an SSE stream on `/api/events`.
+`server.ts`'s `armIdleShutdown` arms a **60-second idle shutdown at boot** and
+calls `shutdown(0)` when it fires. The comment there says it _"keeps us honest
+about the no-persistent-daemon design principle."_ Nothing disarms that timer
+until a browser opens an SSE stream on `/api/events`.
 
 ```
 web start  →  prints tokenized url        idle timer ARMED (60s)

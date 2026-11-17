@@ -1,9 +1,10 @@
 ---
 title: Code formatting
-updated: 2026-11-15
+updated: 2026-11-17
 covers:
   - package.json
   - .prettierignore
+  - .git-blame-ignore-revs
   - .github/workflows/ci.yml
 ---
 
@@ -51,9 +52,46 @@ formatter across one edits a historical record instead of the codebase.
 - **A `file.ts:NNN` reference in prose goes stale when that file reflows.** The
   one-time reformat moved line numbers in most `.ts` files. A reference written
   before it points at the wrong line, not at nothing, so it fails silently.
+  **Name the symbol instead.** `test/stale-line-pointers.test.ts` refuses a new
+  one, and carries the three allowlisted paths with the reason for each.
 - **`git blame` on a reformatted line shows the reformat, not the author.**
-  `git blame --ignore-rev <reformat sha>` skips it. There is no
-  `.git-blame-ignore-revs` file in the repo yet.
+  `.git-blame-ignore-revs` fixes that, but only after you opt in — see below.
+
+---
+
+## Making `git blame` skip the reformat
+
+**Run this once per clone:**
+
+```bash
+git config blame.ignoreRevsFile .git-blame-ignore-revs
+```
+
+🛑 **The file alone does nothing.** `blame.ignoreRevsFile` is clone-local
+config, and git has no way to set it from inside the repo. Without the command
+above, `.git-blame-ignore-revs` sits there and blame still names the reformat.
+
+### What it costs
+
+The reformat reached `main` as a **squash**, so the only sha blame can ever name
+is `491c632` — and that commit is not formatting-only. It bundles the Prettier
+adoption with real work.
+
+|                                | lines  | files |
+| ------------------------------ | ------ | ----- |
+| reformat, correctly skipped    | 37,669 | 320   |
+| real change, now misattributed | ~240   | 16    |
+
+So blame on a genuinely new line in one of those 16 files points one commit too
+early. The pure reformat commit (`fb15837`) was squashed away and is
+unreachable, so there is no formatting-only sha to name instead.
+
+### Adding another entry
+
+🛑 **A sha that does not resolve is skipped silently — no warning, exit 0.** A
+typo reads exactly like a working entry. `test/blame-ignore-revs.test.ts` is
+what catches that, and it also refuses a sha whose diff is too small to be a
+repo-wide reformat.
 
 ---
 
@@ -63,6 +101,7 @@ formatter across one edits a historical record instead of the codebase.
 | -------------------------- | ------------------------------------------------------------------------- |
 | `package.json`             | The `format` and `format:check` scripts, and the `prettier` devDependency |
 | `.prettierignore`          | The four paths Prettier skips                                             |
+| `.git-blame-ignore-revs`   | The reformat sha `git blame` skips, once the clone opts in                |
 | `.github/workflows/ci.yml` | Runs `format:check` on every push and pull request                        |
 
 ## Related docs

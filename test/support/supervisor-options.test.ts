@@ -20,8 +20,9 @@ test("🛑 it supplies the vendor a caller would otherwise have to name", () => 
 
 /**
  * 🛑 THE REAL VENDOR, NOT A STUB. The 26 call sites pass `spawnChild`, so
- * `opts.vendor` is only read on the default-spawn and redispatch paths
- * (`supervise/index.ts:249`, `:670`). A stub would make those two paths behave
+ * `opts.vendor` is only read on the default-spawn and redispatch paths — the
+ * `spawnOnHost` / `spawnContainerized` call and `redispatchPrompt`, both in
+ * `supervise/index.ts`. A stub would make those two paths behave
  * unlike production exactly where a test did reach them.
  */
 test("🛑 the default is the REAL claudeSpawn, so a reached path behaves like production", () => {

@@ -40,12 +40,13 @@ export function RoomsBrowserPane({
     // key cannot prompt for it; `set_style` writes the markdown.
     //
     // 🛑 CTRL, NOT A BARE LETTER, AND NOT AN `EMPTY_BUFFER_HOTKEYS` ENTRY.
-    // That list only suppresses echo while the buffer is EMPTY
-    // (`Input.tsx:167`), so a bare `s` cycled the style AND echoed whenever
-    // someone was mid-message. Adding `s` to the list instead would stop
-    // every message that starts with "s" from being typeable at all.
-    // `Input.tsx:164` never inserts when `key.ctrl`, so this needs no sync
-    // with that list and cannot echo at any buffer state. claude1's finding.
+    // That list only suppresses echo while the buffer is EMPTY — the
+    // `emptyBufferHotkeys.includes(raw)` return in `Input.tsx` — so a bare `s`
+    // cycled the style AND echoed whenever someone was mid-message. Adding `s`
+    // to the list instead would stop every message that starts with "s" from
+    // being typeable at all. `Input.tsx`'s printable-insert guard never
+    // inserts when `key.ctrl`, so this needs no sync with that list and cannot
+    // echo at any buffer state. claude1's finding.
     if (raw === "s" && key.ctrl) {
       const r = rooms[selected];
       if (!r) return;

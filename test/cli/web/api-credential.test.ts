@@ -357,7 +357,7 @@ test("cookieValue finds its name among others and does not match a suffix", () =
  *   ls /work/..                         ->  the CONTAINER root, not the host
  *   find / -maxdepth 6 -name .chat-mcp  ->  (nothing)
  *
- * `assertProjectDirOutsideState` (`containment.ts:128`) is what closed it: it
+ * `assertProjectDirOutsideState` in `containment.ts` is what closed it: it
  * refuses any project dir or registered mount overlapping the state dir.
  *
  * 🛑 SO THE CREDENTIAL NOW *DOES* LIVE UNDER `stateDir()`, in a SEPARATE 0600
