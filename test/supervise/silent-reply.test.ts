@@ -234,6 +234,16 @@ test("owed is what separates a lost reply from an ordinary turn", () => {
  *
  * ⚠️ WHEN THE GAP CLOSES THIS TEST GOES RED, naming the two docblocks that
  * must change with it.
+ *
+ * 🛑 THE `said` PRECONDITION IS NOT DECORATION. `silentReplyWarning` returns
+ * `undefined` for a turn that said nothing, so a DEAD `observe` satisfies the
+ * final assertion without the gap existing at all. Asserting `said` is what
+ * makes a passing `undefined` mean "the gap", and nothing else.
+ *
+ * ⚠️ DELIBERATELY NO `sent` PRECONDITION. It would fire BEFORE the final
+ * assertion on the one trip that matters, replacing "the gap closed, update
+ * the docblocks" with "observe is not reading tool_use blocks" — which is
+ * false exactly when the gap has been closed properly.
  */
 test("a REFUSED send still clears the warning — known gap, not a fix", () => {
   const turn = newTurn(true);
@@ -246,6 +256,8 @@ test("a REFUSED send still clears the warning — known gap, not a fix", () => {
       "Unknown peer: nobody. Call list_agents to see who is registered.",
     ),
   );
+
+  assert.equal(turn.said, true, "observe is not reading text blocks at all");
 
   assert.equal(
     silentReplyWarning(turn),
