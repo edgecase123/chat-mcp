@@ -1,6 +1,6 @@
 ---
 title: Terminal interfaces
-updated: 2026-11-15
+updated: 2026-11-17
 covers:
   - src/cli/index.ts
   - src/cli/ink/App.tsx
@@ -12,6 +12,12 @@ covers:
 
 🛑 **Use [the browser UI](../../../README.md#quick-start--the-browser-ui) instead.**
 It gets every new feature first, and it has no layout limits.
+
+🛑 **THESE SURFACES ARE BEING PHASED OUT.** lee ruled on 2026-11-17 that the
+web UI is the only human-facing surface. **No new human-facing feature may be
+added here**, and "gets new features first" below understates that. Nothing is
+being ripped out and no removal date exists. Full directive and its limits:
+[`AGENTS.md`](../../../AGENTS.md).
 
 Reach for a terminal interface only when no browser is available, or when you
 are scripting. Everything here speaks the same protocol against the same files

@@ -6,8 +6,31 @@ Guidance for any coding agent working in this repo.
 
 `chat-mcp` — a local, no-cloud message bus that lets multiple AI coding
 agents (and the human) talk to each other over MCP. TypeScript, Node 22+,
-stdio MCP shim + CLI + a browser dashboard, backed by a single SQLite file
-under `~/.chat-mcp/` (or `$CHAT_MCP_HOME`). Full design: `DESIGN.md`.
+stdio MCP shim + a browser dashboard, backed by a single SQLite file under
+`~/.chat-mcp/` (or `$CHAT_MCP_HOME`). Full design: `DESIGN.md`.
+
+⚠️ **There is also a CLI, and it is being PHASED OUT.** Read the directive
+below before you build anything on it.
+
+## 🛑 THE WEB UI IS THE OPERATOR SURFACE. THE CLI IS BEING PHASED OUT.
+
+**lee, `#mcp` 15413, 2026-11-17:** _"web ui only. cli will be phased out."_
+
+So a new operator-facing control lands in the browser dashboard, not in
+`src/index.ts`. A ticket that proposes both gets the web half only.
+
+- **Do not add a new `program.command(...)`** for an operator action. Propose
+  the dashboard control instead and say why in the ticket.
+- **The existing CLI commands stay** until lee says otherwise. This is a rule
+  about what is ADDED, not a licence to delete what works.
+- **The MCP shim tools are NOT the CLI** and are unaffected. Agents reach the
+  bus through them, and that is the supported path.
+- ⚠️ **`chat-mcp cli` and `chat-mcp web` both still run.** The phase-out is a
+  direction, and no removal date has been set.
+
+🛑 **A TICKET WRITTEN BEFORE 2026-11-17 MAY STILL PROPOSE A CLI SURFACE.
+THE TICKET IS NOT THE RULING.** Re-scope it to the web UI and say so on the
+ticket. #13, #91, #152 and #181 are all in that state today.
 
 ## Where documentation goes
 
