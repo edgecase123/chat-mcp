@@ -45,10 +45,6 @@ export function applyBacklogCheck(
   const minutes = oldestAt === null ? null : (now - oldestAt) / 60_000;
   const transition = nextBacklogState(minutes, prevWarned);
 
-  if (transition.next_warned !== prevWarned) {
-    dao.setAgentUnreadWarned(db, handle, transition.next_warned);
-  }
-
   const notified = { dm: 0, rooms: [] as string[] };
 
   if (transition.fire != null && minutes != null) {
@@ -101,6 +97,14 @@ export function applyBacklogCheck(
         notified.rooms.push(room.name);
       }
     }
+  }
+
+  // 🛑 AFTER THE DELIVERY, NOT BEFORE IT. A throw above spends the band on a
+  // warning nobody received, and a spent band never fires again — so the agent
+  // is never warned at all. Writing it last means a failed delivery retries on
+  // the next send.
+  if (transition.next_warned !== prevWarned) {
+    dao.setAgentUnreadWarned(db, handle, transition.next_warned);
   }
 
   return {

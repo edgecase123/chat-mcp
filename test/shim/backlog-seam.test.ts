@@ -194,3 +194,62 @@ test("a REFUSED send does not tick, because nothing was sent", async () => {
     "a refusal is not a liveness signal the agent earned",
   );
 });
+
+/**
+ * 🛑 A THROWN CHECK MUST NOT COST THE AGENT A MESSAGE IT ALREADY SENT.
+ *
+ * The seams above prove the check is CALLED. These prove it is called SAFELY,
+ * which is a separate revert: swapping `tickBacklogSafely` back to
+ * `applyBacklogCheck` leaves every other test in this file green.
+ *
+ * ⚠️ BOTH TOOLS, because each seam reverts on its own.
+ */
+for (const tool of ["send", "room_send"] as const) {
+  test(`🚨 ${tool}: a backlog check that THROWS still returns a message_id`, async () => {
+    const me = `seam-${process.pid}-throw-${tool}`;
+    const peer = `seam-${process.pid}-peer-${tool}`;
+    const room = `#seam-throw-${process.pid}-${tool}`;
+    const ctx = contextFor(me);
+    register(ctx, me);
+    register(ctx, peer);
+    dao.joinRoom(ctx.db, room, me);
+    agedDm(ctx, peer, me, 7);
+
+    // The agent's own row inserts first, so only the WARNING's insert fails.
+    ctx.db.exec(
+      `CREATE TRIGGER seam_break_system BEFORE INSERT ON messages
+         WHEN NEW.from_handle = '${dao.SYSTEM_HANDLE}'
+         BEGIN SELECT RAISE(ABORT, 'injected delivery failure'); END`,
+    );
+
+    const errors: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => void errors.push(args.join(" "));
+
+    try {
+      const args =
+        tool === "send" ? { to: peer, body: "work" } : { room, body: "work" };
+      const out = await callTool(ctx, tool, args);
+
+      assert.ok(out.message_id, "the send survives a failed backlog check");
+      assert.deepEqual(systemWarnings(ctx, me), [], "no warning was delivered");
+
+      // ⚠️ A BURNT BAND IS WORSE THAN A LATE ONE. Recording 5 here spends the
+      // 5-minute band on a warning nobody received, and a spent band never
+      // fires again — so the agent is never warned at all.
+      assert.equal(
+        dao.getAgent(ctx.db, me)?.unread_warned_threshold,
+        null,
+        "an undelivered warning must not spend the band",
+      );
+    } finally {
+      console.error = realError;
+      ctx.db.exec(`DROP TRIGGER seam_break_system`);
+    }
+
+    // ⚠️ A swallowed failure with no trace reads exactly like an empty backlog.
+    assert.equal(errors.length, 1, "the swallowed failure reaches stderr");
+    assert.match(errors[0]!, /unread-backlog check failed/);
+    assert.match(errors[0]!, new RegExp(me));
+  });
+}
