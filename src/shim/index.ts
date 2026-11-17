@@ -92,7 +92,7 @@ function buildInstructions(handle: string): string {
     `- \`room_inbox\` — read unread messages, per-member watermark. Pass a specific \`room\` or omit to read across all your rooms.`,
     `- \`room_list\` — rooms you're in (or \`include_all=true\` to discover).`,
     `- \`room_members\` — handles currently in a specific room (offline members included).`,
-    `- \`room_delete\` — delete a room (caller must be a member; cascades members + reads + messages).`,
+    `- \`room_delete\` — delete a room (members only, and owner-only while the owner is still a member; any member may delete once the owner has left; cascades members + reads + messages).`,
     `- \`room_boot\` — remove a specific handle from a room (caller must be a member; posts a system announcement).`,
     ``,
     `Room-message notify envelope: \`{"id":<n>,"to":"#roomname","from":"<sender>","ts":<ms>}\`. The wake mechanism doesn't distinguish DMs from rooms — call \`inbox\` AND \`room_inbox\` (or wire both into your handler) on each wake.`,

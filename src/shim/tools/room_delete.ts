@@ -10,7 +10,7 @@ export function installRoomDelete(server: McpServer, ctx: ShimContext): void {
     {
       title: "Delete a room",
       description:
-        "Delete a room entirely, cascading membership, read watermarks, and any messages sent to the room. Caller must be a current member. No announcement is sent (nobody is left to read it).",
+        "Delete a room entirely, cascading membership, read watermarks, and any messages sent to the room. Members only, and owner-only while the owner is still a member; any member may delete once the owner has left. No announcement is sent (nobody is left to read it).",
       inputSchema: {
         room: z
           .string()
@@ -30,7 +30,7 @@ export function installRoomDelete(server: McpServer, ctx: ShimContext): void {
       if (!result.ok) {
         if (result.reason === "not-a-member") {
           throw new Error(
-            `Cannot delete ${room}: caller is not a member. Join first to confirm the room exists, or ask a current member to delete.`,
+            `Cannot delete ${room}: caller is not a member. Join first to confirm the room exists, or ask its owner — any member may delete once the owner has left.`,
           );
         }
         if (result.reason === "owner-only") {

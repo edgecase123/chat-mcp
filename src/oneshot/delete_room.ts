@@ -19,7 +19,7 @@ export async function runDeleteRoom(opts: DeleteRoomOpts): Promise<void> {
 
     if (!result.ok && result.reason === "not-a-member") {
       throw new Error(
-        `Cannot delete ${opts.room}: ${caller} is not a member. Join first, or ask a current member to delete.`,
+        `Cannot delete ${opts.room}: ${caller} is not a member. Join first, or ask its owner — any member may delete once the owner has left.`,
       );
     }
     if (!result.ok && result.reason === "owner-only") {
