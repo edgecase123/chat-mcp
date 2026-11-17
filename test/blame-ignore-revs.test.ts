@@ -28,6 +28,41 @@ function listedRevs(): string[] {
     .filter((l) => l.length > 0 && !l.startsWith("#"));
 }
 
+/**
+ * 🛑 EVERY TEST BELOW NEEDS REAL HISTORY, AND A SHALLOW CLONE HAS NONE.
+ *
+ * CI checked out at the default depth 1, so `cat-file` could not see the one
+ * sha this file lists and all three history tests failed on a branch that was
+ * green locally. The error it printed named the object, not the cause.
+ *
+ * ⚠️ IT FAILS RATHER THAN SKIPS. A skip here reads as coverage, and the whole
+ * point of these tests is that a dead entry is otherwise silent.
+ */
+test("🛑 the clone has real history, or nothing below can resolve a sha", () => {
+  assert.equal(
+    git("rev-parse", "--is-shallow-repository"),
+    "false",
+    "shallow clone: no sha resolves and every test below fails on its object " +
+      "rather than on its claim. CI needs `fetch-depth: 0` on actions/checkout.",
+  );
+});
+
+/**
+ * 🛑 THE FIX ABOVE LIVES IN A FILE NO TEST READ, so dropping it would silently
+ * return CI to the state that made this file fail. Pinned here, beside the
+ * tests that need it, rather than with the typecheck wiring.
+ */
+test("🛑 CI checks out full history, or these tests cannot run there", () => {
+  const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+
+  assert.match(
+    ci,
+    /uses: actions\/checkout@v4\s*\n\s*with:\s*\n\s*fetch-depth: 0/,
+    "ci.yml does not set `fetch-depth: 0` on the checkout, so the runner gets " +
+      "one commit and every history test here fails on a missing object",
+  );
+});
+
 test("the file lists at least one rev", () => {
   const revs = listedRevs();
   assert.ok(

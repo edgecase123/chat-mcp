@@ -12,7 +12,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      # 🛑 FULL HISTORY, NOT THE DEFAULT DEPTH-1 CLONE. `blame-ignore-revs`
+      # resolves a sha and walks blame through it, and a shallow runner holds
+      # one commit — so all three of its history tests failed with
+      # `git cat-file: could not get object info` while passing locally.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
