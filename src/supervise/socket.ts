@@ -1,6 +1,17 @@
 import { createServer, connect, type Server, type Socket } from "node:net";
-import { chmodSync, existsSync, unlinkSync } from "node:fs";
-import { SOCKET_MODE, ensureSocketDir, socketPathFor } from "../util/paths.js";
+import {
+  chmodSync,
+  existsSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import {
+  SOCKET_MODE,
+  ensureSocketDir,
+  socketDir,
+  socketPathFor,
+} from "../util/paths.js";
 import { supervisorHandleFor } from "./grant.js";
 
 /**
@@ -297,6 +308,73 @@ async function respond(
     socket.write(`${JSON.stringify(ack)}\n`);
   } catch {
     // The sender hung up; nothing to report it to.
+  }
+}
+
+/** A supervisor that answered a liveness probe on its own socket. */
+export interface LiveSupervisor {
+  readonly handle: string;
+  readonly socketPath: string;
+
+  /**
+   * When the socket file was created, as epoch milliseconds.
+   *
+   * ⚠️ THIS IS THE SUPERVISOR'S AGE, NOT THE CHILD'S. A restart respawns the
+   * child without rebinding the socket, so a long age here says nothing about
+   * how long the current agent session has been running.
+   */
+  readonly boundAt: number;
+}
+
+/**
+ * Every supervisor currently answering on `~/.chat-mcp/sock/`.
+ *
+ * 🛑 THE SOCKET IS THE ADDRESS, SO IT IS ALSO THE REGISTER. The `agents` table
+ * records a pid but nothing keeps it fresh, and a reused pid means naming an
+ * unrelated process. A socket that answers a probe is a supervisor that can be
+ * sent a control this instant, which is the only property an operator stopping
+ * an agent needs.
+ *
+ * 🛑 STALE DEBRIS IS SKIPPED AND LEFT ALONE. A crashed supervisor leaves a
+ * file behind, and removing it is `WakeListener.bind`'s job — it probes under
+ * its own refusal rules first. A reader that tidied up would race a supervisor
+ * binding at that moment.
+ */
+export async function listLiveSupervisors(): Promise<LiveSupervisor[]> {
+  let entries: string[];
+
+  try {
+    entries = readdirSync(socketDir());
+  } catch {
+    // No socket directory means no supervisor has ever bound here.
+    return [];
+  }
+
+  const probed = await Promise.all(
+    entries.map(async (handle): Promise<LiveSupervisor | null> => {
+      const path = socketPathFor(handle);
+
+      if (!(await isLive(path))) return null;
+
+      return { handle, socketPath: path, boundAt: boundAtOf(path) };
+    }),
+  );
+
+  return probed.filter((s): s is LiveSupervisor => s !== null);
+}
+
+/**
+ * The socket file's own mtime, or now when it cannot be read.
+ *
+ * ⚠️ `mtime` RATHER THAN `birthtime`, which is zero on some filesystems. A
+ * socket file is written once at `listen()` and never again, so its mtime is
+ * its creation time.
+ */
+function boundAtOf(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return Date.now();
   }
 }
 
