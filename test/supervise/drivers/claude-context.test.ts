@@ -95,6 +95,51 @@ test("haiku 4.5 is the one current model that is not a megatoken", () => {
 });
 
 /**
+ * 🛑 MEASURED: THE CLI EMITS A DATED ID FOR HAIKU AND AN UNDATED ONE FOR THE
+ * REST, so the family alias above is a string the wire never carries. Four
+ * real `claude -p --output-format stream-json` spawns, 2026-11-17:
+ *
+ *   --model claude-haiku-4-5           -> message.model claude-haiku-4-5-20251001
+ *   --model claude-haiku-4-5-20251001  -> message.model claude-haiku-4-5-20251001
+ *   --model claude-opus-5              -> message.model claude-opus-5
+ *   --model claude-sonnet-5            -> message.model claude-sonnet-5
+ *
+ * ⚠️ IT READ CORRECTLY ANYWAY, WHICH IS WHY NOTHING CAUGHT IT. Every
+ * supervised haiku child fell through to `FALLBACK_CONTEXT_WINDOW`, and that
+ * is derived as the smallest mapped window — haiku's own 200k. Adding any
+ * smaller model would have moved the fallback and started reading HIGH.
+ */
+test("the DATED id the CLI actually emits resolves, not just the family alias", () => {
+  assert.equal(contextWindowForModel("claude-haiku-4-5-20251001"), 200_000);
+});
+
+/**
+ * 🛑 THE DATE COMES OFF, THE FAMILY DOES NOT. `contextWindowForModel`'s own
+ * docblock refuses a prefix rule because it would absorb the next model
+ * family silently. Stripping a dated suffix is not a prefix rule, and this is
+ * the control that says so: an unmapped family stays unmapped however it is
+ * dated.
+ */
+test("stripping the date does NOT absorb an unmapped family", () => {
+  assert.equal(contextWindowForModel("claude-haiku-5-20260301"), null);
+  assert.equal(contextWindowForModel("claude-opus-6-20260301"), null);
+  // A non-date suffix is a DIFFERENT model, and a prefix rule would hand it
+  // haiku's window.
+  assert.equal(contextWindowForModel("claude-haiku-4-5-turbo"), null);
+});
+
+/**
+ * ⚠️ A SUFFIX THAT IS NOT 8 DIGITS IS PART OF THE NAME. Every mapped id ends
+ * in a version segment, so a looser rule would strip `-5` off `claude-opus-5`
+ * and look up `claude-opus`.
+ */
+test("a version segment is not mistaken for a date", () => {
+  assert.equal(contextWindowForModel("claude-sonnet-4-6"), 1_000_000);
+  assert.equal(contextWindowForModel("claude-opus-5"), 1_000_000);
+  assert.equal(contextWindowForModel("claude-opus-5-2025100"), null);
+});
+
+/**
  * 🛑 AN UNKNOWN ID RETURNS null, SO THE CALLER MUST CHOOSE AND SAY SO. The
  * caller falls back to `FALLBACK_CONTEXT_WINDOW` and logs the id. Returning
  * the fallback from here would make an unmapped model indistinguishable from
