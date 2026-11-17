@@ -17,6 +17,27 @@ export interface BacklogCheck {
 }
 
 /**
+ * 🛑 THE ROW IS THE DELIVERY. `inbox` and `room_inbox` read the table, so a
+ * failed wake has not lost the warning — and not counting the delivery leaves
+ * the band unspent, which writes the same row again on every later tick.
+ *
+ * ⚠️ CALLERS PASS A THUNK WITH A BLOCK BODY, and both halves are load-bearing:
+ * `body-reaches-sender` reads the source, so the envelope must stay a literal
+ * at the call site, and its denominator control only sees a call ending `);`.
+ */
+function wakeQuietly(target: string, wake: () => void): void {
+  try {
+    wake();
+  } catch (e) {
+    console.error(
+      `[chat-mcp] backlog warning wake failed for ${target}: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+  }
+}
+
+/**
  * Observe one agent's unread backlog and deliver whatever band it just crossed.
  *
  * 🛑 THE TICK IS THE AGENT'S OWN `send` / `room_send`, and that is the whole
@@ -64,15 +85,18 @@ export function applyBacklogCheck(
         kind: "chat",
       });
 
-      notifyPeer(handle, {
-        id: result.id,
-        to: handle,
-        from: dao.SYSTEM_HANDLE,
-        ts: result.sent_at,
-        body,
-        kind: "chat",
-      });
       notified.dm = 1;
+
+      wakeQuietly(handle, () => {
+        notifyPeer(handle, {
+          id: result.id,
+          to: handle,
+          from: dao.SYSTEM_HANDLE,
+          ts: result.sent_at,
+          body,
+          kind: "chat",
+        });
+      });
     } else {
       // 60 / 240: a DM is evidently not reaching them, so the rooms get it.
       const kind = delivery === "alert" ? "alert" : "chat";
@@ -88,17 +112,20 @@ export function applyBacklogCheck(
             kind,
           });
 
+          notified.rooms.push(room.name);
+
           for (const member of dao.roomMembers(db, room.name)) {
-            notifyPeer(member, {
-              id: result.id,
-              to: room.name,
-              from: dao.SYSTEM_HANDLE,
-              ts: result.sent_at,
-              body,
-              kind,
+            wakeQuietly(room.name, () => {
+              notifyPeer(member, {
+                id: result.id,
+                to: room.name,
+                from: dao.SYSTEM_HANDLE,
+                ts: result.sent_at,
+                body,
+                kind,
+              });
             });
           }
-          notified.rooms.push(room.name);
         } catch (e) {
           // PER ROOM, so one unwritable room cannot cost the others their
           // warning — and cannot leave the band unspent, which re-delivers.

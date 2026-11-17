@@ -312,3 +312,61 @@ test("🛑 a band NOTHING could be delivered to stays unspent, and retries", () 
     stderr.restore();
   }
 });
+
+/**
+ * A REAL wake failure, not an injected one: the notify dir is resolved from
+ * `CHAT_MCP_HOME` on every call, so an unwritable path makes `notifyPeer`
+ * throw out of `mkdirSync` the way a permission or ENOSPC error would.
+ */
+function breakWakes(): () => void {
+  const real = process.env.CHAT_MCP_HOME;
+  process.env.CHAT_MCP_HOME = "/dev/null/not-a-dir";
+
+  return () => void (process.env.CHAT_MCP_HOME = real);
+}
+
+test("🛑 a failed WAKE does not re-send a warning row that committed (rooms)", () => {
+  const db = freshDb();
+  const now = Date.now();
+  twoRooms(db);
+  dmAgedBy(db, now, 61);
+
+  const restore = breakWakes();
+  const stderr = quietStderr();
+  try {
+    for (const tick of [0, 1, 2]) applyBacklogCheck(db, "me", now + tick * MIN);
+  } finally {
+    stderr.restore();
+    restore();
+  }
+
+  assert.equal(
+    warningsIn(db, "#aaa").length,
+    1,
+    "the row IS the delivery, so one row across 3 ticks",
+  );
+  assert.equal(dao.getAgent(db, "me")?.unread_warned_threshold, 60);
+  assert.match(stderr.lines[0]!, /wake failed for #aaa/);
+});
+
+test("🛑 a failed WAKE does not re-send the DM warning either", () => {
+  const db = freshDb();
+  const now = Date.now();
+  dmAgedBy(db, now, 6);
+
+  const restore = breakWakes();
+  const stderr = quietStderr();
+  try {
+    for (const tick of [0, 1, 2]) applyBacklogCheck(db, "me", now + tick * MIN);
+  } finally {
+    stderr.restore();
+    restore();
+  }
+
+  const warnings = dao
+    .pendingInbox(db, { to: "me" })
+    .filter((m) => m.from_handle === dao.SYSTEM_HANDLE);
+  assert.equal(warnings.length, 1, "warned once, not once per tick");
+  assert.equal(dao.getAgent(db, "me")?.unread_warned_threshold, 5);
+  assert.match(stderr.lines[0]!, /wake failed for me/);
+});
