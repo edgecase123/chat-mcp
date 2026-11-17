@@ -133,6 +133,29 @@ test("stripping the date does NOT absorb an unmapped family", () => {
  * in a version segment, so a looser rule would strip `-5` off `claude-opus-5`
  * and look up `claude-opus`.
  */
+/**
+ * 🛑 AN INHERITED MEMBER IS NOT NULLISH, SO `?? null` COULD NOT CATCH IT. A
+ * plain object literal answers for every `Object.prototype` key, so the map
+ * returned a FUNCTION where the signature says `number | null` — and
+ * `Math.min(used, total)` was then NaN with `totalIsFallback` FALSE, so
+ * nothing logged either.
+ *
+ * ⚠️ VENDOR-UNREACHABLE: it needs `message.model` to be literally "toString".
+ * This is a type hole `tsc` cannot see, not a live defect. Raised by claude2
+ * reviewing this PR, measured independently here.
+ */
+test("a prototype member is not a context window", () => {
+  for (const key of [
+    "toString",
+    "constructor",
+    "valueOf",
+    "hasOwnProperty",
+    "__proto__",
+  ]) {
+    assert.equal(contextWindowForModel(key), null, key);
+  }
+});
+
 test("a version segment is not mistaken for a date", () => {
   assert.equal(contextWindowForModel("claude-sonnet-4-6"), 1_000_000);
   assert.equal(contextWindowForModel("claude-opus-5"), 1_000_000);

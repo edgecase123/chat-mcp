@@ -390,10 +390,26 @@ const DATED_RELEASE_SUFFIX = /-\d{8}$/;
  */
 export function contextWindowForModel(model: string): number | null {
   return (
-    CONTEXT_WINDOWS[model] ??
-    CONTEXT_WINDOWS[model.replace(DATED_RELEASE_SUFFIX, "")] ??
+    mappedWindow(model) ??
+    mappedWindow(model.replace(DATED_RELEASE_SUFFIX, "")) ??
     null
   );
+}
+
+/**
+ * One mapped window, or undefined — and `Object.hasOwn` is the load-bearing
+ * part.
+ *
+ * 🛑 AN INHERITED MEMBER IS NOT NULLISH, so a bare `CONTEXT_WINDOWS[id] ?? …`
+ * answered `"toString"` with a FUNCTION where the signature promises a number,
+ * `totalIsFallback` came back FALSE so nothing logged, and
+ * `Math.min(used, total)` was NaN. Raised by claude2 reviewing this fix.
+ *
+ * ⚠️ ONE HOME FOR THE LOOKUP, because the dated retry above would otherwise be
+ * a second copy of the same guard.
+ */
+function mappedWindow(id: string): number | undefined {
+  return Object.hasOwn(CONTEXT_WINDOWS, id) ? CONTEXT_WINDOWS[id] : undefined;
 }
 
 /**
