@@ -88,3 +88,25 @@ test("each live supervisor carries when its socket was bound", async () => {
     await l.close();
   }
 });
+
+test("a `.DS_Store` in the socket directory is skipped, not thrown on", async () => {
+  // 🛑 THE FILESYSTEM IS A SECOND SOURCE OF HANDLES, AND IT IS NOT VALIDATED.
+  // `socketPathFor` calls `assertHandle`, which THROWS on a leading dot — so
+  // one Finder visit to ~/.chat-mcp/sock/ turned the whole live list into a
+  // 500. The guard on the caller's own handle does not cover this. Measured by
+  // claude1 reviewing PR 296.
+  ensureSocketDir();
+  writeFileSync(join(socketDir(), ".DS_Store"), "");
+  const l = await WakeListener.bind("survivor", () => ({ ok: true }));
+
+  try {
+    const live = await listLiveSupervisors();
+
+    assert.deepEqual(
+      live.map((s) => s.handle),
+      ["survivor"],
+    );
+  } finally {
+    await l.close();
+  }
+});

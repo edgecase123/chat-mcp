@@ -13,6 +13,7 @@ import {
   socketPathFor,
 } from "../util/paths.js";
 import { supervisorHandleFor } from "./grant.js";
+import { isHandle } from "../util/naming.js";
 
 /**
  * Direct delivery to a running supervisor.
@@ -351,13 +352,19 @@ export async function listLiveSupervisors(): Promise<LiveSupervisor[]> {
   }
 
   const probed = await Promise.all(
-    entries.map(async (handle): Promise<LiveSupervisor | null> => {
-      const path = socketPathFor(handle);
+    // 🛑 THE FILESYSTEM IS A SECOND SOURCE OF HANDLES AND IT IS NOT VALIDATED.
+    // `socketPathFor` throws on a name that is not a handle, so one Finder
+    // visit leaving a `.DS_Store` here turned the whole live list into a 500.
+    // Found by claude1 reviewing PR 296, and measured.
+    entries
+      .filter(isHandle)
+      .map(async (handle): Promise<LiveSupervisor | null> => {
+        const path = socketPathFor(handle);
 
-      if (!(await isLive(path))) return null;
+        if (!(await isLive(path))) return null;
 
-      return { handle, socketPath: path, boundAt: boundAtOf(path) };
-    }),
+        return { handle, socketPath: path, boundAt: boundAtOf(path) };
+      }),
   );
 
   return probed.filter((s): s is LiveSupervisor => s !== null);
