@@ -121,9 +121,15 @@ test("🛑 it reaches web/assets, or every test/web import is `any`", () => {
  *
  * `allowJs` without `checkJs` puts the file in the program and type-checks
  * nothing inside it, so "no errors in web/assets" is the only answer that
- * config can give. Turning `checkJs` on is 408 errors in there, measured.
+ * config can give.
  *
- * This fails the day someone flips it without budgeting for them.
+ * 🛑 THAT IS NOW A RULING, NOT AN UNBUDGETED GAP. lee on #177, 2026-11-16:
+ * "No, web assets should not be typechecked." Hand-written browser ES modules
+ * stay out, so flipping `checkJs` reverses a decision and fails this first.
+ *
+ * ⚠️ NO ERROR COUNT HERE ON PURPOSE. This comment used to carry one, and it
+ * was already wrong by the time #177 closed. Nothing in the suite measures
+ * that number, so a copy of it here can only go stale.
  */
 test("⚠️ checkJs stays off — web/assets is UNCHECKED, not clean", () => {
   const { compilerOptions } = showConfig("tsconfig.test.json");
@@ -131,7 +137,7 @@ test("⚠️ checkJs stays off — web/assets is UNCHECKED, not clean", () => {
   assert.notEqual(
     compilerOptions.checkJs,
     true,
-    "checkJs is on; web/assets carries 408 errors and no slice has budgeted them",
+    "checkJs is on; web/assets is excluded by lee's ruling on #177, not pending",
   );
 });
 
