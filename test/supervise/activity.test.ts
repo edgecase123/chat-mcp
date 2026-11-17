@@ -31,11 +31,10 @@ import {
  */
 
 /**
- * 🛑 THE PRODUCER'S EXACT STRING, NOT A TOKEN. `server.ts:155` builds
- * `${url}?t=${token}` and `:183` writes THAT, plus a newline, to
- * `web-handshake`. A fixture holding a bare token is a string no producer ever
- * writes, and it passed while production 401'd on every pulse. Found by
- * claude1 on PR 244.
+ * 🛑 THE PRODUCER'S EXACT STRING, NOT A TOKEN. `server.ts` builds
+ * `handshakeUrl` and writes THAT, plus a newline, to `webHandshakeFile()`. A
+ * fixture holding a bare token is a string no producer ever writes, and it
+ * passed while production 401'd on every pulse. Found by claude1 on PR 244.
  */
 /** A real minted token, so the fixtures carry the shape production carries. */
 const TOKEN = mintToken();
@@ -414,7 +413,8 @@ test("⚠️ two handles throttle independently", async () => {
  * 🔴 THE ASSERTION THE OTHER TESTS COULD NOT MAKE, AND IT IS THE WHOLE POINT.
  * Every fixture here used to write a bare token, so `activityTarget` returning
  * the WHOLE handshake url went unnoticed — `tokenMatches` compares lengths
- * first, 68 against 43, and `server.ts:373` answers 401. The two halves of
+ * first, 68 against 43, and `server.ts`'s `requiredCapability` check answers
+ * 401. The two halves of
  * #240 were each green against their own fixture and disagreed with each
  * other. Found by claude1 on PR 244.
  *

@@ -23,7 +23,8 @@ import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
  * `replaceChild` and `doRestart` both drain the queue, respawn, then re-offer
  * what they drained. `TurnQueue.offer` DROPS a prompt whose message ids it has
  * already seen, `drain()` does not clear that set, and there is one queue per
- * supervisor (`index.ts:440`). So the re-offer returns `duplicate` and the
+ * supervisor — `supervise/index.ts` has a single `new TurnQueue`. So the
+ * re-offer returns `duplicate` and the
  * operator's unsent work is gone on the SUCCESS path.
  *
  * ⚠️ THE DOCBLOCK ON `replaceChild` SAYS THE OPPOSITE — "THE QUEUE IS DRAINED,

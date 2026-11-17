@@ -726,7 +726,7 @@ test("the replacement child is sent something it could actually run", async () =
       approval: {
         approvalId: 11,
         decision: "approve",
-        // `answer.ts:67` is the only producer of this envelope and it writes
+        // `answer.ts` is the only producer of this envelope and it writes
         // `?? ""`, so a literal null here is a shape production cannot send.
         requested: denial.requested ?? "",
         grant: grantFor(denial),

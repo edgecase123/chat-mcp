@@ -52,6 +52,8 @@ formatter across one edits a historical record instead of the codebase.
 - **A `file.ts:NNN` reference in prose goes stale when that file reflows.** The
   one-time reformat moved line numbers in most `.ts` files. A reference written
   before it points at the wrong line, not at nothing, so it fails silently.
+  **Name the symbol instead.** `test/stale-line-pointers.test.ts` refuses a new
+  one, and carries the three allowlisted paths with the reason for each.
 - **`git blame` on a reformatted line shows the reformat, not the author.**
   `.git-blame-ignore-revs` fixes that, but only after you opt in — see below.
 
