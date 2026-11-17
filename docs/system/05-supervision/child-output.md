@@ -1,8 +1,9 @@
 ---
 title: Child Output
-updated: 2026-11-14
+updated: 2026-11-16
 covers:
   - src/supervise/child.ts
+  - src/supervise/silent-reply.ts
   - src/supervise/drivers/wiring.ts
   - src/supervise/index.ts
 ---
@@ -136,6 +137,49 @@ So a replaced child's late stderr is dropped, and `ifCurrent` says so. The loss
 is visible rather than silent. `replace-child.test.ts` asserts the whole
 registration set, and its `REQUIRED` list records this reason.
 
+## 🔴 A turn can answer and still reach nobody
+
+`describeChildOutput` made "the child said nothing" visible. The inverse was
+still silent: the child produced prose, called no `send`, and the log read
+exactly like a delivered reply. The peer waited on an answer that existed only
+in a transcript nobody else can open. #224.
+
+`silent-reply.ts` folds each `assistant` event into one verdict per turn.
+
+| flag   | set by                                                |
+| ------ | ----------------------------------------------------- |
+| `owed` | the dispatched prompt carried `messageIds`            |
+| `said` | a `text` block with something other than blanks       |
+| `sent` | a `tool_use` naming `send` or `room_send` on THIS bus |
+
+A warning needs all three of `owed`, `said` and `!sent`.
+
+🛑 **`owed` IS WHAT STOPS IT BEING NOISE.** "Prose and no send" describes an
+ordinary turn whenever the supervisor prompted its own child — a grant notice,
+a model replacement — because nobody is waiting on those. Every internal
+prompt offers `messageIds: []`, so that list IS the question.
+
+🛑 **THE VERDICT IS READ BEFORE `queue.turnEnded()`.** That call can dispatch a
+prompt queued behind the in-flight turn, synchronously, and the dispatch starts
+a NEW turn. Measured with a second message queued: `→ child:` for it is logged
+before `← turn complete`, so reading after it reads an empty turn and reports
+nothing.
+
+⚠️ **IT NEVER READS A TOOL CALL'S INPUT.** A `mcp__chat__send` input IS the
+message body, which this file's own rule keeps out of the log, so the detector
+cannot tell WHO a send reached. lee ruled on 2026-11-16: flag a turn with no
+send at all.
+
+⚠️ **A BARE TOOL NAME COUNTS, AND ANOTHER SERVER'S `send` DOES NOT.** The
+`mcp__chat__` prefix belongs to the MCP client, not the bus, so a driver
+reporting an unprefixed name must not make the detector silently blind.
+`mcp__other__send` is a different server and never clears the warning.
+
+🛑 **IT LOGS AND DOES NOT NUDGE.** The ticket allowed either. A nudge back to
+the agent risks a loop — the nudge is a turn, which can itself end in prose
+with no send — so it needs a loop bound designed on purpose rather than added
+here.
+
 ## Common pitfalls
 
 - ⚠️ **`tsc` does not typecheck `test/`.** `tsconfig.json` includes `src/**/*`
@@ -156,6 +200,7 @@ registration set, and its `REQUIRED` list records this reason.
 | `src/supervise/child.ts`          | the `AgentChild` contract, and the stdout line parser that drops non-JSON |
 | `src/supervise/drivers/wiring.ts` | attaches both streams once for every driver, and buffers stderr to lines  |
 | `src/supervise/index.ts`          | subscribes and logs, inside `ifCurrent`                                   |
+| `src/supervise/silent-reply.ts`   | one verdict per turn: was a reply owed, said, and actually sent           |
 
 ## Related docs
 
