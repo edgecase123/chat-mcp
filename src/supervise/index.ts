@@ -25,6 +25,7 @@ import {
   type ChildGrant,
 } from "./grant.js";
 import { announceChildExit } from "./exit-event.js";
+import { newTurn, observe, silentReplyWarning } from "./silent-reply.js";
 import { dirsFor } from "./projects.js";
 import { allowlistWith, resolveCwd } from "./allowlist.js";
 import { commandFromGrant, grantFor, grantVariants } from "./denial.js";
@@ -531,9 +532,20 @@ export async function startSupervisor(
    */
   let turnEndCount = 0;
 
+  /**
+   * What the CURRENT turn has produced, for #224's lost-reply check.
+   *
+   * 🛑 `false` UNTIL A PROMPT IS DISPATCHED. A turn nobody asked for owes
+   * nobody an answer, so the initial value must not warn.
+   */
+  let turn = newTurn(false);
+
   const queue = new TurnQueue({
     send: (prompt) => {
       log(`→ child: ${excerptForLog(prompt.text)}`);
+      // An inbound bus message carries its id; every internal prompt offers
+      // `messageIds: []`. That list IS "is a peer waiting for this".
+      turn = newTurn(prompt.messageIds.length > 0);
       child.send(prompt.text);
       for (const cb of sendListeners) cb(prompt);
     },
@@ -748,12 +760,24 @@ export async function startSupervisor(
         const outcome = describeTurnResult(event);
 
         if (outcome) log(`← result: ${outcome}`);
+
+        observe(turn, event);
       }),
     );
 
     child.onTurnEnd(
       ifCurrent("onTurnEnd", () => {
         turnEndCount++;
+
+        // 🛑 BEFORE `queue.turnEnded()`, WHICH CAN DISPATCH THE NEXT PROMPT
+        // SYNCHRONOUSLY AND REPLACE `turn`. Measured: with a second message
+        // queued, `→ child:` for it is logged before `← turn complete`.
+        const lost = silentReplyWarning(turn);
+
+        if (lost) log(`⚠️ ${lost}`);
+
+        turn = newTurn(false);
+
         // 🛑 CLEARS THE PULSE, AND IT IS NEVER THROTTLED. A dropped `end`
         // leaves the dot running to the 30s failsafe, which reads as an agent
         // that never finished.
