@@ -12,8 +12,15 @@ import { join } from "node:path";
  * a refused caller to a current member who also cannot delete. Nothing
  * asserted any of them, so all six stayed wrong for 12 days and 97 commits.
  *
- * The documented precondition cannot be derived at runtime: four of the six
- * are static strings an agent reads BEFORE it calls anything.
+ * ⚠️ FOUR OF THE SIX ARE ASSERTED LIVE, NOT HERE. A file-text pin matches a
+ * docblock quoting the phrase, and this repo quotes copy in docblocks
+ * everywhere — so a pin on the thrown refusals passed with the live messages
+ * gutted. `test/messaging/room-delete-refusal.test.ts` drives the real
+ * transport instead, for both refusals, the tool description and the injected
+ * server instructions.
+ *
+ * What is left here is the two surfaces with no runtime to read them, plus
+ * two repo-wide scans that catch a SEVENTH surface arriving.
  */
 
 /** Every `.ts`/`.tsx` file under `src/`. */
@@ -36,28 +43,30 @@ function lines(): ReadonlyArray<readonly [string, string]> {
   return out;
 }
 
-/** The departed-owner fallback. Half the rule, and the half copy keeps losing. */
-const FALLBACK = "any member may delete once the owner has left";
-
-/** The whole documented precondition, as the four static descriptions carry it. */
-const FULL_RULE = `owner-only while the owner is still a member; ${FALLBACK}`;
-
 const MEMBER_ALONE = /caller must be a[^.)]*member/i;
 
-test("🛑 NO DELETE SURFACE SAYS MEMBERSHIP ALONE IS ENOUGH", () => {
-  const all = lines();
-
-  // ⚠️ THE DENOMINATOR, and it is a POSITIVE CONTROL rather than a count.
-  // `room_boot` IS member-only, so its copy must keep matching this pattern.
-  // If it stops, the pattern has drifted and the delete scan below is reading
-  // nothing. A plain "N lines scanned" would not catch that.
+/**
+ * ⚠️ THE DENOMINATOR FOR BOTH SCANS, and it is a POSITIVE CONTROL rather than
+ * a row count. `room_boot` IS member-only, so its copy must keep matching.
+ * If it stops, the scanner is reading nothing and every claim below is about
+ * an empty list. A plain "N lines scanned" would not catch that.
+ */
+function assertScannerSees(
+  all: ReadonlyArray<readonly [string, string]>,
+): void {
   const boot = all.filter(
     ([, l]) => MEMBER_ALONE.test(l) && /\bboot\b/i.test(l),
   );
+
   assert.ok(
     boot.length >= 3,
-    `only ${boot.length} room_boot member-only strings matched; the pattern has drifted`,
+    `only ${boot.length} room_boot member-only strings matched; the scanner has drifted`,
   );
+}
+
+test("🛑 NO DELETE SURFACE SAYS MEMBERSHIP ALONE IS ENOUGH", () => {
+  const all = lines();
+  assertScannerSees(all);
 
   const offenders = all
     .filter(([, l]) => MEMBER_ALONE.test(l) && /delete/i.test(l))
@@ -70,19 +79,15 @@ test("🛑 NO DELETE SURFACE SAYS MEMBERSHIP ALONE IS ENOUGH", () => {
   );
 });
 
-test("🛑 NO DELETE SURFACE SENDS A REFUSED CALLER TO A CURRENT MEMBER", () => {
+test("🛑 NO SURFACE SENDS A REFUSED CALLER TO SOMEONE WHO IS ALSO REFUSED", () => {
   const all = lines();
+  assertScannerSees(all);
 
-  // ⚠️ THE DENOMINATOR. Both `not-a-member` refusals must still offer
-  // recovery advice, or this test passes by having nothing left to check.
-  const advice = all.filter(([, l]) => /Join first/i.test(l));
-  assert.ok(
-    advice.length >= 2,
-    `only ${advice.length} not-a-member recovery strings found; expected the MCP tool and the oneshot`,
-  );
-
+  // Both phrasings name a handle that is itself refused in the case the same
+  // sentence describes. "a current member" cannot delete while the owner is
+  // present; "its owner" is not a member once they have left.
   const offenders = all
-    .filter(([, l]) => /ask a current member/i.test(l))
+    .filter(([, l]) => /ask a current member|ask its owner/i.test(l))
     .map(([f, l]) => `${f}: ${l.trim()}`);
 
   assert.deepEqual(
@@ -92,55 +97,30 @@ test("🛑 NO DELETE SURFACE SENDS A REFUSED CALLER TO A CURRENT MEMBER", () => 
   );
 });
 
+/** The whole documented precondition, as the static descriptions carry it. */
+const FULL_RULE =
+  "owner-only while the owner is still a member; any member may delete once the owner has left";
+
 /**
- * The six surfaces, each pinned to the wording `README.md` already uses.
+ * The two surfaces nothing can read at runtime.
  *
- * Pinned, not derived: a check that only forbade the wrong phrasing would go
- * green on copy that says nothing about the owner at all. Four of these are
- * static strings read before any call, so there is nothing to derive from.
- *
- * ⚠️ `room_delete.ts` appears TWICE and the match is file-wide, so the two
- * entries are distinguished by their phrasing, not by position. The `ask its
- * owner` prefix only ever appears in the refusal.
+ * `src/index.ts` builds a Commander description and `src/shell/aliases.ts`
+ * emits shell text, so there is no served value to assert. A text pin is the
+ * strongest instrument available for these two and the weakest for the other
+ * four, which is why they are split.
  */
 const PINS: ReadonlyArray<readonly [string, string]> = [
-  // The MCP tool description — the string agents actually read.
-  ["src/shim/tools/room_delete.ts", FULL_RULE],
-  // The server-instructions bullet, injected into every agent's context.
-  ["src/shim/index.ts", FULL_RULE],
-  // The CLI command description.
   ["src/index.ts", FULL_RULE],
-  // The shell alias comment.
   ["src/shell/aliases.ts", FULL_RULE],
-  // The two `not-a-member` refusals, which must not misdirect the caller.
-  ["src/shim/tools/room_delete.ts", `ask its owner — ${FALLBACK}`],
-  ["src/oneshot/delete_room.ts", `ask its owner — ${FALLBACK}`],
 ];
 
-test("🛑 ALL SIX DELETE COPY SITES NAME THE OWNER CONDITION", () => {
-  assert.equal(PINS.length, 6, "#127 names six surfaces; the list has drifted");
-
+test("🛑 THE TWO STATIC DESCRIPTIONS CARRY THE RULE, BOTH HALVES OF IT", () => {
+  // The rule has FOUR outcomes. "Only the owner may delete" is ALSO wrong: a
+  // departed owner, and a room with no owner row, both fall back to any
+  // member. `FULL_RULE` states both halves. See `roomDeleteVerdict` in dao.ts.
   const missing = PINS.filter(
     ([f, phrase]) => !readFileSync(f, "utf8").includes(phrase),
   ).map(([f, phrase]) => `${f}: missing ${JSON.stringify(phrase)}`);
 
   assert.deepEqual(missing, [], missing.join("\n"));
-});
-
-test("🛑 THE FALLBACK CASE IS STATED, NOT JUST THE OWNER-ONLY CASE", () => {
-  // The rule has FOUR outcomes. "Only the owner may delete" is ALSO wrong: a
-  // departed owner, and a room with no owner row, both fall back to any
-  // member. See `roomDeleteVerdict` in dao.ts.
-  const files = [...new Set(PINS.map(([f]) => f))];
-  assert.equal(files.length, 5, "the pinned file list has drifted");
-
-  const silent = files.filter(
-    (f) => !readFileSync(f, "utf8").includes(FALLBACK),
-  );
-
-  assert.deepEqual(
-    silent,
-    [],
-    `copy states owner-only without the departed-owner fallback: ${silent.join(", ")}`,
-  );
 });

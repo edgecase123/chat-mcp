@@ -30,7 +30,7 @@ export function installRoomDelete(server: McpServer, ctx: ShimContext): void {
       if (!result.ok) {
         if (result.reason === "not-a-member") {
           throw new Error(
-            `Cannot delete ${room}: caller is not a member. Join first to confirm the room exists, or ask its owner — any member may delete once the owner has left.`,
+            `Cannot delete ${room}: caller is not a member. Join first to confirm the room exists. Deleting needs the owner while they are still a member, and any member once they have left.`,
           );
         }
         if (result.reason === "owner-only") {
