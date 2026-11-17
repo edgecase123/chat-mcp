@@ -1,0 +1,18 @@
+# Commits whose diff is formatting only. `git blame` skips them and names the
+# commit that wrote the code instead.
+#
+# This file does nothing on its own. Each clone has to opt in:
+#
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# A sha that does not resolve is ignored SILENTLY — no warning, exit 0 — so a
+# typo here reads exactly like a working entry. `test/blame-ignore-revs.test.ts`
+# is what catches that.
+
+# The one-time Prettier adoption: 320 files, 37,669 lines.
+#
+# It is the SQUASH, so it also carries ~240 lines of real change across 16
+# files. Blame on those lines names the commit before it, which is wrong. The
+# pure reformat (fb15837) was squashed away and is unreachable, so there is no
+# formatting-only sha to name instead.
+491c632dfed34f6fc91abdf3bdcb372f73d6a2a2
