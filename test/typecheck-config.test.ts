@@ -125,7 +125,12 @@ test("🛑 it reaches web/assets, or every test/web import is `any`", () => {
  *
  * 🛑 THAT IS NOW A RULING, NOT AN UNBUDGETED GAP. lee on #177, 2026-11-16:
  * "No, web assets should not be typechecked." Hand-written browser ES modules
- * stay out, so flipping `checkJs` reverses a decision and fails this first.
+ * stay out, so flipping `checkJs` reverses a decision and fails this test.
+ *
+ * ⚠️ NOT THE FIRST THING THAT FAILS. CI runs `typecheck` before `test`, so
+ * the errors in `web/assets` kill the run before this message is printed. It
+ * is what a dev reads once they have budgeted those errors and still want the
+ * flag on.
  *
  * ⚠️ NO ERROR COUNT HERE ON PURPOSE. This comment used to carry one, and it
  * was already wrong by the time #177 closed. Nothing in the suite measures
@@ -212,5 +217,24 @@ test("⚠️ the dynamic imports that type as `any` are the nine already known",
     sites.length,
     known,
     `template-literal dynamic imports moved from ${known} to ${sites.length}: ${[...new Set(sites)].join(", ")}`,
+  );
+});
+
+/**
+ * 🛑 PINS THE ORDER THE COMMENT ABOVE CLAIMS. If `test` ever ran before
+ * `typecheck`, the checkJs message WOULD be the first thing a dev sees, and
+ * that paragraph would be wrong with nothing to say so.
+ */
+test("🛑 CI typechecks before it tests, so the checkJs message is not what fails first", () => {
+  const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+
+  const typecheck = ci.indexOf("npm run typecheck");
+  const runTests = ci.indexOf("npm test");
+
+  assert.notEqual(typecheck, -1, "no `npm run typecheck` step in ci.yml");
+  assert.notEqual(runTests, -1, "no `npm test` step in ci.yml");
+  assert.ok(
+    typecheck < runTests,
+    "`npm test` now runs before `npm run typecheck`, so the checkJs docblock's `NOT THE FIRST THING THAT FAILS` paragraph is stale",
   );
 });
