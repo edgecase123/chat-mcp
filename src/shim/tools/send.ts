@@ -4,7 +4,7 @@ import * as dao from "../../storage/dao.js";
 import { notifyPeer } from "../../notify/bus.js";
 import type { ShimContext } from "../index.js";
 import { roomTargetRefusal } from "../../util/naming.js";
-import { applyBacklogCheck } from "../backlog-check.js";
+import { tickBacklogSafely } from "../backlog-check.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -73,7 +73,7 @@ export function installSend(server: McpServer, ctx: ShimContext): void {
       // #224 has no other event to hang one on. A sender is demonstrably
       // alive, so a message it has left unread is being ignored. Below the
       // insert, so a refused send is not a liveness signal it earned.
-      applyBacklogCheck(ctx.db, ctx.handle, Date.now());
+      tickBacklogSafely(ctx.db, ctx.handle, Date.now());
 
       return {
         content: [

@@ -570,11 +570,15 @@ export function pendingInboxCount(db: Db, to: string): number {
 /**
  * When the oldest unread DM for `handle` was sent, or `null` for none.
  *
- * 🛑 MUST MIRROR `pendingInboxCount`'s FILTER, for the reason that count
- * mirrors `pendingInbox`'s. The age decides whether to raise an alarm and the
- * read decides what the agent then sees. An age drawn from a row the read
- * excludes alarms about a message that is not there, and no read the agent can
- * make will ever clear it.
+ * 🛑 MIRRORS `pendingInboxCount`'s FILTER WITH ONE DELIBERATE EXCEPTION, and
+ * the exception is load-bearing. An age drawn from a row the read excludes
+ * alarms about a message that is not there, and no read clears it.
+ *
+ * ⚠️ THE EXCEPTION IS `system`, WHICH THE COUNT INCLUDES AND THE AGE MUST NOT.
+ * The backlog warning is itself a `system` DM landing unread in the inbox it
+ * complains about, so counting it lets the alarm age into the next band and
+ * fire for ever off nothing but itself. **So the age and `totalUnreadFor`
+ * disagree on purpose. Do not "restore" the mirror.**
  */
 function oldestDmUnreadAt(db: Db, to: string): number | null {
   const row = db
@@ -1136,10 +1140,13 @@ export function roomUnreadCount(
 /**
  * When the oldest unread message in `room` for `handle` was sent, or `null`.
  *
- * ⚠️ CARRIES `roomUnreadCount`'s FILTER VERBATIM, self-exclusion included. An
- * agent's own post is unread to the row, because `room_send` does not advance
- * the sender's watermark — so counting it makes a silent agent raise an alarm
- * about itself.
+ * ⚠️ CARRIES `roomUnreadCount`'s SELF-EXCLUSION, AND ADDS `system`. An agent's
+ * own post is unread to the row, because `room_send` does not advance the
+ * sender's watermark — so counting it makes a silent agent alarm about itself.
+ *
+ * ⚠️ `system` IS THE ADDITION, NOT A COPY, for `oldestDmUnreadAt`'s reason: it
+ * also drops every `joinRoom` announcement, which would otherwise start a
+ * backlog with no peer behind it.
  *
  * ⚠️ NO `sinceId`. A targeted recovery read consumes nothing, so it cannot
  * change what is waiting; `readFloor` with none is the plain watermark.

@@ -110,3 +110,40 @@ export function applyBacklogCheck(
     notified,
   };
 }
+
+/**
+ * `applyBacklogCheck` for a caller whose own work has ALREADY persisted.
+ *
+ * 🛑 A THROW HERE TOLD THE AGENT ITS SEND FAILED WHEN IT HAD SUCCEEDED, and
+ * the only recovery an agent has is to send again — which duplicates. The
+ * message and the peer's wake both go out above the tick, so by the time this
+ * runs there is nothing left to roll back.
+ *
+ * ⚠️ `gauge-report.ts` DELIBERATELY DOES NOT DO THIS. There the check IS the
+ * tool's whole job, so a throw is an honest failure. Here it is advisory
+ * bookkeeping after the fact, and a warning that cannot be delivered must not
+ * cost the agent its message.
+ *
+ * ⚠️ NOT SILENT. A swallowed failure that leaves no trace is indistinguishable
+ * from an empty backlog, so the reason goes to stderr — stdout is the MCP
+ * protocol stream.
+ *
+ * @returns the reading, or `null` when the check itself failed.
+ */
+export function tickBacklogSafely(
+  db: DatabaseSync,
+  handle: string,
+  now: number,
+): BacklogCheck | null {
+  try {
+    return applyBacklogCheck(db, handle, now);
+  } catch (e) {
+    console.error(
+      `[chat-mcp] unread-backlog check failed for ${handle}: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+
+    return null;
+  }
+}

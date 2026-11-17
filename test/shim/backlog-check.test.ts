@@ -10,7 +10,8 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-backlog-"));
 
 const { migrate } = await import("../../src/storage/db.js");
 const dao = await import("../../src/storage/dao.js");
-const { applyBacklogCheck } = await import("../../src/shim/backlog-check.js");
+const { applyBacklogCheck, tickBacklogSafely } =
+  await import("../../src/shim/backlog-check.js");
 const { deadPid } = await import("../support/dead-pid.js");
 
 /**
@@ -195,4 +196,32 @@ test("the 240-minute band posts to the room as an alert", () => {
     .filter((m) => m.from_handle === dao.SYSTEM_HANDLE);
   assert.equal(posted.length, 1);
   assert.equal(posted[0]!.kind, "alert");
+});
+
+test("🛑 a FAILING check cannot fail the send that already happened", () => {
+  const db = freshDb();
+  const now = Date.now();
+  dmAgedBy(db, now, 6);
+
+  // A closed handle is a real failure mode, not a mock: the send's own insert
+  // has already run and committed by the time the tick is reached.
+  db.close();
+
+  let out: ReturnType<typeof tickBacklogSafely> | undefined;
+  assert.doesNotThrow(() => {
+    out = tickBacklogSafely(db, "me", now);
+  }, "the tick must never reach the caller as a throw");
+
+  assert.equal(out, null, "a failed tick reports null rather than a reading");
+});
+
+test("the safe tick returns the reading when nothing fails", () => {
+  const db = freshDb();
+  const now = Date.now();
+  dmAgedBy(db, now, 6);
+
+  const out = tickBacklogSafely(db, "me", now);
+
+  assert.equal(out?.fired, 5, "the wrapper does not change the behaviour");
+  assert.equal(out?.notified.dm, 1);
 });

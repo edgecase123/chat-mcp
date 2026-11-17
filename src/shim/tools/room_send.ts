@@ -7,7 +7,7 @@ import {
   sendToRoom,
 } from "../../messaging/room-send.js";
 import type { ShimContext } from "../index.js";
-import { applyBacklogCheck } from "../backlog-check.js";
+import { tickBacklogSafely } from "../backlog-check.js";
 
 export function installRoomSend(server: McpServer, ctx: ShimContext): void {
   server.registerTool(
@@ -51,7 +51,7 @@ export function installRoomSend(server: McpServer, ctx: ShimContext): void {
       }
 
       // 🛑 A ROOM POST IS A SEND, so it ticks the same check. See send.ts.
-      applyBacklogCheck(ctx.db, ctx.handle, Date.now());
+      tickBacklogSafely(ctx.db, ctx.handle, Date.now());
 
       return {
         content: [
