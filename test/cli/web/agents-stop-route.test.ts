@@ -309,3 +309,21 @@ test("a body naming neither a handle nor `all` is refused", async () => {
     close(h);
   }
 });
+
+test("a handle that is not a valid handle is refused, not left to throw", async () => {
+  const h = await harness();
+
+  try {
+    // 🛑 `socketPathFor` THROWS on a traversal attempt rather than returning,
+    // and an uncaught throw inside a route leaves the request hanging with no
+    // status at all. The refusal has to happen in the handler.
+    for (const handle of ["../../etc/passwd", "Claude2", "", "has space"]) {
+      const { status, json } = await post(h, "/api/agents/stop", { handle });
+
+      assert.equal(status, 400, `"${handle}" was not refused`);
+      assert.equal(typeof json.error, "string");
+    }
+  } finally {
+    close(h);
+  }
+});

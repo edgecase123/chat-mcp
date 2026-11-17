@@ -21,7 +21,12 @@ import * as dao from "../../storage/dao.js";
 import { parseSearch, snippet } from "../../search/query.js";
 import { gaugeFreshness } from "../../shim/gauge-freshness.js";
 import type { MessageKind } from "../../storage/dao.js";
-import { assertRoomName, isRoomName } from "../../util/naming.js";
+import {
+  assertRoomName,
+  handleRefusal,
+  isHandle,
+  isRoomName,
+} from "../../util/naming.js";
 import {
   ensureStateDir,
   stateDir,
@@ -1095,6 +1100,15 @@ async function handleStopAgents(
 
   if (!all && named === "") {
     return respondJson(res, { error: "name a handle, or pass all: true" }, 400);
+  }
+
+  // 🛑 REFUSED HERE, BECAUSE `socketPathFor` THROWS RATHER THAN RETURNING. The
+  // handle becomes a filename, so `assertHandle` is what guards the traversal
+  // — but an uncaught throw inside a route leaves the request hanging with no
+  // status instead of telling the operator they mistyped a handle. Measured:
+  // the test file reported `cancelled 1` on a 15s timeout without this.
+  if (!all && !isHandle(named)) {
+    return respondJson(res, { error: handleRefusal(named) }, 400);
   }
 
   const { listLiveSupervisors, deliverToSupervisor } =
