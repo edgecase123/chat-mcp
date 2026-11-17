@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
-import { migrate } from "../../src/storage/db.js";
+import { migrate, migrateTo } from "../../src/storage/db.js";
 import * as dao from "../../src/storage/dao.js";
 
 /**
@@ -19,19 +19,36 @@ import * as dao from "../../src/storage/dao.js";
  * at the same time.
  */
 
-/** A database at the version that shipped, with a row already in it. */
+/**
+ * A database at version 7 carried forward by `migrate`, with a row already in
+ * it.
+ *
+ * 🛑 IT USED TO CALL `migrate` ALONE, so "the version that shipped" was always
+ * the CURRENT version and migration 8's rebuild ran on a table migration 8 had
+ * already rebuilt. `migrateTo(db, 7)` is what makes the carry-forward real.
+ */
 function existingDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
-  migrate(db);
+  migrateTo(db, 7);
 
-  dao.insertApproval(db, {
-    agentHandle: "claude2-agent",
-    supervisorHandle: "claude2",
-    requested: "rm in '/tmp/old.txt'",
-    grant: "Bash(rm -f /tmp/old.txt)",
-    reason: "historic row",
-    sessionId: "old",
-  });
+  // 🛑 RAW SQL, NOT `dao.insertApproval`. The DAO is written against the
+  // CURRENT schema and binds `grant_entry`, a column migration 7 does not
+  // have — so seeding a historical database through it throws.
+  db.prepare(
+    `INSERT INTO approvals
+       (agent_handle, supervisor_handle, requested, reason, session_id,
+        created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(
+    "claude2-agent",
+    "claude2",
+    "rm in '/tmp/old.txt'",
+    "historic row",
+    "old",
+    Date.now(),
+  );
+
+  migrate(db);
 
   return db;
 }
@@ -65,12 +82,31 @@ test("the rebuilt table still refuses two answers", () => {
   const db = existingDb();
   const id = dao.pendingApprovals(db)[0]!.id;
 
+  // 🛑 DENY TWICE, NOT deny-then-approve. A row carried from version 7 has no
+  // `grant_entry`, so the approve path throws before it ever reaches the
+  // answered_at guard this test is about. The next test owns that throw.
   assert.equal(dao.answerApproval(db, id, "deny", "operator"), true);
   assert.equal(
-    dao.answerApproval(db, id, "approve", "operator"),
+    dao.answerApproval(db, id, "deny", "operator"),
     false,
     "the index or guard was lost",
   );
+});
+
+/**
+ * The state a real migrated database is in, which the old fixture could not
+ * reach: migration 7 had no `grant_entry` column, so every row that predates
+ * it carries a null grant.
+ */
+test("a row carried up from version 7 can be denied but not approved", () => {
+  const db = existingDb();
+  const id = dao.pendingApprovals(db)[0]!.id;
+
+  assert.equal(dao.getApproval(db, id)?.grant, null);
+  assert.throws(() => dao.answerApproval(db, id, "approve", "operator"), {
+    name: "UnnameableApprovalError",
+  });
+  assert.equal(dao.answerApproval(db, id, "deny", "operator"), true);
 });
 
 /**

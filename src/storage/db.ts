@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, statSync } from "node:fs";
 import { dbPath, ensureStateDir, STATE_FILE_MODE } from "../util/paths.js";
 
@@ -289,6 +290,27 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
 export const SCHEMA_VERSION = MIGRATIONS.length;
 
 /**
+ * A content fingerprint per migration, in version order.
+ *
+ * 🛑 THIS IS THE ONLY THING THAT FAILS WHEN A MIGRATION IS EDITED IN PLACE.
+ * `migrate` starts at the version a database already stores, so an edit to an
+ * earlier entry never runs there and no behavioural test can reach it. The
+ * pinned list in `migration-content.test.ts` is what turns that into a
+ * failure.
+ *
+ * ⚠️ IT HASHES THE TRANSPILED BODY, which has two measured consequences. A
+ * `//` comment outside the SQL does NOT move a fingerprint. A `--` comment
+ * INSIDE the template literal DOES, because that text is part of what ran on
+ * every existing database. A bundler upgrade that reflows output moves all of
+ * them at once, which is loud rather than silent.
+ */
+export function migrationFingerprints(): readonly string[] {
+  return MIGRATIONS.map((m) =>
+    createHash("sha256").update(String(m)).digest("hex").slice(0, 16),
+  );
+}
+
+/**
  * Run `fn` as one transaction, rolling back on a throw.
  *
  * ⚠️ `IMMEDIATE` TAKES THE WRITE LOCK AT `BEGIN`. A plain `BEGIN` is deferred,
@@ -335,12 +357,13 @@ export function currentSchemaVersion(db: Db): number | null {
   return row.v ?? null;
 }
 
-export function migrate(db: Db): void {
+/** Create the version table, then apply everything between `current` and `target`. */
+function applyMigrations(db: Db, target: number): void {
   db.exec(
     `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)`,
   );
   const current = currentSchemaVersion(db) ?? 0;
-  for (let i = current; i < MIGRATIONS.length; i++) {
+  for (let i = current; i < target; i++) {
     const version = i + 1;
     const migration = MIGRATIONS[i];
     if (!migration) throw new Error(`Missing migration ${version}`);
@@ -351,6 +374,67 @@ export function migrate(db: Db): void {
       );
     });
   }
+}
+
+/**
+ * Migrate only as far as `target`, so a test can build a database at an
+ * earlier version and then watch `migrate` carry it forward.
+ *
+ * ⚠️ IT IS A SEAM, NOT A GUARD. It lets a test be written against migration
+ * N on a database at N-1. It cannot make an in-place EDIT of an earlier
+ * migration fail anything, because the loop still starts at the stored
+ * version. The pin in `migration-content.test.ts` is what catches that.
+ *
+ * 🛑 IT REFUSES RATHER THAN CLAMPS. `Math.min` answered `migrateTo(db, 999)`
+ * with a CURRENT database and no complaint, which is the vacuous fixture this
+ * seam exists to remove.
+ */
+export function migrateTo(db: Db, target: number): void {
+  if (!Number.isInteger(target) || target < 1 || target > MIGRATIONS.length) {
+    throw new Error(
+      `migrateTo: target ${target} is not a version. Pass 1..${MIGRATIONS.length} (SCHEMA_VERSION).`,
+    );
+  }
+
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)`,
+  );
+  const current = currentSchemaVersion(db) ?? 0;
+
+  // A migration cannot be undone, so a lower target is a caller mistake.
+  // `migrate` does NOT share this message — a database above SCHEMA_VERSION
+  // means the BUILD is stale, which is a different cause and a different fix.
+  if (current > target) {
+    throw new Error(
+      `migrateTo: database is already at version ${current}, cannot go back to ${target}.`,
+    );
+  }
+
+  applyMigrations(db, target);
+}
+
+/**
+ * Bring a database up to this build's schema. Called by `openDb` on every
+ * process start, so it has to be idempotent.
+ *
+ * 🛑 IT REFUSES A DATABASE NEWER THAN ITSELF. An older build does not know
+ * what a newer migration moved, and until #191 lands both agents open one
+ * `chat.db` from separate worktrees, so proceeding would write to a schema
+ * this code has never seen.
+ */
+export function migrate(db: Db): void {
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)`,
+  );
+  const current = currentSchemaVersion(db) ?? 0;
+
+  if (current > MIGRATIONS.length) {
+    throw new Error(
+      `This build is older than this database: it knows ${MIGRATIONS.length} migrations, the database is at version ${current}. Pull and rebuild.`,
+    );
+  }
+
+  applyMigrations(db, MIGRATIONS.length);
 }
 
 /**
