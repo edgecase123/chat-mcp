@@ -46,6 +46,7 @@ export function applyBacklogCheck(
   const transition = nextBacklogState(minutes, prevWarned);
 
   const notified = { dm: 0, rooms: [] as string[] };
+  let delivered = true;
 
   if (transition.fire != null && minutes != null) {
     const body = warningBody(handle, transition.fire, minutes);
@@ -76,41 +77,59 @@ export function applyBacklogCheck(
       // 60 / 240: a DM is evidently not reaching them, so the rooms get it.
       const kind = delivery === "alert" ? "alert" : "chat";
 
-      for (const room of dao.myRooms(db, handle)) {
-        const result = dao.insertMessage(db, {
-          from: dao.SYSTEM_HANDLE,
-          to: room.name,
-          body,
-          kind,
-        });
+      const rooms = dao.myRooms(db, handle);
 
-        for (const member of dao.roomMembers(db, room.name)) {
-          notifyPeer(member, {
-            id: result.id,
-            to: room.name,
+      for (const room of rooms) {
+        try {
+          const result = dao.insertMessage(db, {
             from: dao.SYSTEM_HANDLE,
-            ts: result.sent_at,
+            to: room.name,
             body,
             kind,
           });
+
+          for (const member of dao.roomMembers(db, room.name)) {
+            notifyPeer(member, {
+              id: result.id,
+              to: room.name,
+              from: dao.SYSTEM_HANDLE,
+              ts: result.sent_at,
+              body,
+              kind,
+            });
+          }
+          notified.rooms.push(room.name);
+        } catch (e) {
+          // PER ROOM, so one unwritable room cannot cost the others their
+          // warning — and cannot leave the band unspent, which re-delivers.
+          console.error(
+            `[chat-mcp] backlog warning undelivered to ${room.name} for ${handle}: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          );
         }
-        notified.rooms.push(room.name);
       }
+
+      // Nothing reached anyone, so the band is not spent and the next send
+      // retries it. One room failing still counts as delivered.
+      delivered = rooms.length === 0 || notified.rooms.length > 0;
     }
   }
 
-  // 🛑 AFTER THE DELIVERY, NOT BEFORE IT. A throw above spends the band on a
-  // warning nobody received, and a spent band never fires again — so the agent
-  // is never warned at all. Writing it last means a failed delivery retries on
-  // the next send.
-  if (transition.next_warned !== prevWarned) {
-    dao.setAgentUnreadWarned(db, handle, transition.next_warned);
+  // 🛑 AFTER THE DELIVERY, AND ONLY IF IT REACHED SOMEBODY. Spending the band
+  // above would leave the agent with no warning at all, because a spent band
+  // never fires again. Spending it on a PARTIAL failure is the opposite bug:
+  // the rooms that did get it are re-told on every later send.
+  const warned = delivered ? transition.next_warned : prevWarned;
+
+  if (warned !== prevWarned) {
+    dao.setAgentUnreadWarned(db, handle, warned);
   }
 
   return {
     minutes,
-    warned: transition.next_warned,
-    fired: transition.fire,
+    warned,
+    fired: delivered ? transition.fire : null,
     notified,
   };
 }

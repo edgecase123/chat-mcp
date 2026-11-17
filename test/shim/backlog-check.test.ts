@@ -225,3 +225,90 @@ test("the safe tick returns the reading when nothing fails", () => {
   assert.equal(out?.fired, 5, "the wrapper does not change the behaviour");
   assert.equal(out?.notified.dm, 1);
 });
+
+/** Make every `system` write to `room` fail, the way a real abort would. */
+function breakRoom(db: DatabaseSync, room: string): void {
+  db.exec(
+    `CREATE TRIGGER break_${room.slice(1)} BEFORE INSERT ON messages
+       WHEN NEW.to_handle = '${room}' AND NEW.from_handle = '${dao.SYSTEM_HANDLE}'
+       BEGIN SELECT RAISE(ABORT, 'injected: room unwritable'); END`,
+  );
+}
+
+function warningsIn(db: DatabaseSync, room: string): unknown[] {
+  return dao
+    .roomUnread(db, room, "peer")
+    .filter((m) => m.from_handle === dao.SYSTEM_HANDLE);
+}
+
+function quietStderr(): { lines: string[]; restore: () => void } {
+  const lines: string[] = [];
+  const real = console.error;
+  console.error = (...args: unknown[]) => void lines.push(args.join(" "));
+
+  return { lines, restore: () => void (console.error = real) };
+}
+
+function twoRooms(db: DatabaseSync): void {
+  for (const room of ["#aaa", "#zzz"]) {
+    dao.joinRoom(db, room, "me");
+    dao.joinRoom(db, room, "peer");
+  }
+}
+
+test("🛑 one unwritable room does not re-warn the rooms that DID get it", () => {
+  const db = freshDb();
+  const now = Date.now();
+  twoRooms(db);
+  dmAgedBy(db, now, 61);
+  breakRoom(db, "#zzz");
+
+  const stderr = quietStderr();
+  try {
+    for (const tick of [0, 1, 2]) applyBacklogCheck(db, "me", now + tick * MIN);
+  } finally {
+    stderr.restore();
+  }
+
+  assert.equal(
+    warningsIn(db, "#aaa").length,
+    1,
+    "warned ONCE across 3 ticks, not once per send",
+  );
+  assert.equal(warningsIn(db, "#zzz").length, 0, "the broken room got none");
+  assert.equal(
+    dao.getAgent(db, "me")?.unread_warned_threshold,
+    60,
+    "a partial delivery still spends the band, or every send re-delivers",
+  );
+  // ONE, not three: ticks 2 and 3 never fire, because tick 1 spent the band.
+  assert.equal(stderr.lines.length, 1, "the failed room is reported once");
+  assert.match(stderr.lines[0]!, /undelivered to #zzz/);
+});
+
+test("🛑 a band NOTHING could be delivered to stays unspent, and retries", () => {
+  const db = freshDb();
+  const now = Date.now();
+  twoRooms(db);
+  dmAgedBy(db, now, 61);
+  breakRoom(db, "#aaa");
+  breakRoom(db, "#zzz");
+
+  const stderr = quietStderr();
+  try {
+    const out = applyBacklogCheck(db, "me", now);
+
+    assert.equal(out.fired, null, "nothing fired, because nothing arrived");
+    assert.deepEqual(out.notified.rooms, []);
+    assert.equal(dao.getAgent(db, "me")?.unread_warned_threshold, null);
+
+    // The positive control: once a room is writable the retry delivers.
+    db.exec(`DROP TRIGGER break_aaa`);
+    const second = applyBacklogCheck(db, "me", now + MIN);
+
+    assert.equal(second.fired, 60, "the unspent band fires on the next tick");
+    assert.equal(warningsIn(db, "#aaa").length, 1);
+  } finally {
+    stderr.restore();
+  }
+});
