@@ -1139,6 +1139,12 @@ export async function startSupervisor(
         // one, so the prompt below is as load-bearing as the flag.
         resumeSessionId: childSession ?? opts.resumeSessionId,
         supervisorHandle: opts.handle,
+        // 🛑 NAMED, BECAUSE `hostBus` IS NOT IN `opts` AND THE SPREAD CANNOT
+        // CARRY IT. Omitting it made `containerized.ts` refuse a granted
+        // spawn, so approving a command KILLED the agent and left its socket
+        // file behind. `bus` is optional on `SpawnOptions`, so typecheck was
+        // clean and the respawn tests' fake only chose whether to throw.
+        bus: hostBus?.endpoint,
       });
     } catch (err) {
       // 🛑 THE DEAD CHILD'S HANDLERS ARE STILL CURRENT WITHOUT THIS, AND ITS
@@ -1332,6 +1338,7 @@ export async function startSupervisor(
         model: currentModel,
         supervisorHandle: opts.handle,
         resumeSessionId: undefined,
+        bus: hostBus?.endpoint,
       });
     } catch (err) {
       // 🛑 THE DEAD CHILD'S HANDLERS ARE STILL CURRENT WITHOUT THIS, AND ITS
