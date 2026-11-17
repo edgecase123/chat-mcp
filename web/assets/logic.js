@@ -1299,6 +1299,54 @@ export function stopOutcomeText(results) {
 }
 
 /**
+ * The class a stop button wears (#40).
+ *
+ * 🛑 ONLY THE CUT-MID-STREAM ONE IS COLOURED. Both buttons of a pair in the
+ * danger colour would say the graceful stop costs what the immediate one
+ * costs, and there are two pairs now.
+ *
+ * @param {"graceful"|"now"} mode
+ */
+export function stopButtonClass(mode) {
+  return mode === "now" ? "agent__stop is-destructive" : "agent__stop";
+}
+
+/**
+ * Whether the Stop all sweep is offered at all (#40).
+ *
+ * 🛑 NOT OFFERED FOR ONE AGENT. That row's own Stop already stops it, so a
+ * sweep beside it would be a second control for the same outcome.
+ *
+ * @param {number} count
+ */
+export function stopAllVisible(count) {
+  return count > 1;
+}
+
+/**
+ * The confirm an operator reads before a sweep (#40).
+ *
+ * 🛑 THE COUNT IS WHAT THE PANEL SHOWS, NOT A PROMISE. The route enumerates
+ * live sockets when it runs, so a supervisor that bound or exited since the
+ * last poll joins or leaves the sweep regardless of this number.
+ *
+ * @param {number} count
+ * @param {"graceful"|"now"} mode
+ */
+export function stopAllConfirmText(count, mode) {
+  const shown =
+    `The panel shows ${count} agent${count === 1 ? "" : "s"}, and the ` +
+    "sweep stops whatever is answering when it runs.";
+
+  return mode === "now"
+    ? `Stop all agents NOW?\n\n${shown}\n\n` +
+        "Every turn in flight is cut mid-stream. The tokens they have " +
+        "already spent produce nothing."
+    : `Stop all agents?\n\n${shown}\n\n` +
+        "Each one finishes its current turn first, then its supervisor exits.";
+}
+
+/**
  * The id shown beside a message's timestamp (#104).
  *
  * 🛑 THE WORDS, NOT A BARE NUMBER. "see 12582" is how one agent points another

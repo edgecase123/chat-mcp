@@ -92,13 +92,17 @@ test("🛑 app.js never formats a bind time itself", () => {
  * tested, honest-looking `ok: false`.
  */
 test("🛑 the stop request posts the supervisor handle, never the child's", () => {
-  const calls = APP_CODE.match(/stopAgent\([^)]*\)/g);
+  // ⚠️ THE TARGET IS NAMED AT THE `stopButton` CALL SITES, NOT AT
+  // `stopAgents`'. The sweep made `stopButton` the one place a button is
+  // built, so a scan of the old symbol alone would be trivially true.
+  const calls = APP_CODE.match(/stop(?:Agents|Button)\([^)]*\)/g);
 
-  assert.notEqual(calls, null, "nothing calls stopAgent");
-  // Two buttons, one declaration site.
+  assert.notEqual(calls, null, "nothing calls stopAgents or stopButton");
+  // THE DENOMINATOR: 4 buttons, stopButton's own stopAgents call, and the two
+  // declarations.
   assert.ok(
-    calls!.length >= 2,
-    `only ${calls!.length} stopAgent references found; the regex has drifted`,
+    calls!.length >= 7,
+    `only ${calls!.length} stop call sites found; the regex has drifted`,
   );
 
   for (const call of calls!) {
@@ -109,9 +113,9 @@ test("🛑 the stop request posts the supervisor handle, never the child's", () 
     );
   }
 
-  const body = fnBody("stopAgent");
+  const body = fnBody("stopAgents");
 
-  assert.match(body, /\/api\/agents\/stop/, "stopAgent posts somewhere else");
+  assert.match(body, /\/api\/agents\/stop/, "stopAgents posts somewhere else");
   assert.doesNotMatch(body, /child/i, "the stop request names a child handle");
 });
 
@@ -130,9 +134,9 @@ test("🛑 the outcome text is the helper's, and app.js reads neither reason nor
   // `reason`, which is a different field on a different route — a file-wide
   // assertion fails on a clean tree.
   assert.doesNotMatch(
-    fnBody("stopAgent"),
+    fnBody("stopAgents"),
     /\.reason\b/,
-    "stopAgent branches on reason itself",
+    "stopAgents branches on reason itself",
   );
 });
 
@@ -194,4 +198,116 @@ test("🛑 a failed live-agents fetch does not blank the panel", () => {
     /state\.agents = /,
     "the catch branch clears the panel",
   );
+});
+
+// ── The Stop all sweep (#40) ─────────────────────────────────────────────
+
+/**
+ * 🛑 THE SWEEP SENDS `all: true` AND NO HANDLE. The route prefers `all` when
+ * both arrive, so a request carrying both would sweep while displaying a
+ * handle nobody checked.
+ */
+test("🛑 the sweep posts all: true, and the named stop still posts a handle", () => {
+  const body = fnBody("stopAgents");
+
+  assert.match(body, /all: true/, "the sweep does not post all: true");
+  assert.match(body, /handle: target/, "the named stop lost its handle");
+});
+
+/**
+ * 🛑 THE CONFIRM IS THE HELPER'S. A sweep confirm written inline in `app.js`
+ * is free to promise a count, which is the one thing its test forbids.
+ */
+test("🛑 the sweep's confirm goes through stopAllConfirmText, once", () => {
+  const found = APP_CODE.match(/stopAllConfirmText\(/g);
+
+  assert.notEqual(found, null, "nothing calls stopAllConfirmText");
+  assert.equal(found!.length, 1);
+  assert.match(fnBody("stopAgents"), /stopAllConfirmText\(/);
+});
+
+/**
+ * ⚠️ THE GATE MUST BE THE HELPER, not an inline `length > 1`. A second copy
+ * is free to drift from the test that pins the threshold.
+ */
+test("🛑 the sweep's visibility goes through stopAllVisible, once", () => {
+  const found = APP_CODE.match(/stopAllVisible\(/g);
+
+  assert.notEqual(found, null, "nothing calls stopAllVisible");
+  assert.equal(found!.length, 1);
+  assert.doesNotMatch(
+    APP_CODE,
+    /agents\.length > 1/,
+    "the threshold is inlined beside the helper",
+  );
+});
+
+/**
+ * 🛑 THE SWEEP BUTTONS PASS `null`, NEVER A HANDLE. A handle here would stop
+ * one agent while the operator read a confirm about all of them.
+ */
+test("🛑 both sweep buttons target null", () => {
+  const sweeps = APP_CODE.match(/stopButton\("Stop all[^)]*\)/g);
+
+  assert.notEqual(sweeps, null, "no Stop all button is built");
+  assert.equal(
+    sweeps!.length,
+    2,
+    `expected 2 sweep buttons, got ${sweeps!.length}`,
+  );
+
+  for (const call of sweeps!) {
+    assert.match(
+      call,
+      /,\s*null\s*,/,
+      `a sweep button names a target: ${call}`,
+    );
+  }
+});
+
+/**
+ * 🛑 ONE HOME FOR THE DANGER COLOUR. Four buttons now, and both of a pair in
+ * the danger colour would say the graceful stop costs what the immediate one
+ * costs.
+ */
+test("🛑 app.js never decides a stop button's danger colour itself", () => {
+  // 🛑 A COUNT OF THE CLASS LITERAL CANNOT SEE THE MUTANT THAT MATTERS.
+  // MEASURED: hardcoding `"agent__stop is-destructive"` for BOTH buttons left
+  // the count at 1 and passed 13 of 13. The decision is a tested helper now,
+  // so the pin is that app.js calls it and never writes the class.
+  const found = APP_CODE.match(/stopButtonClass\(/g);
+
+  assert.notEqual(found, null, "nothing calls stopButtonClass");
+  assert.equal(found!.length, 1);
+  assert.doesNotMatch(
+    APP_CODE,
+    /agent__stop is-destructive/,
+    "app.js sets the danger colour itself",
+  );
+});
+
+/**
+ * 🛑 THE ROW BUTTONS PASS THE ROW'S HANDLE, NEVER `null`. A null here turns a
+ * per-row Stop into a SWEEP, so an operator stopping one agent stops every
+ * one of them.
+ *
+ * ⚠️ THE PAIRED CONTROL TO "both sweep buttons target null". That test filters
+ * on the "Stop all" label, so it still finds its 2 when the ROW buttons become
+ * sweeps, and the `>= 7` call count does not move either. MEASURED: both row
+ * buttons turned into sweeps passed 36 of 36 before this test existed.
+ * Raised by claude1 reviewing PR 303.
+ */
+test("🛑 both row stop buttons target the row's handle", () => {
+  const rows = APP_CODE.match(/stopButton\("Stop(?! all)[^)]*\)/g);
+
+  assert.notEqual(rows, null, "no per-row stop button is built");
+  assert.equal(rows!.length, 2, `expected 2 row buttons, got ${rows!.length}`);
+
+  for (const call of rows!) {
+    assert.match(
+      call,
+      /,\s*a\.handle\s*,/,
+      `a row button lost its handle: ${call}`,
+    );
+  }
 });

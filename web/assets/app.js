@@ -41,6 +41,9 @@ import {
   claimsPanelEmpty,
   agentRow,
   agentsPanelEmpty,
+  stopAllConfirmText,
+  stopAllVisible,
+  stopButtonClass,
   stopConfirmText,
   stopOutcomeText,
   matchPositionLabel,
@@ -311,27 +314,26 @@ function renderSidebar() {
                 : `${a.bound} \u00b7 ${a.childHandle}`,
             ]),
             h("div", { className: "agent__actions" }, [
-              h(
-                "button",
-                {
-                  className: "agent__stop",
-                  type: "button",
-                  onclick: () => stopAgent(a.handle, "graceful"),
-                },
-                ["Stop"],
-              ),
-              h(
-                "button",
-                {
-                  className: "agent__stop is-destructive",
-                  type: "button",
-                  onclick: () => stopAgent(a.handle, "now"),
-                },
-                ["Stop now"],
-              ),
+              stopButton("Stop", a.handle, "graceful"),
+              stopButton("Stop now", a.handle, "now"),
             ]),
           ]),
         )),
+    // The sweep sits BELOW the rows (#40). The operator reads what is running
+    // before they reach the control that stops all of it.
+    //
+    // 🛑 HIDDEN FOR ONE AGENT, because that row's own Stop already stops it.
+    // `stopAllVisible` is an affordance and NOT a precondition — the route
+    // enumerates live sockets itself, so a count that falls to 1 between this
+    // render and the click still sweeps correctly.
+    ...(stopAllVisible(agents.length)
+      ? [
+          h("div", { className: "agents__sweep" }, [
+            stopButton("Stop all", null, "graceful"),
+            stopButton("Stop all now", null, "now"),
+          ]),
+        ]
+      : []),
   ]);
   el.sidebar.appendChild(agentsSection);
 
@@ -415,6 +417,24 @@ function gaugeChip(gauge) {
         [gauge.percent === null ? "\u2013" : `${gauge.percent}%`],
       )
     : null;
+}
+
+/**
+ * One stop control (#40). `target` is a supervisor handle, or null for the
+ * sweep.
+ *
+ * The danger colour is `stopButtonClass`'s call, not this function's.
+ */
+function stopButton(label, target, mode) {
+  return h(
+    "button",
+    {
+      className: stopButtonClass(mode),
+      type: "button",
+      onclick: () => stopAgents(target, mode),
+    },
+    [label],
+  );
 }
 
 function sidebarItem({
@@ -1339,19 +1359,29 @@ async function fetchLiveAgents() {
 }
 
 /**
- * Stop one supervisor (#40).
+ * Stop one supervisor, or sweep every one of them (#40).
  *
  * 🛑 POSTS THE SUPERVISOR HANDLE. The row shows the child's gauge beside it,
  * and `/api/agents/stop` answers a child handle with a tested, honest-looking
  * `ok: false`.
+ *
+ * 🛑 A NULL TARGET IS THE SWEEP, AND IT SENDS NO HANDLE. The route prefers
+ * `all` when both arrive, so sending both would hide a wrong handle.
  */
-async function stopAgent(handle, mode) {
-  if (!window.confirm(stopConfirmText(handle, mode))) return;
+async function stopAgents(target, mode) {
+  const sweep = target === null;
+  const ask = sweep
+    ? stopAllConfirmText(state.agents.length, mode)
+    : stopConfirmText(target, mode);
+
+  if (!window.confirm(ask)) return;
 
   try {
     const data = await api("/api/agents/stop", {
       method: "POST",
-      body: JSON.stringify({ handle, mode }),
+      body: JSON.stringify(
+        sweep ? { all: true, mode } : { handle: target, mode },
+      ),
     });
     const outcome = stopOutcomeText(data.results ?? []);
 

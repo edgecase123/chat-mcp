@@ -95,6 +95,10 @@ Agents
   smoke-container              16%     <- the CHILD's context gauge
   bound 2h · smoke-container-agent
   [Stop]  [Stop now]
+  gopher                       62%
+  bound 11m · gopher-agent
+  [Stop]  [Stop now]
+[Stop all]  [Stop all now]            <- only once a SECOND agent is running
 ```
 
 - **The row posts the SUPERVISOR handle.** The gauge beside it belongs to the
@@ -107,8 +111,29 @@ Agents
 - **A failed fetch keeps the last known list.** Blanking it shows a RUNNING
   agent as stopped, and the operator's next action on that reading is to walk
   away.
-- **Only `Stop now` is coloured.** Both buttons in the danger colour would say
-  the graceful stop costs what the immediate one costs.
+- **Only `Stop now` is coloured.** Both buttons of a pair in the danger colour
+  would say the graceful stop costs what the immediate one costs. The decision
+  is `stopButtonClass()`, because a source-text count of the class could not
+  tell a correct pair from a pair that was both coloured.
+
+### The sweep
+
+**`Stop all` and `Stop all now` sit BELOW the rows**, so the operator reads
+what is running before reaching the control that stops all of it.
+
+- 🛑 **Hidden until a SECOND agent is running.** One row's own `Stop` already
+  stops it, and a sweep beside it is two controls for one outcome.
+- 🛑 **That visibility is an affordance, NOT a precondition.** The route
+  enumerates live sockets itself, so a count that falls to 1 between the render
+  and the click still sweeps correctly.
+- 🛑 **The sweep sends `all: true` and NO handle.** The route prefers `all`
+  when both arrive, so a request carrying both would sweep while showing a
+  handle nobody checked.
+- ⚠️ **The confirm says what the panel SHOWS, and promises no count.** A
+  supervisor that bound or exited since the last poll joins or leaves the sweep
+  regardless of the number the operator read.
+- **The outcome goes through the same `stopOutcomeText()` as a single stop.**
+  It already counts, and it already leads with the failures.
 
 ### Where the strings are decided
 
@@ -116,7 +141,10 @@ Agents
 | ------------------------------------ | ------------------------------------- |
 | the row's labels                     | `agentRow()` in `web/assets/logic.js` |
 | the confirm copy                     | `stopConfirmText()`                   |
-| the toast after a stop               | `stopOutcomeText()`                   |
+| the sweep's confirm copy             | `stopAllConfirmText()`                |
+| whether the sweep is offered         | `stopAllVisible()`                    |
+| which button is coloured             | `stopButtonClass()`                   |
+| the toast after a stop or a sweep    | `stopOutcomeText()`                   |
 | the panel is actually WIRED to those | `test/web/agents-wiring.test.ts`      |
 
 🛑 **The wiring test exists because every helper test passes with the panel
@@ -131,8 +159,8 @@ field; it hands the whole `results` array to `stopOutcomeText`.
 
 - ~~**The dashboard controls themselves.**~~ Shipped — see **The panel**
   above.
-- **Stopping every agent at once.** The route takes `all: true` today and the
-  panel has no sweep button, deliberately: three ways to stop things in one
-  panel is one too many. Its own change, with its own confirm copy.
+- ~~**Stopping every agent at once.**~~ Shipped — see **The sweep** above.
+  The "three ways to stop things in one panel" objection is answered by hiding
+  the sweep until a second agent is running.
 - **`chat-mcp agents stop <handle>`**, the CLI surface that predates the
   web-only directive. It still works and sends the same control.

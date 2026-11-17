@@ -1314,3 +1314,11 @@ body {
   border-color: var(--danger);
   color: var(--danger);
 }
+
+/* #40 — the sweep, BELOW the rows it sweeps. Aligned on .agent's own 8px
+   inset so the buttons sit under the rows rather than under the heading. */
+.agents__sweep {
+  display: flex;
+  gap: 4px;
+  padding: 2px 8px;
+}
