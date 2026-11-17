@@ -30,11 +30,26 @@ migrateTo(db, n)                        applies only up to version n
 `migrate` resumes from the version the database already stores. That one line
 is the source of the rule below.
 
-`migrateTo` refuses rather than clamps. A target outside `1..SCHEMA_VERSION`
-throws before it writes anything, and so does a target below the version the
-database already holds. An earlier cut clamped with `Math.min`, which answered
+Both entry points refuse rather than proceed, with different messages because
+the causes differ.
+
+| call               | refuses when                                                    | because                        |
+| ------------------ | --------------------------------------------------------------- | ------------------------------ |
+| `migrateTo(db, n)` | `n` is outside `1..SCHEMA_VERSION`, or below the version stored | a caller mistake, in test code |
+| `migrate(db)`      | the database is above `SCHEMA_VERSION`                          | **this build is stale**        |
+
+`migrateTo` throws before it writes anything, so a refused call leaves the
+database untouched. An earlier cut clamped with `Math.min`, which answered
 `migrateTo(db, 999)` with a fully migrated database and no complaint — the same
 vacuous fixture the seam exists to remove.
+
+### A database newer than your build
+
+`openDb` calls `migrate` on every process start, so a stale checkout hits this
+at startup rather than at the first query. The message says to pull and
+rebuild. It refuses instead of continuing because an older build does not know
+what a newer migration moved, and until #191 lands both agents open one
+`chat.db` from separate worktrees at separate commits.
 
 ## Never edit a shipped migration
 

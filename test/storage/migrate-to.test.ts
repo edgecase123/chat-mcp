@@ -79,3 +79,23 @@ test("migrate is idempotent on an already current database", () => {
   assert.doesNotThrow(() => migrate(db));
   assert.equal(currentSchemaVersion(db), SCHEMA_VERSION);
 });
+
+/**
+ * 🛑 THE CAUSE IS A STALE BUILD, NOT A CALLER MISTAKE, so it does not share
+ * `migrateTo`'s message. `openDb` calls `migrate` on every process start, and
+ * until #191 lands both agents open one `chat.db` from separate worktrees at
+ * separate commits. The first merged migration after a checkout goes stale
+ * makes every fresh process from that checkout hit this.
+ *
+ * It refuses rather than proceeding: an older build does not know what the
+ * newer schema moved, and the database is shared.
+ */
+test("migrate refuses a database newer than this build and names the stale build", () => {
+  const db = new DatabaseSync(":memory:");
+  migrate(db);
+  db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(
+    SCHEMA_VERSION + 1,
+  );
+
+  assert.throws(() => migrate(db), /older than this database|rebuild/i);
+});
