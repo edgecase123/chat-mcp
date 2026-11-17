@@ -41,6 +41,27 @@ function fnBody(name: string): string {
 
   assert.notEqual(m, null, `${name}() not found in app.js`);
 
+  // 🛑 THE CAPTURE'S OWN NON-VACUITY CONTROL. The regex stops at the FIRST
+  // line starting with `}`, so a brace at column 0 inside the body truncates
+  // it and every `doesNotMatch` below then passes over the half that was cut.
+  // MEASURED: a `child` reference behind such a brace passed 8 of 8 before
+  // this assertion existed. Depth 0 means a whole function was captured.
+  // Raised by claude1 reviewing PR 301.
+  //
+  // ⚠️ IT COUNTS BRACES IN STRINGS TOO, so a body holding an unbalanced brace
+  // in a literal would trip it. None of the three callers has one, and a
+  // false trip is a loud failure rather than a silent pass.
+  const depth = [...m![0]].reduce(
+    (d, c) => d + (c === "{" ? 1 : c === "}" ? -1 : 0),
+    0,
+  );
+
+  assert.equal(
+    depth,
+    0,
+    `${name}()'s captured body is truncated — brace depth ${depth}`,
+  );
+
   return m![0];
 }
 
