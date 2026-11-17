@@ -520,26 +520,22 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         process.exit(1);
       }
 
-      const { deliverToSupervisor } = await import("./supervise/socket.js");
-      const ack = await deliverToSupervisor(handle, {
-        id: 0,
-        to: handle,
-        from: "cli",
-        ts: Date.now(),
-        control: { kind: action, mode: o.now ? "now" : "graceful" },
-      });
+      // 🛑 ONE HOME FOR THE THREE-WAY ACK BRANCH. The dashboard's
+      // /api/agents/stop interprets the same ack, and the PR #158 fix for the
+      // truthy `{ ok: false }` used to exist in both copies.
+      const { requestSupervisorControl } =
+        await import("./supervise/socket.js");
+      const result = await requestSupervisorControl(
+        handle,
+        { kind: action, mode: o.now ? "now" : "graceful" },
+        "cli",
+      );
 
-      if (!ack) {
-        console.error(`no supervisor is listening for "${handle}"`);
-        process.exit(1);
-      }
-
-      // 🛑 `{ ok: false }` IS A TRUTHY OBJECT, so `if (!ack)` alone reports a
-      // REFUSED control as accepted. That turned a refused `--now` into a
-      // silent no-op the operator waited out. Found by claude2 on PR #158.
-      if (!ack.ok) {
+      if (!result.ok) {
         console.error(
-          `${action} refused for ${handle}: ${ack.error ?? "no reason given"}`,
+          result.error === "no supervisor is listening"
+            ? `no supervisor is listening for "${handle}"`
+            : `${action} refused for ${handle}: ${result.error}`,
         );
         process.exit(1);
       }
@@ -563,7 +559,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       // ceiling computed from the default gives up first and calls a healthy
       // stop a failure. The fallback only covers an older supervisor whose ack
       // predates the field.
-      const grace = ack.graceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
+      const grace = result.graceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
       // One grace period, doubled to cover the notice wait AND `docker stop -t`
       // back to back, plus a margin for the daemon's own removal step.
       const STOP_WAIT_MS = grace * 2 * 1000 + 15_000;

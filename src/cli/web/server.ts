@@ -21,7 +21,12 @@ import * as dao from "../../storage/dao.js";
 import { parseSearch, snippet } from "../../search/query.js";
 import { gaugeFreshness } from "../../shim/gauge-freshness.js";
 import type { MessageKind } from "../../storage/dao.js";
-import { assertRoomName, isRoomName } from "../../util/naming.js";
+import {
+  assertRoomName,
+  handleRefusal,
+  isHandle,
+  isRoomName,
+} from "../../util/naming.js";
 import {
   ensureStateDir,
   stateDir,
@@ -469,6 +474,10 @@ export async function route(
     return handleGetApprovals(res, ctx);
   if (path === "/api/claims" && req.method === "GET")
     return handleGetClaims(res, ctx);
+  if (path === "/api/agents/live" && req.method === "GET")
+    return handleLiveAgents(res, ctx);
+  if (path === "/api/agents/stop" && req.method === "POST")
+    return handleStopAgents(req, res, ctx);
   if (path === "/api/search" && req.method === "GET")
     return handleSearch(url, res, ctx);
   if (path === "/api/approvals/answer" && req.method === "POST")
@@ -1007,6 +1016,125 @@ function handleGetClaims(res: ServerResponse, ctx: RouteContext): void {
         Math.round(Math.max(0, c.expires_at - now) / 60_000),
       ),
     })),
+  });
+}
+
+/**
+ * Every supervisor an operator could stop right now (#40).
+ *
+ * 🛑 THE SOCKET IS THE REGISTER, NOT THE `agents` TABLE. The table records a
+ * pid that nothing keeps fresh, so a row can name a dead process or a reused
+ * one. A socket that answers a probe is a supervisor that can be sent a
+ * control this instant, which is the only property a Stop button needs.
+ *
+ * The child is peer-shaped so the page's own `gaugeDisplay()` reads it
+ * unchanged, which keeps the 15-minute freshness window in one place.
+ */
+async function handleLiveAgents(
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const { listLiveSupervisors } = await import("../../supervise/socket.js");
+  const { childHandleFor } = await import("../../supervise/grant.js");
+  const live = await listLiveSupervisors();
+  const now = Date.now();
+
+  respondJson(res, {
+    agents: live.map((s) => {
+      const child = dao.getAgent(ctx.db, childHandleFor(s.handle));
+
+      return {
+        handle: s.handle,
+        boundAt: s.boundAt,
+        child:
+          child === undefined || child === null
+            ? null
+            : { ...child, ...gaugeFreshness(child.context_reported_at, now) },
+      };
+    }),
+  });
+}
+
+/** The two stop modes, so an unknown one is refused rather than defaulted. */
+const STOP_MODES = new Set(["graceful", "now"]);
+
+/**
+ * Stop one supervisor, or every live one (#40).
+ *
+ * 🛑 EVERY OUTCOME IS REPORTED BY HANDLE, INCLUDING THE EMPTY SWEEP. A silent
+ * `all` gives the operator no way to tell a refused stop from an agent that
+ * was never running, which is the whole reason this control exists.
+ *
+ * 🛑 GRACEFUL IS THE DEFAULT, BY lee's RULING OF 2026-10-31. A turn killed
+ * mid-stream spends its tokens and produces nothing, so cutting it costs money
+ * to save seconds.
+ */
+async function handleStopAgents(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  let body: unknown;
+
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    return respondJson(res, { error: "body must be json" }, 400);
+  }
+
+  const input = (body ?? {}) as {
+    handle?: unknown;
+    all?: unknown;
+    mode?: unknown;
+  };
+  const mode = input.mode === undefined ? "graceful" : input.mode;
+
+  // 🛑 VALIDATED BEFORE ANYTHING IS SENT. A 400 returned after a graceful stop
+  // has already left is a refusal that stopped the agent anyway.
+  if (typeof mode !== "string" || !STOP_MODES.has(mode)) {
+    return respondJson(res, { error: 'mode must be "graceful" or "now"' }, 400);
+  }
+
+  const all = input.all === true;
+  const named = typeof input.handle === "string" ? input.handle.trim() : "";
+
+  if (!all && named === "") {
+    return respondJson(res, { error: "name a handle, or pass all: true" }, 400);
+  }
+
+  // 🛑 REFUSED HERE, BECAUSE `socketPathFor` THROWS RATHER THAN RETURNING. The
+  // handle becomes a filename, so `assertHandle` is what guards the traversal
+  // — but an uncaught throw inside a route leaves the request hanging with no
+  // status instead of telling the operator they mistyped a handle. Measured:
+  // the test file reported `cancelled 1` on a 15s timeout without this.
+  if (!all && !isHandle(named)) {
+    return respondJson(res, { error: handleRefusal(named) }, 400);
+  }
+
+  const { listLiveSupervisors, requestSupervisorControl } =
+    await import("../../supervise/socket.js");
+  // ⚠️ A sweep enumerates live sockets; a named stop does NOT, so stopping one
+  // agent never depends on every other socket answering a probe first.
+  const targets = all
+    ? (await listLiveSupervisors()).map((s) => s.handle)
+    : [named];
+
+  // 🛑 ONE HOME FOR THE THREE-WAY ACK BRANCH, in `requestSupervisorControl`.
+  // The `agents` CLI command interprets the same ack, and the PR #158 fix for
+  // the truthy `{ ok: false }` used to exist in both copies.
+  const results = await Promise.all(
+    targets.map((handle) =>
+      requestSupervisorControl(
+        handle,
+        { kind: "stop", mode: mode as "graceful" | "now" },
+        ctx.handle,
+      ),
+    ),
+  );
+
+  respondJson(res, {
+    results,
+    stopped: results.filter((r) => r.ok).length,
   });
 }
 

@@ -1,7 +1,19 @@
 import { createServer, connect, type Server, type Socket } from "node:net";
-import { chmodSync, existsSync, unlinkSync } from "node:fs";
-import { SOCKET_MODE, ensureSocketDir, socketPathFor } from "../util/paths.js";
+import {
+  chmodSync,
+  existsSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+} from "node:fs";
+import {
+  SOCKET_MODE,
+  ensureSocketDir,
+  socketDir,
+  socketPathFor,
+} from "../util/paths.js";
 import { supervisorHandleFor } from "./grant.js";
+import { isHandle } from "../util/naming.js";
 
 /**
  * Direct delivery to a running supervisor.
@@ -300,6 +312,79 @@ async function respond(
   }
 }
 
+/** A supervisor that answered a liveness probe on its own socket. */
+export interface LiveSupervisor {
+  readonly handle: string;
+  readonly socketPath: string;
+
+  /**
+   * When the socket file was created, as epoch milliseconds.
+   *
+   * ⚠️ THIS IS THE SUPERVISOR'S AGE, NOT THE CHILD'S. A restart respawns the
+   * child without rebinding the socket, so a long age here says nothing about
+   * how long the current agent session has been running.
+   */
+  readonly boundAt: number;
+}
+
+/**
+ * Every supervisor currently answering on `~/.chat-mcp/sock/`.
+ *
+ * 🛑 THE SOCKET IS THE ADDRESS, SO IT IS ALSO THE REGISTER. The `agents` table
+ * records a pid but nothing keeps it fresh, and a reused pid means naming an
+ * unrelated process. A socket that answers a probe is a supervisor that can be
+ * sent a control this instant, which is the only property an operator stopping
+ * an agent needs.
+ *
+ * 🛑 STALE DEBRIS IS SKIPPED AND LEFT ALONE. A crashed supervisor leaves a
+ * file behind, and removing it is `WakeListener.bind`'s job — it probes under
+ * its own refusal rules first. A reader that tidied up would race a supervisor
+ * binding at that moment.
+ */
+export async function listLiveSupervisors(): Promise<LiveSupervisor[]> {
+  let entries: string[];
+
+  try {
+    entries = readdirSync(socketDir());
+  } catch {
+    // No socket directory means no supervisor has ever bound here.
+    return [];
+  }
+
+  const probed = await Promise.all(
+    // 🛑 THE FILESYSTEM IS A SECOND SOURCE OF HANDLES AND IT IS NOT VALIDATED.
+    // `socketPathFor` throws on a name that is not a handle, so one Finder
+    // visit leaving a `.DS_Store` here turned the whole live list into a 500.
+    // Found by claude1 reviewing PR 296, and measured.
+    entries
+      .filter(isHandle)
+      .map(async (handle): Promise<LiveSupervisor | null> => {
+        const path = socketPathFor(handle);
+
+        if (!(await isLive(path))) return null;
+
+        return { handle, socketPath: path, boundAt: boundAtOf(path) };
+      }),
+  );
+
+  return probed.filter((s): s is LiveSupervisor => s !== null);
+}
+
+/**
+ * The socket file's own mtime, or now when it cannot be read.
+ *
+ * ⚠️ `mtime` RATHER THAN `birthtime`, which is zero on some filesystems. A
+ * socket file is written once at `listen()` and never again, so its mtime is
+ * its creation time.
+ */
+function boundAtOf(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return Date.now();
+  }
+}
+
 /** Is anything actually answering on this socket path? */
 async function isLive(path: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -396,4 +481,57 @@ export async function deliverToSupervisor(
       }
     });
   });
+}
+
+/** What a control request did, normalized so every caller reports it alike. */
+export interface SupervisorControlResult {
+  readonly handle: string;
+  readonly ok: boolean;
+  readonly error?: string;
+  /** The supervisor's own shutdown grace, when its ack carried one. */
+  readonly graceSeconds?: number;
+}
+
+/**
+ * Send one control to one supervisor and say what happened.
+ *
+ * 🛑 THE THREE-WAY ACK BRANCH HAS ONE HOME, AND IT HAS TO. `null` means
+ * nothing was listening, `{ ok: false }` means the supervisor refused, and
+ * only the third case is a control that will happen. The web route and the
+ * `agents` CLI command each derived this separately, so the PR #158 fix for
+ * the TRUTHY `{ ok: false }` existed in two copies free to drift.
+ *
+ * ⚠️ `graceSeconds` IS OMITTED RATHER THAN DEFAULTED. It is overridable per
+ * handle, so a caller that substitutes its own default computes a wait ceiling
+ * that expires first and calls a healthy stop a failure. A caller with no
+ * other source may fall back, but it does so knowingly.
+ */
+export async function requestSupervisorControl(
+  handle: string,
+  control: SupervisorControl,
+  /** Who asked, for the envelope. The CLI and the dashboard differ. */
+  from = "operator",
+): Promise<SupervisorControlResult> {
+  const ack = await deliverToSupervisor(handle, {
+    id: 0,
+    to: handle,
+    from,
+    ts: Date.now(),
+    control,
+  });
+
+  if (ack === null) {
+    return { handle, ok: false, error: "no supervisor is listening" };
+  }
+
+  // 🛑 `{ ok: false }` IS A TRUTHY OBJECT, so a presence check alone reports a
+  // REFUSED control as accepted. That turned a refused `--now` into a silent
+  // no-op the operator waited out. Found by claude2 on PR #158.
+  if (!ack.ok) {
+    return { handle, ok: false, error: ack.error ?? "no reason given" };
+  }
+
+  return ack.graceSeconds === undefined
+    ? { handle, ok: true }
+    : { handle, ok: true, graceSeconds: ack.graceSeconds };
 }

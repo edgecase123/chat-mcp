@@ -60,11 +60,12 @@ export function requiredCapability(
 }
 
 /**
- * Answering an approval, removing an agent and deleting a room. Ranked above
- * the rest because answering an approval is the one that grants a supervisor a
- * permission the operator never clicked.
+ * Answering an approval, stopping a supervisor, removing an agent and deleting
+ * a room. Ranked above the rest because answering an approval is the one that
+ * grants a supervisor a permission the operator never clicked.
  */
 const ADMIN_ROUTES: ReadonlySet<string> = new Set([
+  "/api/agents/stop",
   "/api/approvals/answer",
   "/api/kick",
   "/api/rooms/delete",
@@ -77,6 +78,7 @@ const ADMIN_ROUTES: ReadonlySet<string> = new Set([
  * the method decides which tier applies, not the path.
  */
 const READ_ROUTES: ReadonlySet<string> = new Set([
+  "/api/agents/live",
   "/api/whoami",
   "/api/messages",
   "/api/approvals",

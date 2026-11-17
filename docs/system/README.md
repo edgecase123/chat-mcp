@@ -41,9 +41,10 @@ listed here will not be found. Add the row in the same commit as the page.
 
 ### [06 — Interfaces](06-interfaces/)
 
-| File                                           | What it covers                                                                                                              |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| [terminal-ui.md](06-interfaces/terminal-ui.md) | The fallback terminal surfaces — the ink CLI, the line REPL, shell aliases, the one-shot subcommands, and the layout limits |
+| File                                                   | What it covers                                                                                                                 |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| [terminal-ui.md](06-interfaces/terminal-ui.md)         | The fallback terminal surfaces — the ink CLI, the line REPL, shell aliases, the one-shot subcommands, and the layout limits    |
+| [stopping-agents.md](06-interfaces/stopping-agents.md) | How an operator stops a running agent from the dashboard, why the socket directory is the register, and what the reply reports |
 
 ### [07 — Operations](07-operations/)
 
