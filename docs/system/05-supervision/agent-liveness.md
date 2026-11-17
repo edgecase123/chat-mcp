@@ -1,8 +1,10 @@
 ---
 title: Agent Liveness
-updated: 2026-11-16
+updated: 2026-11-17
 covers:
   - src/storage/dao.ts
+  - src/shim/backlog.ts
+  - src/shim/backlog-check.ts
   - src/supervise/exit-event.ts
   - src/messaging/room-announce.ts
   - src/messaging/room-send.ts
@@ -131,6 +133,39 @@ zero is the #229 case: the send worked and nobody is there to read it.
 
 🛑 **Neither field says anybody READ it.** Only a reply does.
 
+## A SEND is the only liveness signal the backlog warning trusts
+
+`online` says a process exists. `last_seen_at` says a tool was called. Neither
+says the agent is **reading**, and an agent that reads nothing looked identical
+to one with an empty inbox.
+
+The unread-backlog warning closes that, and the question it had to answer first
+is what makes the check run at all.
+
+| candidate tick         | why not                                                      |
+| ---------------------- | ------------------------------------------------------------ |
+| `inbox`/`room_inbox`   | that is the agent READING, which CLEARS the backlog          |
+| a timer                | fires on handles that were never going to read               |
+| supervisor turn end    | host agents are not supervised; `ps supervise` is empty      |
+| **`send`/`room_send`** | ✅ **the agent is demonstrably alive and still not reading** |
+
+```
+src/shim/tools/send.ts        applyBacklogCheck, BELOW the insert
+src/shim/tools/room_send.ts   applyBacklogCheck, BELOW sendToRoom
+```
+
+**Below the insert on purpose.** A refused send is not a liveness signal the
+agent earned, so it must not tick.
+
+🛑 **The gate is structural, not a timestamp comparison.** `lee-approvals`
+holds over 1800 unread messages and never fires, because it never sends. A
+`last_seen_at` freshness test would have had to pick a number; this picks none.
+
+⚠️ **The known hole is stated rather than hidden: an agent that neither reads
+nor sends never fires.** That is indistinguishable from offline, and the bus
+deliberately stays quiet there. Full design and the rejected options:
+`edgecase123/chat-mcp#224`.
+
 ## Common pitfalls
 
 - 🛑 **A child can die before its shim ever registered**, so there is no row to
@@ -142,6 +177,10 @@ zero is the #229 case: the send worked and nobody is there to read it.
   it.** `claims`, `health` and `search` move nothing, so a child working
   through those alone reads stale while alive — which over-reports dead, the
   safe direction.
+- 🛑 **A `system`-authored message is unread and is NOT a backlog.** The age
+  excludes `system` on both channels, because the warning itself arrives unread
+  in the inbox it complains about. So the backlog AGE and the `unread` COUNT
+  disagree on purpose, and anything asserting they agree is wrong.
 - **The container, the socket and the pidfile all report the SUPERVISOR** and
   outlive the child. None of them is a liveness check. `./scripts/agent status`
   prints the first three.
@@ -154,6 +193,8 @@ zero is the #229 case: the send worked and nobody is there to read it.
 | --------------------------- | ------------------------------------------------------------------------ |
 | `src/storage/dao.ts`        | `isProcessAlive`, `hydrate`'s `online`, `clearAgentPid`, the claim guard |
 | `src/supervise/index.ts`    | `childBusHandle()`, the `child.onExit` handler that clears the pid       |
+| `src/shim/backlog.ts`       | the age bands and their routing, pure                                    |
+| `src/shim/backlog-check.ts` | `applyBacklogCheck` — the seam `send`/`room_send` tick                   |
 | `src/supervise/host-bus.ts` | registers a containerized child's handle from inside the supervisor      |
 
 ## Related docs

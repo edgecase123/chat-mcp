@@ -37,6 +37,7 @@ const SHIPPED: readonly string[] = [
   "a37f288f425cc9f4", // 13
   "c4598bf581a255fb", // 14
   "43ad1f7c2d0f0ad6", // 15
+  "1d41af803f1f040a", // 16
 ];
 
 test("every shipped migration still has the content it shipped with", () => {

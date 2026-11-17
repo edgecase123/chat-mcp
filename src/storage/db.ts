@@ -273,6 +273,23 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
     // one never reaches a database that already ran it.
     db.exec(`ALTER TABLE approvals ADD COLUMN answered_by TEXT`);
   },
+  (db) => {
+    // #224 — unread DEPTH was visible in four surfaces and nothing fired on
+    // it. The bands fire on the AGE of the oldest unread instead, and need one
+    // place to remember which band an agent has already been told about.
+    //
+    // 🛑 A SECOND COLUMN, NOT A REUSE OF `context_warned_threshold`. The two
+    // axes are independent — an agent can be low on context and current on its
+    // inbox — and they share no band values, so one column would let a context
+    // warning silence a backlog warning.
+    //
+    // 🛑 NULLABLE, AND NULL MEANS "NOT WARNED". An agent that caught up is
+    // written back to null so the same band can fire again on a fresh climb.
+    //
+    // ⚠️ A SEPARATE MIGRATION, per migration 8's docblock. Editing an earlier
+    // one never reaches a database that already ran it.
+    db.exec(`ALTER TABLE agents ADD COLUMN unread_warned_threshold INTEGER`);
+  },
 ];
 
 /**

@@ -35,6 +35,7 @@ export interface Agent {
   context_total: number | null;
   context_reported_at: number | null;
   context_warned_threshold: number | null;
+  unread_warned_threshold: number | null;
 }
 
 export interface Message {
@@ -63,6 +64,7 @@ interface AgentRow {
   context_total: number | null;
   context_reported_at: number | null;
   context_warned_threshold: number | null;
+  unread_warned_threshold: number | null;
 }
 
 interface MessageRow {
@@ -134,6 +136,7 @@ function hydrate(row: AgentRow): Agent {
     context_total: row.context_total,
     context_reported_at: row.context_reported_at,
     context_warned_threshold: row.context_warned_threshold,
+    unread_warned_threshold: row.unread_warned_threshold,
   };
 }
 
@@ -173,6 +176,25 @@ export function setAgentContextWarned(
 
   db.prepare(
     `UPDATE agents SET context_warned_threshold = ? WHERE handle = ?`,
+  ).run(threshold, handle);
+}
+
+/**
+ * Remember which unread-backlog band `handle` has already been told about.
+ *
+ * ⚠️ DELIBERATELY NOT MERGED WITH `setAgentContextWarned`. A shared setter
+ * would take the column as an argument, and which axis is being written is the
+ * one thing a caller must not be able to get wrong.
+ */
+export function setAgentUnreadWarned(
+  db: Db,
+  handle: string,
+  threshold: number | null,
+): void {
+  assertLiveDatabase(db, "setAgentUnreadWarned");
+
+  db.prepare(
+    `UPDATE agents SET unread_warned_threshold = ? WHERE handle = ?`,
   ).run(threshold, handle);
 }
 
@@ -546,6 +568,30 @@ export function pendingInboxCount(db: Db, to: string): number {
 }
 
 /**
+ * When the oldest unread DM for `handle` was sent, or `null` for none.
+ *
+ * 🛑 MIRRORS `pendingInboxCount`'s FILTER WITH ONE DELIBERATE EXCEPTION, and
+ * the exception is load-bearing. An age drawn from a row the read excludes
+ * alarms about a message that is not there, and no read clears it.
+ *
+ * ⚠️ THE EXCEPTION IS `system`, WHICH THE COUNT INCLUDES AND THE AGE MUST NOT.
+ * The backlog warning is itself a `system` DM landing unread in the inbox it
+ * complains about, so counting it lets the alarm age into the next band and
+ * fire for ever off nothing but itself. **So the age and `totalUnreadFor`
+ * disagree on purpose. Do not "restore" the mirror.**
+ */
+function oldestDmUnreadAt(db: Db, to: string): number | null {
+  const row = db
+    .prepare(
+      `SELECT MIN(sent_at) AS at FROM messages
+     WHERE to_handle = ? AND read_at IS NULL AND from_handle != ?`,
+    )
+    .get(to, SYSTEM_HANDLE) as unknown as { at: number | null };
+
+  return row.at === null ? null : Number(row.at);
+}
+
+/**
  * Everything waiting for `handle`, across every channel.
  *
  * 🛑 ONE NOTIFY FILE PER HANDLE, SO ONE COUNT. An earlier cut dispatched on the
@@ -563,6 +609,38 @@ export function totalUnreadFor(db: Db, handle: string): number {
   }
 
   return total;
+}
+
+/**
+ * When the oldest thing waiting for `handle` was sent, across every channel,
+ * or `null` when nothing is waiting.
+ *
+ * 🛑 THE AXIS IS AGE, AND DEPTH WAS MEASURED AND RULED OUT. No live agent ever
+ * held more than 6 unread DMs, while 26 messages sat unread with the recipient
+ * still sending — one of them through 142 sends. No depth band separates those
+ * from routine traffic. Age does: p50 0.2 min, p95 407.
+ *
+ * 🛑 ONE NUMBER ACROSS BOTH CHANNELS, for `totalUnreadFor`'s own reason. A
+ * per-channel age lets a DM nobody answered hide behind a fresh room post.
+ *
+ * 🛑 `null` IS NOT A ZERO-MINUTE BACKLOG. It is the absence of one, and it
+ * clears the stored band so an agent that caught up can fire again.
+ *
+ * ⚠️ A TIMESTAMP, NOT A MINUTE COUNT, THOUGH `nextBacklogState` TAKES MINUTES.
+ * A reader that calls `Date.now()` itself cannot be tested without a clock.
+ */
+export function oldestUnreadAt(db: Db, handle: string): number | null {
+  const waiting: number[] = [];
+
+  const dm = oldestDmUnreadAt(db, handle);
+  if (dm !== null) waiting.push(dm);
+
+  for (const room of myRooms(db, handle)) {
+    const at = oldestRoomUnreadAt(db, room.name, handle);
+    if (at !== null) waiting.push(at);
+  }
+
+  return waiting.length === 0 ? null : Math.min(...waiting);
 }
 
 export function markRead(db: Db, ids: number[]): void {
@@ -1057,6 +1135,38 @@ export function roomUnreadCount(
     .get(room, since, handle) as unknown as { n: number };
 
   return Number(row.n);
+}
+
+/**
+ * When the oldest unread message in `room` for `handle` was sent, or `null`.
+ *
+ * ⚠️ CARRIES `roomUnreadCount`'s SELF-EXCLUSION, AND ADDS `system`. An agent's
+ * own post is unread to the row, because `room_send` does not advance the
+ * sender's watermark — so counting it makes a silent agent alarm about itself.
+ *
+ * ⚠️ `system` IS THE ADDITION, NOT A COPY, for `oldestDmUnreadAt`'s reason: it
+ * also drops every `joinRoom` announcement, which would otherwise start a
+ * backlog with no peer behind it.
+ *
+ * ⚠️ NO `sinceId`. A targeted recovery read consumes nothing, so it cannot
+ * change what is waiting; `readFloor` with none is the plain watermark.
+ */
+function oldestRoomUnreadAt(
+  db: Db,
+  room: string,
+  handle: string,
+): number | null {
+  const since = readFloor(db, room, handle);
+  const row = db
+    .prepare(
+      `SELECT MIN(sent_at) AS at FROM messages
+     WHERE to_handle = ? AND id > ? AND from_handle NOT IN (?, ?)`,
+    )
+    .get(room, since, handle, SYSTEM_HANDLE) as unknown as {
+    at: number | null;
+  };
+
+  return row.at === null ? null : Number(row.at);
 }
 
 export function advanceRoomRead(

@@ -4,6 +4,7 @@ import * as dao from "../../storage/dao.js";
 import { notifyPeer } from "../../notify/bus.js";
 import type { ShimContext } from "../index.js";
 import { roomTargetRefusal } from "../../util/naming.js";
+import { tickBacklogSafely } from "../backlog-check.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -67,6 +68,13 @@ export function installSend(server: McpServer, ctx: ShimContext): void {
         kind,
         unread,
       });
+
+      // 🛑 THE AGENT'S OWN SEND IS THE LIVENESS TICK FOR ITS OWN BACKLOG, and
+      // #224 has no other event to hang one on. A sender is demonstrably
+      // alive, so a message it has left unread is being ignored. Below the
+      // insert, so a refused send is not a liveness signal it earned.
+      tickBacklogSafely(ctx.db, ctx.handle, Date.now());
+
       return {
         content: [
           {
