@@ -1191,6 +1191,114 @@ export function claimsPanelEmpty() {
 }
 
 /**
+ * One row of the running-agents panel (#40).
+ *
+ * 🛑 TWO HANDLES ON ONE ROW. `handle` is the supervisor and is the only thing
+ * `/api/agents/stop` accepts; the gauge belongs to its child. Posting the
+ * child's handle returns a tested, honest-looking `ok: false`.
+ *
+ * @param {{handle: string, boundAt?: number|null, child?: object|null}} agent
+ * @param {{nowMs?: number}} [opts]
+ */
+export function agentRow(agent, { nowMs = Date.now() } = {}) {
+  const boundAt = agent?.boundAt;
+  const known = typeof boundAt === "number" && Number.isFinite(boundAt);
+
+  return {
+    handle: agent.handle,
+    childHandle: agent.child?.handle ?? null,
+    gauge: gaugeDisplay(agent.child),
+    // ⚠️ "bound", NEVER "uptime". `boundAtOf` fails open to now, and a clock
+    // that disagrees would otherwise render a negative age.
+    bound: known
+      ? `bound ${ageLabel(Math.max(0, nowMs - boundAt))}`
+      : "bound time unknown",
+    boundTitle:
+      "Age of the supervisor's socket, not the child's — a restart respawns " +
+      "the child without rebinding",
+  };
+}
+
+/**
+ * What the running-agents panel says when nothing is running.
+ *
+ * 🛑 NOT A BLANK, for the same reason as the claims panel.
+ */
+export function agentsPanelEmpty() {
+  return "(no supervised agents running)";
+}
+
+/**
+ * The confirm an operator reads before a stop (#40).
+ *
+ * 🛑 ONLY `now` MENTIONS THE COST, because only `now` pays it. lee ruled
+ * graceful the default on 2026-10-31: a turn cut mid-stream spends its tokens
+ * and produces nothing.
+ */
+export function stopConfirmText(handle, mode) {
+  return mode === "now"
+    ? `Stop ${handle} NOW?\n\n` +
+        "Its current turn is cut mid-stream. The tokens it has already spent " +
+        "produce nothing."
+    : `Stop ${handle}?\n\n` +
+        "Its current turn finishes first, then the supervisor exits.";
+}
+
+/**
+ * What to tell the operator after a stop (#40).
+ *
+ * 🛑 BRANCHES ON `reason`, NEVER ON `error`. `reason` is a discriminant;
+ * `error` is prose and free to be reworded, which is the drift PR 298 fixed
+ * in the CLI.
+ *
+ * ⚠️ FAILURES LEAD. A mixed result read as "stopped 2" is how an operator
+ * walks away from an agent that is still running.
+ *
+ * @param {Array<{handle: string, ok: boolean, reason?: string, error?: string,
+ *   graceSeconds?: number}>} results
+ * @returns {{kind: "info"|"error", text: string}}
+ */
+export function stopOutcomeText(results) {
+  // 🛑 AN EMPTY SET IS NOT A SUCCESS. "stopped 0 agents" reads as a stop that
+  // worked; nothing was running.
+  if (results.length === 0) {
+    return { kind: "info", text: "nothing was running" };
+  }
+
+  const failed = results.filter((r) => !r.ok);
+  const stopped = results.length - failed.length;
+
+  if (failed.length === 0) {
+    if (results.length > 1) {
+      return { kind: "info", text: `stopped ${results.length} agents` };
+    }
+
+    const [only] = results;
+
+    // A grace window means the agent is not gone yet, so the verb changes.
+    return {
+      kind: "info",
+      text:
+        only.graceSeconds === undefined
+          ? `stopped ${only.handle}`
+          : `stopping ${only.handle} — ${only.graceSeconds}s grace`,
+    };
+  }
+
+  const named = failed
+    .map((r) => `${r.handle} ${r.reason ?? "failed for no stated reason"}`)
+    .join(", ");
+
+  return {
+    kind: "error",
+    text:
+      stopped === 0
+        ? `not stopped — ${named}`
+        : `${named} · stopped ${stopped} of ${results.length}`,
+  };
+}
+
+/**
  * The id shown beside a message's timestamp (#104).
  *
  * 🛑 THE WORDS, NOT A BARE NUMBER. "see 12582" is how one agent points another
