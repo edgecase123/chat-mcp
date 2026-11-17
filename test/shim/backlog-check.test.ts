@@ -370,3 +370,46 @@ test("🛑 a failed WAKE does not re-send the DM warning either", () => {
   assert.equal(dao.getAgent(db, "me")?.unread_warned_threshold, 5);
   assert.match(stderr.lines[0]!, /wake failed for me/);
 });
+
+/**
+ * Make the member lookup fail while the room lookup and the room write keep
+ * working. A view without `joined_at` fails at prepare for the one query that
+ * orders by it, so `myRooms` still finds the room and the warning row still
+ * commits — only the wake's audience cannot be enumerated.
+ *
+ * 🛑 THAT IS THE ONE THROW THE PER-ROOM CATCH SEES. Everything else in the
+ * fanout is inside `wakeQuietly`, so no other failure can reach it.
+ */
+function breakMemberLookup(db: DatabaseSync): void {
+  db.exec(`ALTER TABLE room_members RENAME TO room_members_real`);
+  db.exec(
+    `CREATE VIEW room_members AS SELECT room_name, handle FROM room_members_real`,
+  );
+}
+
+test("🛑 a failed MEMBER LOOKUP does not re-warn a room whose row committed", () => {
+  const db = freshDb();
+  const now = Date.now();
+  twoRooms(db);
+  dmAgedBy(db, now, 61);
+  breakMemberLookup(db);
+
+  const stderr = quietStderr();
+  try {
+    for (const tick of [0, 1, 2]) applyBacklogCheck(db, "me", now + tick * MIN);
+  } finally {
+    stderr.restore();
+  }
+
+  // Counting the room BELOW the fanout loses the count to this throw, which
+  // leaves the band unspent and writes the same warning on every later send.
+  assert.equal(warningsIn(db, "#aaa").length, 1, "warned once, not per tick");
+  assert.equal(warningsIn(db, "#zzz").length, 1, "warned once, not per tick");
+  assert.equal(dao.getAgent(db, "me")?.unread_warned_threshold, 60);
+
+  // Non-vacuity: without a real throw the counts above hold for the wrong
+  // reason, so the injection has to prove it fired, once per room, once only.
+  assert.equal(stderr.lines.length, 2, "one firing round, both rooms failing");
+  assert.match(stderr.lines[0]!, /undelivered to #aaa for me/);
+  assert.match(stderr.lines[1]!, /undelivered to #zzz for me/);
+});
