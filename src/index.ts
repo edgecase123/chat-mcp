@@ -531,9 +531,13 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         "cli",
       );
 
+      // 🛑 BRANCH ON `reason`, NEVER ON `error`. `error` is prose and is free
+      // to be reworded; comparing it here put the coupling in another file and
+      // under no test, so a reword would silently print "stop refused for X:
+      // no supervisor is listening". Found by claude1 reviewing PR 296.
       if (!result.ok) {
         console.error(
-          result.error === "no supervisor is listening"
+          result.reason === "unreachable"
             ? `no supervisor is listening for "${handle}"`
             : `${action} refused for ${handle}: ${result.error}`,
         );

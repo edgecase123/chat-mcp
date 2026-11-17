@@ -222,7 +222,13 @@ test("a REFUSED control is reported as a failure, not as a stop that worked", as
     const { json } = await post(h, "/api/agents/stop", { handle: "refuser" });
 
     assert.deepEqual(json.results, [
-      { handle: "refuser", ok: false, error: "mid-turn, try --now" },
+      {
+        handle: "refuser",
+        ok: false,
+        // The card branches on this, not on the prose beside it.
+        reason: "refused",
+        error: "mid-turn, try --now",
+      },
     ]);
   } finally {
     await l.close();
@@ -241,6 +247,7 @@ test("stopping a handle nothing is listening for says so, by handle", async () =
     assert.equal(status, 200);
     assert.equal(json.results[0].handle, "ghost");
     assert.equal(json.results[0].ok, false);
+    assert.equal(json.results[0].reason, "unreachable");
     assert.match(json.results[0].error, /no supervisor/i);
   } finally {
     close(h);

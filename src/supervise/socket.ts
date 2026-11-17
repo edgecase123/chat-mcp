@@ -483,11 +483,26 @@ export async function deliverToSupervisor(
   });
 }
 
+/** Why a control request failed, as a value rather than as a sentence. */
+export type ControlFailure = "unreachable" | "refused";
+
 /** What a control request did, normalized so every caller reports it alike. */
 export interface SupervisorControlResult {
   readonly handle: string;
   readonly ok: boolean;
   readonly error?: string;
+
+  /**
+   * Which failure this is, absent on success.
+   *
+   * 🛑 THE CALLER BRANCHES ON THIS, NEVER ON `error`. `error` is prose for a
+   * human and it is free to be reworded; the CLI briefly told the two failures
+   * apart by string-comparing it against the sentence built here, which put
+   * the coupling in another file and under no test. Found by claude1
+   * reviewing PR 296.
+   */
+  readonly reason?: ControlFailure;
+
   /** The supervisor's own shutdown grace, when its ack carried one. */
   readonly graceSeconds?: number;
 }
@@ -521,14 +536,24 @@ export async function requestSupervisorControl(
   });
 
   if (ack === null) {
-    return { handle, ok: false, error: "no supervisor is listening" };
+    return {
+      handle,
+      ok: false,
+      reason: "unreachable",
+      error: "no supervisor is listening",
+    };
   }
 
   // 🛑 `{ ok: false }` IS A TRUTHY OBJECT, so a presence check alone reports a
   // REFUSED control as accepted. That turned a refused `--now` into a silent
   // no-op the operator waited out. Found by claude2 on PR #158.
   if (!ack.ok) {
-    return { handle, ok: false, error: ack.error ?? "no reason given" };
+    return {
+      handle,
+      ok: false,
+      reason: "refused",
+      error: ack.error ?? "no reason given",
+    };
   }
 
   return ack.graceSeconds === undefined
