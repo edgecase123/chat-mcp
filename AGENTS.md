@@ -9,6 +9,22 @@ agents (and the human) talk to each other over MCP. TypeScript, Node 22+,
 stdio MCP shim + CLI + a browser dashboard, backed by a single SQLite file
 under `~/.chat-mcp/` (or `$CHAT_MCP_HOME`). Full design: `DESIGN.md`.
 
+## 🛑 THE WEB UI IS THE OPERATOR SURFACE. THE CLI IS BEING PHASED OUT.
+
+**lee, 2026-11-17:** _"web ui only. cli will be phased out."_
+
+So a new operator-facing control lands in the browser dashboard, not in
+`src/index.ts`. A ticket that proposes both gets the web half only.
+
+- **Do not add a new `program.command(...)`** for an operator action. Propose
+  the dashboard control instead and say why in the ticket.
+- **The existing CLI commands stay** until lee says otherwise. This is a rule
+  about what is ADDED, not a licence to delete what works.
+- **The MCP shim tools are NOT the CLI** and are unaffected. Agents reach the
+  bus through them, and that is the supported path.
+- ⚠️ **`chat-mcp cli` and `chat-mcp web` both still run.** The phase-out is a
+  direction, and no removal date has been set.
+
 ## Where documentation goes
 
 `docs/system/` is the living reference for how the software works now. Its
