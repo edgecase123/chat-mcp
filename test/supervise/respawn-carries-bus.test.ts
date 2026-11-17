@@ -258,6 +258,19 @@ test("🚨 every spawnFn call site passes bus, and there are exactly 3", () => {
     `expected 3 spawnFn call sites, found ${blocks.length} — a new one must pass bus too`,
   );
 
+  // 🛑 THE ANCHOR ONLY SEES AN INLINE OBJECT, so `spawnFn(someOpts)` is
+  // invisible to it AND does not move the count — the hole is silent rather
+  // than loud. MEASURED: a fourth site passing a variable passed 4 of 4
+  // before this line. Raised by claude2 on review, one level deeper than the
+  // 🟡 that produced the guard above.
+  const everyCall = src.match(/spawnFn\(/g) ?? [];
+
+  assert.equal(
+    everyCall.length,
+    blocks.length,
+    `${everyCall.length} spawnFn( calls but only ${blocks.length} inspectable blocks — a call site passes a variable and nothing checks its bus`,
+  );
+
   for (const block of blocks) {
     assert.ok(
       !block.startsWith("UNBALANCED:"),
