@@ -53,11 +53,21 @@ agents.pid = 41   never refreshed   ->  not consulted at all
 {
   "results": [
     { "handle": "claude2", "ok": true, "graceSeconds": 45 },
-    { "handle": "gopher", "ok": false, "error": "no supervisor is listening" }
+    {
+      "handle": "gopher",
+      "ok": false,
+      "reason": "unreachable",
+      "error": "no supervisor is listening"
+    }
   ],
   "stopped": 1
 }
 ```
+
+🛑 **A caller branches on `reason`, never on `error`.** `reason` is
+`"unreachable"` or `"refused"`; `error` is prose for a human and is free to be
+reworded. The CLI briefly told the two apart by string-comparing the sentence,
+which put the coupling in another file and under no test.
 
 🛑 **`{ ok: false }` is a truthy object.** Reporting on the ack's presence
 alone turned a refused stop into a silent no-op the operator waited out, which

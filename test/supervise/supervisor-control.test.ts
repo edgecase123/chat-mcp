@@ -23,7 +23,12 @@ test("nothing listening is reported as a failure naming the handle", async () =>
       kind: "stop",
       mode: "graceful",
     }),
-    { handle: "nobody", ok: false, error: "no supervisor is listening" },
+    {
+      handle: "nobody",
+      ok: false,
+      reason: "unreachable",
+      error: "no supervisor is listening",
+    },
   );
 });
 
@@ -39,7 +44,12 @@ test("a refused control is a failure carrying the supervisor's reason", async ()
         kind: "stop",
         mode: "graceful",
       }),
-      { handle: "refuser", ok: false, error: "mid-turn, try --now" },
+      {
+        handle: "refuser",
+        ok: false,
+        reason: "refused",
+        error: "mid-turn, try --now",
+      },
     );
   } finally {
     await l.close();
@@ -114,6 +124,47 @@ test("the control reaches the supervisor verbatim, kind and mode both", async ()
     });
 
     assert.deepEqual(seen, [{ kind: "restart", mode: "now" }]);
+  } finally {
+    await l.close();
+  }
+});
+
+test("the two failures are told apart by `reason`, not by their wording", async () => {
+  // 🛑 THE DISCRIMINANT IS WHAT THE CLI BRANCHES ON. It printed the wrong
+  // sentence for a refusal if `error`'s wording ever changed, because it
+  // string-compared the prose built in another file. Found by claude1 on
+  // PR 296. This asserts the two failures differ STRUCTURALLY.
+  const refusing = await WakeListener.bind("says-no", () => ({ ok: false }));
+
+  try {
+    const unreachable = await requestSupervisorControl("not-there", {
+      kind: "stop",
+      mode: "graceful",
+    });
+    const refused = await requestSupervisorControl("says-no", {
+      kind: "stop",
+      mode: "graceful",
+    });
+
+    assert.equal(unreachable.reason, "unreachable");
+    assert.equal(refused.reason, "refused");
+    assert.notEqual(unreachable.reason, refused.reason);
+  } finally {
+    await refusing.close();
+  }
+});
+
+test("a success carries no `reason` at all", async () => {
+  const l = await WakeListener.bind("fine", () => ({ ok: true }));
+
+  try {
+    const r = await requestSupervisorControl("fine", {
+      kind: "stop",
+      mode: "graceful",
+    });
+
+    assert.equal(r.ok, true);
+    assert.equal(r.reason, undefined);
   } finally {
     await l.close();
   }

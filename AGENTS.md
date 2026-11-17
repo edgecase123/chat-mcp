@@ -59,6 +59,12 @@ node --import tsx src/index.ts --help   # proves the module graph actually boots
                                          # tsc --noEmit cannot see an import cycle
 ```
 
+🛑 **`npm test` IS NOT THE GATE. CI ALSO RUNS `npm run format:check`**, which
+is `prettier --check .` over the whole tree. Running `prettier --write` on the
+files you happened to name passes locally and still fails CI, so run
+`npm run format:check` before you push. One missed test file cost a red check
+on PR 296 with a green local suite.
+
 **Tests under the node runner refuse the real `~/.chat-mcp` directory.**
 Set `process.env.CHAT_MCP_HOME` to a temp dir _before_ importing anything
 that resolves a state path — see `src/util/paths.ts`'s `stateDir()` for why,
