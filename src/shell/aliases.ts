@@ -88,7 +88,7 @@ chat-members() {
   _chat_mcp_bin members "\$@"
 }
 
-# Delete a room entirely (caller must be a member).
+# Delete a room entirely (members only, and owner-only while the owner is still a member; any member may delete once the owner has left).
 #   chat-delete-room '#leagues'
 chat-delete-room() {
   if [ "\$#" -lt 1 ]; then

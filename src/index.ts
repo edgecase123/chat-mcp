@@ -184,7 +184,9 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
 
   program
     .command("delete-room <room>")
-    .description("Delete a room entirely (caller must be a member)")
+    .description(
+      "Delete a room entirely (members only, and owner-only while the owner is still a member; any member may delete once the owner has left)",
+    )
     .option("--from <handle>", "caller handle (default: $CHAT_MCP_HANDLE)")
     .option("--json", "emit {room, deleted} as JSON", false)
     .action(async (room: string, opts: { from?: string; json?: boolean }) => {
