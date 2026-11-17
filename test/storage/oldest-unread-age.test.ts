@@ -207,28 +207,59 @@ test("🚨 a room I am not in is not my backlog", () => {
 });
 
 /**
- * 🛑 THE INVARIANT THAT TIES THIS TO THE EXISTING PAIR. The age and the count
- * read the same rows, so they must agree on emptiness in every arrangement. A
- * divergence means one of the two filters drifted, which is exactly how
- * `roomUnreadCount` and `roomUnread` once disagreed.
+ * 🛑 A BACKLOG IMPLIES SOMETHING UNREAD. The age and the count read the same
+ * rows, so an age with a zero count means one of the two filters drifted —
+ * which is exactly how `roomUnreadCount` and `roomUnread` once disagreed.
+ *
+ * ⚠️ THE CONVERSE IS FALSE, DELIBERATELY, AND THE LAST ARRANGEMENT PROVES IT.
+ * A system message is unread and is NOT a backlog, because the axis is "a peer
+ * is waiting on you". Asserting `iff` here would forbid that exclusion, and
+ * without the exclusion a `dm` band's own warning becomes the next band's
+ * input. `backlog-warned-column.test.ts` owns that case.
  */
-test("🚨 a backlog exists if and only if something is unread", () => {
+test("🚨 a backlog always implies something unread, but not the reverse", () => {
   const db = busWithTwoAgents();
   try {
-    const arrangements: Array<() => void> = [
-      () => {},
-      () => void dao.insertMessage(db, { from: "me", to: "#r", body: "mine" }),
-      () => void dao.insertMessage(db, { from: "other", to: "me", body: "dm" }),
-      () => void dao.insertMessage(db, { from: "other", to: "#r", body: "rm" }),
+    const arrangements: Array<readonly [string, () => void]> = [
+      ["nothing", () => {}],
+      [
+        "my own room post",
+        () =>
+          void dao.insertMessage(db, { from: "me", to: "#r", body: "mine" }),
+      ],
+      [
+        "a peer DM",
+        () =>
+          void dao.insertMessage(db, { from: "other", to: "me", body: "dm" }),
+      ],
+      [
+        "a peer room post",
+        () =>
+          void dao.insertMessage(db, { from: "other", to: "#r", body: "rm" }),
+      ],
     ];
 
-    for (const [i, arrange] of arrangements.entries()) {
+    for (const [name, arrange] of arrangements) {
       arrange();
-      assert.equal(
-        dao.oldestUnreadAt(db, "me") === null,
-        dao.totalUnreadFor(db, "me") === 0,
-        `arrangement ${i}: the age and the count disagree on emptiness`,
-      );
+      if (dao.oldestUnreadAt(db, "me") !== null)
+        assert.ok(
+          dao.totalUnreadFor(db, "me") > 0,
+          `${name}: a backlog with nothing unread means a filter drifted`,
+        );
+    }
+
+    // The documented one-way case, asserted rather than described.
+    const db2 = busWithTwoAgents();
+    try {
+      dao.insertMessage(db2, {
+        from: dao.SYSTEM_HANDLE,
+        to: "me",
+        body: "a warning",
+      });
+      assert.equal(dao.oldestUnreadAt(db2, "me"), null, "not a backlog");
+      assert.equal(dao.totalUnreadFor(db2, "me"), 1, "but it IS unread");
+    } finally {
+      db2.close();
     }
   } finally {
     db.close();

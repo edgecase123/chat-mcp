@@ -35,6 +35,7 @@ export interface Agent {
   context_total: number | null;
   context_reported_at: number | null;
   context_warned_threshold: number | null;
+  unread_warned_threshold: number | null;
 }
 
 export interface Message {
@@ -63,6 +64,7 @@ interface AgentRow {
   context_total: number | null;
   context_reported_at: number | null;
   context_warned_threshold: number | null;
+  unread_warned_threshold: number | null;
 }
 
 interface MessageRow {
@@ -134,6 +136,7 @@ function hydrate(row: AgentRow): Agent {
     context_total: row.context_total,
     context_reported_at: row.context_reported_at,
     context_warned_threshold: row.context_warned_threshold,
+    unread_warned_threshold: row.unread_warned_threshold,
   };
 }
 
@@ -173,6 +176,25 @@ export function setAgentContextWarned(
 
   db.prepare(
     `UPDATE agents SET context_warned_threshold = ? WHERE handle = ?`,
+  ).run(threshold, handle);
+}
+
+/**
+ * Remember which unread-backlog band `handle` has already been told about.
+ *
+ * ⚠️ DELIBERATELY NOT MERGED WITH `setAgentContextWarned`. A shared setter
+ * would take the column as an argument, and which axis is being written is the
+ * one thing a caller must not be able to get wrong.
+ */
+export function setAgentUnreadWarned(
+  db: Db,
+  handle: string,
+  threshold: number | null,
+): void {
+  assertLiveDatabase(db, "setAgentUnreadWarned");
+
+  db.prepare(
+    `UPDATE agents SET unread_warned_threshold = ? WHERE handle = ?`,
   ).run(threshold, handle);
 }
 
@@ -557,9 +579,10 @@ export function pendingInboxCount(db: Db, to: string): number {
 function oldestDmUnreadAt(db: Db, to: string): number | null {
   const row = db
     .prepare(
-      `SELECT MIN(sent_at) AS at FROM messages WHERE to_handle = ? AND read_at IS NULL`,
+      `SELECT MIN(sent_at) AS at FROM messages
+     WHERE to_handle = ? AND read_at IS NULL AND from_handle != ?`,
     )
-    .get(to) as unknown as { at: number | null };
+    .get(to, SYSTEM_HANDLE) as unknown as { at: number | null };
 
   return row.at === null ? null : Number(row.at);
 }
@@ -1130,9 +1153,11 @@ function oldestRoomUnreadAt(
   const row = db
     .prepare(
       `SELECT MIN(sent_at) AS at FROM messages
-     WHERE to_handle = ? AND id > ? AND from_handle != ?`,
+     WHERE to_handle = ? AND id > ? AND from_handle NOT IN (?, ?)`,
     )
-    .get(room, since, handle) as unknown as { at: number | null };
+    .get(room, since, handle, SYSTEM_HANDLE) as unknown as {
+    at: number | null;
+  };
 
   return row.at === null ? null : Number(row.at);
 }
