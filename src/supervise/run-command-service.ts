@@ -62,7 +62,7 @@ export interface RunCommandOptions {
 }
 
 /**
- * How many of each handle's commands are running, and who is waiting.
+ * How many of each handle's commands are running.
  *
  * 🛑 PER HANDLE, BY lee's RULING OF 2026-11-15. A timeout already bounds how
  * LONG one command runs (`DEFAULT_TIMEOUT_MS`); nothing bounded how many START,
@@ -72,26 +72,26 @@ export interface RunCommandOptions {
  * process serves one handle: `startSupervisor` runs once per CLI invocation and
  * `openHostBus` once per supervisor. Keying it means the guarantee does not
  * rest on that, and nothing enforces it.
- *
- * Rejected: handing a released permit straight to the next waiter. It closes a
- * rare overtake by a synchronous arrival, and costs a non-obvious invariant.
  */
 const running = new Map<string, number>();
-const waiting = new Map<string, (() => void)[]>();
 
 /**
- * 🛑 A `while`, NOT AN `if`. The woken waiter re-checks, so a release only has
- * to wake one of them. The check and the increment sit in one synchronous turn,
- * so two waiters cannot both pass the check.
+ * Takes one of `handle`'s slots, or refuses.
+ *
+ * 🛑 REFUSES, NEVER WAITS, BY lee's RULING OF 2026-11-15: "refuse immediately,
+ * match the broker's wording". A parked call is invisible latency that the
+ * caller cannot tell apart from a hung command, so it leaves no correct
+ * reaction available.
+ *
+ * 🛑 SYNCHRONOUS, WHICH IS WHAT MAKES THE CHECK AND THE INCREMENT ATOMIC. An
+ * `await` between the two would let two arrivals both pass the check.
+ *
+ * Rejected: a short wait before refusing. It reintroduces the latency the
+ * ruling removed, for a burst the caller can retry itself.
  */
-async function acquireSlot(handle: string, limit: number): Promise<void> {
-  while ((running.get(handle) ?? 0) >= limit) {
-    await new Promise<void>((resolve) => {
-      const queue = waiting.get(handle) ?? [];
-
-      queue.push(resolve);
-      waiting.set(handle, queue);
-    });
+function takeSlot(handle: string, limit: number): void {
+  if ((running.get(handle) ?? 0) >= limit) {
+    throw new Refusal("the command runner is busy; retry");
   }
 
   running.set(handle, (running.get(handle) ?? 0) + 1);
@@ -102,13 +102,6 @@ function releaseSlot(handle: string): void {
 
   if (left <= 0) running.delete(handle);
   else running.set(handle, left);
-
-  const queue = waiting.get(handle);
-  const next = queue?.shift();
-
-  if (queue !== undefined && queue.length === 0) waiting.delete(handle);
-
-  next?.();
 }
 
 /**
@@ -202,9 +195,9 @@ export async function runCommandFor(
   // nothing and take no concurrency slot.
   refuseInContainer(opts);
 
-  // 🛑 RESOLVED ONCE, BEFORE ANY WAIT. `acquireSlot` takes a number, so a
-  // command that parks keeps the limit it arrived with even if the file is
-  // edited while it waits. The counter and the limit cannot disagree.
+  // 🛑 READ PER CALL, AND NOTHING AWAITS BETWEEN THIS READ AND THE SLOT TAKE.
+  // So a refusal is always measured against the file as it stands now, and a
+  // raised cap binds on the very next command rather than the next restart.
   let limits;
 
   try {
@@ -247,15 +240,12 @@ export async function runCommandFor(
   }
 
   // 🛑 AFTER AUTHORIZATION, NOT BEFORE. A command refused for its name or its
-  // script path must not wait behind work that is already running, and must not
-  // hold a slot while being refused.
+  // script path must not be refused as busy instead, which would tell the
+  // caller to retry something that can never succeed.
   //
-  // A limit below 1 is read as 1. Honouring a 0 would wait forever, and a
-  // caller that passes one wants throttling, never a deadlock.
-  await acquireSlot(
-    handle,
-    Math.max(1, opts.maxConcurrent ?? limits.maxConcurrent),
-  );
+  // A limit below 1 is read as 1. Honouring a 0 would refuse every command, and
+  // a caller that passes one wants throttling, never a closed door.
+  takeSlot(handle, Math.max(1, opts.maxConcurrent ?? limits.maxConcurrent));
 
   try {
     return await runScript(
