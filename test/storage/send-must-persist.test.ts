@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { committableFiles } from "../support/committable-files.js";
 
 // Point CHAT_MCP_HOME at a scratch dir BEFORE importing anything that reads it.
 process.env.CHAT_MCP_HOME = join(
@@ -348,8 +349,11 @@ function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
 }
 
+/**
+ * 🛑 UNSTAGED FILES TOO (#312). This guard's subject is a NEW module under
+ * `src/` that opens a database or writes the messages table, and a new module
+ * is invisible to an index-only listing until it is staged.
+ */
 function sourceFiles(): string[] {
-  return execFileSync("git", ["ls-files", "src"], { encoding: "utf8" })
-    .split("\n")
-    .filter((f) => /\.tsx?$/.test(f));
+  return committableFiles({ pathspec: "src" }).filter((f) => /\.tsx?$/.test(f));
 }

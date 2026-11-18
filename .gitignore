@@ -42,3 +42,13 @@ measurements/
 # Created by the Claude Code Agent tool at runtime. It is scratch, and a
 # `git add -A` once swept a skill for an UNRELATED codebase into a merged PR.
 .agents/
+
+# 🛑 UNATTRIBUTED SCRATCH, AND THE GUARDS NOW READ UNSTAGED FILES (#312).
+# Neither agent writes these and they come and go within a session, so a guard
+# that enumerates what a commit would carry had its verdict depending on junk.
+# Root-anchored on purpose: a bare `close*.md` would swallow a real file in any
+# subdirectory later. They are also the only `prettier --check .` failures.
+#
+# ⚠️ IGNORING IS NOT DELETING. Still never `git add -A`, and `git clean -xfd`
+# still destroys them.
+/close*.md

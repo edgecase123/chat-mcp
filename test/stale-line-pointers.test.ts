@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+
+import { committableFiles } from "./support/committable-files.js";
 
 /**
  * 🛑 A `file.ts:NNN` POINTER IN PROSE FAILS SILENTLY. The Prettier adoption
@@ -51,16 +52,9 @@ function allowedReason(path: string): string | null {
   return ALLOWED.find((a) => path.startsWith(a.prefix))?.why ?? null;
 }
 
-/** Every tracked text file, so the scan has a denominator. */
+/** Every text file a commit would carry, so the scan has a denominator. */
 function textFiles(): string[] {
-  const out = execFileSync("git", ["ls-files"], {
-    cwd: ROOT,
-    encoding: "utf8",
-  });
-
-  return out
-    .split("\n")
-    .filter((p) => p.length > 0)
+  return committableFiles()
     .filter((p) => !/\.(png|jpg|jpeg|gif|ico|woff2?|ttf|zip|pdf)$/i.test(p))
     .filter((p) => p !== "package-lock.json");
 }
@@ -107,13 +101,15 @@ test("the scan reports what it finds, so a clean repo is not a vacuous pass", ()
   );
 });
 
-test("no tracked file outside the allowlist carries a line-number pointer", () => {
+test("no committable file outside the allowlist carries a line-number pointer", () => {
   const files = textFiles();
   const scanned = files.filter((p) => !allowedReason(p));
 
   // 🛑 MEMBERSHIP, NOT A FLOOR. The first draft of this file was UNTRACKED
-  // when the suite ran, so `git ls-files` never offered it and its own
+  // when the suite ran, so the index-only listing never offered it and its own
   // offending line passed unseen. A count threshold cannot see one absence.
+  // #312 made the listing reach an unstaged file; this stays because the
+  // membership question is not the same question as the instrument's.
   assert.ok(
     scanned.includes("test/stale-line-pointers.test.ts"),
     "this file is not in its own scan — commit it before trusting a pass",

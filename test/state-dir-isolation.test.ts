@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+
+import { committableFiles } from "./support/committable-files.js";
 
 /**
  * 🛑 THE SUITE WROTE INTO THE OPERATOR'S LIVE STATE DIRECTORY, EVERY RUN.
@@ -140,15 +141,18 @@ function handRollsStatePath(src: string): boolean {
 }
 
 /**
- * ⚠️ TRACKED FILES ONLY. A brand-new test file is invisible here until it is
- * `git add`ed, which is why a carve-out for one read as unearned. That is the
- * right trade — every other scanner in this repo uses `git ls-files`, and CI
- * only ever sees committed files.
+ * 🛑 UNSTAGED FILES TOO, AND THE OLD CARVE-OUT'S REASON HAD EXPIRED (#312).
+ *
+ * It read "every other scanner in this repo uses `git ls-files`". That premise
+ * was measurably false: nine test files scan the filesystem and five used git,
+ * and `gauge-bands.test.ts` had already been converted for this exact defect.
+ * A brand-new test file is the one this guard most needs to see, because a new
+ * file is where an unredirected `CHAT_MCP_HOME` arrives.
  */
 function testFiles(): string[] {
-  return execFileSync("git", ["ls-files", "test"], { encoding: "utf8" })
-    .split("\n")
-    .filter((f) => f.endsWith(".test.ts"));
+  return committableFiles({ pathspec: "test" }).filter((f) =>
+    f.endsWith(".test.ts"),
+  );
 }
 
 test("🚨 every test that can resolve a state path redirects CHAT_MCP_HOME", () => {
