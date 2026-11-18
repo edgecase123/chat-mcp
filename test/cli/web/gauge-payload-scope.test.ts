@@ -47,14 +47,24 @@ function sites(re: RegExp): Site[] {
   }));
 }
 
-/** Where a gauge payload spreads a freshness verdict, and for whom. */
+/**
+ * Where a gauge payload spreads a freshness verdict, and for whom.
+ *
+ * 🛑 `\??\.` IS NOT DEFENSIVE. `me` is the one nullable row in `handleWhoami`
+ * and is already read as `me?.session_id`, so a self-gauge — the likeliest next
+ * builder — would be written `me?.context_reported_at` and a `\w+\.` regex
+ * cannot see it. MEASURED: such a payload with NO ramp passed 2 of 2 before
+ * this. Raised by claude2 reviewing PR 315.
+ */
 function freshnessSites(): Site[] {
-  return sites(/gaugeFreshness\(\s*(\w+)\.context_reported_at/g);
+  return sites(/gaugeFreshness\(\s*(\w+)\??\.context_reported_at/g);
 }
 
 /** Where a gauge payload ships a ramp, and for whom. */
 function rampSites(): Site[] {
-  return sites(/context_ramp:\s*contextRampFor\(\s*\w+\.db,\s*(\w+)\.handle/g);
+  return sites(
+    /context_ramp:\s*contextRampFor\(\s*\w+\??\.db,\s*(\w+)\??\.handle/g,
+  );
 }
 
 test("🛑 EVERY gauge payload in server.ts ships a ramp beside its freshness", () => {
