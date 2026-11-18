@@ -18,6 +18,7 @@ import {
   mintToken,
   tokenMatches,
 } from "../../src/cli/web/credential.js";
+import { arrivedAndStayed } from "../support/arrival.js";
 
 /**
  * #240. The supervisor reads a child's stdout and the browser shows nothing,
@@ -110,7 +111,15 @@ async function recordingServer(): Promise<{
   };
 }
 
-/** Let the fire-and-forget POSTs land. They are deliberately not awaited. */
+/**
+ * A quiet window for the NO-ARRIVAL tests only — a refused post and a missing
+ * state dir have nothing to count, and what they assert is that no rejection
+ * surfaces.
+ *
+ * 🛑 #305. EVERY SITE THAT COUNTS ARRIVALS USES `arrivedAndStayed` INSTEAD. A
+ * fixed sleep there asserts the round trip HAS completed, which a loaded suite
+ * run makes false, and the gate then goes red on working code.
+ */
 function settle(ms = 120): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -200,9 +209,10 @@ test("🛑 a tick REACHES the server, authenticated, with the handle in the BODY
     });
 
     report("tick");
-    await settle();
+    await arrivedAndStayed(() => web.seen.length, {
+      label: "the tick did not arrive",
+    });
 
-    assert.equal(web.seen.length, 1, "the tick did not arrive");
     assert.equal(web.seen[0]!.path, "/api/activity");
 
     // 🛑 THE HANDLE IS IN THE BODY, NOT THE PATH. `requiredCapability` matches
@@ -240,15 +250,16 @@ test("🛑 bursts THROTTLE, so a chatty turn cannot flood the web server", async
     });
 
     for (let i = 0; i < 20; i++) report("tick");
-    await settle();
 
     // A real turn emits an assistant event per tool call and per text block.
     // The dot is binary, so anything past the first in a window is pure cost.
-    assert.equal(
-      web.seen.length,
-      1,
-      `20 ticks in one window sent ${web.seen.length} posts`,
-    );
+    //
+    // 🛑 THE QUIET WINDOW IS THE ASSERTION HERE, NOT THE ARRIVAL. All 20 calls
+    // are synchronous, so a reporter that posted every one would have 19 more
+    // in flight when the first lands — and a bare poll returns before they do.
+    await arrivedAndStayed(() => web.seen.length, {
+      label: "20 ticks in one window sent more than one post",
+    });
   } finally {
     await web.close();
     rig.cleanup();
@@ -277,9 +288,10 @@ test("⚠️ control — the throttle REOPENS, so a later tick is not swallowed"
     report("tick");
     now += ACTIVITY_THROTTLE_MS + 1;
     report("tick");
-    await settle();
-
-    assert.equal(web.seen.length, 2, "the throttle never reopened");
+    await arrivedAndStayed(() => web.seen.length, {
+      want: 2,
+      label: "the throttle never reopened",
+    });
   } finally {
     await web.close();
     rig.cleanup();
@@ -306,13 +318,11 @@ test("🛑 an END is never throttled, even immediately after a tick", async () =
 
     report("tick");
     report("end");
-    await settle();
+    await arrivedAndStayed(() => web.seen.length, {
+      want: 2,
+      label: "the end was swallowed by the tick throttle",
+    });
 
-    assert.equal(
-      web.seen.length,
-      2,
-      "the end was swallowed by the tick throttle",
-    );
     assert.deepEqual(JSON.parse(web.seen[1]!.body), {
       handle: "claude2",
       phase: "end",
@@ -396,9 +406,11 @@ test("⚠️ two handles throttle independently", async () => {
 
     a("tick");
     b("tick");
-    await settle();
+    await arrivedAndStayed(() => web.seen.length, {
+      want: 2,
+      label: "one handle swallowed the other",
+    });
 
-    assert.equal(web.seen.length, 2, "one handle swallowed the other");
     assert.deepEqual(web.seen.map((s) => JSON.parse(s.body).handle).sort(), [
       "claude1",
       "claude2",
