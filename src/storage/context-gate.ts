@@ -108,3 +108,23 @@ export function resolveContextGate(db: Db, handle: string): number {
 
   return getGlobalContextGate(db) ?? DEFAULT_CONTEXT_GATE;
 }
+
+/** Which of the three layers answered `resolveContextGate` for `handle`. */
+export type ContextGateSource = "override" | "global" | "builtin";
+
+/**
+ * The layer `handle`'s gate came from.
+ *
+ * 🛑 THE OPERATOR CANNOT SEE THE DIFFERENCE FROM THE NUMBER ALONE. A handle
+ * showing 50 may be overridden to 50, following a global 50, or on the
+ * built-in — and clearing an override only does something in the first case.
+ *
+ * ⚠️ THE LAYER TESTS MUST MATCH `resolveContextGate`'s, CLAUSE FOR CLAUSE. An
+ * override that is present but ILLEGAL is skipped there, so it must read as
+ * `global` here and not as `override`.
+ */
+export function contextGateSource(db: Db, handle: string): ContextGateSource {
+  if (isLegalGate(getAgent(db, handle)?.context_gate)) return "override";
+
+  return getGlobalContextGate(db) === null ? "builtin" : "global";
+}

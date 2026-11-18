@@ -21,7 +21,13 @@ import * as dao from "../../storage/dao.js";
 import { parseSearch, snippet } from "../../search/query.js";
 import { gaugeFreshness } from "../../shim/gauge-freshness.js";
 import { rampFor } from "../../shim/context-ramp.js";
-import { resolveContextGate } from "../../storage/context-gate.js";
+import {
+  contextGateSource,
+  getGlobalContextGate,
+  resolveContextGate,
+  setGlobalContextGate,
+  setHandleContextGate,
+} from "../../storage/context-gate.js";
 import type { MessageKind } from "../../storage/dao.js";
 import {
   assertRoomName,
@@ -478,6 +484,8 @@ export async function route(
     return handleGetClaims(res, ctx);
   if (path === "/api/agents/live" && req.method === "GET")
     return handleLiveAgents(res, ctx);
+  if (path === "/api/context-gate" && req.method === "POST")
+    return handleContextGateSet(req, res, ctx);
   if (path === "/api/agents/stop" && req.method === "POST")
     return handleStopAgents(req, res, ctx);
   if (path === "/api/search" && req.method === "GET")
@@ -551,6 +559,11 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
       ...a,
       ...gaugeFreshness(a.context_reported_at, now),
       context_ramp: contextRampFor(ctx.db, a.handle),
+      // #135 unit 4 — the SET surface needs the number it is editing and the
+      // layer it came from. Resolved here for the same reason as the ramp:
+      // the three-layer rule has one home and the browser cannot import it.
+      context_gate: resolveContextGate(ctx.db, a.handle),
+      context_gate_source: contextGateSource(ctx.db, a.handle),
     })),
     rooms: myRooms.map((r) => ({
       ...r,
@@ -803,6 +816,87 @@ async function handleRoomStyle(
   dao.setRoomStyle(ctx.db, body.room, style, body.custom);
 
   respondJson(res, { ok: true, style });
+}
+
+/**
+ * #135 unit 4 — set the restart gate. WEB UI ONLY, per lee 2026-11-18.
+ *
+ * `handle` absent sets the global default. `handle` present sets that one
+ * handle's override, and `gate: null` clears it.
+ *
+ * 🛑 `gate: null` WITH NO HANDLE IS REFUSED. There is no layer below the
+ * built-in, so "clear the global" would either leave the operator on a number
+ * they cannot see they are now on, or silently do nothing.
+ *
+ * 🛑 A LOW GATE IS LEGAL AND LOOPS, AND THIS ROUTE DOES NOT REFUSE IT.
+ * `assertLegalGate` defines 1..100, and a container child spawns near 14% fill,
+ * so a gate of 10 fires again on the replacement's first reading. Refusing it
+ * here would put a second, stricter legality rule one layer above the one the
+ * supervisor reads. The warning is the SET surface's job — `gateLoopWarning` in
+ * `web/assets/logic.js` — and unit 3a already latches the refusal per child.
+ *
+ * ⚠️ THE SETTERS THROW ON AN ILLEGAL GATE, so the validation below is not the
+ * only guard. It exists to answer 400 rather than 500, and the tests assert the
+ * stored value as well as the status.
+ */
+async function handleContextGateSet(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as {
+    handle?: string;
+    gate?: unknown;
+  };
+  const { handle } = body;
+  const gate = body.gate;
+
+  if (gate === null) {
+    if (handle === undefined) {
+      return respondJson(
+        res,
+        {
+          error:
+            "a handle is required to clear a gate; the global has no layer below it",
+        },
+        400,
+      );
+    }
+  } else if (
+    typeof gate !== "number" ||
+    !Number.isInteger(gate) ||
+    gate < 1 ||
+    gate > 100
+  ) {
+    return respondJson(
+      res,
+      {
+        error:
+          "gate must be a whole percentage from 1 to 100, or null to clear an override",
+      },
+      400,
+    );
+  }
+
+  // ⚠️ `== null`, NOT `=== undefined`. `dao.getAgent` returns null for an
+  // absent handle, so a strict undefined check never fired and an unknown
+  // handle was answered 200.
+  if (handle !== undefined && dao.getAgent(ctx.db, handle) == null) {
+    return respondJson(res, { error: `no such handle ${handle}` }, 404);
+  }
+
+  if (handle === undefined) {
+    setGlobalContextGate(ctx.db, gate as number);
+  } else {
+    setHandleContextGate(ctx.db, handle, gate as number | null);
+  }
+
+  respondJson(res, {
+    ok: true,
+    scope: handle === undefined ? "global" : handle,
+    gate: handle === undefined ? getGlobalContextGate(ctx.db) : gate,
+    effective: resolveContextGate(ctx.db, handle ?? ctx.handle),
+  });
 }
 
 async function handleRoomLeave(
