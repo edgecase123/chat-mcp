@@ -72,6 +72,15 @@ export const claudeSpawn: VendorSpawn = {
   mcpConfigFor: (grant: ChildGrant, mode: SandboxMode): string =>
     mode === "docker" ? containerMcpConfigPath(claudeSpawn) : grant.configPath,
 
+  // 🛑 ALL OR NEITHER. `--mcp-config` ADDS to whatever the cwd already
+  // configures, so without `--strict-mcp-config` the child also loads the
+  // consuming project's own servers — measured on #33.
+  mcpConfigFlags: (path: string): readonly string[] => [
+    "--mcp-config",
+    path,
+    "--strict-mcp-config",
+  ],
+
   routeEvent: routeClaudeEvent,
 
   encodeInput: claudeEncodeInput,

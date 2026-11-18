@@ -83,6 +83,21 @@ export interface VendorSpawn {
   readonly argsFor: (opts: SpawnOptions, mode: SandboxMode) => string[];
   /** The config path to point the CLI at, written first if the mode needs it. */
   readonly mcpConfigFor: (grant: ChildGrant, mode: SandboxMode) => string;
+
+  /**
+   * The flags, if any, that point this CLI at `path`.
+   *
+   * 🛑 A VENDOR FIELD BECAUSE THE SPELLINGS ARE A VENDOR'S. The containerized
+   * spawner used to push `--mcp-config` and `--strict-mcp-config` itself, so
+   * the one generic spawner `argsFor` exists to keep flag-free knew two Claude
+   * Code flag names. The second vendor to reach it would have been handed argv
+   * it rejects.
+   *
+   * ⚠️ AN EMPTY ARRAY IS A REAL ANSWER, NOT A MISSING ONE. A CLI that reads a
+   * fixed location needs the file written and no flag at all, and the write is
+   * driven by `mcpConfigFor` either way.
+   */
+  readonly mcpConfigFlags: (path: string) => readonly string[];
   readonly routeEvent: EventRouter;
   readonly encodeInput: (text: string) => string;
   readonly redispatchPrompt: (input: RedispatchInput) => string;

@@ -2117,3 +2117,98 @@ test("🚨 a missing image refuses by NAME, not as a dependency failure", async 
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// the MCP config FLAGS belong to the vendor, not to this spawner (#317)
+// ---------------------------------------------------------------------------
+
+/**
+ * 🛑 `--mcp-config` AND `--strict-mcp-config` ARE CLAUDE CODE SPELLINGS, and
+ * this spawner used to push both onto every vendor's argv. `argsFor` exists so
+ * no generic spawner knows a flag name, and this one knew two.
+ *
+ * ⚠️ THE PATH HALF WAS NEVER THE PROBLEM. The prelude writes the file to
+ * `containerMcpConfigPath(vendor)`, so a vendor that reads a fixed location
+ * only needs the file to land there. Cursor reads `~/.cursor/mcp.json` with no
+ * path flag at all, so for it the two flags are argv it would reject.
+ */
+const FLAGLESS_VENDOR = {
+  ...claudeSpawn,
+  containerHome: "/root",
+  mcpConfigFlags: () => [],
+};
+
+test("🛑 a vendor that names NO config flags gets none, and still has its config WRITTEN", () => {
+  setToken("sk-ant-oat-x");
+
+  const { args } = dockerRunPlan(FLAGLESS_VENDOR, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    bus: BUS,
+    grant: childGrant({ handle: "claude1-agent", configPath: "/unused.json" }),
+  });
+
+  assert.ok(
+    !args.includes("--mcp-config"),
+    `--mcp-config was pushed anyway: ${args.join(" ")}`,
+  );
+  assert.ok(
+    !args.includes("--strict-mcp-config"),
+    "--strict-mcp-config was pushed anyway",
+  );
+
+  // 🛑 THE OTHER HALF, OR THE TEST ABOVE PASSES ON A SPAWN THAT LOST ITS BUS.
+  // Dropping the flags must not drop the file, and an agent with no config
+  // reaches no bus and fails silently.
+  const script = args.find((a) => a.includes("umask 077"));
+
+  assert.ok(script, "the config step vanished with the flags");
+  assert.ok(
+    script.includes(containerMcpConfigPath(FLAGLESS_VENDOR)),
+    "the config was written somewhere this vendor does not read",
+  );
+});
+
+test("⚠️ control — claude DOES get both flags, so the test above is not vacuous", () => {
+  const { args } = dockerBusPlan();
+  const at = args.indexOf("--mcp-config");
+
+  assert.ok(at > 0, `claude lost --mcp-config: ${args.join(" ")}`);
+  assert.equal(
+    args[at + 1],
+    containerMcpConfigPath(claudeSpawn),
+    "the flag no longer carries the in-container path",
+  );
+  assert.ok(
+    args.includes("--strict-mcp-config"),
+    "claude lost the strict flag",
+  );
+});
+
+test("🛑 the flags come from the VENDOR, so this spawner contains neither spelling", () => {
+  // 🛑 THE SUBSTRING IS UNQUOTED, AND THAT IS THE WHOLE GUARD. A first
+  // cut matched `'"--mcp-config"'`, which a backtick template literal walks
+  // straight past. claude2 measured the survivor on PR 320: the vendor is
+  // still CALLED, only its `.length` is read, and Claude's spellings are
+  // pushed anyway. Every behavioural test above passes on it.
+  //
+  // ⚠️ IT IS NOT TRUE THAT A RE-HARDCODE PASSES THE TESTS ABOVE. A plain
+  // one is killed by the flagless test. This grep is for the shape that
+  // CONSULTS the vendor and discards the answer.
+  //
+  // Rejected: defeating `"--mcp" + "-config"` too. That is deliberate
+  // evasion rather than an accident, and it buys a rung for a cycle.
+  const source = readFileSync(
+    new URL("../../../src/supervise/drivers/containerized.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.ok(
+    !source.includes("mcp-config"),
+    "containerized.ts names --mcp-config again",
+  );
+  assert.ok(
+    !source.includes("strict-mcp-config"),
+    "containerized.ts names --strict-mcp-config again",
+  );
+});
