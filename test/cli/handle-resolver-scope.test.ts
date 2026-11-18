@@ -78,6 +78,25 @@ test("🛑 every command that registers THIS process as a peer resolves its hand
       /\.option\(\s*\n?\s*"--handle <handle>",\s*\n?\s*"[^"]*",\s*\n?\s*"/,
       `the "${name}" command passes a hardcoded default to --handle, which is the #314 bug`,
     );
+
+    // 🛑 THE CALL BEING PRESENT IS NOT THE RESULT BEING USED, and asserting
+    // only the call let a launder mutant through: `resolveDefaultHandle` ran,
+    // its answer was dropped, and `opts.handle ?? "user"` reached the runner.
+    // Found by claude1 on PR 316, reproduced here before this line was written.
+    assert.match(
+      block,
+      /const handle = resolveDefaultHandle\(/,
+      `the "${name}" command does not bind the resolver's answer to \`handle\``,
+    );
+    // 🛑 SO THE RUNNER TAKES THE BARE SHORTHAND, `{ handle }`, AND NOTHING
+    // ELSE. Any laundering has to write `handle: <expression>`, and an
+    // expression cannot be a shorthand property. A future caller that
+    // genuinely needs `handle: x` has to come and change this line.
+    assert.doesNotMatch(
+      block,
+      /\bhandle:/,
+      `the "${name}" command passes \`handle:\` an expression, so the resolver's answer can be computed and then discarded`,
+    );
   }
 });
 
