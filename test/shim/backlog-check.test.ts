@@ -13,6 +13,8 @@ const dao = await import("../../src/storage/dao.js");
 const { applyBacklogCheck, tickBacklogSafely } =
   await import("../../src/shim/backlog-check.js");
 const { deadPid } = await import("../support/dead-pid.js");
+const { breakMemberLookup, breakRoom, quietStderr, warningsIn } =
+  await import("../support/warning-fanout.js");
 
 /**
  * #224 defect 2, unit 3b — the seam that makes the bands fire.
@@ -227,28 +229,6 @@ test("the safe tick returns the reading when nothing fails", () => {
 });
 
 /** Make every `system` write to `room` fail, the way a real abort would. */
-function breakRoom(db: DatabaseSync, room: string): void {
-  db.exec(
-    `CREATE TRIGGER break_${room.slice(1)} BEFORE INSERT ON messages
-       WHEN NEW.to_handle = '${room}' AND NEW.from_handle = '${dao.SYSTEM_HANDLE}'
-       BEGIN SELECT RAISE(ABORT, 'injected: room unwritable'); END`,
-  );
-}
-
-function warningsIn(db: DatabaseSync, room: string): unknown[] {
-  return dao
-    .roomUnread(db, room, "peer")
-    .filter((m) => m.from_handle === dao.SYSTEM_HANDLE);
-}
-
-function quietStderr(): { lines: string[]; restore: () => void } {
-  const lines: string[] = [];
-  const real = console.error;
-  console.error = (...args: unknown[]) => void lines.push(args.join(" "));
-
-  return { lines, restore: () => void (console.error = real) };
-}
-
 function twoRooms(db: DatabaseSync): void {
   for (const room of ["#aaa", "#zzz"]) {
     dao.joinRoom(db, room, "me");
@@ -372,27 +352,10 @@ test("🛑 a failed WAKE does not re-send the DM warning either", () => {
 });
 
 /**
- * Make the member lookup fail while the room lookup and the room write keep
- * working. A view over `room_members` without `joined_at` fails at prepare for
- * EVERY query naming that column, so `myRooms`, the membership check and
- * `roomUnread` all still work and the warning row still commits — only the
- * wake's audience cannot be enumerated.
- *
- * 🛑 CALL THIS AFTER ALL ROOM SETUP. `joinRoom` reads `joined_at` too, so a
- * join below this line throws instead of joining, and the test then measures
- * an empty fixture. claude2 found that reviewing PR 292.
- *
  * 🛑 `roomMembers` IS THE ONLY THROW THE PER-ROOM CATCH SEES on the fire path.
  * Everything else in the fanout is inside `wakeQuietly`, so no other failure
  * can reach it.
  */
-function breakMemberLookup(db: DatabaseSync): void {
-  db.exec(`ALTER TABLE room_members RENAME TO room_members_real`);
-  db.exec(
-    `CREATE VIEW room_members AS SELECT room_name, handle FROM room_members_real`,
-  );
-}
-
 test("🛑 a failed MEMBER LOOKUP does not re-warn a room whose row committed", () => {
   const db = freshDb();
   const now = Date.now();

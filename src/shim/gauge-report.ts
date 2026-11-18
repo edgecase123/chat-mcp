@@ -45,11 +45,8 @@ export function applyContextReport(
   const percent = total > 0 ? Math.round((used / total) * 1000) / 10 : 0;
   const transition = nextGaugeState(percent, prevWarned);
 
-  if (transition.next_warned !== prevWarned) {
-    dao.setAgentContextWarned(db, handle, transition.next_warned);
-  }
-
   const notified = { dm: 0, rooms: [] as string[] };
+  let delivered = true;
 
   if (transition.fire != null) {
     const body = warningBody(handle, transition.fire, percent);
@@ -78,35 +75,72 @@ export function applyContextReport(
       // react. `alert` at 95 surfaces it in the alert lane.
       const kind = delivery === "alert" ? "alert" : "chat";
 
-      for (const room of dao.myRooms(db, handle)) {
-        const result = dao.insertMessage(db, {
-          from: dao.SYSTEM_HANDLE,
-          to: room.name,
-          body,
-          kind,
-        });
+      const rooms = dao.myRooms(db, handle);
 
-        for (const member of dao.roomMembers(db, room.name)) {
-          notifyPeer(member, {
-            id: result.id,
-            to: room.name,
+      for (const room of rooms) {
+        try {
+          const result = dao.insertMessage(db, {
             from: dao.SYSTEM_HANDLE,
-            ts: result.sent_at,
+            to: room.name,
             body,
             kind,
           });
+
+          // 🛑 ABOVE THE MEMBER FANOUT. The row IS the delivery, so a throw
+          // while enumerating the audience must not discard a row that has
+          // already committed.
+          notified.rooms.push(room.name);
+
+          for (const member of dao.roomMembers(db, room.name)) {
+            notifyPeer(member, {
+              id: result.id,
+              to: room.name,
+              from: dao.SYSTEM_HANDLE,
+              ts: result.sent_at,
+              body,
+              kind,
+            });
+          }
+        } catch (e) {
+          // PER ROOM, so one unreachable room cannot cost the others their
+          // warning. Wrapping the whole fanout loses every room when one
+          // fails, which is what `backlog-check.ts` had before #224.
+          console.error(
+            `[chat-mcp] context warning undelivered to ${room.name} for ${handle}: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          );
         }
-        notified.rooms.push(room.name);
       }
+
+      // ONE room reaching somebody spends the band, because the rooms that did
+      // get it would otherwise be re-told on every later reading. Only a total
+      // failure leaves it unspent for a later report to retry.
+      //
+      // ⚠️ AN AGENT IN NO ROOMS TAKES THE SPENT BRANCH TOO. It has no audience
+      // to fail, so the band is consumed having reached nobody — which is every
+      // supervised child today, since none of them joins a room. Pinned by
+      // `an agent in NO rooms spends the band`, and owned by #135.
+      delivered = rooms.length === 0 || notified.rooms.length > 0;
     }
+  }
+
+  // 🛑 AFTER THE DELIVERY, AND ONLY IF IT REACHED SOMEBODY. Spending the band
+  // above would leave the agent with no warning at all, because a spent band
+  // never fires again. Spending it on a PARTIAL failure is the opposite bug:
+  // the rooms that did get it are re-told on every later report.
+  const warned = delivered ? transition.next_warned : prevWarned;
+
+  if (warned !== prevWarned) {
+    dao.setAgentContextWarned(db, handle, warned);
   }
 
   return {
     used,
     total,
     percent,
-    warned: transition.next_warned,
-    fired: transition.fire,
+    warned,
+    fired: delivered ? transition.fire : null,
     notified,
   };
 }
