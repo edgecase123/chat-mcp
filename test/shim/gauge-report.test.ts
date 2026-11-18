@@ -14,6 +14,8 @@ const { migrate } = await import("../../src/storage/db.js");
 const dao = await import("../../src/storage/dao.js");
 const { applyContextReport } = await import("../../src/shim/gauge-report.js");
 const { deadPid } = await import("../support/dead-pid.js");
+const { breakMemberLookup, breakRoom, quietStderr, warningsIn } =
+  await import("../support/warning-fanout.js");
 
 /**
  * 🛑 THE WRITE, THE HYSTERESIS AND THE FANOUT WERE COPIED IN TWO FILES, and
@@ -108,4 +110,86 @@ test("an unknown handle does not throw here", () => {
   const db = freshDb();
 
   assert.doesNotThrow(() => applyContextReport(db, "nobody", 1, 10));
+});
+
+/**
+ * Two rooms, both holding the reporter and a peer, so a room that was skipped
+ * is visible as an empty table rather than inferred.
+ */
+function twoRooms(db: DatabaseSync): void {
+  dao.upsertAgent(db, { handle: "peer", pid: deadPid(), session_id: "peer" });
+
+  for (const room of ["#aaa", "#zzz"]) {
+    dao.joinRoom(db, room, "claude9");
+    dao.joinRoom(db, room, "peer");
+  }
+}
+
+/**
+ * 🛑 THE BAND IS SPENT BEFORE THE DELIVERY IS ATTEMPTED, so a throw part-way
+ * through the fanout costs the rooms below it their only warning. A spent band
+ * never fires again, and the gauge is the signal an operator acts on.
+ */
+test("🛑 a failed MEMBER LOOKUP still warns every room, and warns each once", () => {
+  const db = freshDb();
+  twoRooms(db);
+  breakMemberLookup(db);
+
+  const stderr = quietStderr();
+  try {
+    for (const used of [860_000, 870_000, 880_000]) {
+      applyContextReport(db, "claude9", used, 1_000_000);
+    }
+  } finally {
+    stderr.restore();
+  }
+
+  // The row IS the delivery — `room_inbox` reads the table — so an unreachable
+  // audience must not discard a row that already committed.
+  assert.equal(warningsIn(db, "#aaa").length, 1, "warned once, not per report");
+  assert.equal(warningsIn(db, "#zzz").length, 1, "warned once, not per report");
+  assert.equal(dao.getAgent(db, "claude9")?.context_warned_threshold, 85);
+
+  // Non-vacuity: without a real throw the counts above hold for the wrong
+  // reason, so the injection has to prove it fired, once per room, once only.
+  assert.equal(stderr.lines.length, 2, "one firing round, both rooms failing");
+  assert.match(stderr.lines[0]!, /undelivered to #aaa for claude9/);
+  assert.match(stderr.lines[1]!, /undelivered to #zzz for claude9/);
+});
+
+/**
+ * 🛑 THE OPPOSITE BUG. Spending the band when NOTHING was delivered leaves the
+ * agent with no warning at all, because a spent band never fires again.
+ */
+test("🛑 a band nothing could be delivered for is NOT spent, and retries", () => {
+  const db = freshDb();
+  twoRooms(db);
+  breakRoom(db, "#aaa");
+  breakRoom(db, "#zzz");
+
+  const stderr = quietStderr();
+  let first;
+  try {
+    first = applyContextReport(db, "claude9", 860_000, 1_000_000);
+  } finally {
+    stderr.restore();
+  }
+
+  assert.deepEqual(first.notified.rooms, [], "no room took the row");
+  assert.equal(first.fired, null, "nothing fired, because nothing landed");
+  assert.equal(
+    dao.getAgent(db, "claude9")?.context_warned_threshold,
+    null,
+    "the band must stay unspent so a later report can retry it",
+  );
+  assert.equal(stderr.lines.length, 2, "both rooms reported undelivered");
+
+  // The retry is the point of leaving it unspent, so prove it actually fires.
+  db.exec(`DROP TRIGGER break_aaa`);
+  db.exec(`DROP TRIGGER break_zzz`);
+
+  const second = applyContextReport(db, "claude9", 870_000, 1_000_000);
+
+  assert.equal(second.fired, 85, "the band was still there to cross");
+  assert.deepEqual(second.notified.rooms, ["#aaa", "#zzz"]);
 });

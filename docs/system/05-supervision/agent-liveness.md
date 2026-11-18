@@ -166,6 +166,35 @@ nor sends never fires.** That is indistinguishable from offline, and the bus
 deliberately stays quiet there. Full design and the rejected options:
 `edgecase123/chat-mcp#224`.
 
+## A band is spent only once the warning REACHED somebody
+
+Both warning fanouts — the unread backlog and the context gauge — record the
+band they just crossed so it fires once rather than on every tick. Recording it
+_before_ the delivery is attempted spends it on a delivery that never happened,
+and a spent band never fires again.
+
+| ordering                           | what it costs                                         |
+| ---------------------------------- | ----------------------------------------------------- |
+| band recorded BEFORE delivery      | a throw part-way leaves later rooms never warned      |
+| one `try` around the whole fan     | one unreachable room costs every room its warning     |
+| room counted BELOW its fanout      | the band stays unspent and re-warns on every tick     |
+| **recorded after, per-room catch** | ✅ **partial delivery counts; total failure retries** |
+
+```
+src/shim/backlog-check.ts   applyBacklogCheck
+src/shim/gauge-report.ts    applyContextReport
+```
+
+🛑 **The row IS the delivery.** `inbox` and `room_inbox` read the table, so a
+failed wake has not lost the warning — which is why the room is counted above
+the member fanout, not below it.
+
+⚠️ **A partial failure still spends the band.** The rooms that were reached
+would otherwise be re-told on every later tick, and that is the louder bug.
+
+⚠️ **`fired` is `null` when nothing landed at all**, so a caller cannot read a
+crossed band as a delivered one.
+
 ## Common pitfalls
 
 - 🛑 **A child can die before its shim ever registered**, so there is no row to
@@ -195,6 +224,7 @@ deliberately stays quiet there. Full design and the rejected options:
 | `src/supervise/index.ts`    | `childBusHandle()`, the `child.onExit` handler that clears the pid       |
 | `src/shim/backlog.ts`       | the age bands and their routing, pure                                    |
 | `src/shim/backlog-check.ts` | `applyBacklogCheck` — the seam `send`/`room_send` tick                   |
+| `src/shim/gauge-report.ts`  | `applyContextReport` — the same fanout, for the context gauge            |
 | `src/supervise/host-bus.ts` | registers a containerized child's handle from inside the supervisor      |
 
 ## Related docs
