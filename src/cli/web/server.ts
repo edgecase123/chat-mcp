@@ -828,12 +828,16 @@ async function handleRoomStyle(
  * built-in, so "clear the global" would either leave the operator on a number
  * they cannot see they are now on, or silently do nothing.
  *
- * 🛑 A LOW GATE IS LEGAL AND LOOPS, AND THIS ROUTE DOES NOT REFUSE IT.
- * `assertLegalGate` defines 1..100, and a container child spawns near 14% fill,
- * so a gate of 10 fires again on the replacement's first reading. Refusing it
- * here would put a second, stricter legality rule one layer above the one the
- * supervisor reads. The warning is the SET surface's job — `gateLoopWarning` in
- * `web/assets/logic.js` — and unit 3a already latches the refusal per child.
+ * 🛑 A LOW GATE IS LEGAL AND GOES SILENT, AND THIS ROUTE DOES NOT REFUSE IT.
+ * `assertLegalGate` defines 1..100, and a container child spawns near 14% fill.
+ * A gate at or below that fill does NOT loop — `checkContextGate` compares the
+ * gate against `childFloor`, logs once and returns for the child's whole life,
+ * so NOTHING restarts. Proven by
+ * `test/supervise/context-gate-restart.test.ts:270`, with the positive control
+ * at `:303`.
+ *
+ * Refusing it here would put a second, stricter legality rule one layer above
+ * the one the supervisor reads. Warning the operator is the SET surface's job.
  *
  * ⚠️ THE SETTERS THROW ON AN ILLEGAL GATE, so the validation below is not the
  * only guard. It exists to answer 400 rather than 500, and the tests assert the
