@@ -18,6 +18,20 @@ export interface ContextReport {
 }
 
 /**
+ * How full the window is, to one decimal.
+ *
+ * 🛑 EXPORTED BECAUSE THE SUPERVISOR'S RESTART GATE COMPARES THE SAME NUMBER.
+ * A second copy of this expression there is a second rounding rule, and
+ * `context-ramp.ts` is built to exactly this precision — so the two would
+ * drift while both still returned a plausible percentage.
+ *
+ * A zero or absent window is 0%, never a division by zero.
+ */
+export function contextPercent(used: number, total: number): number {
+  return total > 0 ? Math.round((used / total) * 1000) / 10 : 0;
+}
+
+/**
  * Record one context reading and deliver whatever band it just crossed.
  *
  * 🛑 THE WHOLE BODY WAS COPIED IN TWO FILES. `src/oneshot/report_context.ts`
@@ -42,7 +56,7 @@ export function applyContextReport(
 
   dao.setAgentContext(db, handle, used, total);
 
-  const percent = total > 0 ? Math.round((used / total) * 1000) / 10 : 0;
+  const percent = contextPercent(used, total);
   const transition = nextGaugeState(percent, prevWarned);
 
   const notified = { dm: 0, rooms: [] as string[] };

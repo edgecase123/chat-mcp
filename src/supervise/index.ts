@@ -36,7 +36,8 @@ import {
   excerptForLog,
 } from "./drivers/claude-events.js";
 import { openHostBus, type HostBus } from "./host-bus.js";
-import { applyContextReport } from "../shim/gauge-report.js";
+import { applyContextReport, contextPercent } from "../shim/gauge-report.js";
+import { resolveContextGate } from "../storage/context-gate.js";
 import type { ContextSnapshot } from "./context-gauge.js";
 import { createActivityReporter } from "./activity.js";
 import { describeContextGauge } from "./context-gauge.js";
@@ -665,6 +666,130 @@ export async function startSupervisor(
   let warnedUnregisteredGauge = false;
 
   /**
+   * Run the graceful restart, set once `restartChild` exists.
+   *
+   * 🛑 AN INDIRECTION BECAUSE `wireChild` RUNS LONG BEFORE `restartChild` IS
+   * DECLARED. Naming the const directly from a callback registered at line
+   * ~1040 reads fine and is a `ReferenceError` if any driver ever delivers a
+   * reading synchronously from `onContext` registration — and the gauge
+   * handler's own try/catch would log that as "FAILED to record the context
+   * gauge" and swallow the restart. Nothing else inside `wireChild` reaches
+   * forward like that, so this does not start the habit either.
+   *
+   * ⚠️ A READING BEFORE IT IS SET IS A NO-OP, WHICH IS CORRECT RATHER THAN
+   * CONVENIENT. That window closes during `startSupervisor`, when the child's
+   * fill is still at its spawn floor and no gate can legitimately be reached.
+   */
+  let runGracefulRestart: (() => void) | null = null;
+
+  /**
+   * Whether this child has already been told to restart on its gate.
+   *
+   * ⚠️ RESET PER CHILD, INSIDE `wireChild`, for the opposite reason to
+   * `warnedUnregisteredGauge`'s. A process-lifetime latch would restart the
+   * FIRST child and then let every replacement fill to 100% unattended, which
+   * is the failure #135 exists to end. The replacement's window starts over,
+   * so its gate is a fresh event.
+   */
+  let gateRestartRequested = false;
+
+  /**
+   * This child's first reading, which is as close to its spawn fill as the
+   * driver reports. `null` until one arrives.
+   *
+   * 🛑 A GATE AT OR BELOW IT IS AN INFINITE RESTART LOOP, AND EVERY GATE FROM
+   * 1 TO 100 IS LEGAL CONFIG. A fresh container child sat at 14.4% of its
+   * window before doing any work — its system prompt plus its tool definitions
+   * — so a gate of 10 is reached by the FIRST reading, and the replacement's
+   * first reading is the same number. The restart reclaims nothing and the next
+   * reading asks for another. Found by claude2 reviewing this before it merged.
+   *
+   * ⚠️ IT IS THE FIRST READING, NOT A TRUE TURN-0 FILL, AND THE GAP IS
+   * NARROWER THAN THAT SOUNDS. `claudeContextUsage` takes a reading from every
+   * main-session `assistant` event, so a turn that reads twenty files emits
+   * twenty of them and only the first sets this — before any tool result comes
+   * back. What is left uncovered is a first PROMPT large enough to exceed the
+   * gate alone. That child is refused a restart it could have used, the log
+   * names the reason, and the operator is left where they were before this
+   * trigger existed. Better than a loop. claude2 asked which one it was.
+   */
+  let childFloor: number | null = null;
+
+  /** Once per child: see `childFloor`, and `warnedFallbackWindows` for why. */
+  let warnedGateUnderFloor = false;
+
+  /**
+   * Restart the child if this reading has reached the handle's gate.
+   *
+   * 🛑 THE GATE IS RESOLVED PER READING, NOT CACHED AT SPAWN. An operator who
+   * raises a handle's gate mid-run expects the next reading to honour it, and
+   * `resolveContextGate` is documented as cheap enough for this path.
+   *
+   * 🛑 ONE NOTICE PER CHILD. `restartChild('graceful')` queues the externalize
+   * notice and waits for the turn after it; a second call inside that window
+   * queues a second notice and starts a second wait, so the child is told
+   * twice and the first wait still fires.
+   *
+   * 🛑 IT TAKES THE READING, NOT A PERCENT, SO THE WINDOW RULE LIVES WITH THE
+   * FLOOR RULE. `childFloor` is the thing that breaks on a percent derived
+   * from no window, and a `0` is a legal-looking argument — so a guard at the
+   * call site is a rule a second caller can omit silently. claude2 raised this
+   * as the invariant sitting away from the code that depends on it, and the
+   * ramp in 3b is that second caller.
+   */
+  const checkContextGate = (
+    childHandle: string,
+    used: number,
+    total: number,
+  ): void => {
+    if (gateRestartRequested) return;
+
+    // 🛑 A READING WITH NO WINDOW IS SKIPPED, NOT TREATED AS 0%.
+    // `contextPercent` answers 0 for a total of 0, and latching that as the
+    // spawn floor turns the loop guard OFF for this child's whole life: every
+    // later reading then looks like a legitimate climb from empty, and a gate
+    // under the real spawn fill restarts forever.
+    //
+    // ⚠️ SKIPPED, NOT FATAL. A driver that emits one such reading must not
+    // lose the gate for every child behind it, which is what latching any
+    // floor here would cost. Unreachable on the claude driver, whose fallback
+    // window is 200000, and reachable at the `ContextSnapshot` vendor seam.
+    // Measured by claude2 on PR 311.
+    if (!Number.isFinite(total) || total <= 0) return;
+
+    const percent = contextPercent(used, total);
+    const gate = resolveContextGate(approvalsDb, childHandle);
+
+    childFloor ??= percent;
+
+    // 🛑 REFUSED FOR THIS CHILD'S WHOLE LIFETIME, not just for the reading
+    // that showed it. Skipping one reading halves the loop's rate and does not
+    // end it. See `childFloor`.
+    if (childFloor >= gate) {
+      if (!warnedGateUnderFloor) {
+        warnedGateUnderFloor = true;
+        log(
+          `restart gate of ${gate}% is at or below ${childHandle}'s spawn fill of ${childFloor.toFixed(1)}%; ` +
+            `a restart cannot reclaim that, so NOTHING will restart this child — raise the gate`,
+        );
+      }
+
+      return;
+    }
+
+    if (percent < gate) return;
+
+    gateRestartRequested = true;
+
+    log(
+      `${childHandle} at ${percent.toFixed(1)}% context reached its restart gate of ${gate}%; ` +
+        `sending the externalize notice, then restarting`,
+    );
+
+    runGracefulRestart?.();
+  };
+
+  /**
    * Register every callback on the CURRENT child.
    *
    * 🛑 CALLED AGAIN AFTER A REPLACEMENT. Callbacks live on the instance, so a
@@ -683,6 +808,13 @@ export async function startSupervisor(
 
     // See the declaration: this notice is once per child, not once per process.
     warnedUnregisteredGauge = false;
+
+    // See the declaration: the replacement's window starts over, so its gate
+    // is a fresh event rather than one already spent, and its spawn fill is
+    // its own to measure.
+    gateRestartRequested = false;
+    childFloor = null;
+    warnedGateUnderFloor = false;
 
     /**
      * 🛑 EVERY CALLBACK GOES THROUGH THIS, NOT JUST THE ONE THAT BIT.
@@ -816,6 +948,32 @@ export async function startSupervisor(
         try {
           const childHandle = childBusHandle();
 
+          // Clamp rather than refuse: a real window larger than the mapped one
+          // means the map is stale, and a gauge pinned at 100% still says full.
+          const used = Math.min(snapshot.used, snapshot.total);
+
+          // 🛑 BEFORE THE REGISTRATION GUARD, BECAUSE THE READING IS REAL
+          // EITHER WAY. The guard below exists because a row UPDATE against a
+          // missing row is silent — a restart is not a row update. A child
+          // that fills its window without ever registering on the bus is the
+          // case most in need of the restart, and `resolveContextGate` is
+          // documented to answer for a handle with no `agents` row.
+          //
+          // 🛑 ITS OWN CATCH, AND THE OUTER ONE IS WHY. Running first means a
+          // throw here would otherwise take the gauge write with it, which
+          // nothing before this could do — and it would be logged as "FAILED
+          // to record the context gauge", naming the half that still worked.
+          // Raised by claude2, who went looking for the catch that swallowed a
+          // mutant's `ReferenceError`.
+          try {
+            checkContextGate(childHandle, used, snapshot.total);
+          } catch (err) {
+            log(
+              `FAILED to check ${childHandle}'s restart gate: ${String(err)}; ` +
+                `the gauge reading below is unaffected, but NOTHING restarted this child`,
+            );
+          }
+
           // 🛑 AN UPDATE AGAINST A MISSING ROW IS A SILENT NO-OP, which is the
           // exact failure class this ticket exists to end. The row is written
           // by the SHIM when the child registers, so a reading can arrive
@@ -842,14 +1000,7 @@ export async function startSupervisor(
             );
           }
 
-          // Clamp rather than refuse: a real window larger than the mapped one
-          // means the map is stale, and a gauge pinned at 100% still says full.
-          applyContextReport(
-            approvalsDb,
-            childHandle,
-            Math.min(snapshot.used, snapshot.total),
-            snapshot.total,
-          );
+          applyContextReport(approvalsDb, childHandle, used, snapshot.total);
         } catch (err) {
           log(`FAILED to record the context gauge: ${String(err)}`);
         }
@@ -1385,6 +1536,10 @@ export async function startSupervisor(
       doRestart,
     );
   };
+
+  // See `runGracefulRestart`: the context gauge reaches the restart through
+  // this, because its callback is registered before this const exists.
+  runGracefulRestart = () => restartChild("graceful");
 
   /**
    * Set while a graceful stop is waiting out its grace period. Calling it ends
