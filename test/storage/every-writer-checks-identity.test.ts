@@ -30,6 +30,11 @@ const DAO = "src/storage/dao.ts";
  * 🛑 `db.ts` IS EXEMPT BECAUSE `migrate` HOLDS THE DATABASE ALONE. The
  * migrations and `applyMigrations` run before any identity is established, so
  * calling the guard there would be comparing a file against itself.
+ *
+ * ⚠️ IT IS NOT A NO-OP ENTRY. `WRITES_A_TABLE` ignores `CREATE` and `ALTER`,
+ * so a reader can conclude `db.ts` would pass anyway. It would not: migration
+ * 8's rebuild and the version row are ordinary DML. Emptying this list fails
+ * the test below and names `db.ts`.
  */
 const EXEMPT_FROM_THE_GUARD: readonly string[] = ["db.ts"];
 
