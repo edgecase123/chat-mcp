@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, renameSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+} from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +23,20 @@ const { dbPath } = await import("../../src/util/paths.js");
 const dao = await import("../../src/storage/dao.js");
 
 const DAO = "src/storage/dao.ts";
+
+/**
+ * Where a table write is allowed to live without an identity check.
+ *
+ * 🛑 `db.ts` IS EXEMPT BECAUSE `migrate` HOLDS THE DATABASE ALONE. The
+ * migrations and `applyMigrations` run before any identity is established, so
+ * calling the guard there would be comparing a file against itself.
+ *
+ * ⚠️ IT IS NOT A NO-OP ENTRY. `WRITES_A_TABLE` ignores `CREATE` and `ALTER`,
+ * so a reader can conclude `db.ts` would pass anyway. It would not: migration
+ * 8's rebuild and the version row are ordinary DML. Emptying this list fails
+ * the test below and names `db.ts`.
+ */
+const EXEMPT_FROM_THE_GUARD: readonly string[] = ["db.ts"];
 
 /**
  * #268 — a claim could land in a database nobody reads, and nothing said so.
@@ -414,4 +434,50 @@ test("a claim taken and released through an UNTOUCHED handle still works", (t) =
 
   assert.ok(taken, "a healthy insertClaim returned null");
   assert.equal(dao.releaseClaim(db, taken.id, Date.now()), true);
+});
+
+/**
+ * 🛑 THE GUARD ABOVE IS SCOPED TO ONE FILENAME, AND THAT IS THIS FILE'S OWN
+ * STATED LESSON APPLIED TO ITSELF.
+ *
+ * `DAO` is a literal path, so a writer added in a NEW module under
+ * `src/storage/` is not merely missed — it is unreachable by every assertion
+ * above, and the suite reads exactly like a clean tree. #268's own write-up
+ * says an audit scoped to the names already in hand undercounts, and it
+ * undercounted by 8x. A second storage module is the same mistake one level up.
+ *
+ * So this asserts the SCOPE, not the contents: the only files under
+ * `src/storage/` that contain a table write are the audited one and the
+ * exempt one. A third gets named here the moment it appears, and whoever adds
+ * it then chooses between moving the write into `dao.ts` and widening the
+ * audit on purpose.
+ *
+ * ⚠️ IT IS NOT A COUNT. A new module with no writes does not fail it, and a
+ * new module with one cannot be made green by editing a number.
+ */
+test("🛑 NO STORAGE MODULE OUTSIDE THE AUDITED ONE CONTAINS A TABLE WRITE", () => {
+  const dir = "src/storage";
+  const files = readdirSync(dir).filter((f) => f.endsWith(".ts"));
+
+  // Denominator: a readdir that returned nothing would otherwise pass.
+  assert.ok(
+    files.includes("dao.ts") && files.length >= 2,
+    `${dir} listed ${files.length} modules; the listing itself is broken`,
+  );
+
+  const audited = DAO.slice(dir.length + 1);
+  const unaudited = files
+    .filter((f) => f !== audited && !EXEMPT_FROM_THE_GUARD.includes(f))
+    .filter((f) => {
+      const source = stripComments(readFileSync(join(dir, f), "utf8"));
+      return functionsOf(source).some(isWriter);
+    });
+
+  assert.deepEqual(
+    unaudited,
+    [],
+    `${unaudited.join(", ")} write a table and no assertion in this file can ` +
+      `reach them. Move the write into ${DAO}, or widen the audit here on ` +
+      `purpose and say why.`,
+  );
 });

@@ -290,6 +290,33 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
     // one never reaches a database that already ran it.
     db.exec(`ALTER TABLE agents ADD COLUMN unread_warned_threshold INTEGER`);
   },
+  (db) => {
+    // #135 — the restart threshold a supervised agent is measured against.
+    // lee ruled the shape on 2026-11-09: a global default with a per-handle
+    // override, mirroring `git config --global` against a local.
+    //
+    // 🛑 TWO PLACES BECAUSE THE PRECEDENCE IS THE FEATURE. A single column on
+    // `agents` could not express "every handle, including ones not registered
+    // yet", and a single global could not express an exception.
+    //
+    // 🛑 `settings` IS KEY/VALUE AND DELIBERATELY UNTYPED AT THE SQL LAYER.
+    // The readers validate, because a hand-edited or restored database can
+    // hold a value no writer here would have accepted.
+    //
+    // 🛑 NULLABLE, AND NULL MEANS "NO OVERRIDE". A default of 50 on the column
+    // would make every existing agent's gate indistinguishable from one lee
+    // had chosen for it, so the global could never move them again.
+    //
+    // ⚠️ A SEPARATE MIGRATION, per migration 8's docblock. Editing an earlier
+    // one never reaches a database that already ran it.
+    db.exec(`
+      CREATE TABLE settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `);
+    db.exec(`ALTER TABLE agents ADD COLUMN context_gate INTEGER`);
+  },
 ];
 
 /**
