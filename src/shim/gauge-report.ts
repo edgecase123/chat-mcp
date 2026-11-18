@@ -113,8 +113,14 @@ export function applyContextReport(
         }
       }
 
-      // Nothing reached anyone, so the band is not spent and a later report
-      // retries it. One room failing still counts as delivered.
+      // ONE room reaching somebody spends the band, because the rooms that did
+      // get it would otherwise be re-told on every later reading. Only a total
+      // failure leaves it unspent for a later report to retry.
+      //
+      // ⚠️ AN AGENT IN NO ROOMS TAKES THE SPENT BRANCH TOO. It has no audience
+      // to fail, so the band is consumed having reached nobody — which is every
+      // supervised child today, since none of them joins a room. Pinned by
+      // `an agent in NO rooms spends the band`, and owned by #135.
       delivered = rooms.length === 0 || notified.rooms.length > 0;
     }
   }
