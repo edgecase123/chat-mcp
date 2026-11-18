@@ -125,8 +125,9 @@ seam. An option passed there beats the file.
 ### What the cap does and does not do
 
 - **A command over the cap is REFUSED, at once.** It reads _"the command runner
-  is busy; retry"_, which matches the wording the broker's own cap uses. Nothing
-  queues and nothing waits.
+  is busy; retry"_. That is the SHAPE of the broker's own cap refusal, not the
+  same sentence: the broker says _"the broker is busy; retry"_, and there is no
+  broker on this route to name. Nothing queues and nothing waits.
 - **A command refused for its name or its script path takes no slot**, so it is
   refused for the real reason rather than told to retry.
 - **A failed command returns its slot**, so one failure cannot wedge a handle.
