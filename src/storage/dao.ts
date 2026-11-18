@@ -36,6 +36,14 @@ export interface Agent {
   context_reported_at: number | null;
   context_warned_threshold: number | null;
   unread_warned_threshold: number | null;
+  /**
+   * This handle's own restart threshold, or null to follow the global (#135).
+   *
+   * 🛑 NULL IS NOT 50. Null means "whatever the global says", so a handle
+   * reading null tracks a later change to the global and a handle reading 50
+   * does not.
+   */
+  context_gate: number | null;
 }
 
 export interface Message {
@@ -65,6 +73,7 @@ interface AgentRow {
   context_reported_at: number | null;
   context_warned_threshold: number | null;
   unread_warned_threshold: number | null;
+  context_gate: number | null;
 }
 
 interface MessageRow {
@@ -137,6 +146,7 @@ function hydrate(row: AgentRow): Agent {
     context_reported_at: row.context_reported_at,
     context_warned_threshold: row.context_warned_threshold,
     unread_warned_threshold: row.unread_warned_threshold,
+    context_gate: row.context_gate,
   };
 }
 
@@ -196,6 +206,55 @@ export function setAgentUnreadWarned(
   db.prepare(
     `UPDATE agents SET unread_warned_threshold = ? WHERE handle = ?`,
   ).run(threshold, handle);
+}
+
+/**
+ * Set or clear `handle`'s own restart threshold (#135).
+ *
+ * `null` clears the override, which returns the handle to the global default.
+ *
+ * ⚠️ VALIDATION LIVES IN `context-gate.ts`, NOT HERE. This is the table write;
+ * the policy module owns what a legal gate is, and is the only caller.
+ *
+ * ⚠️ DELIBERATELY NOT MERGED WITH `setAgentContextWarned`. One is the band an
+ * agent has already been told about, the other is the threshold it is measured
+ * against, and a shared setter would take the column as an argument.
+ */
+export function setAgentContextGate(
+  db: Db,
+  handle: string,
+  gate: number | null,
+): void {
+  assertLiveDatabase(db, "setAgentContextGate");
+
+  db.prepare(`UPDATE agents SET context_gate = ? WHERE handle = ?`).run(
+    gate,
+    handle,
+  );
+}
+
+/**
+ * Read one `settings` row, or null when it is absent.
+ *
+ * 🛑 THE VALUE IS TEXT AND IS NOT TRUSTED. A caller parses and validates it.
+ * The table is key/value with no per-key type, so a restored backup or a hand
+ * edit can put anything here.
+ */
+export function getSetting(db: Db, key: string): string | null {
+  const row = db
+    .prepare(`SELECT value FROM settings WHERE key = ?`)
+    .get(key) as unknown as { value: string } | undefined;
+  return row ? row.value : null;
+}
+
+/** Write one `settings` row, replacing any current value. */
+export function setSetting(db: Db, key: string, value: string): void {
+  assertLiveDatabase(db, "setSetting");
+
+  db.prepare(
+    `INSERT INTO settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run(key, value);
 }
 
 export interface RegisterInput {

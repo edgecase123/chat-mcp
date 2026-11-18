@@ -70,12 +70,31 @@ test("🚨 writing the backlog band leaves the context band alone", () => {
   }
 });
 
-test("🚨 the migration that adds the column is registered as its own version", () => {
-  assert.equal(
-    SCHEMA_VERSION,
-    16,
-    "migration 16 adds agents.unread_warned_threshold",
+/**
+ * 🛑 A FLOOR AND AN EFFECT, NEVER AN EQUALITY. This asserted
+ * `SCHEMA_VERSION === 16` and broke on the next migration added for an
+ * unrelated feature, which is the brittleness `db.ts`'s own docblock names: a
+ * literal version pinned in a test named for something else. The floor makes
+ * DELETING this migration loud, and the column check is what actually proves
+ * it ran.
+ */
+test("🚨 the migration that adds the column ran, and is not deleted", () => {
+  assert.ok(
+    SCHEMA_VERSION >= 16,
+    `the schema went BACKWARDS to ${SCHEMA_VERSION}; migration 16 adds agents.unread_warned_threshold`,
   );
+
+  const d = agent();
+  try {
+    const cols = (
+      d.prepare(`PRAGMA table_info(agents)`).all() as unknown as {
+        name: string;
+      }[]
+    ).map((c) => c.name);
+    assert.ok(cols.includes("unread_warned_threshold"), cols.join(", "));
+  } finally {
+    d.close();
+  }
 });
 
 /**
