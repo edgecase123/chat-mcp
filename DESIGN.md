@@ -240,7 +240,7 @@ Two modes from the same package, selected by the first positional arg:
   ```
 - **User CLI mode** (run from a shell; positional arg is `cli`):
   ```bash
-  npx -y github:edgecase123/chat-mcp#v0.1.0 cli                # handle defaults to "user"
+  npx -y github:edgecase123/chat-mcp#v0.1.0 cli                # handle: $CHAT_MCP_HANDLE, else the OS login name
   npx -y github:edgecase123/chat-mcp#v0.1.0 cli --handle lee   # custom handle
   ```
 
