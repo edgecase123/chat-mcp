@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+
+import { committableFiles } from "./support/committable-files.js";
 
 /**
  * 🛑 THE GATE'S VERDICT MUST NOT DEPEND ON THE TREE IT RAN IN.
@@ -27,12 +28,6 @@ function looksDiscoverable(path: string): boolean {
   );
 }
 
-function trackedFiles(): string[] {
-  return execFileSync("git", ["ls-files"], { encoding: "utf8" })
-    .split("\n")
-    .filter(Boolean);
-}
-
 test("the test script names where tests live, rather than letting node guess", () => {
   const pkg = JSON.parse(readFileSync("package.json", "utf8")) as {
     scripts: Record<string, string>;
@@ -45,8 +40,11 @@ test("the test script names where tests live, rather than letting node guess", (
   );
 });
 
-test("🛑 no tracked file OUTSIDE test/ is discoverable as a test", () => {
-  const strays = trackedFiles()
+test("🛑 no committable file OUTSIDE test/ is discoverable as a test", () => {
+  // 🛑 NOT THE TRACKED SET. The subject is what a test RUNNER would discover,
+  // and a runner walks the filesystem — so a stray written and not yet staged
+  // is the case this guard exists for.
+  const strays = committableFiles()
     .filter((f) => !f.startsWith("test/"))
     .filter(looksDiscoverable);
 
@@ -65,8 +63,8 @@ test("the guard can actually see a stray, so an empty result means something", (
   assert.equal(looksDiscoverable("scripts/scroll-diagnostic.mjs"), false);
 });
 
-test("no tracked test file imports dist/, which is gitignored", () => {
-  const offenders = trackedFiles()
+test("no committable test file imports dist/, which is gitignored", () => {
+  const offenders = committableFiles()
     .filter((f) => f.startsWith("test/") && f.endsWith(".ts"))
     .filter((f) => /from '[^']*\/dist\//.test(readFileSync(f, "utf8")));
 
