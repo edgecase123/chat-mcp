@@ -2186,19 +2186,29 @@ test("⚠️ control — claude DOES get both flags, so the test above is not va
 });
 
 test("🛑 the flags come from the VENDOR, so this spawner contains neither spelling", () => {
-  // The grep is the assertion. A future edit that re-hard-codes either flag
-  // here passes every behavioural test above and still reverses #317.
+  // 🛑 THE SUBSTRING IS UNQUOTED, AND THAT IS THE WHOLE GUARD. A first
+  // cut matched `'"--mcp-config"'`, which a backtick template literal walks
+  // straight past. claude2 measured the survivor on PR 320: the vendor is
+  // still CALLED, only its `.length` is read, and Claude's spellings are
+  // pushed anyway. Every behavioural test above passes on it.
+  //
+  // ⚠️ IT IS NOT TRUE THAT A RE-HARDCODE PASSES THE TESTS ABOVE. A plain
+  // one is killed by the flagless test. This grep is for the shape that
+  // CONSULTS the vendor and discards the answer.
+  //
+  // Rejected: defeating `"--mcp" + "-config"` too. That is deliberate
+  // evasion rather than an accident, and it buys a rung for a cycle.
   const source = readFileSync(
     new URL("../../../src/supervise/drivers/containerized.ts", import.meta.url),
     "utf8",
   );
 
   assert.ok(
-    !source.includes('"--mcp-config"'),
-    "containerized.ts hard-codes --mcp-config again",
+    !source.includes("mcp-config"),
+    "containerized.ts names --mcp-config again",
   );
   assert.ok(
-    !source.includes('"--strict-mcp-config"'),
-    "containerized.ts hard-codes --strict-mcp-config again",
+    !source.includes("strict-mcp-config"),
+    "containerized.ts names --strict-mcp-config again",
   );
 });
