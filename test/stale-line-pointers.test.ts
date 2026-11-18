@@ -105,11 +105,10 @@ test("no committable file outside the allowlist carries a line-number pointer", 
   const files = textFiles();
   const scanned = files.filter((p) => !allowedReason(p));
 
-  // 🛑 MEMBERSHIP, NOT A FLOOR. The first draft of this file was UNTRACKED
-  // when the suite ran, so the index-only listing never offered it and its own
-  // offending line passed unseen. A count threshold cannot see one absence.
-  // #312 made the listing reach an unstaged file; this stays because the
-  // membership question is not the same question as the instrument's.
+  // 🛑 MEMBERSHIP, NOT A FLOOR. A count threshold cannot see ONE absence, and
+  // the absence it still catches is an `ALLOWED` prefix growing to cover this
+  // file — `prefix: "test/stale-"` exempts the scanner from its own scan while
+  // `scanned.length` stays over 200. Proven by mutation, claude1 on PR 313.
   assert.ok(
     scanned.includes("test/stale-line-pointers.test.ts"),
     "this file is not in its own scan — commit it before trusting a pass",
