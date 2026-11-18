@@ -729,10 +729,35 @@ export async function startSupervisor(
    * notice and waits for the turn after it; a second call inside that window
    * queues a second notice and starts a second wait, so the child is told
    * twice and the first wait still fires.
+   *
+   * 🛑 IT TAKES THE READING, NOT A PERCENT, SO THE WINDOW RULE LIVES WITH THE
+   * FLOOR RULE. `childFloor` is the thing that breaks on a percent derived
+   * from no window, and a `0` is a legal-looking argument — so a guard at the
+   * call site is a rule a second caller can omit silently. claude2 raised this
+   * as the invariant sitting away from the code that depends on it, and the
+   * ramp in 3b is that second caller.
    */
-  const checkContextGate = (childHandle: string, percent: number): void => {
+  const checkContextGate = (
+    childHandle: string,
+    used: number,
+    total: number,
+  ): void => {
     if (gateRestartRequested) return;
 
+    // 🛑 A READING WITH NO WINDOW IS SKIPPED, NOT TREATED AS 0%.
+    // `contextPercent` answers 0 for a total of 0, and latching that as the
+    // spawn floor turns the loop guard OFF for this child's whole life: every
+    // later reading then looks like a legitimate climb from empty, and a gate
+    // under the real spawn fill restarts forever.
+    //
+    // ⚠️ SKIPPED, NOT FATAL. A driver that emits one such reading must not
+    // lose the gate for every child behind it, which is what latching any
+    // floor here would cost. Unreachable on the claude driver, whose fallback
+    // window is 200000, and reachable at the `ContextSnapshot` vendor seam.
+    // Measured by claude2 on PR 311.
+    if (!Number.isFinite(total) || total <= 0) return;
+
+    const percent = contextPercent(used, total);
     const gate = resolveContextGate(approvalsDb, childHandle);
 
     childFloor ??= percent;
@@ -940,29 +965,13 @@ export async function startSupervisor(
           // to record the context gauge", naming the half that still worked.
           // Raised by claude2, who went looking for the catch that swallowed a
           // mutant's `ReferenceError`.
-          // 🛑 A READING WITH NO WINDOW IS SKIPPED, NOT TREATED AS 0%.
-          // `contextPercent` answers 0 for a total of 0, and latching that as
-          // the spawn floor turns the loop guard OFF for the child's whole
-          // life — every later reading then looks like a legitimate climb from
-          // empty. Unreachable on the claude driver, whose fallback window is
-          // 200000, but `ContextSnapshot` is the vendor seam and the next
-          // driver is not bound by that. Found by claude2 on PR 311.
-          //
-          // ⚠️ SKIPPED, NOT FATAL. A driver that emits one such reading must
-          // not lose the gate for every child behind it, which is what
-          // latching any floor here would cost.
-          if (snapshot.total > 0) {
-            try {
-              checkContextGate(
-                childHandle,
-                contextPercent(used, snapshot.total),
-              );
-            } catch (err) {
-              log(
-                `FAILED to check ${childHandle}'s restart gate: ${String(err)}; ` +
-                  `the gauge reading below is unaffected, but NOTHING restarted this child`,
-              );
-            }
+          try {
+            checkContextGate(childHandle, used, snapshot.total);
+          } catch (err) {
+            log(
+              `FAILED to check ${childHandle}'s restart gate: ${String(err)}; ` +
+                `the gauge reading below is unaffected, but NOTHING restarted this child`,
+            );
           }
 
           // 🛑 AN UPDATE AGAINST A MISSING ROW IS A SILENT NO-OP, which is the
