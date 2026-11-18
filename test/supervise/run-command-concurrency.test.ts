@@ -112,7 +112,7 @@ test("🚨 TWO DIFFERENT HANDLES DO NOT BLOCK EACH OTHER, which is what per-hand
   await Promise.all([first, second]);
 });
 
-test("🛑 A SECOND COMMAND FOR THE SAME HANDLE WAITS, and starts only once the first ends", async () => {
+test("🛑 A SECOND COMMAND FOR THE SAME HANDLE IS REFUSED, not queued behind the first", async () => {
   const handle = handleFor("same");
 
   projectFor(handle);
@@ -125,7 +125,31 @@ test("🛑 A SECOND COMMAND FOR THE SAME HANDLE WAITS, and starts only once the 
     {},
     { sandbox: "host", maxConcurrent: 1, run: runner.run },
   );
-  const second = runCommandFor(
+
+  await settle();
+
+  await assert.rejects(
+    runCommandFor(
+      handle,
+      "slow",
+      {},
+      { sandbox: "host", maxConcurrent: 1, run: runner.run },
+    ),
+    /the command runner is busy; retry/,
+    "the second command parked instead of being refused",
+  );
+
+  // The claim is that the refused one never REACHED the runner, not that it
+  // was slow to get there.
+  assert.equal(runner.started, 1, "the refused command started anyway");
+
+  runner.releaseOne();
+  await first;
+
+  // 🛑 A REFUSAL MUST COST THE HANDLE NOTHING. A refusal that took a slot and
+  // never released it would leave the cap permanently one lower, and the two
+  // assertions above would both still pass.
+  const third = runCommandFor(
     handle,
     "slow",
     {},
@@ -134,30 +158,19 @@ test("🛑 A SECOND COMMAND FOR THE SAME HANDLE WAITS, and starts only once the 
 
   await settle();
 
-  // The claim is that the second never REACHED the runner, not that it is slow.
-  assert.equal(runner.started, 1, "the cap let a second command start");
+  assert.equal(runner.started, 2, "the slot never came back after a refusal");
 
   runner.releaseOne();
-  await first;
-  await settle();
-
-  assert.equal(
-    runner.started,
-    2,
-    "the waiter was never woken when the slot freed",
-  );
-
-  runner.releaseOne();
-  await second;
+  await third;
 });
 
-test("a cap of 3 lets 3 start and holds the 4th", async () => {
+test("a cap of 3 lets 3 start and refuses the 4th", async () => {
   const handle = handleFor("three");
 
   projectFor(handle);
 
   const runner = heldRunner();
-  const all = [0, 1, 2, 3].map(() =>
+  const all = [0, 1, 2].map(() =>
     runCommandFor(
       handle,
       "slow",
@@ -170,9 +183,20 @@ test("a cap of 3 lets 3 start and holds the 4th", async () => {
 
   assert.equal(runner.started, 3);
 
+  await assert.rejects(
+    runCommandFor(
+      handle,
+      "slow",
+      {},
+      { sandbox: "host", maxConcurrent: 3, run: runner.run },
+    ),
+    /the command runner is busy; retry/,
+    "the 4th command parked instead of being refused",
+  );
+
+  assert.equal(runner.started, 3, "the refused 4th command reached the runner");
+
   for (const _ of all) runner.releaseOne();
-  await settle();
-  runner.releaseOne();
   await Promise.all(all);
 });
 
@@ -251,7 +275,7 @@ test("🛑 A REFUSED NAME TAKES NO SLOT AT ALL, so it never queues behind runnin
   await held;
 });
 
-test("a cap below 1 is read as 1 rather than waiting forever", async () => {
+test("a cap below 1 is read as 1, so one runs and the next is refused", async () => {
   const handle = handleFor("zero");
 
   projectFor(handle);
@@ -269,7 +293,20 @@ test("a cap below 1 is read as 1 rather than waiting forever", async () => {
   assert.equal(
     runner.started,
     1,
-    "a cap of 0 deadlocked instead of clamping to 1",
+    "a cap of 0 refused the first command instead of clamping to 1",
+  );
+
+  // The other half of the clamp. A 0 read as 0 would refuse everything, which
+  // is as useless as the deadlock this assertion used to guard against.
+  await assert.rejects(
+    runCommandFor(
+      handle,
+      "slow",
+      {},
+      { sandbox: "host", maxConcurrent: 0, run: runner.run },
+    ),
+    /the command runner is busy; retry/,
+    "a cap of 0 was read as something above 1",
   );
 
   runner.releaseOne();
@@ -277,7 +314,7 @@ test("a cap below 1 is read as 1 rather than waiting forever", async () => {
 });
 
 // ---------------------------------------------------------------------------
-// limits.json — the cap an operator sets, and what it does to a parked command
+// limits.json — the cap an operator sets, and when a change to it binds
 // ---------------------------------------------------------------------------
 
 const limitsFile = join(process.env.CHAT_MCP_HOME as string, "limits.json");
@@ -291,7 +328,7 @@ function withLimits(
   t.after(() => rmSync(limitsFile, { force: true }));
 }
 
-test("🛑 AN EXPLICIT OPTION BEATS THE FILE, so the 11 tests above still pin what they claim", async (t) => {
+test("🛑 AN EXPLICIT OPTION BEATS THE FILE, so every test above still pins what it claims", async (t) => {
   const handle = handleFor("opt-wins");
 
   projectFor(handle);
@@ -339,41 +376,36 @@ test("⚠️ control — with NO option the file's cap really does bind, so the 
     {},
     { sandbox: "host", run: runner.run },
   );
-  const second = runCommandFor(
-    handle,
-    "slow",
-    {},
-    { sandbox: "host", run: runner.run },
-  );
 
   await settle();
 
-  assert.equal(
-    runner.started,
-    1,
-    "the file was ignored and both commands started",
+  await assert.rejects(
+    runCommandFor(handle, "slow", {}, { sandbox: "host", run: runner.run }),
+    /the command runner is busy; retry/,
+    "the file was ignored and a second command started",
   );
 
+  assert.equal(runner.started, 1, "the refused command reached the runner");
+
   runner.releaseOne();
-  await settle();
-  runner.releaseOne();
-  await Promise.all([first, second]);
+  await first;
 });
 
 /**
- * 🛑 THE LIMIT IS RESOLVED ONCE, BEFORE ANY WAIT. `acquireSlot` takes a number,
- * so a parked command keeps the limit it arrived with.
+ * 🛑 THE FILE IS RAISED, NOT LOWERED, AND THAT IS THE WHOLE TEST. A lowered
+ * file refuses at either cap, so lowering cannot tell a re-read from a number
+ * cached at module load. Raising can: only a re-read lets the next command
+ * through.
  *
- * 🛑 THE FILE IS LOWERED, NOT RAISED, AND THAT IS THE WHOLE TEST. Nothing wakes
- * a parked waiter until a slot frees, so RAISING the limit cannot distinguish a
- * frozen limit from a live one — both let the waiter through. Only lowering it
- * does: a live limit makes the woken waiter re-park.
+ * This is what replaced the parked-command claim. Nothing parks, so a frozen
+ * limit has no life to keep, and the live question became whether the refusal
+ * reads the CURRENT file.
  */
-test("🛑 A PARKED COMMAND KEEPS THE LIMIT IT ARRIVED WITH, even if the file is LOWERED", async (t) => {
-  const handle = handleFor("frozen");
+test("🛑 A RAISED limits.json BINDS ON THE NEXT COMMAND, so a refusal reads the CURRENT file", async (t) => {
+  const handle = handleFor("raised");
 
   projectFor(handle);
-  withLimits(t, { maxConcurrent: 2 });
+  withLimits(t, { maxConcurrent: 1 });
 
   const runner = heldRunner();
 
@@ -383,37 +415,36 @@ test("🛑 A PARKED COMMAND KEEPS THE LIMIT IT ARRIVED WITH, even if the file is
     {},
     { sandbox: "host", run: runner.run },
   );
+
+  await settle();
+  assert.equal(runner.started, 1, "the cap of 1 did not let the first start");
+
+  await assert.rejects(
+    runCommandFor(handle, "slow", {}, { sandbox: "host", run: runner.run }),
+    /the command runner is busy; retry/,
+    "the cap of 1 did not refuse a second command",
+  );
+
+  writeFileSync(limitsFile, JSON.stringify({ maxConcurrent: 2 }));
+
   const second = runCommandFor(
     handle,
     "slow",
     {},
     { sandbox: "host", run: runner.run },
   );
-  const third = runCommandFor(
-    handle,
-    "slow",
-    {},
-    { sandbox: "host", run: runner.run },
-  );
 
-  await settle();
-  assert.equal(runner.started, 2, "the cap of 2 did not hold");
-
-  // One slot frees, so the parked third wakes and re-checks. Its own limit is
-  // 2 and one command is left running, so it must start.
-  writeFileSync(limitsFile, JSON.stringify({ maxConcurrent: 1 }));
-  runner.releaseOne();
   await settle();
 
   assert.equal(
     runner.started,
-    3,
-    "the parked command re-checked against the NEW cap of 1 and stayed parked",
+    2,
+    "the raised cap was not read, so the limit was cached rather than per call",
   );
 
   runner.releaseOne();
   runner.releaseOne();
-  await Promise.all([first, second, third]);
+  await Promise.all([first, second]);
 });
 
 test("🛑 AN UNREADABLE limits.json REFUSES THE COMMAND rather than running it uncapped", async (t) => {

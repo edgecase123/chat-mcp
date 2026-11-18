@@ -124,12 +124,18 @@ seam. An option passed there beats the file.
 
 ### What the cap does and does not do
 
-- **A command over the cap WAITS.** It is not refused, so a caller sees latency
-  rather than an error.
-- **A command refused for its name or its script path takes no slot**, so a bad
-  request is answered immediately rather than queueing behind running work.
+- **A command over the cap is REFUSED, at once.** It reads _"the command runner
+  is busy; retry"_, which matches the wording the broker's own cap uses. Nothing
+  queues and nothing waits.
+- **A command refused for its name or its script path takes no slot**, so it is
+  refused for the real reason rather than told to retry.
 - **A failed command returns its slot**, so one failure cannot wedge a handle.
-- **A cap below 1 is read as 1.** Honouring a 0 would wait forever.
+- **A cap below 1 is read as 1.** Honouring a 0 would refuse every command.
+
+🛑 **THE REFUSAL IS THE POINT, BY lee's RULING OF 2026-11-15.** Waiting was the
+original behaviour and it made a throttled command indistinguishable from a
+hung one, so a caller had no correct reaction available. A refusal is an error
+the caller can act on: retry it, or stop.
 
 ## Configuring the limits
 
@@ -205,10 +211,12 @@ host's log instead.
 **On the next command.** The file is re-read on every call, so no restart is
 needed.
 
-🛑 **A COMMAND ALREADY WAITING KEEPS THE LIMIT IT ARRIVED WITH.** `acquireSlot`
-is given a number, not a way to re-read one, so lowering the cap cannot strand a
-queue that formed under the old one. The counter and the limit can never
-disagree for the life of a parked command.
+🛑 **A RAISED CAP BINDS ON THE VERY NEXT COMMAND.** The file is read on every
+call and nothing awaits between that read and the slot being taken, so a
+refusal is always measured against the file as it stands now.
+
+⚠️ **A COMMAND ALREADY RUNNING IS NEVER RE-CHECKED.** Lowering the cap refuses
+the next arrival. It does not interrupt work already in flight.
 
 ## Common pitfalls
 
