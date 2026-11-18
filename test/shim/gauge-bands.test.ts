@@ -6,7 +6,6 @@ import {
   nextGaugeState,
   warningBody,
   deliveryFor,
-  PLANNING_BAND,
   type Threshold,
 } from "../../src/shim/gauge.js";
 
@@ -186,34 +185,45 @@ test("🛑 exactly one site routes a band, so a new reporter cannot grow a copy"
   }
 });
 
-test("🛑 the web gauge colours every band EXCEPT the planning one", () => {
-  // claude1 on PR 113: the previous version of this test asserted the coloured
-  // set was [85, 95] and never looked at 70, which IS coloured and IS a dm. So
-  // it certified a comment that was false in a new way. The rule is the
-  // exclusion, and every included band is now checked by name.
+/**
+ * 🛑 THE WEB GAUGE NO LONGER MIRRORS `BANDS`, AND THAT IS THE WHOLE OF #135's
+ * UNIT 3b. The previous version of this test asserted `logic.js` contained the
+ * literals `>= 70`, `>= 85` and `>= 95`, certifying a design that could not
+ * work: a handle gated at 50 is RESTARTED before it can reach 70, so two of
+ * those three were unreachable and the third was the restart itself.
+ *
+ * lee ruled on 2026-11-18 that the gauge colours the GATE'S RAMP instead —
+ * yellow, orange, red at 50%, 75% and 85% OF the handle's own gate, default
+ * below band 1. The ticks are computed from `rampFor` server-side and shipped
+ * in the peer payload, so the browser holds no copy of lee's fractions.
+ *
+ * ⚠️ WHAT THIS TEST GUARDS NOW IS THE ABSENCE. An absolute band literal
+ * creeping back into `logic.js` is the regression, and it would be invisible
+ * to `gauge-display.test.ts`, which only ever passes a ramp in.
+ */
+test("🛑 the web gauge bands on the SHIPPED ramp, never on an absolute number", () => {
   const logic = readFileSync(
     new URL("../../web/assets/logic.js", import.meta.url),
     "utf8",
   );
 
-  const coloured = BANDS.map((b) => b.warn).filter((n) => n !== PLANNING_BAND);
-  assert.deepEqual(
-    coloured,
-    [70, 85, 95],
-    "the coloured set moved; logic.js and its comment both need rereading",
-  );
-
-  for (const n of coloured) {
+  for (const n of BANDS.map((b) => b.warn)) {
     assert.ok(
-      logic.includes(`>= ${n}`),
-      `logic.js does not band on ${n}, which is not the planning band`,
+      !new RegExp(`>= ${n}\\b`).test(logic),
+      `logic.js bands on the absolute ${n}. The ramp is relative to the gate.`,
     );
   }
 
-  assert.doesNotMatch(
+  // The positive half: without it, deleting `rampBand` entirely would pass.
+  assert.match(
     logic,
-    new RegExp(`>= ${PLANNING_BAND}\\b`),
-    "logic.js colours the planning band. A plan is not an escalation.",
+    /exactPercent >= tick/,
+    "logic.js no longer compares a fill against a shipped tick",
+  );
+  assert.match(
+    logic,
+    /peer\.context_ramp/,
+    "logic.js no longer reads the ramp out of the payload",
   );
 });
 

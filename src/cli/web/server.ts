@@ -20,6 +20,8 @@ import { answerAndNotify } from "../../supervise/answer.js";
 import * as dao from "../../storage/dao.js";
 import { parseSearch, snippet } from "../../search/query.js";
 import { gaugeFreshness } from "../../shim/gauge-freshness.js";
+import { rampFor } from "../../shim/context-ramp.js";
+import { resolveContextGate } from "../../storage/context-gate.js";
 import type { MessageKind } from "../../storage/dao.js";
 import {
   assertRoomName,
@@ -511,6 +513,23 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(raw);
 }
 
+/**
+ * The ramp ticks a handle's gauge colours against, for the browser.
+ *
+ * 🛑 COMPUTED HERE BECAUSE `rampFor` IS THE ONE HOME FOR lee's FRACTIONS.
+ * `web/assets/logic.js` cannot import from `src/`, so the alternative was a
+ * second copy of 0.5/0.75/0.85 in the browser, free to drift from the ones the
+ * restart measures against.
+ *
+ * ⚠️ FLOOR 0, DELIBERATELY, UNLIKE THE SUPERVISOR'S CALL. A floor skips bands
+ * a child spawned past, so that its restart warnings do not all fire on turn
+ * 0. A colour fires nothing, so skipping a tick would only make the gauge jump
+ * a shade for no reason.
+ */
+function contextRampFor(db: Db, handle: string): number[] {
+  return rampFor(resolveContextGate(db, handle)).map((band) => band.at);
+}
+
 function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
   const me = dao.getAgent(ctx.db, ctx.handle);
   const peers = dao
@@ -531,6 +550,7 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
     peers: peers.map((a) => ({
       ...a,
       ...gaugeFreshness(a.context_reported_at, now),
+      context_ramp: contextRampFor(ctx.db, a.handle),
     })),
     rooms: myRooms.map((r) => ({
       ...r,
@@ -1049,7 +1069,11 @@ async function handleLiveAgents(
         child:
           child === undefined || child === null
             ? null
-            : { ...child, ...gaugeFreshness(child.context_reported_at, now) },
+            : {
+                ...child,
+                ...gaugeFreshness(child.context_reported_at, now),
+                context_ramp: contextRampFor(ctx.db, child.handle),
+              },
       };
     }),
   });

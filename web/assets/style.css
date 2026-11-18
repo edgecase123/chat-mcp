@@ -41,6 +41,19 @@
   --self-soft: #ede9fe;
   --danger: #dc2626;
   --danger-soft: #fee2e2;
+
+  /* 🛑 THE CONTEXT RAMP'S THREE BANDS, ONE TOKEN EACH AND NO SHARED LITERAL.
+     The old gauge read a `--warning` token that NO theme defined, behind a
+     hardcoded amber fallback, for TWO bands — so one literal served a white
+     ground and a near-black one. 4.73 light, 3.41 dark: below AA in exactly
+     one theme, and silent about it.
+     Pinned by ramp-contrast.test.ts, which asserts every band on every ground.
+
+     ⚠️ BAND 1 IS A DARK GOLD, NOT A TRUE YELLOW. A true yellow cannot clear
+     the 4.5 AA floor against white at any weight. Set by lee, 2026-11-18. */
+  --ramp-1: #7a5c00;
+  --ramp-2: #9a3412;
+  --ramp-3: #b91c1c;
   --dispatch: #0284c7;
   --dispatch-soft: #e0f2fe;
 
@@ -72,6 +85,10 @@
   --self-soft: #3b2a5c;
   --danger: #f87171;
   --danger-soft: #4c1d1d;
+
+  --ramp-1: #facc15;
+  --ramp-2: #fb923c;
+  --ramp-3: #f87171;
   --dispatch: #38bdf8;
   --dispatch-soft: #0c3a52;
 
@@ -1228,15 +1245,16 @@ body {
   font-variant-numeric: tabular-nums;
   color: var(--fg-faint);
 }
-.sidebar__item-gauge.is-soft {
-  color: var(--warning, #b45309);
-}
-.sidebar__item-gauge.is-warn {
-  color: var(--warning, #b45309);
+.sidebar__item-gauge.is-ramp1 {
+  color: var(--ramp-1);
   font-weight: 600;
 }
-.sidebar__item-gauge.is-crit {
-  color: var(--danger, #dc2626);
+.sidebar__item-gauge.is-ramp2 {
+  color: var(--ramp-2);
+  font-weight: 600;
+}
+.sidebar__item-gauge.is-ramp3 {
+  color: var(--ramp-3);
   font-weight: 600;
 }
 .sidebar__item-gauge.is-stale {
