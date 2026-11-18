@@ -3,7 +3,8 @@ import { z } from "zod";
 import * as dao from "../../storage/dao.js";
 import { notifyPeer } from "../../notify/bus.js";
 import type { ShimContext } from "../index.js";
-import { roomTargetRefusal } from "../../util/naming.js";
+import { roomTargetRefusal, unknownPeerRefusal } from "../../util/naming.js";
+import { childHandleFor } from "../../supervise/grant.js";
 import { tickBacklogSafely } from "../backlog-check.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -47,8 +48,13 @@ export function installSend(server: McpServer, ctx: ShimContext): void {
             ),
           );
         }
+        const child = childHandleFor(to);
         throw new Error(
-          `Unknown peer: ${to}. Call list_agents to see who is registered.`,
+          unknownPeerRefusal(
+            to,
+            dao.getAgent(ctx.db, child) ? child : null,
+            "Call list_agents to see who is registered.",
+          ),
         );
       }
       dao.touchLastSeen(ctx.db, ctx.handle);

@@ -83,3 +83,44 @@ export function roomTargetRefusal(
   }
   return `${target} is a room, and ${operation} is peer-only. ${nextStep}${note}`;
 }
+
+/**
+ * The refusal for a handle nothing is registered under.
+ *
+ * 🛑 IT NAMES THE SIBLING IT FOUND, WHICH IS THE WHOLE OF #297. `supervise
+ * <handle>` binds the socket as `<handle>` while the child registers as
+ * `<handle>-agent`, so an operator who sends to the name they typed gets a
+ * refusal that reads exactly like "that agent is not running". There was no
+ * way to tell a naming slip from a failed spawn.
+ *
+ * 🛑 `sibling` IS THE CALLER'S LOOKUP, NOT A GUESS MADE HERE. Only the caller
+ * holds the db, and deriving the name is `childHandleFor`'s job — its own
+ * docblock says a second copy of the suffix is how the pair drifts.
+ *
+ * ⚠️ THE INVERSE IS DELIBERATELY NOT OFFERED. `supervisorHandleFor` would turn
+ * an unknown `x-agent` into `x`, and `x` is a socket binding rather than a
+ * Claude — advising it would point the operator at something that cannot
+ * reply. Raised by claude1 on PR 310, who went looking for the missing hint.
+ *
+ * ⚠️ IT DOES NOT REDIRECT THE MESSAGE. The two names address two different
+ * processes, so the refusal tells the operator which one they want and stops.
+ * Resolving the bare handle to the child is a separate decision.
+ *
+ * `nextStep` differs per surface for the same reason `roomTargetRefusal`'s
+ * does: the MCP shim has `list_agents`, the one-shot CLI has `chat-mcp list`.
+ */
+export function unknownPeerRefusal(
+  target: string,
+  sibling: string | null,
+  nextStep: string,
+): string {
+  if (sibling !== null) {
+    return (
+      `Unknown peer: ${target}, but "${sibling}" IS registered. ` +
+      `A supervised agent runs under its child handle, so send to "${sibling}" — ` +
+      `"${target}" is the supervisor you started it with.`
+    );
+  }
+
+  return `Unknown peer: ${target}. ${nextStep}`;
+}

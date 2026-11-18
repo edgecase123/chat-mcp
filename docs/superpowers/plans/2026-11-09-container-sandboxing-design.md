@@ -1770,7 +1770,7 @@ chat-mcp mount add smoke-container local-context ~/context
 chat-mcp supervise smoke-container --container --no-reply
 ```
 
-Confirm the y/N prompt appears with mount paths and env var NAMES only (no token value on screen), confirm yes, and confirm the supervisor logs `child acts as "smoke-container-agent"` and does not immediately exit. Then from a second terminal: `chat-mcp send smoke-container "say hi"` — confirm the container responds, confirm `docker ps` shows the container while it runs and shows nothing once the supervisor is stopped (`Ctrl-C`), proving `--rm` actually cleaned up.
+Confirm the y/N prompt appears with mount paths and env var NAMES only (no token value on screen), confirm yes, and confirm the supervisor logs `child acts as "smoke-container-agent"` and does not immediately exit. Then from a second terminal: `chat-mcp send smoke-container-agent "say hi"` — note the `-agent` suffix, because `supervise smoke-container` binds the socket as `smoke-container` while the child registers on the bus as `smoke-container-agent`, and sending to the bare name is refused (#297) — confirm the container responds, confirm `docker ps` shows the container while it runs and shows nothing once the supervisor is stopped (`Ctrl-C`), proving `--rm` actually cleaned up.
 
 - **Step 5: Commit**
 

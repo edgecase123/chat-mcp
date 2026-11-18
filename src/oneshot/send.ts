@@ -2,7 +2,8 @@ import * as dao from "../storage/dao.js";
 import { openDb } from "../storage/db.js";
 import { notifyPeer } from "../notify/bus.js";
 import { readStdinAll, resolveHandle } from "./common.js";
-import { roomTargetRefusal } from "../util/naming.js";
+import { roomTargetRefusal, unknownPeerRefusal } from "../util/naming.js";
+import { childHandleFor } from "../supervise/grant.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -37,8 +38,13 @@ export async function runSend(opts: SendOpts): Promise<void> {
           ),
         );
       }
+      const child = childHandleFor(opts.to);
       throw new Error(
-        `Unknown peer: ${opts.to}. Run 'chat-mcp list --all' to see registered handles.`,
+        unknownPeerRefusal(
+          opts.to,
+          dao.getAgent(db, child) ? child : null,
+          "Run 'chat-mcp list --all' to see registered handles.",
+        ),
       );
     }
     const result = dao.insertMessage(db, { from, to: opts.to, body });
