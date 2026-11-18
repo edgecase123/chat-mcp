@@ -940,13 +940,29 @@ export async function startSupervisor(
           // to record the context gauge", naming the half that still worked.
           // Raised by claude2, who went looking for the catch that swallowed a
           // mutant's `ReferenceError`.
-          try {
-            checkContextGate(childHandle, contextPercent(used, snapshot.total));
-          } catch (err) {
-            log(
-              `FAILED to check ${childHandle}'s restart gate: ${String(err)}; ` +
-                `the gauge reading below is unaffected, but NOTHING restarted this child`,
-            );
+          // 🛑 A READING WITH NO WINDOW IS SKIPPED, NOT TREATED AS 0%.
+          // `contextPercent` answers 0 for a total of 0, and latching that as
+          // the spawn floor turns the loop guard OFF for the child's whole
+          // life — every later reading then looks like a legitimate climb from
+          // empty. Unreachable on the claude driver, whose fallback window is
+          // 200000, but `ContextSnapshot` is the vendor seam and the next
+          // driver is not bound by that. Found by claude2 on PR 311.
+          //
+          // ⚠️ SKIPPED, NOT FATAL. A driver that emits one such reading must
+          // not lose the gate for every child behind it, which is what
+          // latching any floor here would cost.
+          if (snapshot.total > 0) {
+            try {
+              checkContextGate(
+                childHandle,
+                contextPercent(used, snapshot.total),
+              );
+            } catch (err) {
+              log(
+                `FAILED to check ${childHandle}'s restart gate: ${String(err)}; ` +
+                  `the gauge reading below is unaffected, but NOTHING restarted this child`,
+              );
+            }
           }
 
           // 🛑 AN UPDATE AGAINST A MISSING ROW IS A SILENT NO-OP, which is the

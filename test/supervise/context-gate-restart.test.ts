@@ -486,8 +486,8 @@ test("a throw inside the gate check does not cost the gauge its reading", async 
 
 test("a notice that cannot be delivered still restarts the child on the timeout", async () => {
   // 🛑 THE TURN-END PATH IS DEAD WHEN `send` THROWS, and that is not obvious:
-  // the queue calls `child.send` BEFORE it notifies `sendListeners`
-  // (index.ts:550), so the throw means `onSend` never runs,
+  // the `TurnQueue` `send` callback in `startSupervisor` calls `child.send`
+  // BEFORE it walks `sendListeners`, so the throw means `onSend` never runs,
   // `noticeDispatchedAtCount` stays null, and `onAnyTurnEnd` returns early
   // forever. Only the 30s timer is left. claude2 asked whether the restart
   // still happens at all — it does, late, and the notice is best-effort.
@@ -523,6 +523,62 @@ test("a notice that cannot be delivered still restarts the child on the timeout"
     );
   } finally {
     mock.timers.reset();
+    await h.sup.stop();
+  }
+});
+
+/** A driver that reports a reading with no window size at all. */
+const NO_WINDOW: ContextSnapshot = {
+  used: 0,
+  total: 0,
+  model: null,
+  totalIsFallback: true,
+};
+
+test("a reading with no window cannot set the floor", async () => {
+  // 🛑 A FLOOR OF 0 DISABLES THE LOOP GUARD FOR THE CHILD'S WHOLE LIFE.
+  // `contextPercent` answers 0 for a total of 0, so latching that makes every
+  // later reading look like a legitimate climb from empty — and a gate under
+  // the real spawn fill loops again. Unreachable on the claude driver, whose
+  // fallback window is 200000, but `ContextSnapshot` is the vendor seam and the
+  // next driver is not bound by it. Found by claude2 on PR 311.
+  const h = await harness("nowin", 10);
+
+  try {
+    h.children[0]?.report(NO_WINDOW);
+    h.children[0]?.report(at(14.4));
+
+    assert.deepEqual(
+      notices(h.children[0]),
+      [],
+      "a windowless reading set the floor to 0 and the loop guard went off",
+    );
+    assert.equal(h.children.length, 1);
+    assert.ok(
+      h.lines.find((l) => /spawn fill/i.test(l)),
+      `the gate was not reported as unreachable; got ${JSON.stringify(h.lines)}`,
+    );
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("a windowless reading is SKIPPED, not fatal to the child's gate", async () => {
+  // The paired control. Treating a windowless reading as "this child is done"
+  // would disable the restart for every child behind a driver that emits one.
+  const h = await harness("nowin2", 10);
+
+  try {
+    h.children[0]?.report(NO_WINDOW);
+    h.children[0]?.report(at(5));
+    h.children[0]?.report(at(14.4));
+
+    assert.equal(
+      notices(h.children[0]).length,
+      1,
+      "the gate never fired for a child that really did spawn under it",
+    );
+  } finally {
     await h.sup.stop();
   }
 });
