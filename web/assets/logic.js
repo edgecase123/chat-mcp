@@ -1095,20 +1095,25 @@ export function customStyleSubmission(markdown) {
  * below a reset point. `gauge.ts` BANDS do carry resets; those exist to stop
  * NOTIFICATION chatter, and a colour has none to stop.
  *
- * 🛑 COMPARED AGAINST THE EXACT FILL, NOT THE ROUNDED LABEL. A tick carries one
- * decimal, so the rounded integer crosses it up to half a point early.
+ * 🛑 COMPARED AT ONE DECIMAL, BECAUSE `contextPercent` IS ONE DECIMAL AND THE
+ * SUPERVISOR'S RESTART BANDS AGAINST THAT NUMBER. Full precision here and one
+ * decimal there disagree on the tick itself: 49920 of 200000 is 24.96 raw and
+ * 25.0 rounded, so a gate of 50 fired band 1 while this gauge stayed default.
+ * The rounded INTEGER is wrong in the other direction — a tick carries one
+ * decimal, so an integer crosses it up to half a point early.
  *
  * ⚠️ NO RAMP MEANS NO COLOUR, AND THE GUARD FOR THAT IS UPSTREAM. Deriving a
  * gate here would put a second home for lee's default beside
  * `DEFAULT_CONTEXT_GATE`. That the payload always carries one is asserted by
  * `test/web/whoami-ramp.test.ts`.
  */
-function rampBand(exactPercent, ramp) {
+function rampBand(percentTenths, ramp) {
   if (!Array.isArray(ramp)) return "ok";
 
   let band = "ok";
   ramp.forEach((tick, i) => {
-    if (typeof tick === "number" && exactPercent >= tick) band = `ramp${i + 1}`;
+    if (typeof tick === "number" && percentTenths >= tick)
+      band = `ramp${i + 1}`;
   });
 
   return band;
@@ -1137,13 +1142,17 @@ export function gaugeDisplay(peer) {
     };
   }
 
-  const exact = (used / total) * 100;
-  const percent = Math.round(exact);
+  // ⚠️ TWO NUMBERS ON PURPOSE, AND ROUNDING `percent` FROM `tenths` WOULD BE
+  // WRONG. 24.45 is 24.5 at one decimal and 25 after a second round, where the
+  // raw fill rounds to 24. The label keeps its own rule; only the BAND has to
+  // agree with the supervisor.
+  const percent = Math.round((used / total) * 100);
+  const tenths = Math.round((used / total) * 1000) / 10;
 
   return {
     show: true,
     percent,
-    band: rampBand(exact, peer.context_ramp),
+    band: rampBand(tenths, peer.context_ramp),
     title: `Context ${percent}% — ${used.toLocaleString()} of ${total.toLocaleString()} tokens`,
   };
 }

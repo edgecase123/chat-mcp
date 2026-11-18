@@ -217,7 +217,7 @@ test("🛑 the web gauge bands on the SHIPPED ramp, never on an absolute number"
   // The positive half: without it, deleting `rampBand` entirely would pass.
   assert.match(
     logic,
-    /exactPercent >= tick/,
+    /percentTenths >= tick/,
     "logic.js no longer compares a fill against a shipped tick",
   );
   assert.match(
