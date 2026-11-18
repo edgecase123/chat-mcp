@@ -10,6 +10,7 @@ process.on("warning", (w) => {
 });
 
 import { Command } from "commander";
+import { resolveDefaultHandle } from "./util/handle-default.js";
 import { handleRefusal, isHandle } from "./util/naming.js";
 import { KNOWN_SUBCOMMANDS } from "./util/subcommands.js";
 import { packageVersion } from "./util/version.js";
@@ -72,19 +73,26 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   program
     .command("cli")
     .description("Run the user CLI (terminal REPL joining the bus as a peer)")
-    .option("--handle <handle>", "peer handle for this session", "user")
+    .option(
+      "--handle <handle>",
+      "peer handle for this session (default: $CHAT_MCP_HANDLE, then the OS login name)",
+    )
     .option(
       "--experimental",
       "use the full-screen Ink UI (autocomplete, palette, rooms browser, markdown)",
       false,
     )
-    .action(async (opts: { handle: string; experimental?: boolean }) => {
+    .action(async (opts: { handle?: string; experimental?: boolean }) => {
+      const handle = resolveDefaultHandle({
+        flag: opts.handle,
+        env: process.env.CHAT_MCP_HANDLE,
+      });
       if (opts.experimental) {
         const { runInkCli } = await import("./cli/ink/index.js");
-        await runInkCli({ handle: opts.handle });
+        await runInkCli({ handle });
       } else {
         const { runCli } = await import("./cli/index.js");
-        await runCli({ handle: opts.handle });
+        await runCli({ handle });
       }
     });
 
@@ -93,17 +101,26 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     .description(
       "Launch the browser-based chat UI (localhost-only foreground server)",
     )
-    .option("--handle <handle>", "peer handle for this session", "user")
+    .option(
+      "--handle <handle>",
+      "peer handle for this session (default: $CHAT_MCP_HANDLE, then the OS login name)",
+    )
     .option(
       "--port <port>",
       "bind to a specific port (default: random free)",
       (v) => parseInt(v, 10),
     )
     .option("--no-open", "do not auto-open the default browser", false)
-    .action(async (opts: { handle: string; port?: number; open?: boolean }) => {
-      const { runWeb } = await import("./cli/web/server.js");
-      await runWeb({ handle: opts.handle, port: opts.port, open: opts.open });
-    });
+    .action(
+      async (opts: { handle?: string; port?: number; open?: boolean }) => {
+        const handle = resolveDefaultHandle({
+          flag: opts.handle,
+          env: process.env.CHAT_MCP_HANDLE,
+        });
+        const { runWeb } = await import("./cli/web/server.js");
+        await runWeb({ handle, port: opts.port, open: opts.open });
+      },
+    );
 
   program
     .command("send <to> [body]")
