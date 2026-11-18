@@ -35,8 +35,17 @@ export interface RampBand {
 }
 
 export interface RampTransition {
-  /** The band to persist. Latched — it never steps back down. */
-  next_level: number | null;
+  /**
+   * The fill percent of the highest band that has fired, to persist. Latched —
+   * it never steps back down.
+   *
+   * 🛑 A PERCENT AND NOT A BAND INDEX, WHICH IS WHAT MAKES A RAISED GATE STILL
+   * WARN. An index means "band 3 has fired", a claim about a ramp that stops
+   * existing the moment the gate moves — so the agent stays latched at the top
+   * of its old ramp and is never warned again. A percent is comparable against
+   * whatever ramp it is read beside. Raised by claude2 on PR 309.
+   */
+  next_mark: number | null;
   /** The band newly crossed by this reading, or null. At most one per reading. */
   fire: RampBand | null;
 }
@@ -97,17 +106,44 @@ export function rampFor(gate: number, floor = 0): RampBand[] {
 }
 
 /**
+ * A stored mark that can be compared, or null when the row does not hold one.
+ *
+ * 🛑 THE MARK IS THE ONE INPUT THAT COMES FROM THE DATABASE, SO IT IS
+ * VALIDATED ON READ. `context-gate.ts` makes the same argument for the gate: a
+ * hand edit, a restored backup and a future migration all reach the same row,
+ * and the setter is not the only writer it has.
+ *
+ * 🛑 AN UNUSABLE MARK MEANS "NOTHING HAS FIRED", NEVER "EVERYTHING HAS". A
+ * stored 999 would otherwise kill the ramp for that handle permanently, and a
+ * lost warning is the failure this whole ticket exists to fix. The next fire
+ * writes a usable value back, so it self-corrects.
+ *
+ * ⚠️ IT DOES NOT THROW, AND `rampFor` DOES. The gate arrives from code that
+ * guarantees it. This arrives from a row anything can write.
+ */
+function usableMark(mark: number | null): number | null {
+  if (mark === null) return null;
+
+  return Number.isFinite(mark) && mark >= 0 && mark <= 100 ? mark : null;
+}
+
+/**
  * The transition one reading causes against a ramp.
  *
  * 🛑 EACH BAND FIRES AT MOST ONCE PER CONTEXT LIFETIME. A notification on
  * every reading above band 1 is noise, and quiet is the whole reason the ramp
- * sits below the gate instead of at it. The caller clears the stored level
- * when it restarts the agent, and that is what bounds the lifetime.
+ * sits below the gate instead of at it. The caller clears the stored mark when
+ * it restarts the agent, and that is what bounds the lifetime.
  *
  * 🛑 NO HYSTERESIS, WHICH IS THE OPPOSITE OF `gauge.ts` ON PURPOSE. The gauge
  * steps back down so a peer who compacted is warned again later. Here a drop
  * in fill means the agent did the hygiene the ramp was asking for, so
- * re-arming the band would warn them for succeeding.
+ * re-arming the band would warn it for succeeding.
+ *
+ * ⚠️ THAT REASON COVERS THE DROP AND NOTHING ELSE. A gate RAISED after a band
+ * fired is a different event, and the mark being a percent is what answers it
+ * — see `next_mark`. An earlier draft of this docblock offered the drop as the
+ * reason for both, which claude2 caught on PR 309.
  *
  * At most one band fires per reading: a jump straight past band 3 fires 3
  * alone, matching `nextGaugeState`.
@@ -115,17 +151,17 @@ export function rampFor(gate: number, floor = 0): RampBand[] {
 export function nextRampState(
   percent: number,
   ramp: RampBand[],
-  prevLevel: number | null,
+  prevMark: number | null,
 ): RampTransition {
-  let next = prevLevel;
+  let next = usableMark(prevMark);
   let fire: RampBand | null = null;
 
   for (const band of ramp) {
-    if (percent >= band.at && (next == null || next < band.level)) {
+    if (percent >= band.at && (next == null || next < band.at)) {
       fire = band;
-      next = band.level;
+      next = band.at;
     }
   }
 
-  return { next_level: next, fire };
+  return { next_mark: next, fire };
 }
