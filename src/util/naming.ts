@@ -97,6 +97,11 @@ export function roomTargetRefusal(
  * holds the db, and deriving the name is `childHandleFor`'s job — its own
  * docblock says a second copy of the suffix is how the pair drifts.
  *
+ * ⚠️ THE INVERSE IS DELIBERATELY NOT OFFERED. `supervisorHandleFor` would turn
+ * an unknown `x-agent` into `x`, and `x` is a socket binding rather than a
+ * Claude — advising it would point the operator at something that cannot
+ * reply. Raised by claude1 on PR 310, who went looking for the missing hint.
+ *
  * ⚠️ IT DOES NOT REDIRECT THE MESSAGE. The two names address two different
  * processes, so the refusal tells the operator which one they want and stops.
  * Resolving the bare handle to the child is a separate decision.
