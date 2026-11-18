@@ -1075,9 +1075,50 @@ export function customStyleSubmission(markdown) {
  * `fresh` and `age_ms` are computed server-side (`/api/whoami`), so the
  * 15-minute window has ONE home and this file never hard-codes it.
  *
- * @param {{context_used?: number|null, context_total?: number|null, fresh?: boolean, age_ms?: number|null}} peer
+ * `context_ramp` arrives the same way, for the same reason: `rampFor` owns
+ * lee's fractions and a copy of them here would be free to drift from the
+ * ones the restart measures against.
+ *
+ * @param {{context_used?: number|null, context_total?: number|null, fresh?: boolean, age_ms?: number|null, context_ramp?: number[]|null}} peer
  * @returns {{show: boolean, percent: number|null, band: string, title: string}}
  */
+/**
+ * Which ramp band a fill has reached, as a class suffix.
+ *
+ * 🛑 THE TICKS ARE RELATIVE TO THE HANDLE'S GATE, NEVER ABSOLUTE. The previous
+ * cut coloured at a hardcoded 70/85/95. A handle gated at 50 is restarted
+ * before it can reach 70, so two of those three were unreachable and the third
+ * was the restart itself — the ramp rendered nothing on the default gate.
+ *
+ * 🛑 NO HYSTERESIS. lee ruled "A-Stateless" on 2026-11-18, against a reading of
+ * "up to reset threshold" that would have kept the colour until the fill fell
+ * below a reset point. `gauge.ts` BANDS do carry resets; those exist to stop
+ * NOTIFICATION chatter, and a colour has none to stop.
+ *
+ * 🛑 COMPARED AT ONE DECIMAL, BECAUSE `contextPercent` IS ONE DECIMAL AND THE
+ * SUPERVISOR'S RESTART BANDS AGAINST THAT NUMBER. Full precision here and one
+ * decimal there disagree on the tick itself: 49920 of 200000 is 24.96 raw and
+ * 25.0 rounded, so a gate of 50 fired band 1 while this gauge stayed default.
+ * The rounded INTEGER is wrong in the other direction — a tick carries one
+ * decimal, so an integer crosses it up to half a point early.
+ *
+ * ⚠️ NO RAMP MEANS NO COLOUR, AND THE GUARD FOR THAT IS UPSTREAM. Deriving a
+ * gate here would put a second home for lee's default beside
+ * `DEFAULT_CONTEXT_GATE`. That the payload always carries one is asserted by
+ * `test/web/whoami-ramp.test.ts`.
+ */
+function rampBand(percentTenths, ramp) {
+  if (!Array.isArray(ramp)) return "ok";
+
+  let band = "ok";
+  ramp.forEach((tick, i) => {
+    if (typeof tick === "number" && percentTenths >= tick)
+      band = `ramp${i + 1}`;
+  });
+
+  return band;
+}
+
 export function gaugeDisplay(peer) {
   const used = peer?.context_used;
   const total = peer?.context_total;
@@ -1101,27 +1142,17 @@ export function gaugeDisplay(peer) {
     };
   }
 
+  // ⚠️ TWO NUMBERS ON PURPOSE, AND ROUNDING `percent` FROM `tenths` WOULD BE
+  // WRONG. 24.45 is 24.5 at one decimal and 25 after a second round, where the
+  // raw fill rounds to 24. The label keeps its own rule; only the BAND has to
+  // agree with the supervisor.
   const percent = Math.round((used / total) * 100);
-
-  // 🛑 EVERY BUS BAND EXCEPT THE PLANNING ONE. Not "the bands the bus warns
-  // on" (it warns at 50 too) and not "the bands it posts to a room" (70 is a
-  // DM and is coloured here). Both of those were written and both were false.
-  // The rule is the exclusion: 50 asks for a plan, and a plan is not an
-  // escalation, so it earns no colour. Pinned by `the web gauge colours every
-  // band EXCEPT the planning one` in test/shim/gauge-bands.test.ts.
-  const band =
-    percent >= 95
-      ? "crit"
-      : percent >= 85
-        ? "warn"
-        : percent >= 70
-          ? "soft"
-          : "ok";
+  const tenths = Math.round((used / total) * 1000) / 10;
 
   return {
     show: true,
     percent,
-    band,
+    band: rampBand(tenths, peer.context_ramp),
     title: `Context ${percent}% — ${used.toLocaleString()} of ${total.toLocaleString()} tokens`,
   };
 }

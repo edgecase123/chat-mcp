@@ -1,8 +1,10 @@
 ---
 title: Context Restart Gate
-updated: 2026-11-17
+updated: 2026-11-18
 covers:
   - src/storage/context-gate.ts
+  - web/assets/logic.js
+  - web/assets/style.css
   - src/shim/context-ramp.ts
   - src/shim/gauge-report.ts
   - src/supervise/index.ts
@@ -75,22 +77,56 @@ child has no `agents` row, because a row UPDATE against a missing row is a
 silent no-op. A restart writes no row, and a child filling its window without
 ever reaching the bus is the case most in need of one.
 
-## The ramp below the gate is BUILT and NOT WIRED
+## The ramp below the gate is the WEB UI's COLOUR
 
 `src/shim/context-ramp.ts` computes the quiet approach lee asked for — _"the
 gradients should be 50% of that, 75% of that, 85% of that"_ — as fractions of
-the handle's own gate:
+the handle's own gate. The percentage beside an agent's name is where they land:
 
-```
-band 1   50% of gate      25.0 at the default gate of 50
-band 2   75% of gate      37.5
-band 3   85% of gate      42.5
-GATE    100% of gate      50
-```
+| Band  | Fraction | At gate 50 | At gate 80 | Colour                     |
+| ----- | -------- | ---------- | ---------- | -------------------------- |
+| below | —        | < 25.0     | < 40       | default, not bold          |
+| 1     | 50%      | 25.0       | 40         | yellow, bold               |
+| 2     | 75%      | 37.5       | 60         | orange, bold               |
+| 3     | 85%      | 42.5       | 68         | red, bold                  |
+| GATE  | 100%     | 50         | 80         | restart — no fourth colour |
 
-Nothing calls it yet. The audience is undecided: on the live bus no `-agent`
-handle is a member of any room, so a room post from a supervised child reaches
-nobody.
+🛑 **THE AUDIENCE IS THE OPERATOR'S SCREEN, NOT THE BUS.** lee ruled this on
+2026-11-18. A room post was the alternative and it is vacuous: no `-agent`
+handle is a member of any room, so there is no room to pick, and a new one
+would need membership plumbing whose only reader is this page anyway.
+
+🛑 **NO HYSTERESIS — lee ruled "A-Stateless".** The colour steps back down the
+instant the fill does. `gauge.ts` BANDS carry a reset 5 points under each warn
+because a notification has chatter to stop; a colour has none, and
+`gaugeDisplay` is a pure function with nowhere to keep a latch.
+
+### Why the ticks are computed server-side
+
+`web/assets/logic.js` cannot import from `src/`, so the browser would have
+needed its own copy of 0.5/0.75/0.85. `/api/whoami` ships `context_ramp` per
+peer instead, from `rampFor`, which stays the one home for lee's fractions.
+
+⚠️ **The display call passes floor 0; the supervisor's does not.** A floor skips
+bands a child spawned past, so its restart warnings do not all fire on turn 0.
+A colour fires nothing, so a skipped tick would only make the gauge jump a
+shade.
+
+### The colours are tokens, and the contrast is asserted
+
+Each band has one token per theme — `--ramp-1`, `--ramp-2`, `--ramp-3` — and
+`test/web/ramp-contrast.test.ts` holds every band above the 4.5 AA floor on
+every ground in every theme.
+
+🛑 **BOLD IS FOR SCANNING AND CANNOT SUBSTITUTE FOR CONTRAST.** The gauge is
+11px, so WCAG's large-text relief never applies and the floor stays 4.5 at any
+weight. The band that shipped before this worked the other way round: both
+`.is-soft` and `.is-warn` read a `--warning` token that **no theme defined**,
+behind a hardcoded amber fallback, which measured 4.73 in light and **3.41 in
+dark** — below AA in exactly one theme, silently.
+
+⚠️ **Band 1 in light mode is a dark gold, not a true yellow.** A true yellow
+cannot clear 4.5 against white at any weight.
 
 ## Common pitfalls
 
@@ -103,9 +139,10 @@ Raise the handle's gate if its task needs longer than that.
 definitions, so a different MCP set moves it. Read the turn-0 fill at spawn
 rather than hardcoding a floor.
 
-**The old 50/70/85/95 gauge bands now sit at and above the gate.** A handle on
-the default gate is restarted before it can reach 70, so three of those four
-are unreachable in practice. Not yet resolved.
+**The old absolute 50/70/85/95 web colours are RETIRED.** A handle on the
+default gate is restarted before it can reach 70, so three of those four could
+never render. `BANDS` in `src/shim/gauge.ts` still drives the bus DM and room
+posts; it no longer drives any colour.
 
 ---
 
@@ -115,7 +152,10 @@ are unreachable in practice. Not yet resolved.
 | -------------------------------- | ------------------------------------------------ |
 | `src/storage/context-gate.ts`    | resolves the gate, validates every layer on read |
 | `src/shim/gauge-report.ts`       | `contextPercent`, the one rounding rule          |
-| `src/shim/context-ramp.ts`       | the quiet bands below the gate — built, unwired  |
+| `src/shim/context-ramp.ts`       | the quiet bands below the gate, as fractions     |
+| `src/cli/web/server.ts`          | ships `context_ramp` per peer on `/api/whoami`   |
+| `web/assets/logic.js`            | `rampBand` — which tick a fill has reached       |
+| `web/assets/style.css`           | the three `--ramp-*` tokens, one set per theme   |
 | `src/supervise/index.ts`         | the trigger, the per-child latch, the restart    |
 | `src/supervise/context-gauge.ts` | the driver's reading, normalised across vendors  |
 
