@@ -658,9 +658,7 @@ export function dockerRunPlan(
     }
 
     cli.push(
-      "--mcp-config",
-      vendor.mcpConfigFor(opts.grant, "docker"),
-      "--strict-mcp-config",
+      ...vendor.mcpConfigFlags(vendor.mcpConfigFor(opts.grant, "docker")),
     );
 
     env[CONTAINER_MCP_CONFIG_ENV] = buildContainerMcpConfig(opts.bus);
