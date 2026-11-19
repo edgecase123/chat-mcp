@@ -296,7 +296,7 @@ lee, 2026-11-19, ruling on the #222 override arc:
 ### Why — the three pipes ARE the connection
 
 ```js
-// drivers/containerized.ts
+// src/supervise/drivers/containerized.ts
 const child: ChildProcessWithoutNullStreams = spawn("docker", plan.args, {
   stdio: ["pipe", "pipe", "pipe"],
 ```
@@ -316,11 +316,23 @@ those pipes instead, and the supervisor loses the connection it exists to hold.
 
 ### What it does NOT touch
 
+🛑 **The test is one question: does this call carry the AGENT's stdin?**
+Exactly one does — the spawn above. Everything else is outside the rule, and an
+enumeration of the exceptions would go stale the moment a new `docker` call
+lands.
+
 - **Authoring the config.** A human edits validated JSON, by lee's separate
   ruling of the same day. That is a different half of the same question.
-- **`docker` subcommands the supervisor runs for its own bookkeeping** —
-  `docker rm -f`, `docker stop`, the dependency-install container. Those take no
-  agent pipe.
+- **Every other `docker` call the supervisor makes for its own bookkeeping** —
+  `docker rm -f`, `docker stop`, the dependency-install container, and
+  `docker ps -aq` while it waits for a name to disappear.
+  ⚠️ **`docker ps` DOES hold a pipe**, `["ignore","pipe","ignore"]`. That
+  pipe reads one line of docker's own stdout. It is not the agent's stdin, and
+  that distinction is the rule — not the absence of pipes.
+- **Building and inspecting the IMAGE.** `docker build` and
+  `docker image inspect` live in `src/supervise/container.ts`, outside the
+  driver. An image is not a container, so starting one is not what this rule
+  governs.
 - Generating a compose file as an artifact for a human to read. Nothing reads
   one today, and this rule is about who STARTS a container, not what may be
   written down.
