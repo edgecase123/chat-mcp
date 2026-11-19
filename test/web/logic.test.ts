@@ -507,8 +507,17 @@ test("each entry names its own target in the title", () => {
  * stand in for the code. The sibling wiring tests learned this the hard way:
  * a `/** ... *\/` sentence once satisfied a code assertion on a clean tree.
  *
- * The map is matched by BRACE DEPTH rather than to the first `}`, because the
- * arrow functions inside it each close a brace of their own.
+ * 🛑 KEYS ARE COLLECTED BY BRACE DEPTH, NOT BY INDENT. The first cut matched
+ * `/^\s{4}(\w+):/gm`, so a handler written at any other indent was skipped —
+ * and a SKIPPED key is invisible to the reverse check below, which iterates
+ * only what was read. MEASURED: a sixth handler nothing routes to, indented
+ * six spaces, passed 202 of 202. Raised by claude1 reviewing this PR.
+ *
+ * ⚠️ THE DEPTH WALK COUNTS BRACES INSIDE STRING AND TEMPLATE LITERALS, the
+ * same caveat `agents-wiring.test.ts` documents for its own matcher. No
+ * handler in the map holds a brace in a literal today. One written with a
+ * `${…}` template would truncate the slice early, and the denominator test
+ * below is what turns that into a loud failure rather than a short list.
  */
 function appHandlerKeys(): string[] {
   const app = readFileSync(
@@ -524,41 +533,73 @@ function appHandlerKeys(): string[] {
 
   assert.notEqual(start, -1, "itemMenu's handler map not found in app.js");
 
+  const open = app.indexOf("{", start);
+  const keys: string[] = [];
   let depth = 0;
+  let expectKey = false;
   let end = -1;
-  for (let i = app.indexOf("{", start); i < app.length; i++) {
-    if (app[i] === "{") depth++;
-    else if (app[i] === "}" && --depth === 0) {
-      end = i;
-      break;
+
+  for (let i = open; i < app.length; i++) {
+    const c = app[i]!;
+
+    if (c === "{") {
+      depth++;
+      if (depth === 1) expectKey = true;
+      continue;
     }
+    if (c === "}") {
+      if (--depth === 0) {
+        end = i;
+        break;
+      }
+      continue;
+    }
+    if (depth === 1 && c === ",") {
+      expectKey = true;
+      continue;
+    }
+    if (!expectKey || depth !== 1 || /\s/.test(c)) continue;
+
+    const m = app.slice(i).match(/^([A-Za-z_$][\w$]*)\s*:/);
+
+    if (m) keys.push(m[1]!);
+    expectKey = false;
   }
 
   assert.notEqual(end, -1, "itemMenu's handler map is unbalanced");
 
-  return [...app.slice(start, end).matchAll(/^\s{4}(\w+):/gm)].map(
-    (m) => m[1]!,
-  );
+  return keys;
 }
 
-/**
- * ⚠️ RESOLVED LAZILY, NOT AT MODULE LOAD. A top-level call made a broken
- * extraction throw during import, which the runner reported as an
- * uncaughtException from async activity and took the other 199 tests in this
- * file down with it. A named failure beats a louder one that says less.
- */
 let handlerKeys: string[] | null = null;
 const appKeys = (): string[] => (handlerKeys ??= appHandlerKeys());
 
 /**
- * 🛑 THE EXTRACTION'S OWN DENOMINATOR. A regex that silently matched nothing
- * would make the forward check below fail loudly, but it would make the
- * reverse check pass over an empty set and read as "no dead handlers".
+ * 🛑 THE EXTRACTION'S OWN DENOMINATOR, COUNTED A SECOND WAY. An extraction that
+ * silently read SHORT makes the forward check fail loudly only when the missed
+ * key had an entry, and makes the reverse check pass over a key it never saw.
+ *
+ * 🛑 THE FLOOR IS NOT A HAND-WRITTEN 5. A constant equal to today's exact count
+ * has zero margin and proves only that the walk matched something today — a
+ * sixth handler that the walk missed still clears it. This counts the map's
+ * entries by a DIFFERENT signal, the arrows, and requires the two to agree.
  */
-test("the handler keys were actually read out of app.js", () => {
-  assert.ok(
-    appKeys().length >= 5,
-    `read ${appKeys().length} handler keys from app.js, expected at least 5`,
+test("the walk read every entry in app.js's handler map", () => {
+  const app = readFileSync(
+    new URL("../../web/assets/app.js", import.meta.url),
+    "utf8",
+  );
+  const map = app.slice(
+    app.indexOf("const handlers = {"),
+    app.indexOf("\n  };", app.indexOf("const handlers = {")),
+  );
+  const arrows = [...map.matchAll(/=>/g)].length;
+
+  assert.ok(appKeys().length > 0, "the walk read NO handler keys at all");
+  assert.equal(
+    appKeys().length,
+    arrows,
+    `the walk read ${appKeys().length} keys but the map holds ${arrows} arrow handlers: ${appKeys().join(", ")}`,
   );
 });
 
