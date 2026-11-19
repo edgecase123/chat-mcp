@@ -311,3 +311,36 @@ test("ordinary image, memory and cpus values are still accepted", () => {
   // would satisfy every smuggling case above.
   assert.equal(good.length, 8);
 });
+
+/**
+ * 🛑 A REFUSAL A HUMAN CANNOT ACT ON IS HALF A GUARD. lee ruled on 2026-11-19
+ * that a human edits this JSON, and a human writes `2` rather than `"2"`.
+ * String-only stays — docker's own forms are `512m` and `1.5` — so the MESSAGE
+ * has to carry the quotes. Raised by claude2 reviewing PR 331.
+ */
+test("a number value is refused with a message naming the quoted form", () => {
+  const cases: [string, unknown, string][] = [
+    ["cpus", { cpus: 2 }, '"2"'],
+    ["memory", { memory: 512 }, '"512m"'],
+    ["image", { image: 22 }, '"node:22-slim"'],
+  ];
+
+  for (const [key, raw, example] of cases) {
+    assert.throws(
+      () => parseHandleOverride(raw),
+      (err: unknown) => {
+        const message = (err as Error).message;
+
+        assert.match(message, /quoted string/, `${key}: ${message}`);
+        assert.ok(
+          message.includes(example),
+          `${key} does not show the quoted form ${example}: ${message}`,
+        );
+
+        return true;
+      },
+    );
+  }
+
+  assert.equal(cases.length, 3);
+});

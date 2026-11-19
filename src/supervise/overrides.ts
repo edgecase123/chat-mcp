@@ -158,13 +158,27 @@ const MEMORY = /^\d+[bkmg]?$/i;
 /** Docker's own `--cpus` form: a decimal number. */
 const CPUS = /^\d+(\.\d+)?$/;
 
+/** What a legal value of each patterned key looks like, for the refusal. */
+function exampleFor(key: "image" | "memory" | "cpus"): string {
+  if (key === "image") return "node:22-slim";
+  if (key === "memory") return "512m";
+
+  return "2";
+}
+
 function checkPattern(
   key: "image" | "memory" | "cpus",
   value: unknown,
   pattern: RegExp,
 ): string {
+  // 🛑 THE MESSAGE TEACHES THE QUOTES, because a human writes this file and a
+  // human writes `2`, not `"2"`. String-only is correct: docker's own forms
+  // are `512m` and `1.5`, which are not numbers.
   if (typeof value !== "string") {
-    throw new Error(`\`${key}\` must be a string`);
+    throw new Error(
+      `\`${key}\` must be a quoted string: write ` +
+        `${JSON.stringify(String(exampleFor(key)))}, not ${JSON.stringify(value)}`,
+    );
   }
 
   if (!pattern.test(value)) {
