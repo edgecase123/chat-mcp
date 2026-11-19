@@ -65,8 +65,24 @@ async function harness(
     token: TOKEN,
     capabilities,
   };
+  // 🛑 THIS MIRRORS PRODUCTION'S CATCH-ALL ON PURPOSE. `chat-mcp web` wraps
+  // `route` in a try that answers 500, and a bare `void route(...)` here does
+  // not — so a throwing route produced NO RESPONSE and every test awaiting one
+  // HUNG rather than failing. A harness that cannot tell "threw" from "hung"
+  // is a guard that fails open. Found by claude2 on #135 unit 4.
   const server = createServer((req, res) => {
-    void route(req, res, ctx);
+    void (async () => {
+      try {
+        await route(req, res, ctx);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (!res.headersSent) {
+          res.statusCode = 500;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ error: msg }));
+        }
+      }
+    })();
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
@@ -334,6 +350,96 @@ test("setting a gate moves that peer's colour ramp in the same payload", async (
       "the ramp did not follow the gate",
     );
     assert.deepEqual(after?.context_ramp, [50, 75, 85]);
+  } finally {
+    close(h);
+  }
+});
+
+/**
+ * 🟡 B from claude2's review. A non-string handle reached SQLite and came back
+ * as a raw driver message with a 500, where every illegal GATE gets a 400.
+ *
+ * 🛑 THE STATUS IS NOT THE WHOLE ASSERTION. A 500 is also "refused", so the
+ * body is checked for the driver's wording — that is what made this a finding
+ * rather than a cosmetic difference.
+ */
+for (const badHandle of [true, 42, { a: 1 }, ["x"]] as const) {
+  test(`handle ${JSON.stringify(badHandle)} is a clean 400, not a driver error`, async () => {
+    const h = await harness(["peer-a"]);
+    try {
+      const { status, json } = await setGate(h.origin, {
+        handle: badHandle,
+        gate: 50,
+      });
+
+      assert.equal(status, 400, `${JSON.stringify(badHandle)} was not a 400`);
+      assert.doesNotMatch(
+        String(json.error),
+        /SQLite|bound to|parameter/i,
+        "a raw driver message reached the operator",
+      );
+      assert.equal(getGlobalContextGate(h.db), null, "it wrote anyway");
+    } finally {
+      close(h);
+    }
+  });
+}
+
+/**
+ * 🔵 E from claude2's review. `effective` resolved against the OPERATOR's own
+ * handle on a global set, so an operator with an override read their own
+ * number back as the effect of a change to everyone else's.
+ */
+test("a GLOBAL set does not report an `effective` number at all", async () => {
+  const h = await harness(["peer-a"]);
+  try {
+    setHandleContextGate(h.db, "operator", 90);
+
+    const { status, json } = await setGate(h.origin, { gate: 30 });
+
+    assert.equal(status, 200);
+    assert.equal(json.gate, 30);
+    assert.equal(
+      json.effective,
+      undefined,
+      "a global set reported one effective number, and there is no such thing",
+    );
+  } finally {
+    close(h);
+  }
+});
+
+test("a HANDLE set reports that handle's effective number", async () => {
+  const h = await harness(["peer-a"]);
+  try {
+    const { json } = await setGate(h.origin, { handle: "peer-a", gate: 44 });
+
+    assert.equal(json.scope, "peer-a");
+    assert.equal(json.effective, 44);
+  } finally {
+    close(h);
+  }
+});
+
+/**
+ * 🛑 THE NON-VACUITY CONTROL FOR THE HARNESS FIX ABOVE. Without it the
+ * try/catch is a change nothing in this file can prove.
+ *
+ * ⚠️ A FIRST VERSION OF THIS CONTROL USED `?around_id=%ZZ` AND WAS VACUOUS. It
+ * passed with the bare `void route(...)` too, because `parseAroundId` refuses a
+ * malformed id cleanly and nothing throws. `readJsonBody` does a bare
+ * `JSON.parse`, so a malformed BODY is the input that actually rejects.
+ */
+test("a route that THROWS answers 500 here, as it does in production", async () => {
+  const h = await harness(["peer-a"]);
+  try {
+    const res = await fetch(`${h.origin}/api/context-gate`, {
+      method: "POST",
+      headers: { cookie: COOKIE },
+      body: "{not json",
+    });
+
+    assert.equal(res.status, 500, "a throwing route did not answer 500");
   } finally {
     close(h);
   }

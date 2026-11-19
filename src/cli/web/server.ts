@@ -22,9 +22,10 @@ import { parseSearch, snippet } from "../../search/query.js";
 import { gaugeFreshness } from "../../shim/gauge-freshness.js";
 import { rampFor } from "../../shim/context-ramp.js";
 import {
-  contextGateSource,
   getGlobalContextGate,
+  isLegalGate,
   resolveContextGate,
+  resolveContextGateWithSource,
   setGlobalContextGate,
   setHandleContextGate,
 } from "../../storage/context-gate.js";
@@ -538,6 +539,16 @@ function contextRampFor(db: Db, handle: string): number[] {
   return rampFor(resolveContextGate(db, handle)).map((band) => band.at);
 }
 
+/** The gate and its layer, flattened onto a peer row. */
+function gateFields(
+  db: Db,
+  handle: string,
+): { context_gate: number; context_gate_source: string } {
+  const { gate, source } = resolveContextGateWithSource(db, handle);
+
+  return { context_gate: gate, context_gate_source: source };
+}
+
 function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
   const me = dao.getAgent(ctx.db, ctx.handle);
   const peers = dao
@@ -562,8 +573,7 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
       // #135 unit 4 — the SET surface needs the number it is editing and the
       // layer it came from. Resolved here for the same reason as the ramp:
       // the three-layer rule has one home and the browser cannot import it.
-      context_gate: resolveContextGate(ctx.db, a.handle),
-      context_gate_source: contextGateSource(ctx.db, a.handle),
+      ...gateFields(ctx.db, a.handle),
     })),
     rooms: myRooms.map((r) => ({
       ...r,
@@ -852,8 +862,17 @@ async function handleContextGateSet(
     handle?: string;
     gate?: unknown;
   };
-  const { handle } = body;
   const gate = body.gate;
+
+  // ⚠️ TYPE-CHECKED, NOT JUST PRESENCE-CHECKED. A non-string handle reached
+  // `getAgent` and came back as a raw driver message — "Provided value cannot
+  // be bound to SQLite parameter 1", a 500 where every bad GATE gets a clean
+  // 400. Found by claude2 on #135 unit 4.
+  if ("handle" in body && typeof body.handle !== "string") {
+    return respondJson(res, { error: "handle must be a string" }, 400);
+  }
+
+  const handle = typeof body.handle === "string" ? body.handle : undefined;
 
   if (gate === null) {
     if (handle === undefined) {
@@ -866,12 +885,10 @@ async function handleContextGateSet(
         400,
       );
     }
-  } else if (
-    typeof gate !== "number" ||
-    !Number.isInteger(gate) ||
-    gate < 1 ||
-    gate > 100
-  ) {
+  } else if (!isLegalGate(gate)) {
+    // 🛑 THE STORAGE PREDICATE, NOT A SECOND COPY OF ITS CLAUSES. An inline
+    // range test here was a duplicate of the rule the setters enforce, free to
+    // drift from it. Raised by claude2.
     return respondJson(
       res,
       {
@@ -895,12 +912,22 @@ async function handleContextGateSet(
     setHandleContextGate(ctx.db, handle, gate as number | null);
   }
 
-  respondJson(res, {
-    ok: true,
-    scope: handle === undefined ? "global" : handle,
-    gate: handle === undefined ? getGlobalContextGate(ctx.db) : gate,
-    effective: resolveContextGate(ctx.db, handle ?? ctx.handle),
-  });
+  // ⚠️ NO `effective` ON A GLOBAL SET. It used to resolve against
+  // `handle ?? ctx.handle`, so setting the global to 30 while the OPERATOR's
+  // own handle was overridden to 90 answered `effective: 90` — correct per the
+  // code and misleading per the name. A global set has no single effective
+  // number; every peer resolves its own. Found by claude2.
+  respondJson(
+    res,
+    handle === undefined
+      ? { ok: true, scope: "global", gate: getGlobalContextGate(ctx.db) }
+      : {
+          ok: true,
+          scope: handle,
+          gate,
+          effective: resolveContextGate(ctx.db, handle),
+        },
+  );
 }
 
 async function handleRoomLeave(
