@@ -27,19 +27,25 @@ key, and before writing a reader for either file.
 A handle file may stand alone. A profile exists so several handles can share
 one capability set without a second copy of it.
 
-🛑 **Both files sit outside every container mount.** `/work` is mounted, so an
-in-tree override would let an agent widen its own next spawn.
+🛑 **Both files must sit outside every container mount.** `/work` is mounted,
+so an in-tree override would let an agent widen its own next spawn.
+
+⚠️ **NOT YET ENFORCED, because neither directory exists in code yet.** There is
+no `profilesDir()` or `overridesDir()` in `src/util/paths.ts`, and the guard
+that would cover them, `assertProjectDirOutsideState` in `containment.ts`,
+only reaches paths under `stateDir()`. **Whoever adds the reader owes that pin
+and its test.**
 
 ## The keys
 
-| Key              | Value                            | Merge    |
-| ---------------- | -------------------------------- | -------- |
-| `env`            | object of NAME to string         | union    |
-| `readOnlyMounts` | array of project-relative paths  | union    |
-| `image`          | a registry reference             | replace  |
-| `memory`         | docker's own form, `512m`        | replace  |
-| `cpus`           | a decimal, `1.5`                 | replace  |
-| `profile`        | a profile name, handle file only | resolved |
+| Key              | Value                                 | Merge    |
+| ---------------- | ------------------------------------- | -------- |
+| `env`            | object of NAME to string, no newline  | union    |
+| `readOnlyMounts` | array of project-relative paths       | union    |
+| `image`          | a registry reference                  | replace  |
+| `memory`         | docker's own form, `512m`, never zero | replace  |
+| `cpus`           | a decimal, `1.5`, never zero          | replace  |
+| `profile`        | a profile name, handle file only      | resolved |
 
 🛑 **The container surface is five keys. `profile` is a pointer, not a sixth
 thing docker is told.** That is why `ALLOWED_OVERRIDE_KEYS` holds five and
@@ -59,6 +65,16 @@ lee ruled this on 2026-11-19.
 pattern, so `!docs` is a legal mount path today.** A later sentinel syntax
 would silently redefine an existing file.
 
+## Zero is not a small limit
+
+**`memory` and `cpus` refuse every spelling of zero**, which is 13 for memory
+and 7 for cpus. Measured on this host, docker 24.0.7: `--memory 0` leaves
+`memory.max` at `max`, and `--cpus 0` leaves `cpu.max` with no quota.
+
+🛑 **The ADD-only ruling cannot reach this.** The ruling protects a NAME, and
+for these two keys the value is the only thing there is. A handle file writing
+`"memory": "0"` would nullify a profile's cap and obey the letter of the rule.
+
 ## A profile name is not a path
 
 `^[a-z0-9][a-z0-9-]*$`. No dot, no slash, no upper case.
@@ -75,7 +91,8 @@ so resolution needs no cycle detection.
 
 - **An unresolvable profile name must be a loud refusal at spawn.** A silent
   fall back to the default container shows an operator a capability the agent
-  did not get.
+  did not get. ⚠️ **NOT BUILT. Nothing resolves a name yet**, so this is an
+  obligation on the reader rather than a description of today.
 - **A refusal names the whole file, not the key.** A partial parse would apply
   the legal half of a file and silently drop the rest.
 - **`env` may not name `CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN` or

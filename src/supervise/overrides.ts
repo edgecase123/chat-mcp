@@ -33,6 +33,8 @@ export const ALLOWED_HANDLE_KEYS = [
   "profile",
 ] as const;
 
+export type AllowedHandleKey = (typeof ALLOWED_HANDLE_KEYS)[number];
+
 /** What reaches a spawn: the five keys, each already checked. */
 export type ContainerOverride = {
   env?: Record<string, string>;
@@ -114,6 +116,16 @@ function checkEnv(value: unknown): Record<string, string> {
       throw new Error(`\`env\` value for ${name} must be a string`);
     }
 
+    // 🛑 `docker run -e` IS IMMUNE AND `--env-file` IS NOT. The flag sets one
+    // multi-line variable; the file is parsed by line, so a newline here
+    // declares a SECOND variable, which may name a reserved credential.
+    if (/[\n\r\u0000]/.test(raw)) {
+      throw new Error(
+        `\`env\` value for ${name} may not contain a newline or a NUL: ` +
+          "a line break declares a second variable in an env file",
+      );
+    }
+
     out[name] = raw;
   }
 
@@ -187,6 +199,27 @@ function exampleFor(key: "image" | "memory" | "cpus"): string {
   return "2";
 }
 
+/**
+ * 🛑 ZERO IS NOT A SMALL LIMIT, IT IS NO LIMIT. Measured on this host,
+ * docker 24.0.7: `--memory 0` leaves `memory.max` at `max`, and `--cpus 0`
+ * leaves `cpu.max` with no quota.
+ *
+ * ⚠️ THE ADD-ONLY RULING CANNOT REACH THIS. The ruling protects a NAME, and
+ * for these two keys the value is the only thing there is — so a handle file
+ * writing `"memory": "0"` would nullify a profile's cap and obey the letter
+ * of the ruling. Found by `security-scanner` on PR 333.
+ */
+function refuseNoLimit(key: "memory" | "cpus", value: string): void {
+  const digits = key === "memory" ? value.replace(/[bkmg]$/i, "") : value;
+
+  if (Number(digits) === 0) {
+    throw new Error(
+      `\`${key}\` may not be zero: docker reads zero as no limit, so the ` +
+        "override would widen the container rather than narrow it",
+    );
+  }
+}
+
 function checkPattern(
   key: "image" | "memory" | "cpus",
   value: unknown,
@@ -207,6 +240,8 @@ function checkPattern(
       `\`${key}\` is not a legal value: ${JSON.stringify(value)}`,
     );
   }
+
+  if (key !== "image") refuseNoLimit(key, value);
 
   return value;
 }
@@ -244,6 +279,38 @@ function checkProfileName(value: unknown): string {
  * escalation sit beside a legal key and apply the legal half, so the human
  * would see a spawn that worked and a flag that silently did not.
  */
+/**
+ * The value check for every key a handle may set.
+ *
+ * 🛑 `Record<AllowedHandleKey, …>` IS THE GUARD. A key added to
+ * `ALLOWED_HANDLE_KEYS` with no check here does not compile, so an unchecked
+ * value can never reach a spawn. Found by `dry-solid-reviewer` on PR 333.
+ */
+const VALUE_CHECKS: Record<AllowedHandleKey, (value: unknown) => unknown> = {
+  env: checkEnv,
+  readOnlyMounts: checkReadOnlyMounts,
+  image: (value) => checkPattern("image", value, IMAGE_REF),
+  memory: (value) => checkPattern("memory", value, MEMORY),
+  cpus: (value) => checkPattern("cpus", value, CPUS),
+  profile: checkProfileName,
+};
+
+/** The container keys whose values UNION on a merge rather than replace. */
+export const UNION_KEYS = ["env", "readOnlyMounts"] as const;
+
+/**
+ * The container keys a later value simply replaces.
+ *
+ * 🛑 DERIVED, NOT A THIRD COPY OF THE LIST. A hand-kept copy that missed a
+ * sixth container key would drop that key from BOTH sides of the merge, and
+ * the spawn would run without it with nothing printed. Found by
+ * `dry-solid-reviewer` on PR 333.
+ */
+export const SCALAR_KEYS = ALLOWED_OVERRIDE_KEYS.filter(
+  (key): key is Exclude<AllowedOverrideKey, (typeof UNION_KEYS)[number]> =>
+    !(UNION_KEYS as readonly string[]).includes(key),
+);
+
 function parseAgainst(
   raw: unknown,
   allowed: readonly string[],
@@ -266,13 +333,11 @@ function parseAgainst(
       );
     }
 
-    if (key === "env") out.env = checkEnv(value);
-    else if (key === "readOnlyMounts")
-      out.readOnlyMounts = checkReadOnlyMounts(value);
-    else if (key === "image") out.image = checkPattern(key, value, IMAGE_REF);
-    else if (key === "memory") out.memory = checkPattern(key, value, MEMORY);
-    else if (key === "cpus") out.cpus = checkPattern(key, value, CPUS);
-    else out.profile = checkProfileName(value);
+    // 🛑 THE TABLE IS EXHAUSTIVE BY TYPE, which an if/else chain was not. Its
+    // terminal `else` meant `profile`, so a sixth allowed key with no branch
+    // of its own was read AS a profile name — a guard that failed open.
+    (out as Record<string, unknown>)[key] =
+      VALUE_CHECKS[key as AllowedHandleKey](value);
   }
 
   return out;
@@ -297,11 +362,16 @@ export function parseProfile(raw: unknown): ContainerOverride {
     );
   }
 
-  return parseAgainst(raw, ALLOWED_OVERRIDE_KEYS);
-}
+  // ⚠️ DESTRUCTURED, NOT CAST. The pre-check above carries the message a
+  // human can act on; this line is what makes the narrowed return type true
+  // rather than merely assignable.
+  const { profile: _pointer, ...container } = parseAgainst(
+    raw,
+    ALLOWED_OVERRIDE_KEYS,
+  );
 
-/** The three keys a later value simply replaces. */
-const SCALAR_KEYS = ["image", "memory", "cpus"] as const;
+  return container;
+}
 
 /**
  * Apply a handle's override on top of its profile's, ADD-only.
@@ -309,11 +379,18 @@ const SCALAR_KEYS = ["image", "memory", "cpus"] as const;
  * 🛑 ADD-ONLY IS lee's RULING OF 2026-11-19 (`#mcp` 15889). A handle may
  * change what a name is SET TO. No handle file can express dropping a name
  * the profile contributed, which is why this unions rather than replaces.
+ *
+ * 🛑 THE TWO LAYERS ARE NAMED RATHER THAN ORDERED. Positionally, `profile`
+ * is optional on a handle, so the transposed call type-checked and silently
+ * inverted the ruling. Found by `security-scanner` on PR 333.
  */
-export function mergeOverrides(
-  profile: ContainerOverride,
-  handle: HandleOverride,
-): ContainerOverride {
+export function mergeOverrides({
+  profile,
+  handle,
+}: {
+  profile: ContainerOverride;
+  handle: HandleOverride;
+}): ContainerOverride {
   const merged: ContainerOverride = {};
 
   if (profile.env || handle.env) {
