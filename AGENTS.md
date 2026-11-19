@@ -283,6 +283,51 @@ container's request arrives with `Host: host.docker.internal:<port>`, which a
 loopback allowlist never contains, so it would refuse the caller this transport
 exists for. The bearer token is the whole boundary there.
 
+## 🛑 The supervisor starts every container itself
+
+**A container is started by `docker run`, spawned by the supervisor. Never by an
+orchestrator that sits between them.**
+
+lee, 2026-11-19, ruling on the #222 override arc:
+
+> _"contianer should NOT be started by docker compose, we want to retail i/o
+> control"_
+
+### Why — the three pipes ARE the connection
+
+```js
+// drivers/containerized.ts
+const child: ChildProcessWithoutNullStreams = spawn("docker", plan.args, {
+  stdio: ["pipe", "pipe", "pipe"],
+```
+
+The supervisor holds the container's stdin, stdout and stderr in its own hands.
+That is how it talks to the agent inside. Any starter placed in between owns
+those pipes instead, and the supervisor loses the connection it exists to hold.
+
+### What this forbids
+
+- `docker compose up` as the spawn path, now or later.
+- Any orchestrator that declares containers up front. A container here is
+  created per handle, at the moment it is needed, which a declared service set
+  cannot express.
+- A wrapper script that starts the container and hands back a pid. The pid is
+  not the pipe.
+
+### What it does NOT touch
+
+- **Authoring the config.** A human edits validated JSON, by lee's separate
+  ruling of the same day. That is a different half of the same question.
+- **`docker` subcommands the supervisor runs for its own bookkeeping** —
+  `docker rm -f`, `docker stop`, the dependency-install container. Those take no
+  agent pipe.
+- Generating a compose file as an artifact for a human to read. Nothing reads
+  one today, and this rule is about who STARTS a container, not what may be
+  written down.
+
+⚠️ **No compose file exists in this repo.** This rule stops one being added to
+the spawn path; it removes nothing.
+
 ## Conventions
 
 - TDD: write the failing test first, run it, confirm it fails for the stated
