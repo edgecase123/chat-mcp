@@ -664,3 +664,60 @@ test("an env value may not carry a newline, which --env-file reads as a second v
   });
   assert.equal(smuggled.length, 3);
 });
+
+/**
+ * 🛑 THE DEDUP COMPARED STRINGS, SO A SECOND SPELLING OF ONE PATH BEAT IT.
+ * `"docs"` in a profile and `"./docs"` in a handle produced TWO mounts of one
+ * directory, which is the exact harm `checkReadOnlyMounts`' own docblock names.
+ * Found by claude2 reviewing PR 333 at `e790869`.
+ *
+ * 🛑 REFUSED, NOT NORMALISED. Normalising here would disagree with the
+ * driver's own containment check, and two readings of one path is what puts a
+ * directory at two destinations.
+ */
+test("a mount path must be in canonical form, so one path has one spelling", () => {
+  const refused: [string, string][] = [
+    ["a dot-relative prefix", "./docs"],
+    ["a bare dot segment", "docs/./sub"],
+    ["a trailing slash", "docs/"],
+    ["a doubled slash", "docs//sub"],
+    ["a lone dot", "."],
+  ];
+
+  for (const [why, entry] of refused) {
+    assert.throws(
+      () => parseHandleOverride({ readOnlyMounts: [entry] }),
+      /mount/i,
+      `accepted ${why}: ${JSON.stringify(entry)}`,
+    );
+  }
+
+  // 🛑 THE POSITIVE CONTROL. A check that refused every path would satisfy
+  // all five cases above.
+  assert.deepEqual(
+    parseHandleOverride({ readOnlyMounts: ["docs", "web/assets", "Docs"] })
+      .readOnlyMounts,
+    ["docs", "web/assets", "Docs"],
+  );
+  assert.equal(refused.length, 5);
+});
+
+test("the merge cannot mount one directory twice through two spellings", () => {
+  // 🛑 THE DEDUP IS NOW LOAD-BEARING ONLY FOR THE EXACT REPEAT. Every other
+  // spelling is refused before it reaches the merge, which is why this asserts
+  // the refusal rather than a deduped result.
+  for (const spelling of ["./docs", "docs/", "docs//sub"]) {
+    assert.throws(
+      () => parseHandleOverride({ readOnlyMounts: [spelling] }),
+      /mount/i,
+      `a second spelling reached the merge: ${spelling}`,
+    );
+  }
+
+  const merged = mergeOverrides({
+    profile: parseProfile({ readOnlyMounts: ["docs"] }),
+    handle: parseHandleOverride({ readOnlyMounts: ["docs", "plans"] }),
+  });
+
+  assert.deepEqual(merged.readOnlyMounts, ["docs", "plans"]);
+});

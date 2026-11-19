@@ -161,9 +161,24 @@ function checkReadOnlyMounts(value: unknown): string[] {
       );
     }
 
-    if (entry.split("/").includes("..")) {
+    const segments = entry.split("/");
+
+    if (segments.includes("..")) {
       throw new Error(
         `a read-only mount may not climb out of the project: ${entry}`,
+      );
+    }
+
+    // 🛑 ONE PATH, ONE SPELLING. The duplicate check below compares STRINGS,
+    // so `docs` and `./docs` were two mounts of one directory — and the merge
+    // unions two files, which doubles the chance of a second spelling.
+    // Refused rather than normalised, for the reason in this docblock.
+    // Case is NOT folded: `Docs` is a different directory where the
+    // filesystem is case-sensitive, so the pair is legal.
+    if (segments.includes(".") || segments.includes("")) {
+      throw new Error(
+        "a read-only mount must be in canonical form, with no `.` segment, " +
+          `no doubled slash and no trailing slash: ${entry}`,
       );
     }
 

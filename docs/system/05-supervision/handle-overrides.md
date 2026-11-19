@@ -75,6 +75,20 @@ and 7 for cpus. Measured on this host, docker 24.0.7: `--memory 0` leaves
 for these two keys the value is the only thing there is. A handle file writing
 `"memory": "0"` would nullify a profile's cap and obey the letter of the rule.
 
+## One path, one spelling
+
+**A mount path must already be canonical.** No `.` segment, no doubled slash,
+no trailing slash.
+
+🛑 **The duplicate check compares STRINGS.** So `docs` in a profile and
+`./docs` in a handle file were two mounts of one directory, and the union
+merge doubles the chance of a second spelling reaching it.
+
+**Case is NOT folded, deliberately.** `docs` and `Docs` are different
+directories on a case-sensitive filesystem, so refusing the pair would reject
+a legal layout. Two read-only views of one directory is not a containment
+problem.
+
 ## A profile name is not a path
 
 `^[a-z0-9][a-z0-9-]*$`. No dot, no slash, no upper case.
