@@ -26,6 +26,7 @@ import {
   isLegalGate,
   resolveContextGate,
   resolveContextGateWithSource,
+  resolveDefaultContextGate,
   setGlobalContextGate,
   setHandleContextGate,
 } from "../../storage/context-gate.js";
@@ -580,6 +581,10 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
       unread: dao.roomUnreadCount(ctx.db, r.name, ctx.handle),
     })),
     discoverRooms,
+    // #135 slice 4c — the footer that EDITS the global default needs to show
+    // it, and no peer row can be relied on to carry it: a peer reports the
+    // global only while it has no override of its own.
+    context_gate_default: resolveDefaultContextGate(ctx.db),
     version: VERSION,
     // The two roots a dropped file path is shown relative to. The page
     // already lists directories under both through /api/files, so this adds

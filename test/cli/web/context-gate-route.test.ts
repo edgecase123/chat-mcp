@@ -180,6 +180,83 @@ test("with no global set, a peer reports the BUILT-IN as its source", async () =
   }
 });
 
+/**
+ * #135 slice 4c — the footer that EDITS the global default has to show it, and
+ * no peer row can be relied on to carry it.
+ *
+ * 🛑 THE ROWS CANNOT ANSWER THIS. A peer reports the global only when it has
+ * no override of its own, so on a page where every agent is overridden the
+ * global appears nowhere in the payload. The footer would then render a number
+ * it inferred, or none at all.
+ */
+test("whoami carries the global default itself, not only each peer's resolved gate", async () => {
+  const h = await harness(["only-peer"]);
+  try {
+    setGlobalContextGate(h.db, 65);
+    setHandleContextGate(h.db, "only-peer", 20);
+
+    const res = await fetch(`${h.origin}/api/whoami`, {
+      headers: { Cookie: COOKIE },
+    });
+    const body = (await res.json()) as any;
+
+    assert.equal(
+      body.peers[0].context_gate_source,
+      "override",
+      "the setup no longer hides the global — reread this test",
+    );
+    assert.equal(body.context_gate_default.gate, 65);
+    assert.equal(body.context_gate_default.source, "global");
+  } finally {
+    close(h);
+  }
+});
+
+/**
+ * 🛑 THE OPERATOR'S OWN GATE IS NOT THE DEFAULT, AND THIS IS THE ONLY CASE
+ * THAT SAYS SO. The operator has no override in the test above, so their
+ * resolved gate IS the global and the two readings agree.
+ *
+ * MEASURED: `resolveContextGateWithSource(ctx.db, ctx.handle)` in place of
+ * `resolveDefaultContextGate(ctx.db)` passed 25 of 25 before this existed.
+ */
+test("the default is the GLOBAL, not the operator's own overridden gate", async () => {
+  const h = await harness(["someone"]);
+  try {
+    setGlobalContextGate(h.db, 65);
+    setHandleContextGate(h.db, "operator", 90);
+
+    const res = await fetch(`${h.origin}/api/whoami`, {
+      headers: { Cookie: COOKIE },
+    });
+    const body = (await res.json()) as any;
+
+    assert.equal(body.context_gate_default.gate, 65);
+    assert.equal(body.context_gate_default.source, "global");
+  } finally {
+    close(h);
+  }
+});
+
+/**
+ * 🛑 THE DISCRIMINATING CASE FOR A HARDCODED NUMBER. A payload that always
+ * answered the built-in passes the global test above and fails this one.
+ */
+test("with no global set, the default reports the BUILT-IN as its source", async () => {
+  const h = await harness(["plain"]);
+  try {
+    const res = await fetch(`${h.origin}/api/whoami`, {
+      headers: { Cookie: COOKIE },
+    });
+    const body = (await res.json()) as any;
+
+    assert.equal(body.context_gate_default.gate, DEFAULT_CONTEXT_GATE);
+    assert.equal(body.context_gate_default.source, "builtin");
+  } finally {
+    close(h);
+  }
+});
+
 test("a POST with no handle sets the GLOBAL default", async () => {
   const h = await harness(["peer-a"]);
   try {
