@@ -39,16 +39,6 @@ export const BANDS = [
 
 export type Threshold = 50 | 70 | 85 | 95;
 
-/**
- * The band that asks for a plan rather than a hygiene pass.
- *
- * 🛑 EXPORTED FOR THE WEB GAUGE TO EXCLUDE, and that exclusion is the ONLY
- * thing that distinguishes the colour ramp from `BANDS`. An earlier comment in
- * `logic.js` said the ramp mirrored the room-post bands; it does not — 70 is
- * `dm` and is coloured. claude1 caught it on PR 113.
- */
-export const PLANNING_BAND = 50 as const;
-
 /** How a band reaches its audience. */
 export type Delivery = "dm" | "room" | "alert";
 
