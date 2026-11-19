@@ -5,8 +5,9 @@
  * make every future container flag reachable from a config file, including the
  * ones this module exists to refuse.
  *
- * ⚠️ `image`, `memory` and `cpus` are still accepted unchecked. `env` and
- * `readOnlyMounts` are not, because their VALUES reach the container.
+ * 🛑 EVERY VALUE IS CHECKED, NOT ONLY EVERY KEY. An allowed key whose value
+ * passed through as `unknown` was still an escalation: `{ image:
+ * ["--privileged", "node:22"] }` reached a consumer that spreads into argv.
  */
 
 /** Every key a human may write in an override file. */
@@ -143,6 +144,38 @@ function checkReadOnlyMounts(value: unknown): string[] {
   return [...value] as string[];
 }
 
+/**
+ * 🛑 NO LEADING DASH AND NO WHITESPACE, WHICH IS THE POINT. A value starting
+ * `-` is a docker flag, and a value containing a space becomes two argv
+ * entries. The character class is otherwise permissive, because a registry
+ * reference carries hosts, ports, tags and digests.
+ */
+const IMAGE_REF = /^[A-Za-z0-9][A-Za-z0-9._:/@-]*$/;
+
+/** Docker's own memory forms: digits, optionally one unit suffix. */
+const MEMORY = /^\d+[bkmg]?$/i;
+
+/** Docker's own `--cpus` form: a decimal number. */
+const CPUS = /^\d+(\.\d+)?$/;
+
+function checkPattern(
+  key: "image" | "memory" | "cpus",
+  value: unknown,
+  pattern: RegExp,
+): string {
+  if (typeof value !== "string") {
+    throw new Error(`\`${key}\` must be a string`);
+  }
+
+  if (!pattern.test(value)) {
+    throw new Error(
+      `\`${key}\` is not a legal value: ${JSON.stringify(value)}`,
+    );
+  }
+
+  return value;
+}
+
 function isAllowed(key: string): key is AllowedOverrideKey {
   return (ALLOWED_OVERRIDE_KEYS as readonly string[]).includes(key);
 }
@@ -176,7 +209,9 @@ export function parseHandleOverride(raw: unknown): HandleOverride {
     if (key === "env") out.env = checkEnv(value);
     else if (key === "readOnlyMounts")
       out.readOnlyMounts = checkReadOnlyMounts(value);
-    else out[key] = value;
+    else if (key === "image") out.image = checkPattern(key, value, IMAGE_REF);
+    else if (key === "memory") out.memory = checkPattern(key, value, MEMORY);
+    else out.cpus = checkPattern(key, value, CPUS);
   }
 
   return out;

@@ -131,12 +131,20 @@ test("an empty override is legal and means no change", () => {
   assert.deepEqual(parseHandleOverride({}), {});
 });
 
-/** A shape each allowed key will accept once unit 2 checks values. */
+/**
+ * A legal value for each allowed key.
+ *
+ * 🛑 ONE PLACEHOLDER STRING USED TO SERVE ALL THREE OF `image`, `memory` and
+ * `cpus`, and that is exactly what made the smuggling above invisible — the
+ * fixture could not tell a checked value from an unchecked one.
+ */
 function sampleFor(key: string): unknown {
   if (key === "env") return { EXAMPLE: "1" };
   if (key === "readOnlyMounts") return ["docs"];
+  if (key === "image") return "node:22-slim";
+  if (key === "memory") return "512m";
 
-  return "placeholder";
+  return "2";
 }
 
 /* ------------------------------------------------------------------------ *
@@ -242,4 +250,64 @@ test("ordinary relative mounts are accepted, including an empty list", () => {
       .readOnlyMounts,
     ["docs", "web/assets"],
   );
+});
+
+/* ------------------------------------------------------------------------ *
+ * #222 unit 2b — `image`, `memory` and `cpus` VALUES.
+ *
+ * 🛑 AN ALLOWED KEY WAS STILL AN ESCALATION. These three passed through as
+ * `unknown`, so `{ image: ["--privileged", "node:22"] }` was accepted and a
+ * consumer spreading it into argv would inject the flag the allowlist exists
+ * to refuse. Found by claude2 reviewing PR 331 at `ac8bf3b`.
+ * ------------------------------------------------------------------------ */
+
+test("an allowed key may not smuggle a docker flag through its VALUE", () => {
+  const smuggled: [string, unknown][] = [
+    ["image as an array", { image: ["--privileged", "node:22"] }],
+    ["memory as an array", { memory: ["--privileged"] }],
+    ["cpus as an object", { cpus: { toString: 1 } }],
+    ["image is a flag", { image: "-v /:/host" }],
+    ["image has a space", { image: "node:22 --privileged" }],
+    ["image is empty", { image: "" }],
+    ["memory is a flag", { memory: "--privileged" }],
+    ["cpus is a flag", { cpus: "--privileged" }],
+    ["image is a number", { image: 22 }],
+    ["memory is a number", { memory: 512 }],
+    ["cpus is a number", { cpus: 2 }],
+    ["image is null", { image: null }],
+  ];
+
+  for (const [why, raw] of smuggled) {
+    assert.throws(
+      () => parseHandleOverride(raw),
+      /image|memory|cpus/i,
+      `accepted: ${why}`,
+    );
+  }
+
+  assert.equal(smuggled.length, 12);
+});
+
+test("ordinary image, memory and cpus values are still accepted", () => {
+  const good: [string, Record<string, unknown>][] = [
+    ["a plain tag", { image: "node:22-slim" }],
+    ["a namespaced repo", { image: "mcr.microsoft.com/playwright:v1.49.0" }],
+    ["a digest", { image: `node@sha256:${"a".repeat(64)}` }],
+    ["bytes", { memory: "512m" }],
+    ["gigabytes", { memory: "2G" }],
+    ["bare digits", { memory: "1073741824" }],
+    ["whole cpus", { cpus: "2" }],
+    ["fractional cpus", { cpus: "1.5" }],
+  ];
+
+  for (const [why, raw] of good) {
+    const out = parseHandleOverride(raw);
+    const [key] = Object.keys(raw);
+
+    assert.equal(out[key as never], raw[key], `refused a legal value: ${why}`);
+  }
+
+  // 🛑 THE POSITIVE CONTROL. A parse that refused all three keys outright
+  // would satisfy every smuggling case above.
+  assert.equal(good.length, 8);
 });
