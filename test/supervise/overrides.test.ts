@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { AllowedOverrideKey } from "../../src/supervise/overrides.js";
 import {
   ALLOWED_HANDLE_KEYS,
   ALLOWED_OVERRIDE_KEYS,
@@ -720,4 +721,80 @@ test("the merge cannot mount one directory twice through two spellings", () => {
   });
 
   assert.deepEqual(merged.readOnlyMounts, ["docs", "plans"]);
+});
+
+/**
+ * 🛑 A SIXTH CONTAINER KEY IS CLASSIFIED BY DEFAULT, AND THE DEFAULT IS WRONG.
+ * `SCALAR_KEYS` is the complement of `UNION_KEYS`, so a key nobody classified
+ * silently joins the REPLACING half — and a handle file could then drop what a
+ * profile set, which is the ADD-only ruling inverted with nothing printed.
+ *
+ * 🛑 `Record<AllowedOverrideKey, …>` IS THE GUARD. A new container key does not
+ * compile until someone writes down which half it belongs to. Found by claude2
+ * reviewing PR 333.
+ */
+const MERGE_BEHAVIOUR: Record<AllowedOverrideKey, "union" | "replace"> = {
+  env: "union",
+  readOnlyMounts: "union",
+  image: "replace",
+  memory: "replace",
+  cpus: "replace",
+};
+
+test("every container key is classified union or replace, and the lists agree", () => {
+  const declared = Object.entries(MERGE_BEHAVIOUR);
+
+  assert.deepEqual(
+    declared
+      .filter(([, how]) => how === "union")
+      .map(([key]) => key)
+      .sort(),
+    [...UNION_KEYS].sort(),
+  );
+
+  assert.deepEqual(
+    declared
+      .filter(([, how]) => how === "replace")
+      .map(([key]) => key)
+      .sort(),
+    [...SCALAR_KEYS].sort(),
+  );
+
+  // 🛑 THE DENOMINATOR. Two agreeing lists that both omit a key would pass
+  // every assertion above.
+  assert.deepEqual(
+    declared.map(([key]) => key).sort(),
+    [...ALLOWED_OVERRIDE_KEYS].sort(),
+  );
+});
+
+test("a union key keeps the profile's value and a scalar key loses it", () => {
+  const merged = mergeOverrides({
+    profile: parseProfile({
+      env: { FROM_PROFILE: "1" },
+      readOnlyMounts: ["docs"],
+      image: "profile-image",
+      memory: "512m",
+      cpus: "1",
+    }),
+    handle: parseHandleOverride({
+      env: { FROM_HANDLE: "2" },
+      readOnlyMounts: ["plans"],
+      image: "handle-image",
+      memory: "1g",
+      cpus: "2",
+    }),
+  });
+
+  // The union half keeps BOTH sides.
+  assert.deepEqual(Object.keys(merged.env ?? {}).sort(), [
+    "FROM_HANDLE",
+    "FROM_PROFILE",
+  ]);
+  assert.deepEqual(merged.readOnlyMounts, ["docs", "plans"]);
+
+  // The replacing half keeps the handle's value only.
+  assert.equal(merged.image, "handle-image");
+  assert.equal(merged.memory, "1g");
+  assert.equal(merged.cpus, "2");
 });

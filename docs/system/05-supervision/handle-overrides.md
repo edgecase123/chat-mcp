@@ -51,6 +51,12 @@ and its test.**
 thing docker is told.** That is why `ALLOWED_OVERRIDE_KEYS` holds five and
 `ALLOWED_HANDLE_KEYS` holds six, and why a profile file refuses `profile`.
 
+🛑 **A sixth container key must be classified union or replace DELIBERATELY.**
+`SCALAR_KEYS` is the complement of `UNION_KEYS`, so an unclassified key joins
+the replacing half and a handle file could then drop what a profile set. The
+`MERGE_BEHAVIOUR` table in `test/supervise/overrides.test.ts` does not compile
+until the new key is written down.
+
 ## ADD-only, which is a ruling and not a default
 
 **An override may change what a name is SET TO. It may never drop a name.**

@@ -310,8 +310,19 @@ const VALUE_CHECKS: Record<AllowedHandleKey, (value: unknown) => unknown> = {
   profile: checkProfileName,
 };
 
-/** The container keys whose values UNION on a merge rather than replace. */
-export const UNION_KEYS = ["env", "readOnlyMounts"] as const;
+/**
+ * The container keys whose values UNION on a merge rather than replace.
+ *
+ * 🛑 `satisfies` IS THE GUARD. `SCALAR_KEYS` is the complement of this list,
+ * so a misspelled entry here would not fail: it would quietly move a real key
+ * into the replacing half, and a handle file could then drop what a profile
+ * set. A spelling that is not a container key does not compile. Found by
+ * claude2 on PR 333.
+ */
+export const UNION_KEYS = [
+  "env",
+  "readOnlyMounts",
+] as const satisfies readonly AllowedOverrideKey[];
 
 /**
  * The container keys a later value simply replaces.
