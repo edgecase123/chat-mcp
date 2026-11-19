@@ -131,3 +131,64 @@ test("a cleared gate warns nothing, because falling back to the global default s
   assert.equal(gateRisk(undefined, 20), null);
   assert.equal(gateRisk(Number.NaN, 20), null);
 });
+
+/**
+ * #135 slice 4c — the SAME empty box means two different things, and only one
+ * of them is legal.
+ *
+ * 🛑 `gateSubmission` WAS SCOPE-BLIND AND THE ROUTE'S RULE IS SCOPE-DEPENDENT.
+ * An empty box is a legal CLEAR for a handle, which returns it to the global
+ * default. There is no layer below the global, so clearing IT has nothing to
+ * fall back to, and `handleContextGateSet` answers 400. MEASURED by claude2
+ * before this control was written: `gateSubmission("")` said `{ok: true,
+ * gate: null}` and the POST came back 400.
+ *
+ * ⚠️ THE WHOLE POINT OF THIS VALIDATOR IS TO ANSWER BEFORE A ROUND TRIP, so a
+ * shape it waves through to a guaranteed 400 is the one defect it cannot have.
+ */
+test("an empty box is refused for the GLOBAL default, because nothing sits below it", () => {
+  for (const raw of ["", "   "]) {
+    const out = gateSubmission(raw, { scope: "global" });
+    assert.equal(out.ok, false, `an empty global box was accepted: ${raw}`);
+    assert.ok(out.reason, "refused with no reason at all");
+    assert.match(
+      out.reason,
+      /cannot be cleared|no layer below|every agent/i,
+      "the reason does not say why the global is different",
+    );
+  }
+});
+
+/**
+ * 🛑 THE POSITIVE CONTROL FOR THE CLAUSE ABOVE. A `gateSubmission` that
+ * refused an empty box in EVERY scope would pass that test and break the only
+ * way to undo a per-handle override.
+ */
+test("an empty box is still a CLEAR for a handle, and for the default scope", () => {
+  for (const opts of [undefined, {}, { scope: "handle" }]) {
+    const out = gateSubmission("", opts);
+    assert.equal(
+      out.ok,
+      true,
+      `a handle clear was refused: ${JSON.stringify(opts)}`,
+    );
+    assert.equal(out.gate, null, "a handle clear stopped being a clear");
+  }
+});
+
+/**
+ * ⚠️ SCOPE CHANGES ONE CLAUSE, NOT THE RULE. A global set is still a number
+ * from 1 to 100, and the four refusals are unchanged — so a scope argument
+ * that accidentally short-circuited the range test would be invisible without
+ * this.
+ */
+test("the global scope refuses every illegal number the handle scope refuses", () => {
+  for (const raw of ["0", "101", "50.5", "abc"]) {
+    const out = gateSubmission(raw, { scope: "global" });
+    assert.equal(out.ok, false, `${raw} was accepted for the global`);
+  }
+
+  const good = gateSubmission("50", { scope: "global" });
+  assert.equal(good.ok, true, "a legal global gate was refused");
+  assert.equal(good.gate, 50);
+});

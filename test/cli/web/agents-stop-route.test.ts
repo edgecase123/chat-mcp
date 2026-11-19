@@ -20,6 +20,8 @@ const { ALL_CAPABILITIES, requiredCapability, CLASSIFIED_PATHS } =
 const { WakeListener } = await import("../../../src/supervise/socket.js");
 const { socketPathFor, ensureSocketDir } =
   await import("../../../src/util/paths.js");
+const { setGlobalContextGate, setHandleContextGate } =
+  await import("../../../src/storage/context-gate.js");
 
 const TEST_TOKEN = "test-token-for-stop-routes";
 const COOKIE = `chat_mcp_api=${TEST_TOKEN}`;
@@ -331,6 +333,72 @@ test("a handle that is not a valid handle is refused, not left to throw", async 
       assert.equal(typeof json.error, "string");
     }
   } finally {
+    close(h);
+  }
+});
+
+/**
+ * #135 slice 4c — the gate CONTROL lives on the agent row, and the agent row
+ * reads this route.
+ *
+ * 🛑 `/api/whoami` SHIPS THE GATE AND THIS ROUTE DID NOT. Slice 4a flattened
+ * `context_gate` onto whoami's PEERS only, so the number the control edits was
+ * absent from the one payload the Agents panel actually renders. Without this
+ * the control would have had to resolve the three-layer rule in the browser,
+ * which is a second home for it.
+ *
+ * ⚠️ `context_gate_source` IS ASSERTED, NOT JUST `context_gate`. A control that
+ * cannot tell an inherited default from an override would offer `[Clear]` on a
+ * row that has nothing to clear.
+ */
+test("a live supervisor's child row carries the gate and the layer it came from", async () => {
+  const h = await harness();
+  dao.upsertAgent(h.db, {
+    handle: "gated-agent",
+    pid: process.pid,
+    session_id: "s",
+    display_name: "gated-agent",
+    metadata: {},
+  });
+  setGlobalContextGate(h.db, 60);
+  const l = await WakeListener.bind("gated", () => ({ ok: true }));
+
+  try {
+    const body = await get(h, "/api/agents/live");
+
+    assert.equal(body.agents[0].child.context_gate, 60);
+    assert.equal(body.agents[0].child.context_gate_source, "global");
+  } finally {
+    await l.close();
+    close(h);
+  }
+});
+
+/**
+ * 🛑 THE DISCRIMINATING CASE. A route that hardcoded the global, or resolved
+ * the OPERATOR's gate instead of the child's, passes the test above and fails
+ * this one.
+ */
+test("a per-handle override on the child beats the global, and says so", async () => {
+  const h = await harness();
+  dao.upsertAgent(h.db, {
+    handle: "override-agent",
+    pid: process.pid,
+    session_id: "s",
+    display_name: "override-agent",
+    metadata: {},
+  });
+  setGlobalContextGate(h.db, 60);
+  setHandleContextGate(h.db, "override-agent", 25);
+  const l = await WakeListener.bind("override", () => ({ ok: true }));
+
+  try {
+    const body = await get(h, "/api/agents/live");
+
+    assert.equal(body.agents[0].child.context_gate, 25);
+    assert.equal(body.agents[0].child.context_gate_source, "override");
+  } finally {
+    await l.close();
     close(h);
   }
 });

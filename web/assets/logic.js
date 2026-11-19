@@ -1169,11 +1169,26 @@ export function gaugeDisplay(peer) {
  * that rule and it exists only to answer the operator before a round trip —
  * the route refuses the same shapes, and a test asserts the stored value did
  * not move. If one side changes, both must.
+ *
+ * 🛑 `scope` EXISTS BECAUSE THE EMPTY BOX MEANS TWO DIFFERENT THINGS. Clearing
+ * a HANDLE returns it to the global default. The global has no layer below it,
+ * so `handleContextGateSet` answers 400 — and a validator whose job is to
+ * answer before a round trip must not wave through the one shape that is
+ * guaranteed to fail.
  */
-export function gateSubmission(raw) {
+export function gateSubmission(raw, { scope = "handle" } = {}) {
   const text = String(raw ?? "").trim();
 
-  if (text === "") return { ok: true, gate: null };
+  if (text === "") {
+    return scope === "global"
+      ? {
+          ok: false,
+          reason:
+            "the default gate cannot be cleared; every agent without an " +
+            "override of its own resolves it",
+        }
+      : { ok: true, gate: null };
+  }
 
   if (!/^\d+$/.test(text)) {
     return {
