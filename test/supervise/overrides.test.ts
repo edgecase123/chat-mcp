@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   ALLOWED_OVERRIDE_KEYS,
   EXPLAINED_REFUSALS,
+  RESERVED_ENV_NAMES,
   parseHandleOverride,
 } from "../../src/supervise/overrides.js";
 
@@ -137,3 +138,108 @@ function sampleFor(key: string): unknown {
 
   return "placeholder";
 }
+
+/* ------------------------------------------------------------------------ *
+ * #222 unit 2 — the VALUES inside `env` and `readOnlyMounts`.
+ *
+ * Unit 1 refused by key. These two keys are the ones whose VALUES reach the
+ * container, so a key-only allowlist leaves the escalation one level down:
+ * `env` can name a credential the spawn already sets, and a mount entry can
+ * point outside the project.
+ * ------------------------------------------------------------------------ */
+
+/** The three names the spawn already pushes as credentials. */
+const RESERVED = ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN", "CHAT_MCP_MCP_CONFIG"];
+
+test("the reserved names are exactly what the spawn pushes as credentials", async () => {
+  const { containerCredentialEnvVars } =
+    await import("../../src/supervise/drivers/containerized.js");
+  const { claudeSpawn } = await import("../../src/adapters/claude-spawn.js");
+
+  // 🛑 NOT A SECOND HAND-KEPT LIST. Two literals that merely coincide is how
+  // the credential scrub rotted before, per containerized.ts's own docblock.
+  assert.deepEqual(
+    [...RESERVED_ENV_NAMES].sort(),
+    [...containerCredentialEnvVars(claudeSpawn)].sort(),
+  );
+  assert.deepEqual([...RESERVED_ENV_NAMES].sort(), [...RESERVED].sort());
+  assert.equal(RESERVED_ENV_NAMES.length, 3);
+});
+
+test("env may not name a credential the spawn already sets", () => {
+  let refused = 0;
+
+  for (const name of RESERVED) {
+    assert.throws(
+      () => parseHandleOverride({ env: { [name]: "stolen" } }),
+      new RegExp(name),
+      `${name} was accepted as an override env name`,
+    );
+    refused += 1;
+  }
+
+  assert.equal(refused, 3);
+});
+
+test("env accepts an ordinary name and a string value", () => {
+  const out = parseHandleOverride({ env: { PLAYWRIGHT_BROWSERS_PATH: "/ms" } });
+
+  assert.deepEqual(out.env, { PLAYWRIGHT_BROWSERS_PATH: "/ms" });
+});
+
+test("env refuses a name that is not an env var, and a value that is not a string", () => {
+  const bad: [string, unknown][] = [
+    ["lowercase", { env: { path: "x" } }],
+    ["leading digit", { env: { "1PATH": "x" } }],
+    ["a dash", { env: { "MY-VAR": "x" } }],
+    ["a space", { env: { "MY VAR": "x" } }],
+    ["empty name", { env: { "": "x" } }],
+    ["number value", { env: { OK: 1 } }],
+    ["null value", { env: { OK: null } }],
+    ["nested value", { env: { OK: { a: 1 } } }],
+    ["env is an array", { env: ["OK=1"] }],
+    ["env is a string", { env: "OK=1" }],
+  ];
+
+  for (const [why, raw] of bad) {
+    assert.throws(() => parseHandleOverride(raw), /env/i, `accepted: ${why}`);
+  }
+
+  assert.equal(bad.length, 10);
+});
+
+test("a read-only mount must be a relative path inside the project", () => {
+  const bad: [string, unknown][] = [
+    ["absolute", ["/etc/shadow"]],
+    ["parent escape", ["../secrets"]],
+    ["parent mid-path", ["docs/../../secrets"]],
+    ["a colon, docker's separator", ["docs:/mnt/x"]],
+    ["empty string", [""]],
+    ["only whitespace", ["   "]],
+    ["not a string", [3]],
+    ["a duplicate", ["docs", "docs"]],
+    ["not an array", "docs"],
+  ];
+
+  for (const [why, mounts] of bad) {
+    assert.throws(
+      () => parseHandleOverride({ readOnlyMounts: mounts }),
+      /read-only mount|readOnlyMounts/i,
+      `accepted: ${why}`,
+    );
+  }
+
+  assert.equal(bad.length, 9);
+});
+
+test("ordinary relative mounts are accepted, including an empty list", () => {
+  assert.deepEqual(
+    parseHandleOverride({ readOnlyMounts: [] }).readOnlyMounts,
+    [],
+  );
+  assert.deepEqual(
+    parseHandleOverride({ readOnlyMounts: ["docs", "web/assets"] })
+      .readOnlyMounts,
+    ["docs", "web/assets"],
+  );
+});

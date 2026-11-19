@@ -5,9 +5,8 @@
  * make every future container flag reachable from a config file, including the
  * ones this module exists to refuse.
  *
- * ⚠️ KEYS ONLY. Nothing here checks what is INSIDE `env` or `readOnlyMounts`.
- * That is #222 unit 2, and until it lands an override is trusted input from
- * the human who wrote the file.
+ * ⚠️ `image`, `memory` and `cpus` are still accepted unchecked. `env` and
+ * `readOnlyMounts` are not, because their VALUES reach the container.
  */
 
 /** Every key a human may write in an override file. */
@@ -52,6 +51,98 @@ export const EXPLAINED_REFUSALS = new Map<string, string>([
   ],
 ]);
 
+/**
+ * The env names the spawn already pushes as credentials.
+ *
+ * 🛑 AN OVERRIDE MAY NOT NAME ONE. `docker run -e NAME` copies this process's
+ * value, so an override that re-declared one would decide which credential the
+ * agent receives. Pinned equal to `containerCredentialEnvVars` by test, so the
+ * two cannot drift into merely coinciding.
+ */
+export const RESERVED_ENV_NAMES = [
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "GH_TOKEN",
+  "CHAT_MCP_MCP_CONFIG",
+] as const;
+
+/** POSIX env var names, which is narrower than what a shell will accept. */
+const ENV_NAME = /^[A-Z][A-Z0-9_]*$/;
+
+function checkEnv(value: unknown): Record<string, string> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("`env` must be a JSON object of NAME to string");
+  }
+
+  const out: Record<string, string> = {};
+
+  for (const [name, raw] of Object.entries(value)) {
+    if (!ENV_NAME.test(name)) {
+      throw new Error(
+        `\`env\` name ${JSON.stringify(name)} is not an environment variable name`,
+      );
+    }
+
+    if ((RESERVED_ENV_NAMES as readonly string[]).includes(name)) {
+      throw new Error(
+        `\`env\` may not name ${name}: the spawn already pushes it as a credential`,
+      );
+    }
+
+    if (typeof raw !== "string") {
+      throw new Error(`\`env\` value for ${name} must be a string`);
+    }
+
+    out[name] = raw;
+  }
+
+  return out;
+}
+
+/**
+ * 🛑 REFUSES RATHER THAN NORMALISES. A `..` resolved away here would differ
+ * from what the driver's own containment check reads, and two readings of one
+ * path is the shape that puts a directory at two container destinations.
+ */
+function checkReadOnlyMounts(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error("`readOnlyMounts` must be an array of relative paths");
+  }
+
+  const seen = new Set<string>();
+
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      throw new Error("a read-only mount must be a non-empty string");
+    }
+
+    if (entry.startsWith("/")) {
+      throw new Error(
+        `a read-only mount must be relative to the project: ${entry}`,
+      );
+    }
+
+    if (entry.includes(":")) {
+      throw new Error(
+        `a read-only mount may not contain a colon, which docker reads as a spec separator: ${entry}`,
+      );
+    }
+
+    if (entry.split("/").includes("..")) {
+      throw new Error(
+        `a read-only mount may not climb out of the project: ${entry}`,
+      );
+    }
+
+    if (seen.has(entry)) {
+      throw new Error(`a read-only mount is declared twice: ${entry}`);
+    }
+
+    seen.add(entry);
+  }
+
+  return [...value] as string[];
+}
+
 function isAllowed(key: string): key is AllowedOverrideKey {
   return (ALLOWED_OVERRIDE_KEYS as readonly string[]).includes(key);
 }
@@ -82,7 +173,10 @@ export function parseHandleOverride(raw: unknown): HandleOverride {
       );
     }
 
-    out[key] = value;
+    if (key === "env") out.env = checkEnv(value);
+    else if (key === "readOnlyMounts")
+      out.readOnlyMounts = checkReadOnlyMounts(value);
+    else out[key] = value;
   }
 
   return out;
