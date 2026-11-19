@@ -83,6 +83,7 @@ test("no input the browser accepts as a number is illegal to the server", () => 
   let okNumber = 0;
   let clear = 0;
   let refused = 0;
+  let globalRefusedEmpty = 0;
 
   for (const scope of SCOPES) {
     for (const raw of CORPUS) {
@@ -91,6 +92,8 @@ test("no input the browser accepts as a number is illegal to the server", () => 
 
       if (!out.ok) {
         refused += 1;
+        if (scope === "global" && String(raw).trim() === "")
+          globalRefusedEmpty += 1;
         continue;
       }
 
@@ -127,6 +130,16 @@ test("no input the browser accepts as a number is illegal to the server", () => 
   // 🛑 THE POSITIVE CONTROL. Without it a gateSubmission that refused
   // EVERYTHING would satisfy the property above and report green.
   assert.ok(okNumber > 0, "no input reached the ok-with-a-number branch");
+
+  // 🛑 AND THE SCOPE AXIS IS PINNED BY ITS CONSEQUENCE, NOT BY THE ARRAY.
+  // `SCOPES` cut to `["handle"]` kept `examined` consistent — it is the same
+  // tautology one axis out — and silently stopped exercising the branch that
+  // refuses a global clear. claude1 measured that on PR 328.
+  assert.ok(clear > 0, "no scope reached the clear branch");
+  assert.ok(
+    globalRefusedEmpty > 0,
+    "the global scope never refused an empty box",
+  );
 });
 
 /**
@@ -179,4 +192,8 @@ test("the corpus is the one the property was measured against", () => {
   for (const raw of [...DECIMALS, ...SHAPES]) {
     assert.ok(CORPUS.includes(raw), `${JSON.stringify(raw)} is not in CORPUS`);
   }
+
+  // Sorted, because the ORDER of the two scopes carries nothing and pinning it
+  // would fail on a harmless edit.
+  assert.deepEqual([...SCOPES].sort(), ["global", "handle"]);
 });
