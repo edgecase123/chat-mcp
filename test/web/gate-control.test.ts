@@ -47,6 +47,7 @@ test("every illegal shape is refused, and says which rule it broke", () => {
   for (const [raw, reason] of cases) {
     const out = gateSubmission(raw);
     assert.equal(out.ok, false, `${raw} was accepted`);
+    assert.ok(out.reason, `${raw} was refused with no reason at all`);
     assert.match(out.reason, reason, `${raw} gave the wrong reason`);
   }
 });
@@ -63,11 +64,7 @@ test("a gate well above the current fill carries NO warning", () => {
 test("a gate at or below the current fill warns, and names SILENCE as the risk", () => {
   for (const gate of [20, 14, 10]) {
     const risk = gateRisk(gate, 20);
-    assert.notEqual(
-      risk,
-      null,
-      `gate ${gate} under a 20% fill gave no warning`,
-    );
+    assert.ok(risk, `gate ${gate} under a 20% fill gave no warning`);
     assert.match(
       risk.message,
       /nothing will restart|never restart/i,
@@ -84,7 +81,7 @@ test("a gate at or below the current fill warns, and names SILENCE as the risk",
  */
 test("the equal case is SILENT — at or below, not strictly below", () => {
   const risk = gateRisk(20, 20);
-  assert.notEqual(risk, null, "gate == fill was treated as safe");
+  assert.ok(risk, "gate == fill was treated as safe");
   assert.equal(risk.severity, "silent", "gate == fill was downgraded to soon");
 });
 
@@ -95,14 +92,18 @@ test("the equal case is SILENT — at or below, not strictly below", () => {
  */
 test("a gate just above the current fill warns that it fires SOON, not that it silences", () => {
   const risk = gateRisk(23, 20);
-  assert.notEqual(risk, null, "a 3-point margin gave no note at all");
+  assert.ok(risk, "a 3-point margin gave no note at all");
   assert.equal(risk.severity, "soon");
   assert.doesNotMatch(risk.message, /nothing will restart|never restart/i);
 });
 
 test("the two severities are distinct, so the UI can style them apart", () => {
-  assert.equal(gateRisk(10, 20).severity, "silent");
-  assert.equal(gateRisk(23, 20).severity, "soon");
+  const under = gateRisk(10, 20);
+  const above = gateRisk(23, 20);
+  assert.ok(under, "a gate under the fill gave no warning at all");
+  assert.ok(above, "a gate just above the fill gave no warning at all");
+  assert.equal(under.severity, "silent");
+  assert.equal(above.severity, "soon");
 });
 
 /**
