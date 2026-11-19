@@ -832,9 +832,9 @@ async function handleRoomStyle(
  * `assertLegalGate` defines 1..100, and a container child spawns near 14% fill.
  * A gate at or below that fill does NOT loop — `checkContextGate` compares the
  * gate against `childFloor`, logs once and returns for the child's whole life,
- * so NOTHING restarts. Proven by
- * `test/supervise/context-gate-restart.test.ts:270`, with the positive control
- * at `:303`.
+ * so NOTHING restarts. Proven by "a gate under the child's spawn fill does NOT
+ * restart it, and says why", with its positive control "a gate above the spawn
+ * fill still fires on a later reading".
  *
  * Refusing it here would put a second, stricter legality rule one layer above
  * the one the supervisor reads. Warning the operator is the SET surface's job.

@@ -1157,6 +1157,84 @@ export function gaugeDisplay(peer) {
   };
 }
 
+/**
+ * Turn what the operator typed into a gate, a clear, or a refusal (#135 unit 4).
+ *
+ * An EMPTY box is a CLEAR, not a zero. `setHandleContextGate(…, null)` returns
+ * a handle to the global default, and that is the only way to undo an override,
+ * so the control needs a spelling for it.
+ *
+ * 🛑 THE FOUR REFUSAL CLAUSES MATCH `isLegalGate` IN
+ * `src/storage/context-gate.ts`, CLAUSE FOR CLAUSE. This is a second copy of
+ * that rule and it exists only to answer the operator before a round trip —
+ * the route refuses the same shapes, and a test asserts the stored value did
+ * not move. If one side changes, both must.
+ */
+export function gateSubmission(raw) {
+  const text = String(raw ?? "").trim();
+
+  if (text === "") return { ok: true, gate: null };
+
+  if (!/^\d+$/.test(text)) {
+    return {
+      ok: false,
+      reason: /^-?\d*\.\d+$/.test(text)
+        ? "a gate must be a whole percentage, not a fraction"
+        : "a gate must be a number from 1 to 100",
+    };
+  }
+
+  const gate = Number(text);
+
+  if (gate < 1 || gate > 100) {
+    return { ok: false, reason: "a gate must be from 1 to 100" };
+  }
+
+  return { ok: true, gate };
+}
+
+/** How close a gate sits to the fill the peer is already reporting. */
+const SOON_MARGIN = 5;
+
+/**
+ * What a gate will do to a peer that is already at `fillPercent`, or null when
+ * there is nothing worth saying.
+ *
+ * 🛑 THE BROWSER CANNOT SEE THE SPAWN FLOOR, SO THIS USES CURRENT FILL. The
+ * supervisor compares a gate against `childFloor`, a local in its own process
+ * that reaches no table. Current fill is always at or above that floor, so a
+ * gate under current fill may fire at once OR silence the child permanently,
+ * and this cannot tell those apart. The `silent` copy names the worse one
+ * because it is the one an operator would not predict.
+ *
+ * ⚠️ `>=`, NOT `>`. A gate exactly equal to the floor silences the child —
+ * `checkContextGate` tests `childFloor >= gate`. Proven by "a gate under the
+ * child's spawn fill does NOT restart it, and says why".
+ */
+export function gateRisk(gate, fillPercent) {
+  if (typeof fillPercent !== "number" || !Number.isFinite(fillPercent)) {
+    return null;
+  }
+
+  if (gate <= fillPercent) {
+    return {
+      severity: "silent",
+      message:
+        `this agent already reports ${fillPercent}% — a gate at or below its ` +
+        `spawn fill means nothing will restart it, and the supervisor says so once`,
+    };
+  }
+
+  if (gate - fillPercent <= SOON_MARGIN) {
+    return {
+      severity: "soon",
+      message: `this agent is at ${fillPercent}%, so a gate of ${gate}% fires within a few turns`,
+    };
+  }
+
+  return null;
+}
+
 /** A duration a human reads at a glance. Exported for its own test. */
 export function ageLabel(ms) {
   if (ms == null) return "never reported";
