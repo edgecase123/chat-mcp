@@ -425,7 +425,17 @@ test("🛑 a gate change refetches both payloads, not just the rows", () => {
  * 3  renamed to loadClaims AND cut           pass  <-OPEN   FAIL
  * 4  await dropped AND cut                   FAIL           FAIL
  * 5  Promise.all refactor, still in boot     pass           pass
+ * 6  declared `const … = async function`     n/a            FAIL
+ * 7  declared `const … = async () =>`        n/a            FAIL
  * ```
+ *
+ * 🛑 ARMS 6 AND 7 ARE WHY `declared` READS TWO FORMS, NOT ONE. Keying only on
+ * `function name(` left a view declared as a `const` invisible to the matcher,
+ * and the floor's margin of one absorbed the shrink — the same arithmetic as
+ * the `>= 4` floor it replaced, one layer up. Raised by claude2 re-reviewing
+ * this PR, who measured the gap and then declined to claim their own fix
+ * worked, because their re-implementation and the real file disagreed. The
+ * real file is the instrument: patched and re-run here, it closes both arms.
  *
  * ⚠️ `await (\w+)\(` WAS ALSO MEASURED AND IS WORSE. It closes arm 3, reopens
  * arm 4, and false-alarms on arm 5 — `await Promise.all([…])` collapses the
@@ -448,9 +458,14 @@ test("🛑 every view refresh() fills, boot() fills too — an empty panel must 
   // Top-level functions `app.js` defines. A call to one of these is a view
   // this file owns; `console.error` and `Promise.all` are not, which is what
   // keeps the match from needing an exemption list that grows.
-  const declared = new Set(
-    [...APP_CODE.matchAll(/^(?:async )?function (\w+)\(/gm)].map((m) => m[1]!),
-  );
+  const declared = new Set([
+    ...[...APP_CODE.matchAll(/^(?:async )?function (\w+)\(/gm)].map(
+      (m) => m[1]!,
+    ),
+    ...[
+      ...APP_CODE.matchAll(/^const (\w+) = (?:async )?(?:function\s*)?\(/gm),
+    ].map((m) => m[1]!),
+  ]);
 
   // 🛑 `refresh` ITSELF IS EXCLUDED BECAUSE fnBody CAPTURES THE SIGNATURE LINE.
   // Without this the guard demands that boot() call refresh(), which is the one
