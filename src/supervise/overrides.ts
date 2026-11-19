@@ -21,7 +21,30 @@ export const ALLOWED_OVERRIDE_KEYS = [
 
 export type AllowedOverrideKey = (typeof ALLOWED_OVERRIDE_KEYS)[number];
 
-export type HandleOverride = Partial<Record<AllowedOverrideKey, unknown>>;
+/**
+ * Every key a human may write in a HANDLE file: the five, plus the pointer.
+ *
+ * 🛑 `profile` IS NOT A SIXTH CONTAINER KEY. It names a second file whose
+ * contents are the five. Putting it in `ALLOWED_OVERRIDE_KEYS` would read as
+ * another thing docker can be told, and a profile file would then accept it.
+ */
+export const ALLOWED_HANDLE_KEYS = [
+  ...ALLOWED_OVERRIDE_KEYS,
+  "profile",
+] as const;
+
+export type AllowedHandleKey = (typeof ALLOWED_HANDLE_KEYS)[number];
+
+/** What reaches a spawn: the five keys, each already checked. */
+export type ContainerOverride = {
+  env?: Record<string, string>;
+  readOnlyMounts?: string[];
+  image?: string;
+  memory?: string;
+  cpus?: string;
+};
+
+export type HandleOverride = ContainerOverride & { profile?: string };
 
 /**
  * The escalations somebody reaches for on purpose, each with its own sentence.
@@ -93,6 +116,16 @@ function checkEnv(value: unknown): Record<string, string> {
       throw new Error(`\`env\` value for ${name} must be a string`);
     }
 
+    // 🛑 `docker run -e` IS IMMUNE AND `--env-file` IS NOT. The flag sets one
+    // multi-line variable; the file is parsed by line, so a newline here
+    // declares a SECOND variable, which may name a reserved credential.
+    if (/[\n\r\u0000]/.test(raw)) {
+      throw new Error(
+        `\`env\` value for ${name} may not contain a newline or a NUL: ` +
+          "a line break declares a second variable in an env file",
+      );
+    }
+
     out[name] = raw;
   }
 
@@ -128,9 +161,24 @@ function checkReadOnlyMounts(value: unknown): string[] {
       );
     }
 
-    if (entry.split("/").includes("..")) {
+    const segments = entry.split("/");
+
+    if (segments.includes("..")) {
       throw new Error(
         `a read-only mount may not climb out of the project: ${entry}`,
+      );
+    }
+
+    // 🛑 ONE PATH, ONE SPELLING. The duplicate check below compares STRINGS,
+    // so `docs` and `./docs` were two mounts of one directory — and the merge
+    // unions two files, which doubles the chance of a second spelling.
+    // Refused rather than normalised, for the reason in this docblock.
+    // Case is NOT folded: `Docs` is a different directory where the
+    // filesystem is case-sensitive, so the pair is legal.
+    if (segments.includes(".") || segments.includes("")) {
+      throw new Error(
+        "a read-only mount must be in canonical form, with no `.` segment, " +
+          `no doubled slash and no trailing slash: ${entry}`,
       );
     }
 
@@ -166,6 +214,27 @@ function exampleFor(key: "image" | "memory" | "cpus"): string {
   return "2";
 }
 
+/**
+ * 🛑 ZERO IS NOT A SMALL LIMIT, IT IS NO LIMIT. Measured on this host,
+ * docker 24.0.7: `--memory 0` leaves `memory.max` at `max`, and `--cpus 0`
+ * leaves `cpu.max` with no quota.
+ *
+ * ⚠️ THE ADD-ONLY RULING CANNOT REACH THIS. The ruling protects a NAME, and
+ * for these two keys the value is the only thing there is — so a handle file
+ * writing `"memory": "0"` would nullify a profile's cap and obey the letter
+ * of the ruling. Found by `security-scanner` on PR 333.
+ */
+function refuseNoLimit(key: "memory" | "cpus", value: string): void {
+  const digits = key === "memory" ? value.replace(/[bkmg]$/i, "") : value;
+
+  if (Number(digits) === 0) {
+    throw new Error(
+      `\`${key}\` may not be zero: docker reads zero as no limit, so the ` +
+        "override would widen the container rather than narrow it",
+    );
+  }
+}
+
 function checkPattern(
   key: "image" | "memory" | "cpus",
   value: unknown,
@@ -187,11 +256,35 @@ function checkPattern(
     );
   }
 
+  if (key !== "image") refuseNoLimit(key, value);
+
   return value;
 }
 
-function isAllowed(key: string): key is AllowedOverrideKey {
-  return (ALLOWED_OVERRIDE_KEYS as readonly string[]).includes(key);
+/**
+ * A profile name, which is deliberately narrower than a filename.
+ *
+ * 🛑 THE NAME BECOMES A PATH SEGMENT. Refusing the dot and the slash outright
+ * is narrower than resolving the path and checking where it landed, and it
+ * cannot disagree with whatever the reader of the profiles directory does.
+ */
+const PROFILE_NAME = /^[a-z0-9][a-z0-9-]*$/;
+
+function checkProfileName(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error(
+      `a profile name must be a quoted string: ${JSON.stringify(value)}`,
+    );
+  }
+
+  if (!PROFILE_NAME.test(value)) {
+    throw new Error(
+      "a profile name holds only lower-case letters, digits and dashes, " +
+        `and starts with a letter or a digit: ${JSON.stringify(value)}`,
+    );
+  }
+
+  return value;
 }
 
 /**
@@ -201,7 +294,53 @@ function isAllowed(key: string): key is AllowedOverrideKey {
  * escalation sit beside a legal key and apply the legal half, so the human
  * would see a spawn that worked and a flag that silently did not.
  */
-export function parseHandleOverride(raw: unknown): HandleOverride {
+/**
+ * The value check for every key a handle may set.
+ *
+ * 🛑 `Record<AllowedHandleKey, …>` IS THE GUARD. A key added to
+ * `ALLOWED_HANDLE_KEYS` with no check here does not compile, so an unchecked
+ * value can never reach a spawn. Found by `dry-solid-reviewer` on PR 333.
+ */
+const VALUE_CHECKS: Record<AllowedHandleKey, (value: unknown) => unknown> = {
+  env: checkEnv,
+  readOnlyMounts: checkReadOnlyMounts,
+  image: (value) => checkPattern("image", value, IMAGE_REF),
+  memory: (value) => checkPattern("memory", value, MEMORY),
+  cpus: (value) => checkPattern("cpus", value, CPUS),
+  profile: checkProfileName,
+};
+
+/**
+ * The container keys whose values UNION on a merge rather than replace.
+ *
+ * 🛑 `satisfies` IS THE GUARD. `SCALAR_KEYS` is the complement of this list,
+ * so a misspelled entry here would not fail: it would quietly move a real key
+ * into the replacing half, and a handle file could then drop what a profile
+ * set. A spelling that is not a container key does not compile. Found by
+ * claude2 on PR 333.
+ */
+export const UNION_KEYS = [
+  "env",
+  "readOnlyMounts",
+] as const satisfies readonly AllowedOverrideKey[];
+
+/**
+ * The container keys a later value simply replaces.
+ *
+ * 🛑 DERIVED, NOT A THIRD COPY OF THE LIST. A hand-kept copy that missed a
+ * sixth container key would drop that key from BOTH sides of the merge, and
+ * the spawn would run without it with nothing printed. Found by
+ * `dry-solid-reviewer` on PR 333.
+ */
+export const SCALAR_KEYS = ALLOWED_OVERRIDE_KEYS.filter(
+  (key): key is Exclude<AllowedOverrideKey, (typeof UNION_KEYS)[number]> =>
+    !(UNION_KEYS as readonly string[]).includes(key),
+);
+
+function parseAgainst(
+  raw: unknown,
+  allowed: readonly string[],
+): HandleOverride {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("an override must be a JSON object");
   }
@@ -213,20 +352,93 @@ export function parseHandleOverride(raw: unknown): HandleOverride {
 
     if (explained) throw new Error(explained);
 
-    if (!isAllowed(key)) {
+    if (!allowed.includes(key)) {
       throw new Error(
         `unknown key ${JSON.stringify(key)}; an override may set only ` +
-          ALLOWED_OVERRIDE_KEYS.join(", "),
+          allowed.join(", "),
       );
     }
 
-    if (key === "env") out.env = checkEnv(value);
-    else if (key === "readOnlyMounts")
-      out.readOnlyMounts = checkReadOnlyMounts(value);
-    else if (key === "image") out.image = checkPattern(key, value, IMAGE_REF);
-    else if (key === "memory") out.memory = checkPattern(key, value, MEMORY);
-    else out.cpus = checkPattern(key, value, CPUS);
+    // 🛑 THE TABLE IS EXHAUSTIVE BY TYPE, which an if/else chain was not. Its
+    // terminal `else` meant `profile`, so a sixth allowed key with no branch
+    // of its own was read AS a profile name — a guard that failed open.
+    (out as Record<string, unknown>)[key] =
+      VALUE_CHECKS[key as AllowedHandleKey](value);
   }
 
   return out;
+}
+
+export function parseHandleOverride(raw: unknown): HandleOverride {
+  return parseAgainst(raw, ALLOWED_HANDLE_KEYS);
+}
+
+/**
+ * Validate one profile file, or throw naming the key.
+ *
+ * 🛑 A PROFILE MAY NOT NAME A PROFILE. A pointer inside a profile makes the
+ * files a graph, and resolving a graph needs cycle detection that lee's
+ * ruling of 2026-11-19 never asked for. Two layers, profile then handle.
+ */
+export function parseProfile(raw: unknown): ContainerOverride {
+  if (raw !== null && typeof raw === "object" && "profile" in raw) {
+    throw new Error(
+      "a profile may not set a profile name: only a handle points at a " +
+        "profile, so the files stay two layers rather than a graph",
+    );
+  }
+
+  // ⚠️ DESTRUCTURED, NOT CAST. The pre-check above carries the message a
+  // human can act on; this line is what makes the narrowed return type true
+  // rather than merely assignable.
+  const { profile: _pointer, ...container } = parseAgainst(
+    raw,
+    ALLOWED_OVERRIDE_KEYS,
+  );
+
+  return container;
+}
+
+/**
+ * Apply a handle's override on top of its profile's, ADD-only.
+ *
+ * 🛑 ADD-ONLY IS lee's RULING OF 2026-11-19 (`#mcp` 15889). A handle may
+ * change what a name is SET TO. No handle file can express dropping a name
+ * the profile contributed, which is why this unions rather than replaces.
+ *
+ * 🛑 THE TWO LAYERS ARE NAMED RATHER THAN ORDERED. Positionally, `profile`
+ * is optional on a handle, so the transposed call type-checked and silently
+ * inverted the ruling. Found by `security-scanner` on PR 333.
+ */
+export function mergeOverrides({
+  profile,
+  handle,
+}: {
+  profile: ContainerOverride;
+  handle: HandleOverride;
+}): ContainerOverride {
+  const merged: ContainerOverride = {};
+
+  if (profile.env || handle.env) {
+    merged.env = { ...profile.env, ...handle.env };
+  }
+
+  if (profile.readOnlyMounts || handle.readOnlyMounts) {
+    // 🛑 DEDUPED. A repeated `-v` puts one directory at one destination twice,
+    // and docker's own error for that names neither mount.
+    merged.readOnlyMounts = [
+      ...new Set([
+        ...(profile.readOnlyMounts ?? []),
+        ...(handle.readOnlyMounts ?? []),
+      ]),
+    ];
+  }
+
+  for (const key of SCALAR_KEYS) {
+    const value = handle[key] ?? profile[key];
+
+    if (value !== undefined) merged[key] = value;
+  }
+
+  return merged;
 }

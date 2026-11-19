@@ -1,10 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { AllowedOverrideKey } from "../../src/supervise/overrides.js";
 import {
+  ALLOWED_HANDLE_KEYS,
   ALLOWED_OVERRIDE_KEYS,
   EXPLAINED_REFUSALS,
   RESERVED_ENV_NAMES,
+  SCALAR_KEYS,
+  UNION_KEYS,
+  mergeOverrides,
   parseHandleOverride,
+  parseProfile,
 } from "../../src/supervise/overrides.js";
 
 /**
@@ -343,4 +349,452 @@ test("a number value is refused with a message naming the quoted form", () => {
   }
 
   assert.equal(cases.length, 3);
+});
+
+/* ------------------------------------------------------------------------ *
+ * #222 unit 3 — the `profile` key and the ADD-only merge.
+ *
+ * 🛑 THE CONTAINER SURFACE STAYS AT FIVE KEYS. `profile` is a POINTER to a
+ * second file, not a sixth thing the container can be told. That is why the
+ * handle file accepts six names and a profile file accepts five.
+ *
+ * 🛑 ADD-ONLY IS lee's RULING OF 2026-11-19 (`#mcp` 15889). A merge may
+ * overwrite a VALUE and may never drop a NAME, so every name the profile
+ * contributes survives whatever the handle file says.
+ * ------------------------------------------------------------------------ */
+
+/** A legal profile name, which is deliberately not a legal path. */
+const PROFILE_NAMES = ["reviewer", "browser", "browser-2", "a", "0"];
+
+test("the container keys stay at five and only a handle may name a profile", () => {
+  assert.deepEqual([...ALLOWED_OVERRIDE_KEYS], ALLOWED);
+  assert.equal(ALLOWED_OVERRIDE_KEYS.length, 5);
+
+  // 🛑 THE POINTER IS NOT A CONTAINER SETTING. A `profile` added to
+  // ALLOWED_OVERRIDE_KEYS would read as a sixth thing docker is told.
+  assert.ok(!ALLOWED_OVERRIDE_KEYS.includes("profile" as never));
+  assert.deepEqual([...ALLOWED_HANDLE_KEYS], [...ALLOWED, "profile"]);
+  assert.equal(ALLOWED_HANDLE_KEYS.length, 6);
+});
+
+test("a handle override may name a profile", () => {
+  let accepted = 0;
+
+  for (const name of PROFILE_NAMES) {
+    assert.deepEqual(
+      parseHandleOverride({ profile: name }),
+      { profile: name },
+      `refused a legal profile name: ${name}`,
+    );
+    accepted += 1;
+  }
+
+  // 🛑 THE POSITIVE CONTROL. A parse that refused every name would satisfy
+  // every refusal below and report green.
+  assert.equal(accepted, PROFILE_NAMES.length);
+  assert.equal(accepted, 5);
+});
+
+/**
+ * 🛑 THE NAME BECOMES A FILENAME, so a name that is a path is a traversal.
+ * `profiles/../../.ssh/id_ed25519` is the shape this refuses, and refusing
+ * the dot and the slash outright is narrower than resolving the path and
+ * checking where it landed.
+ */
+test("a profile name can never be a path", () => {
+  const refused: [string, unknown][] = [
+    ["climbs out", "../escape"],
+    ["has a slash", "a/b"],
+    ["is a bare dot-dot", ".."],
+    ["carries an extension", "a.json"],
+    ["is dot-relative", "./a"],
+    ["is absolute", "/etc/passwd"],
+    ["is upper case", "Reviewer"],
+    ["is empty", ""],
+    ["leads with a dash", "-x"],
+    ["holds an underscore", "a_b"],
+    ["holds a space", "a b"],
+    ["is a number", 2],
+    ["is an array", ["reviewer"]],
+    ["is null", null],
+  ];
+
+  for (const [why, name] of refused) {
+    assert.throws(
+      () => parseHandleOverride({ profile: name }),
+      (err: unknown) => {
+        const message = (err as Error).message;
+
+        // 🛑 NOT THE GENERIC REFUSAL. Before `profile` was allowed at all,
+        // every case here threw `unknown key "profile"`, which matches
+        // /profile/i and made this whole test pass against no implementation.
+        assert.ok(
+          !/unknown key/i.test(message),
+          `${why} hit the unknown-key refusal, so the name was never checked: ${message}`,
+        );
+        assert.match(message, /profile name/i, `${why}: ${message}`);
+
+        return true;
+      },
+      `accepted a profile name that ${why}: ${JSON.stringify(name)}`,
+    );
+  }
+
+  assert.equal(refused.length, 14);
+});
+
+test("a profile file carries the five keys and may not name another profile", () => {
+  for (const key of ALLOWED) {
+    const out = parseProfile({ [key]: sampleFor(key) });
+
+    assert.ok(key in out, `a profile file dropped ${key}`);
+  }
+
+  // 🛑 NO CHAINING. A profile that names a profile is a graph, and a graph
+  // needs cycle detection the ruling never asked for.
+  assert.throws(
+    () => parseProfile({ profile: "reviewer" }),
+    (err: unknown) => {
+      const message = (err as Error).message;
+
+      // 🛑 ITS OWN SENTENCE, NOT THE GENERIC ONE. `unknown key "profile"`
+      // matches /profile/i and would tell the human nothing about why.
+      assert.ok(!/unknown key/i.test(message), message);
+      assert.match(message, /may not set a profile name/i, message);
+
+      return true;
+    },
+    "a profile named another profile",
+  );
+});
+
+test("the merge unions env, and the handle wins on a collision", () => {
+  const merged = mergeOverrides({
+    profile: { env: { SHARED: "from-profile", ONLY_PROFILE: "1" } },
+    handle: { env: { SHARED: "from-handle", ONLY_HANDLE: "1" } },
+  });
+
+  assert.deepEqual(merged.env, {
+    SHARED: "from-handle",
+    ONLY_PROFILE: "1",
+    ONLY_HANDLE: "1",
+  });
+});
+
+test("the merge unions readOnlyMounts, profile first, with no duplicate", () => {
+  const merged = mergeOverrides({
+    profile: { readOnlyMounts: ["docs", "web/assets"] },
+    handle: { readOnlyMounts: ["web/assets", "plans"] },
+  });
+
+  // 🛑 DEDUPED, because a repeated `-v` puts one directory at one destination
+  // twice and docker's own error for that is unreadable.
+  assert.deepEqual(merged.readOnlyMounts, ["docs", "web/assets", "plans"]);
+});
+
+test("image, memory and cpus are replaced by the handle", () => {
+  const merged = mergeOverrides({
+    profile: { image: "node:22-slim", memory: "4g", cpus: "4" },
+    handle: { memory: "2g" },
+  });
+
+  assert.deepEqual(merged, {
+    image: "node:22-slim",
+    memory: "2g",
+    cpus: "4",
+  });
+});
+
+/**
+ * 🛑 THE ADD-ONLY INVARIANT, AND IT IS THE WHOLE RULING. A handle may change
+ * what a name is set to. No handle file can express dropping the name.
+ */
+test("the merge can never remove an env name or a mount the profile set", () => {
+  const profile = {
+    env: { KEPT: "1", BLANKED: "1" },
+    readOnlyMounts: ["docs"],
+  };
+
+  const attempts: [string, Record<string, unknown>][] = [
+    ["an empty value", { env: { BLANKED: "" } }],
+    ["an empty env object", { env: {} }],
+    ["an empty mount list", { readOnlyMounts: [] }],
+    ["an unrelated key", { image: "node:22-slim" }],
+  ];
+
+  for (const [why, handle] of attempts) {
+    const merged = mergeOverrides({ profile, handle });
+
+    for (const name of Object.keys(profile.env)) {
+      assert.ok(
+        merged.env && name in merged.env,
+        `${why} removed the env name ${name}`,
+      );
+    }
+
+    assert.ok(
+      merged.readOnlyMounts?.includes("docs"),
+      `${why} removed the mount docs`,
+    );
+  }
+
+  assert.equal(attempts.length, 4);
+});
+
+test("the merged result never carries the profile pointer", () => {
+  const merged = mergeOverrides({
+    profile: { image: "node:22-slim" },
+    handle: { profile: "reviewer", memory: "2g" },
+  });
+
+  // 🛑 A POINTER THAT SURVIVED THE MERGE WOULD REACH A SPAWN, where it is
+  // neither a docker flag nor an error anybody sees.
+  assert.ok(!("profile" in merged), "the pointer survived into the merge");
+  assert.deepEqual(merged, { image: "node:22-slim", memory: "2g" });
+});
+
+/* ------------------------------------------------------------------------ *
+ * #222 unit 3, review remediation. Both reviewers on PR 333 found the same
+ * fall-through, and the security scanner found three ways a value defeats a
+ * ruling the keys already enforce.
+ * ------------------------------------------------------------------------ */
+
+test("every container key has a merge policy, and the two lists partition it", () => {
+  // 🛑 A HAND-KEPT SCALAR LIST WOULD DROP A SIXTH KEY FROM BOTH SIDES of the
+  // merge, and the spawn would run without it with nothing printed.
+  assert.deepEqual(
+    [...UNION_KEYS, ...SCALAR_KEYS].sort(),
+    [...ALLOWED_OVERRIDE_KEYS].sort(),
+  );
+  assert.equal(UNION_KEYS.length + SCALAR_KEYS.length, 5);
+});
+
+/**
+ * 🛑 EVERY ALLOWED KEY HAS ITS OWN CHECK, which is the fall-through both
+ * reviewers found. The chain's terminal `else` meant `profile`, so a sixth
+ * allowed key with no branch would have been validated as a FILENAME.
+ */
+test("every key a handle may set refuses an illegal value, naming that key", () => {
+  const illegal: Record<string, unknown> = {
+    env: "not-an-object",
+    readOnlyMounts: "not-an-array",
+    image: "-v /:/host",
+    memory: "not-a-size",
+    cpus: "not-a-number",
+    profile: "../escape",
+  };
+
+  for (const key of ALLOWED_HANDLE_KEYS) {
+    assert.throws(
+      () => parseHandleOverride({ [key]: illegal[key] }),
+      (err: unknown) => {
+        const message = (err as Error).message;
+
+        assert.ok(
+          !/unknown key/i.test(message),
+          `${key} was refused as unknown rather than checked: ${message}`,
+        );
+
+        return true;
+      },
+      `${key} accepted an illegal value, so it has no check of its own`,
+    );
+  }
+
+  assert.equal(ALLOWED_HANDLE_KEYS.length, 6);
+  assert.equal(Object.keys(illegal).length, 6);
+});
+
+/**
+ * 🛑 A VALUE CAN DEFEAT THE ADD-ONLY RULING WHERE A KEY CANNOT. The ruling
+ * protects NAMES, and for these two keys the value is the only thing there is.
+ * Docker reads zero as NO limit, so `"memory": "0"` in a handle file nullifies
+ * a profile's cap while obeying the letter of the ruling.
+ */
+test("a zero memory or cpus limit is refused, because docker reads it as no limit", () => {
+  const nullified: [string, Record<string, unknown>][] = [
+    ["bare zero memory", { memory: "0" }],
+    ["zero megabytes", { memory: "0m" }],
+    ["zero gigabytes", { memory: "0G" }],
+    ["padded zero memory", { memory: "00" }],
+    ["zero cpus", { cpus: "0" }],
+    ["zero point zero cpus", { cpus: "0.0" }],
+    ["many zero cpus", { cpus: "0.000" }],
+  ];
+
+  for (const [why, raw] of nullified) {
+    assert.throws(
+      () => parseHandleOverride(raw),
+      /no limit/i,
+      `accepted a limit that removes the limit: ${why}`,
+    );
+  }
+
+  // 🛑 THE POSITIVE CONTROL. A check that refused every limit would satisfy
+  // all seven cases above.
+  assert.equal(parseHandleOverride({ memory: "1" }).memory, "1");
+  assert.equal(parseHandleOverride({ cpus: "0.5" }).cpus, "0.5");
+  assert.equal(nullified.length, 7);
+});
+
+/**
+ * 🛑 A NEWLINE IN AN ENV VALUE RE-INTRODUCES A RESERVED NAME. `docker run -e`
+ * is immune, because it sets one multi-line variable. `--env-file` is
+ * line-based, and `--env-file` plus `writePrivateFileSync` is the documented
+ * way to keep a secret out of argv — so the next unit on that path walks into
+ * this. Found by `security-scanner` on PR 333.
+ */
+test("an env value may not carry a newline, which --env-file reads as a second variable", () => {
+  const smuggled: [string, string][] = [
+    ["a newline", "x\nCLAUDE_CODE_OAUTH_TOKEN=stolen"],
+    ["a carriage return", "x\rGH_TOKEN=stolen"],
+    ["a NUL", "x\u0000GH_TOKEN=stolen"],
+  ];
+
+  for (const [why, value] of smuggled) {
+    assert.throws(
+      () => parseHandleOverride({ env: { FOO: value } }),
+      /newline|line break|control character/i,
+      `accepted an env value holding ${why}`,
+    );
+  }
+
+  // 🛑 THE POSITIVE CONTROL. An ordinary value still passes.
+  assert.deepEqual(parseHandleOverride({ env: { FOO: "plain value" } }).env, {
+    FOO: "plain value",
+  });
+  assert.equal(smuggled.length, 3);
+});
+
+/**
+ * 🛑 THE DEDUP COMPARED STRINGS, SO A SECOND SPELLING OF ONE PATH BEAT IT.
+ * `"docs"` in a profile and `"./docs"` in a handle produced TWO mounts of one
+ * directory, which is the exact harm `checkReadOnlyMounts`' own docblock names.
+ * Found by claude2 reviewing PR 333 at `e790869`.
+ *
+ * 🛑 REFUSED, NOT NORMALISED. Normalising here would disagree with the
+ * driver's own containment check, and two readings of one path is what puts a
+ * directory at two destinations.
+ */
+test("a mount path must be in canonical form, so one path has one spelling", () => {
+  const refused: [string, string][] = [
+    ["a dot-relative prefix", "./docs"],
+    ["a bare dot segment", "docs/./sub"],
+    ["a trailing slash", "docs/"],
+    ["a doubled slash", "docs//sub"],
+    ["a lone dot", "."],
+  ];
+
+  for (const [why, entry] of refused) {
+    assert.throws(
+      () => parseHandleOverride({ readOnlyMounts: [entry] }),
+      /mount/i,
+      `accepted ${why}: ${JSON.stringify(entry)}`,
+    );
+  }
+
+  // 🛑 THE POSITIVE CONTROL. A check that refused every path would satisfy
+  // all five cases above.
+  assert.deepEqual(
+    parseHandleOverride({ readOnlyMounts: ["docs", "web/assets", "Docs"] })
+      .readOnlyMounts,
+    ["docs", "web/assets", "Docs"],
+  );
+  assert.equal(refused.length, 5);
+});
+
+test("the merge cannot mount one directory twice through two spellings", () => {
+  // 🛑 THE DEDUP IS NOW LOAD-BEARING ONLY FOR THE EXACT REPEAT. Every other
+  // spelling is refused before it reaches the merge, which is why this asserts
+  // the refusal rather than a deduped result.
+  for (const spelling of ["./docs", "docs/", "docs//sub"]) {
+    assert.throws(
+      () => parseHandleOverride({ readOnlyMounts: [spelling] }),
+      /mount/i,
+      `a second spelling reached the merge: ${spelling}`,
+    );
+  }
+
+  const merged = mergeOverrides({
+    profile: parseProfile({ readOnlyMounts: ["docs"] }),
+    handle: parseHandleOverride({ readOnlyMounts: ["docs", "plans"] }),
+  });
+
+  assert.deepEqual(merged.readOnlyMounts, ["docs", "plans"]);
+});
+
+/**
+ * 🛑 A SIXTH CONTAINER KEY IS CLASSIFIED BY DEFAULT, AND THE DEFAULT IS WRONG.
+ * `SCALAR_KEYS` is the complement of `UNION_KEYS`, so a key nobody classified
+ * silently joins the REPLACING half — and a handle file could then drop what a
+ * profile set, which is the ADD-only ruling inverted with nothing printed.
+ *
+ * 🛑 `Record<AllowedOverrideKey, …>` IS THE GUARD. A new container key does not
+ * compile until someone writes down which half it belongs to. Found by claude2
+ * reviewing PR 333.
+ */
+const MERGE_BEHAVIOUR: Record<AllowedOverrideKey, "union" | "replace"> = {
+  env: "union",
+  readOnlyMounts: "union",
+  image: "replace",
+  memory: "replace",
+  cpus: "replace",
+};
+
+test("every container key is classified union or replace, and the lists agree", () => {
+  const declared = Object.entries(MERGE_BEHAVIOUR);
+
+  assert.deepEqual(
+    declared
+      .filter(([, how]) => how === "union")
+      .map(([key]) => key)
+      .sort(),
+    [...UNION_KEYS].sort(),
+  );
+
+  assert.deepEqual(
+    declared
+      .filter(([, how]) => how === "replace")
+      .map(([key]) => key)
+      .sort(),
+    [...SCALAR_KEYS].sort(),
+  );
+
+  // 🛑 THE DENOMINATOR. Two agreeing lists that both omit a key would pass
+  // every assertion above.
+  assert.deepEqual(
+    declared.map(([key]) => key).sort(),
+    [...ALLOWED_OVERRIDE_KEYS].sort(),
+  );
+});
+
+test("a union key keeps the profile's value and a scalar key loses it", () => {
+  const merged = mergeOverrides({
+    profile: parseProfile({
+      env: { FROM_PROFILE: "1" },
+      readOnlyMounts: ["docs"],
+      image: "profile-image",
+      memory: "512m",
+      cpus: "1",
+    }),
+    handle: parseHandleOverride({
+      env: { FROM_HANDLE: "2" },
+      readOnlyMounts: ["plans"],
+      image: "handle-image",
+      memory: "1g",
+      cpus: "2",
+    }),
+  });
+
+  // The union half keeps BOTH sides.
+  assert.deepEqual(Object.keys(merged.env ?? {}).sort(), [
+    "FROM_HANDLE",
+    "FROM_PROFILE",
+  ]);
+  assert.deepEqual(merged.readOnlyMounts, ["docs", "plans"]);
+
+  // The replacing half keeps the handle's value only.
+  assert.equal(merged.image, "handle-image");
+  assert.equal(merged.memory, "1g");
+  assert.equal(merged.cpus, "2");
 });
