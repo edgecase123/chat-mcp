@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 // The SERVER's copy of the byte cap, so the two can be compared.
 import * as dao from "../../src/storage/dao.js";
 // The browser file itself, imported directly. No DOM, no bundler, no copy.
@@ -494,11 +495,162 @@ test("each entry names its own target in the title", () => {
   assert.ok(menuEntriesFor("room", "#gate")[0]!.title.includes("#gate"));
 });
 
+/**
+ * The keys of `itemMenu`'s handler map in `app.js`, read out of the source.
+ *
+ * 🛑 THIS LIST USED TO BE A COPY MADE BY HAND, AND THE RENAME IT GUARDS WAS THE
+ * ONE THING IT COULD NOT SEE. Renaming `kickPeer` in `app.js` left all 200
+ * tests in this file green while the Kick entry became a dead button, because
+ * `menuEntry` treats a missing handler as nothing to bind rather than an error.
+ *
+ * 🛑 BOTH COMMENT FORMS ARE STRIPPED FIRST, so a docblock naming a key cannot
+ * stand in for the code. The sibling wiring tests learned this the hard way:
+ * a `/** ... *\/` sentence once satisfied a code assertion on a clean tree.
+ *
+ * 🛑 KEYS ARE COLLECTED BY BRACE DEPTH, NOT BY INDENT. The first cut matched
+ * `/^\s{4}(\w+):/gm`, so a handler written at any other indent was skipped —
+ * and a SKIPPED key is invisible to the reverse check below, which iterates
+ * only what was read. MEASURED: a sixth handler nothing routes to, indented
+ * six spaces, passed 202 of 202. Raised by claude1 reviewing this PR.
+ *
+ * 🛑 AN UNREADABLE KEY POSITION IS A HARD FAILURE, NOT A SKIP. Skipping it was
+ * the same fail-open one rung out: a shorthand-method handler, `mute(e) {…}`,
+ * has no `name:` colon, so the walk passed over it AND it contributed no arrow
+ * for the denominator to disagree about. MEASURED: a dead shorthand handler
+ * passed 202 of 202, and 199 of 202 once the skip became an assert. `mute(e)`
+ * is ordinary JS for a handler map, so this is an accident, not an evasion.
+ *
+ * ⚠️ THE DEPTH WALK COUNTS BRACES INSIDE STRING AND TEMPLATE LITERALS, the
+ * same caveat `agents-wiring.test.ts` documents for its own matcher. No
+ * handler in the map holds a brace in a literal today. One written with a
+ * `${…}` template would truncate the slice early, and the denominator test
+ * below is what turns that into a loud failure rather than a short list.
+ */
+/**
+ * `app.js` with both comment forms stripped.
+ *
+ * 🛑 THE WALK AND ITS DENOMINATOR MUST READ THE SAME SOURCE. They used to
+ * disagree: the walk stripped comments and the arrow count did not, so an
+ * ordinary `//` note holding `=>` inside the map turned the suite red and
+ * blamed the walk. MEASURED at 201 of 202. Raised by claude1 reviewing this PR.
+ */
+function appWithoutComments(): string {
+  return readFileSync(
+    new URL("../../web/assets/app.js", import.meta.url),
+    "utf8",
+  )
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
+}
+
+function appHandlerKeys(): string[] {
+  const app = appWithoutComments();
+
+  const start = app.indexOf("const handlers = {");
+
+  assert.notEqual(start, -1, "itemMenu's handler map not found in app.js");
+
+  const open = app.indexOf("{", start);
+  const keys: string[] = [];
+  let depth = 0;
+  let expectKey = false;
+  let end = -1;
+
+  for (let i = open; i < app.length; i++) {
+    const c = app[i]!;
+
+    if (c === "{") {
+      depth++;
+      if (depth === 1) expectKey = true;
+      continue;
+    }
+    if (c === "}") {
+      if (--depth === 0) {
+        end = i;
+        break;
+      }
+      continue;
+    }
+    if (depth === 1 && c === ",") {
+      expectKey = true;
+      continue;
+    }
+    if (!expectKey || depth !== 1 || /\s/.test(c)) continue;
+
+    const m = app.slice(i).match(/^([A-Za-z_$][\w$]*)\s*:/);
+
+    assert.ok(
+      m,
+      `itemMenu entry at offset ${i} is not a readable \`name:\` key: ${JSON.stringify(app.slice(i, i + 40))}`,
+    );
+
+    keys.push(m[1]!);
+    expectKey = false;
+  }
+
+  assert.notEqual(end, -1, "itemMenu's handler map is unbalanced");
+
+  return keys;
+}
+
+let handlerKeys: string[] | null = null;
+const appKeys = (): string[] => (handlerKeys ??= appHandlerKeys());
+
+/**
+ * 🛑 THE EXTRACTION'S OWN DENOMINATOR, COUNTED A SECOND WAY. An extraction that
+ * silently read SHORT makes the forward check fail loudly only when the missed
+ * key had an entry, and makes the reverse check pass over a key it never saw.
+ *
+ * 🛑 THE FLOOR IS NOT A HAND-WRITTEN 5. A constant equal to today's exact count
+ * has zero margin and proves only that the walk matched something today — a
+ * sixth handler that the walk missed still clears it. This counts the map's
+ * entries by a DIFFERENT signal, the arrows, and requires the two to agree.
+ *
+ * 🛑 THIS TEST IS STILL LOAD-BEARING AFTER THE WALK LEARNED TO REFUSE AN
+ * UNREADABLE KEY, AND THAT WAS MEASURED RATHER THAN ARGUED. The assert fires
+ * at a key position, so it cannot see a map TRUNCATED before one: an
+ * unbalanced brace in a string literal ends the walk, and a dead handler
+ * after it is read by nothing. MEASURED — `kickPeer: () => kickPeer("}")`
+ * followed by a dead `mute: () => 1` fails ONLY here, 201 of 202, and passes
+ * 202 of 202 with this assertion deleted.
+ */
+test("the walk read every entry in app.js's handler map", () => {
+  const app = appWithoutComments();
+  const map = app.slice(
+    app.indexOf("const handlers = {"),
+    app.indexOf("\n  };", app.indexOf("const handlers = {")),
+  );
+  const arrows = [...map.matchAll(/=>/g)].length;
+
+  assert.ok(appKeys().length > 0, "the walk read NO handler keys at all");
+  assert.equal(
+    appKeys().length,
+    arrows,
+    `the walk read ${appKeys().length} keys but the map holds ${arrows} arrow handlers: ${appKeys().join(", ")}`,
+  );
+});
+
 /** Every action must reach a handler, and app.js keys them by this string. */
 test("every action is one app.js has a handler for", () => {
-  const known = ["prefill", "copyName", "leaveRoom", "deleteRoom", "kickPeer"];
   for (const e of [...ROOM, ...PEER]) {
-    assert.ok(known.includes(e.action), `no handler key for "${e.action}"`);
+    assert.ok(
+      appKeys().includes(e.action),
+      `no handler key for "${e.action}" — app.js has ${appKeys().join(", ")}`,
+    );
+  }
+});
+
+/**
+ * The other direction. A handler nothing routes to is dead code that reads as
+ * live wiring, and renaming an ACTION rather than a handler produces exactly
+ * that shape.
+ */
+test("every app.js handler is one some entry routes to", () => {
+  const actions = new Set([...ROOM, ...PEER].map((e) => e.action));
+  for (const key of appKeys()) {
+    assert.ok(actions.has(key), `app.js handler "${key}" has no entry`);
   }
 });
 
