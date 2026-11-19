@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 // The SERVER's copy of the byte cap, so the two can be compared.
 import * as dao from "../../src/storage/dao.js";
 // The browser file itself, imported directly. No DOM, no bundler, no copy.
@@ -494,11 +495,92 @@ test("each entry names its own target in the title", () => {
   assert.ok(menuEntriesFor("room", "#gate")[0]!.title.includes("#gate"));
 });
 
+/**
+ * The keys of `itemMenu`'s handler map in `app.js`, read out of the source.
+ *
+ * 🛑 THIS LIST USED TO BE A COPY MADE BY HAND, AND THE RENAME IT GUARDS WAS THE
+ * ONE THING IT COULD NOT SEE. Renaming `kickPeer` in `app.js` left all 200
+ * tests in this file green while the Kick entry became a dead button, because
+ * `menuEntry` treats a missing handler as nothing to bind rather than an error.
+ *
+ * 🛑 BOTH COMMENT FORMS ARE STRIPPED FIRST, so a docblock naming a key cannot
+ * stand in for the code. The sibling wiring tests learned this the hard way:
+ * a `/** ... *\/` sentence once satisfied a code assertion on a clean tree.
+ *
+ * The map is matched by BRACE DEPTH rather than to the first `}`, because the
+ * arrow functions inside it each close a brace of their own.
+ */
+function appHandlerKeys(): string[] {
+  const app = readFileSync(
+    new URL("../../web/assets/app.js", import.meta.url),
+    "utf8",
+  )
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
+
+  const start = app.indexOf("const handlers = {");
+
+  assert.notEqual(start, -1, "itemMenu's handler map not found in app.js");
+
+  let depth = 0;
+  let end = -1;
+  for (let i = app.indexOf("{", start); i < app.length; i++) {
+    if (app[i] === "{") depth++;
+    else if (app[i] === "}" && --depth === 0) {
+      end = i;
+      break;
+    }
+  }
+
+  assert.notEqual(end, -1, "itemMenu's handler map is unbalanced");
+
+  return [...app.slice(start, end).matchAll(/^\s{4}(\w+):/gm)].map(
+    (m) => m[1]!,
+  );
+}
+
+/**
+ * ⚠️ RESOLVED LAZILY, NOT AT MODULE LOAD. A top-level call made a broken
+ * extraction throw during import, which the runner reported as an
+ * uncaughtException from async activity and took the other 199 tests in this
+ * file down with it. A named failure beats a louder one that says less.
+ */
+let handlerKeys: string[] | null = null;
+const appKeys = (): string[] => (handlerKeys ??= appHandlerKeys());
+
+/**
+ * 🛑 THE EXTRACTION'S OWN DENOMINATOR. A regex that silently matched nothing
+ * would make the forward check below fail loudly, but it would make the
+ * reverse check pass over an empty set and read as "no dead handlers".
+ */
+test("the handler keys were actually read out of app.js", () => {
+  assert.ok(
+    appKeys().length >= 5,
+    `read ${appKeys().length} handler keys from app.js, expected at least 5`,
+  );
+});
+
 /** Every action must reach a handler, and app.js keys them by this string. */
 test("every action is one app.js has a handler for", () => {
-  const known = ["prefill", "copyName", "leaveRoom", "deleteRoom", "kickPeer"];
   for (const e of [...ROOM, ...PEER]) {
-    assert.ok(known.includes(e.action), `no handler key for "${e.action}"`);
+    assert.ok(
+      appKeys().includes(e.action),
+      `no handler key for "${e.action}" — app.js has ${appKeys().join(", ")}`,
+    );
+  }
+});
+
+/**
+ * The other direction. A handler nothing routes to is dead code that reads as
+ * live wiring, and renaming an ACTION rather than a handler produces exactly
+ * that shape.
+ */
+test("every app.js handler is one some entry routes to", () => {
+  const actions = new Set([...ROOM, ...PEER].map((e) => e.action));
+  for (const key of appKeys()) {
+    assert.ok(actions.has(key), `app.js handler "${key}" has no entry`);
   }
 });
 
