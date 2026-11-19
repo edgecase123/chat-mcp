@@ -513,14 +513,29 @@ test("each entry names its own target in the title", () => {
  * only what was read. MEASURED: a sixth handler nothing routes to, indented
  * six spaces, passed 202 of 202. Raised by claude1 reviewing this PR.
  *
+ * 🛑 AN UNREADABLE KEY POSITION IS A HARD FAILURE, NOT A SKIP. Skipping it was
+ * the same fail-open one rung out: a shorthand-method handler, `mute(e) {…}`,
+ * has no `name:` colon, so the walk passed over it AND it contributed no arrow
+ * for the denominator to disagree about. MEASURED: a dead shorthand handler
+ * passed 202 of 202, and 199 of 202 once the skip became an assert. `mute(e)`
+ * is ordinary JS for a handler map, so this is an accident, not an evasion.
+ *
  * ⚠️ THE DEPTH WALK COUNTS BRACES INSIDE STRING AND TEMPLATE LITERALS, the
  * same caveat `agents-wiring.test.ts` documents for its own matcher. No
  * handler in the map holds a brace in a literal today. One written with a
  * `${…}` template would truncate the slice early, and the denominator test
  * below is what turns that into a loud failure rather than a short list.
  */
-function appHandlerKeys(): string[] {
-  const app = readFileSync(
+/**
+ * `app.js` with both comment forms stripped.
+ *
+ * 🛑 THE WALK AND ITS DENOMINATOR MUST READ THE SAME SOURCE. They used to
+ * disagree: the walk stripped comments and the arrow count did not, so an
+ * ordinary `//` note holding `=>` inside the map turned the suite red and
+ * blamed the walk. MEASURED at 201 of 202. Raised by claude1 reviewing this PR.
+ */
+function appWithoutComments(): string {
+  return readFileSync(
     new URL("../../web/assets/app.js", import.meta.url),
     "utf8",
   )
@@ -528,6 +543,10 @@ function appHandlerKeys(): string[] {
     .split("\n")
     .filter((line) => !line.trimStart().startsWith("//"))
     .join("\n");
+}
+
+function appHandlerKeys(): string[] {
+  const app = appWithoutComments();
 
   const start = app.indexOf("const handlers = {");
 
@@ -562,7 +581,12 @@ function appHandlerKeys(): string[] {
 
     const m = app.slice(i).match(/^([A-Za-z_$][\w$]*)\s*:/);
 
-    if (m) keys.push(m[1]!);
+    assert.ok(
+      m,
+      `itemMenu entry at offset ${i} is not a readable \`name:\` key: ${JSON.stringify(app.slice(i, i + 40))}`,
+    );
+
+    keys.push(m[1]!);
     expectKey = false;
   }
 
@@ -583,12 +607,17 @@ const appKeys = (): string[] => (handlerKeys ??= appHandlerKeys());
  * has zero margin and proves only that the walk matched something today — a
  * sixth handler that the walk missed still clears it. This counts the map's
  * entries by a DIFFERENT signal, the arrows, and requires the two to agree.
+ *
+ * 🛑 THIS TEST IS STILL LOAD-BEARING AFTER THE WALK LEARNED TO REFUSE AN
+ * UNREADABLE KEY, AND THAT WAS MEASURED RATHER THAN ARGUED. The assert fires
+ * at a key position, so it cannot see a map TRUNCATED before one: an
+ * unbalanced brace in a string literal ends the walk, and a dead handler
+ * after it is read by nothing. MEASURED — `kickPeer: () => kickPeer("}")`
+ * followed by a dead `mute: () => 1` fails ONLY here, 201 of 202, and passes
+ * 202 of 202 with this assertion deleted.
  */
 test("the walk read every entry in app.js's handler map", () => {
-  const app = readFileSync(
-    new URL("../../web/assets/app.js", import.meta.url),
-    "utf8",
-  );
+  const app = appWithoutComments();
   const map = app.slice(
     app.indexOf("const handlers = {"),
     app.indexOf("\n  };", app.indexOf("const handlers = {")),
