@@ -145,3 +145,38 @@ test("the box accepts exactly the 100 decimals the server calls legal", () => {
   assert.deepEqual(accepted, legal);
   assert.equal(accepted.length, 100);
 });
+
+/**
+ * 🛑 THE CORPUS IS ASSERTED, NOT ONLY ITS TOTAL. `examined` compared against
+ * `CORPUS.length * SCOPES.length` is a TAUTOLOGY — it holds for an empty
+ * corpus too. Emptying `SHAPES` alone left the file reporting 2 of 2, because
+ * the decimals kept the positive control satisfied. claude1 measured that on
+ * PR 328 and it is the reason this test exists.
+ *
+ * ⚠️ A LENGTH ALONE DOES NOT CLOSE IT EITHER. Thirty-two copies of `"abc"` is
+ * still thirty-two, so the shapes whose refusal the PR body reasons about are
+ * named here rather than counted.
+ */
+test("the corpus is the one the property was measured against", () => {
+  assert.equal(DECIMALS.length, 111);
+  assert.deepEqual([DECIMALS[0], DECIMALS.at(-1)], ["-5", "105"]);
+
+  assert.equal(SHAPES.length, 32);
+  assert.equal(new Set(SHAPES).size, SHAPES.length, "a shape is duplicated");
+
+  // The seven inputs the browser refuses and the server would call legal, plus
+  // the empty box. Each one leaving the corpus removes a reason this file
+  // deliberately does NOT pin the converse direction.
+  for (const raw of ["", "+50", "50.0", "1.", "1e2", "1E2", "0x10", "0b11"]) {
+    assert.ok(SHAPES.includes(raw), `${JSON.stringify(raw)} left the corpus`);
+  }
+
+  // 🛑 AND `CORPUS` MUST STILL BE ITS TWO HALVES. Asserting the halves is not
+  // asserting what the property above actually iterates: a `.map()` or a
+  // `.filter()` at the join gutted the corpus while every line above stayed
+  // green, measured as mutant V3 on PR 328.
+  assert.equal(CORPUS.length, DECIMALS.length + SHAPES.length);
+  for (const raw of [...DECIMALS, ...SHAPES]) {
+    assert.ok(CORPUS.includes(raw), `${JSON.stringify(raw)} is not in CORPUS`);
+  }
+});
