@@ -405,39 +405,74 @@ test("🛑 a gate change refetches both payloads, not just the rows", () => {
  * invisible until some unrelated wake event arrived."
  *
  * That comment was written after the approvals card hit it, and two more
- * panels hit it afterwards anyway. MEASURED on `origin/main`: `boot()` names
+ * panels hit it afterwards anyway. MEASURED on `origin/main`: `boot()` named
  * neither `fetchLiveAgents` nor `fetchClaims`, so a freshly opened page said
  * "(no supervised agents running)" with two supervisors live, until a wake
  * event arrived. An empty panel and a panel nobody filled look identical.
  *
+ * 🛑 IT KEYS ON FUNCTIONS THIS FILE DECLARES, NOT ON A `fetch` NAME PREFIX.
+ * The first cut matched `/fetch[A-Z]\w*\(/` over a floor of `>= 4`, which is
+ * the same fail-open shape as PR 325's: a rename OUT of the prefix drops the
+ * call from the set, the floor still clears on the survivors, and the missing
+ * name is then never checked against `boot()` at all.
+ *
+ * MEASURED across five arms, by claude2 reviewing this PR and then by me:
+ *
+ * ```
+ * arm                                        prefix+floor   declared-callee
+ * 1  clean tree                              pass           pass
+ * 2  fetchClaims cut from boot()             FAIL           FAIL
+ * 3  renamed to loadClaims AND cut           pass  <-OPEN   FAIL
+ * 4  await dropped AND cut                   FAIL           FAIL
+ * 5  Promise.all refactor, still in boot     pass           pass
+ * ```
+ *
+ * ⚠️ `await (\w+)\(` WAS ALSO MEASURED AND IS WORSE. It closes arm 3, reopens
+ * arm 4, and false-alarms on arm 5 — `await Promise.all([…])` collapses the
+ * set to `Promise`, and `setGate` in this same PR already uses that idiom.
+ *
+ * ⚠️ MATCHING EVERY CALLED IDENTIFIER WAS MEASURED AND IS WORSE STILL. It
+ * picks up `console.error`'s `error(` and `Promise.all`'s `all(`, so it
+ * false-alarms on a clean tree and needs an exemption list that grows.
+ *
  * ⚠️ `fetchMessages` IS THE ONE EXEMPTION AND IT IS NOT A LOOPHOLE. It is
  * conditional on `state.currentTarget` in `refresh()`, and on boot no
- * conversation is open yet, so there is nothing to fetch. Every other fetch in
- * `refresh()` is unconditional.
+ * conversation is open yet, so there is nothing to fetch. Every other call in
+ * the set is unconditional.
  */
-test("🛑 every panel refresh() fills, boot() fills too — an empty panel must not lie", () => {
+test("🛑 every view refresh() fills, boot() fills too — an empty panel must not lie", () => {
   const refresh = fnBody("refresh");
   const boot = fnBody("boot");
   const EXEMPT = new Set(["fetchMessages"]);
 
-  const inRefresh = [
-    ...new Set([...refresh.matchAll(/\b(fetch[A-Z]\w*)\(/g)].map((m) => m[1]!)),
-  ];
-
-  // ⚠️ THE DENOMINATOR. A regex that matched nothing would make every claim
-  // below vacuously true, which is this file's recurring failure shape.
-  assert.ok(
-    inRefresh.length >= 4,
-    `only ${inRefresh.length} fetches found in refresh(); the regex has drifted`,
+  // Top-level functions `app.js` defines. A call to one of these is a view
+  // this file owns; `console.error` and `Promise.all` are not, which is what
+  // keeps the match from needing an exemption list that grows.
+  const declared = new Set(
+    [...APP_CODE.matchAll(/^(?:async )?function (\w+)\(/gm)].map((m) => m[1]!),
   );
 
-  const missing = inRefresh.filter(
+  // 🛑 `refresh` ITSELF IS EXCLUDED BECAUSE fnBody CAPTURES THE SIGNATURE LINE.
+  // Without this the guard demands that boot() call refresh(), which is the one
+  // thing boot deliberately does not do.
+  const called = [
+    ...new Set([...refresh.matchAll(/\b(\w+)\(/g)].map((m) => m[1]!)),
+  ].filter((n) => declared.has(n) && n !== "refresh");
+
+  // ⚠️ THE DENOMINATOR. A match that collapsed to nothing would make the claim
+  // below vacuously true, which is this file's recurring failure shape.
+  assert.ok(
+    called.length >= 8,
+    `only ${called.length} app.js calls found in refresh(); the matcher has drifted: ${called.join(", ")}`,
+  );
+
+  const missing = called.filter(
     (f) => !EXEMPT.has(f) && !boot.includes(`${f}(`),
   );
 
   assert.deepEqual(
     missing,
     [],
-    `refresh() fills these and boot() does not, so they are empty on a fresh page load: ${missing.join(", ")}`,
+    `refresh() calls these and boot() does not, so they are empty or unpainted on a fresh page load: ${missing.join(", ")}`,
   );
 });
