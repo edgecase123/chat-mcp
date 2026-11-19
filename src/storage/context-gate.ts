@@ -40,7 +40,7 @@ export const CONTEXT_GATE_KEY = "context_gate";
  * 1..100 rather than 0..100: a gate of 0 fires before the agent has done
  * anything, which is a restart loop and not a threshold.
  */
-function isLegalGate(value: unknown): value is number {
+export function isLegalGate(value: unknown): value is number {
   return (
     typeof value === "number" &&
     Number.isInteger(value) &&
@@ -103,8 +103,34 @@ export function setHandleContextGate(
  * one already pruned — resolves to the global rather than failing.
  */
 export function resolveContextGate(db: Db, handle: string): number {
-  const own = getAgent(db, handle)?.context_gate;
-  if (isLegalGate(own)) return own;
+  return resolveContextGateWithSource(db, handle).gate;
+}
 
-  return getGlobalContextGate(db) ?? DEFAULT_CONTEXT_GATE;
+/** Which of the three layers answered for a handle. */
+export type ContextGateSource = "override" | "global" | "builtin";
+
+/**
+ * The gate `handle` is measured against AND the layer that answered, resolved
+ * in ONE pass.
+ *
+ * 🛑 ONE FUNCTION, BECAUSE TWO WOULD EACH ENCODE THE LAYER ORDER. An earlier
+ * cut had a separate `contextGateSource` whose docblock said its clauses "must
+ * match `resolveContextGate`'s, clause for clause" — which is the comment this
+ * shape replaces with a guarantee. Raised by claude2 on #135 unit 4.
+ *
+ * 🛑 THE OPERATOR CANNOT SEE THE LAYER FROM THE NUMBER ALONE. A handle showing
+ * 50 may be overridden to 50, following a global 50, or on the built-in, and
+ * clearing an override only does something in the first case.
+ */
+export function resolveContextGateWithSource(
+  db: Db,
+  handle: string,
+): { gate: number; source: ContextGateSource } {
+  const own = getAgent(db, handle)?.context_gate;
+  if (isLegalGate(own)) return { gate: own, source: "override" };
+
+  const global = getGlobalContextGate(db);
+  if (global !== null) return { gate: global, source: "global" };
+
+  return { gate: DEFAULT_CONTEXT_GATE, source: "builtin" };
 }

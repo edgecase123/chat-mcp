@@ -60,13 +60,20 @@ export function requiredCapability(
 }
 
 /**
- * Answering an approval, stopping a supervisor, removing an agent and deleting
- * a room. Ranked above the rest because answering an approval is the one that
- * grants a supervisor a permission the operator never clicked.
+ * Answering an approval, stopping a supervisor, removing an agent, deleting a
+ * room, and setting a restart gate. Ranked above the rest because answering an
+ * approval is the one that grants a supervisor a permission the operator never
+ * clicked.
+ *
+ * 🛑 A GATE IS HERE AND NOT IN THE WRITES BECAUSE OF ITS CONSEQUENCE. A gate of
+ * 1 restarts every agent on its next reading, which is `/api/agents/stop` in
+ * slower motion. The supervisor holds a `write` credential and is the thing a
+ * gate kills.
  */
 const ADMIN_ROUTES: ReadonlySet<string> = new Set([
   "/api/agents/stop",
   "/api/approvals/answer",
+  "/api/context-gate",
   "/api/kick",
   "/api/rooms/delete",
 ]);

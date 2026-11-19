@@ -21,7 +21,14 @@ import * as dao from "../../storage/dao.js";
 import { parseSearch, snippet } from "../../search/query.js";
 import { gaugeFreshness } from "../../shim/gauge-freshness.js";
 import { rampFor } from "../../shim/context-ramp.js";
-import { resolveContextGate } from "../../storage/context-gate.js";
+import {
+  getGlobalContextGate,
+  isLegalGate,
+  resolveContextGate,
+  resolveContextGateWithSource,
+  setGlobalContextGate,
+  setHandleContextGate,
+} from "../../storage/context-gate.js";
 import type { MessageKind } from "../../storage/dao.js";
 import {
   assertRoomName,
@@ -478,6 +485,8 @@ export async function route(
     return handleGetClaims(res, ctx);
   if (path === "/api/agents/live" && req.method === "GET")
     return handleLiveAgents(res, ctx);
+  if (path === "/api/context-gate" && req.method === "POST")
+    return handleContextGateSet(req, res, ctx);
   if (path === "/api/agents/stop" && req.method === "POST")
     return handleStopAgents(req, res, ctx);
   if (path === "/api/search" && req.method === "GET")
@@ -530,6 +539,16 @@ function contextRampFor(db: Db, handle: string): number[] {
   return rampFor(resolveContextGate(db, handle)).map((band) => band.at);
 }
 
+/** The gate and its layer, flattened onto a peer row. */
+function gateFields(
+  db: Db,
+  handle: string,
+): { context_gate: number; context_gate_source: string } {
+  const { gate, source } = resolveContextGateWithSource(db, handle);
+
+  return { context_gate: gate, context_gate_source: source };
+}
+
 function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
   const me = dao.getAgent(ctx.db, ctx.handle);
   const peers = dao
@@ -551,6 +570,10 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
       ...a,
       ...gaugeFreshness(a.context_reported_at, now),
       context_ramp: contextRampFor(ctx.db, a.handle),
+      // #135 unit 4 — the SET surface needs the number it is editing and the
+      // layer it came from. Resolved here for the same reason as the ramp:
+      // the three-layer rule has one home and the browser cannot import it.
+      ...gateFields(ctx.db, a.handle),
     })),
     rooms: myRooms.map((r) => ({
       ...r,
@@ -803,6 +826,108 @@ async function handleRoomStyle(
   dao.setRoomStyle(ctx.db, body.room, style, body.custom);
 
   respondJson(res, { ok: true, style });
+}
+
+/**
+ * #135 unit 4 — set the restart gate. WEB UI ONLY, per lee 2026-11-18.
+ *
+ * `handle` absent sets the global default. `handle` present sets that one
+ * handle's override, and `gate: null` clears it.
+ *
+ * 🛑 `gate: null` WITH NO HANDLE IS REFUSED. There is no layer below the
+ * built-in, so "clear the global" would either leave the operator on a number
+ * they cannot see they are now on, or silently do nothing.
+ *
+ * 🛑 A LOW GATE IS LEGAL AND GOES SILENT, AND THIS ROUTE DOES NOT REFUSE IT.
+ * `assertLegalGate` defines 1..100, and a container child spawns near 14% fill.
+ * A gate at or below that fill does NOT loop — `checkContextGate` compares the
+ * gate against `childFloor`, logs once and returns for the child's whole life,
+ * so NOTHING restarts. Proven by "a gate under the child's spawn fill does NOT
+ * restart it, and says why", with its positive control "a gate above the spawn
+ * fill still fires on a later reading".
+ *
+ * Refusing it here would put a second, stricter legality rule one layer above
+ * the one the supervisor reads. Warning the operator is the SET surface's job.
+ *
+ * ⚠️ THE SETTERS THROW ON AN ILLEGAL GATE, so the validation below is not the
+ * only guard. It exists to answer 400 rather than 500, and the tests assert the
+ * stored value as well as the status.
+ */
+async function handleContextGateSet(
+  req: IncomingMessage,
+  res: ServerResponse,
+  ctx: RouteContext,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as {
+    handle?: string;
+    gate?: unknown;
+  };
+  const gate = body.gate;
+
+  // ⚠️ TYPE-CHECKED, NOT JUST PRESENCE-CHECKED. A non-string handle reached
+  // `getAgent` and came back as a raw driver message — "Provided value cannot
+  // be bound to SQLite parameter 1", a 500 where every bad GATE gets a clean
+  // 400. Found by claude2 on #135 unit 4.
+  if ("handle" in body && typeof body.handle !== "string") {
+    return respondJson(res, { error: "handle must be a string" }, 400);
+  }
+
+  const handle = typeof body.handle === "string" ? body.handle : undefined;
+
+  if (gate === null) {
+    if (handle === undefined) {
+      return respondJson(
+        res,
+        {
+          error:
+            "a handle is required to clear a gate; the global has no layer below it",
+        },
+        400,
+      );
+    }
+  } else if (!isLegalGate(gate)) {
+    // 🛑 THE STORAGE PREDICATE, NOT A SECOND COPY OF ITS CLAUSES. An inline
+    // range test here was a duplicate of the rule the setters enforce, free to
+    // drift from it. Raised by claude2.
+    return respondJson(
+      res,
+      {
+        error:
+          "gate must be a whole percentage from 1 to 100, or null to clear an override",
+      },
+      400,
+    );
+  }
+
+  // ⚠️ `== null`, NOT `=== undefined`. `dao.getAgent` returns null for an
+  // absent handle, so a strict undefined check never fired and an unknown
+  // handle was answered 200.
+  if (handle !== undefined && dao.getAgent(ctx.db, handle) == null) {
+    return respondJson(res, { error: `no such handle ${handle}` }, 404);
+  }
+
+  if (handle === undefined) {
+    setGlobalContextGate(ctx.db, gate as number);
+  } else {
+    setHandleContextGate(ctx.db, handle, gate as number | null);
+  }
+
+  // ⚠️ NO `effective` ON A GLOBAL SET. It used to resolve against
+  // `handle ?? ctx.handle`, so setting the global to 30 while the OPERATOR's
+  // own handle was overridden to 90 answered `effective: 90` — correct per the
+  // code and misleading per the name. A global set has no single effective
+  // number; every peer resolves its own. Found by claude2.
+  respondJson(
+    res,
+    handle === undefined
+      ? { ok: true, scope: "global", gate: getGlobalContextGate(ctx.db) }
+      : {
+          ok: true,
+          scope: handle,
+          gate,
+          effective: resolveContextGate(ctx.db, handle),
+        },
+  );
 }
 
 async function handleRoomLeave(
