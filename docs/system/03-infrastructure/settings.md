@@ -124,15 +124,15 @@ not by reading every module. Verify before treating it as exhaustive.
 | MCP HTTP     | max body                     | 4 MB   | `supervise/mcp-http.ts`                                                          |
 | Shim         | broker deadline              | 16 min | `shim/broker-client.ts`                                                          |
 | Shim         | gauge stale-after            | 15 min | `shim/gauge-freshness.ts`                                                        |
-| Shim         | planning band                | 50     | `shim/gauge.ts`                                                                  |
+| Shim         | planning band                | 50     | `shim/gauge.ts` — `BANDS[0].warn`                                                |
 | Supervisor   | graceful restart timeout     | 30 s   | `supervise/index.ts`                                                             |
 | Socket       | ack timeout                  | 2 s    | `supervise/socket.ts`                                                            |
 | Messages     | body cap                     | 64 KB  | `oneshot/send.ts`, `shim/tools/send.ts`, `messaging/room-send.ts` — three copies |
 
 ⚠️ **Every ROW ABOVE was re-checked against source on 2026-11-15, 14 of 14 — but 14 is a count
 of rows verified, not an inventory of what exists.** This table is as complete as the grep that
-built it, per the caveat at the top of the page. `shim/gauge.ts` is the demonstration:
-`PLANNING_BAND` is listed and the `BANDS` array beside it holds eight more numbers of exactly
+built it, per the caveat at the top of the page. `shim/gauge.ts` is the demonstration: one of
+`BANDS`' eight numbers is listed above and the other seven are not, and all eight are of exactly
 this class.
 
 The message body cap is the one row that is not a single constant — it is declared independently
