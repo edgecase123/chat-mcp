@@ -317,9 +317,13 @@ those pipes instead, and the supervisor loses the connection it exists to hold.
 ### What it does NOT touch
 
 🛑 **The test is one question: does this call carry the AGENT's stdin?**
-Exactly one does — the spawn above. Everything else is outside the rule, and an
-enumeration of the exceptions would go stale the moment a new `docker` call
-lands.
+Exactly one `docker` call does — the spawn above. Everything else is outside the
+rule, and an enumeration of the exceptions would go stale the moment a new
+`docker` call lands.
+
+⚠️ **The host driver carries it too**, at `drivers/host.ts`. Both drivers hand
+their child to `wireAgentChild`, so owning the agent's pipes is the shape of
+every spawn path here, not a container-only rule.
 
 - **Authoring the config.** A human edits validated JSON, by lee's separate
   ruling of the same day. That is a different half of the same question.
