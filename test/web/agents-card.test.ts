@@ -293,3 +293,44 @@ test("only the immediate stop button takes the danger colour", () => {
   assert.equal(stopButtonClass("graceful"), "agent__stop");
   assert.equal(stopButtonClass("now"), "agent__stop is-destructive");
 });
+
+/**
+ * #135 slice 4c — the row carries the CHILD's gate, because the gate control
+ * sits on the row and the gate is stored against the agent, not the supervisor.
+ *
+ * 🛑 `undefined` HERE IS A SILENT WRONG ANSWER, NOT AN ERROR. A missing gate
+ * reaches `gateControlDisplay`, falls through to the built-in label and renders
+ * a plausible "built-in default" on a row that is in fact overridden. Nothing
+ * throws, and the number on screen is simply wrong.
+ */
+test("the row carries the child's gate and the layer that answered", () => {
+  const r = agentRow(
+    live({
+      child: {
+        handle: "smoke-container-agent",
+        context_used: 32_673,
+        context_total: 200_000,
+        fresh: true,
+        age_ms: 1000,
+        context_gate: 25,
+        context_gate_source: "override",
+      },
+    }),
+    { nowMs: NOW },
+  );
+
+  assert.equal(r.gate, 25);
+  assert.equal(r.gateSource, "override");
+});
+
+/**
+ * 🛑 A SUPERVISOR WITH NO CHILD HAS NO GATE, AND MUST NOT REPORT A NUMBER.
+ * `gateFields` is never resolved for a null child, so inventing one here would
+ * put a second copy of the three-layer default in the browser.
+ */
+test("a supervisor with no child reports no gate at all", () => {
+  const r = agentRow(live({ child: null }), { nowMs: NOW });
+
+  assert.equal(r.gate, null);
+  assert.equal(r.gateSource, null);
+});

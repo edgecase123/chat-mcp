@@ -46,6 +46,9 @@ import {
   stopButtonClass,
   stopConfirmText,
   stopOutcomeText,
+  gateControlDisplay,
+  gateRisk,
+  gateSubmission,
   matchPositionLabel,
   messageHash,
   messageIdFromHash,
@@ -106,6 +109,17 @@ const state = {
   // shown relative to these.
   roots: null,
   theme: null, // set below
+  // #135 slice 4c — the child handle whose gate editor is open, or the literal
+  // GLOBAL_GATE_KEY for the footer. At most one at a time.
+  //
+  // 🛑 IT LIVES HERE AND NOT IN THE DOM, for the same reason as `openMenuFor`:
+  // renderSidebar() rebuilds every agent row on any peer status change, so an
+  // open editor held only as a class is wiped by the next wake — mid-edit.
+  gateEditing: null,
+  // #135 slice 4c — { gate, source } for the GLOBAL default, from /api/whoami.
+  // Not derivable from the rows: a peer reports the global only while it has
+  // no override of its own.
+  gateDefault: null,
   // #240 — handles whose supervisor says they are producing output right now.
   // 🛑 IT LIVES HERE AND NOT IN THE DOM. renderSidebar() rebuilds every row on
   // any peer status change, so a pulse held only as a class is dropped by the
@@ -199,6 +213,7 @@ async function fetchWhoami() {
   state.rooms = data.rooms;
   state.discoverRooms = data.discoverRooms;
   state.roots = data.roots ?? null;
+  state.gateDefault = data.context_gate_default ?? null;
   el.myHandle.textContent = `${data.handle} · v${data.version}`;
 }
 
@@ -317,6 +332,23 @@ function renderSidebar() {
               stopButton("Stop", a.handle, "graceful"),
               stopButton("Stop now", a.handle, "now"),
             ]),
+            // #135 slice 4c — BELOW the stops. A gate change takes effect on
+            // the NEXT restart, so it is the quieter control of the two and
+            // must not sit above the one that acts now.
+            //
+            // 🛑 SKIPPED FOR A SUPERVISOR WITH NO CHILD. There is no agent to
+            // gate, and `gateFields` was never resolved for a null child.
+            a.childHandle === null
+              ? null
+              : gateControl({
+                  scope: "handle",
+                  handle: a.childHandle,
+                  resolved: {
+                    gate: a.gate,
+                    source: a.gateSource,
+                  },
+                  fillPercent: a.gauge.show ? a.gauge.percent : null,
+                }),
           ]),
         )),
     // The sweep sits BELOW the rows (#40). The operator reads what is running
@@ -334,6 +366,20 @@ function renderSidebar() {
           ]),
         ]
       : []),
+    // #135 slice 4c — the global default, BELOW the rows and the sweep.
+    //
+    // 🛑 RENDERED EVEN WITH NO AGENTS RUNNING. The default applies to agents
+    // spawned LATER, so hiding it on an empty panel hides it exactly when an
+    // operator is about to start one.
+    ...(state.gateDefault === null
+      ? []
+      : [
+          gateControl({
+            scope: "global",
+            handle: null,
+            resolved: state.gateDefault,
+          }),
+        ]),
   ]);
   el.sidebar.appendChild(agentsSection);
 
@@ -435,6 +481,158 @@ function stopButton(label, target, mode) {
     },
     [label],
   );
+}
+
+/**
+ * `state.gateEditing` for the footer, which has no handle of its own.
+ *
+ * 🛑 NOT null AND NOT "". Either would collide with "no editor open", and the
+ * footer would then render open on every page load.
+ */
+const GLOBAL_GATE_KEY = "\u0000global";
+
+/**
+ * One gate control — the current gate, and a form to change it (#135 slice 4c).
+ *
+ * 🛑 THE ROW'S GATE BELONGS TO THE CHILD, NOT THE SUPERVISOR. `stopAgents`
+ * posts the SUPERVISOR handle because that is what owns the socket; a gate is
+ * stored against the agent the supervisor restarts, so this posts
+ * `child.handle`. Sending the supervisor handle here would 404, and the two
+ * handles differ by a suffix, so the mistake reads as correct.
+ *
+ * 🛑 THE FOOTER IS ALWAYS OPEN AND THE ROWS ARE NOT. A row's gate is usually
+ * inherited and rarely changed, so an edit form on every row is noise. The
+ * footer IS the control for the default — collapsing it would hide the only
+ * place the default can be set.
+ */
+function gateControl({ scope, handle, resolved, fillPercent = null }) {
+  const d = gateControlDisplay(resolved, { scope, fillPercent });
+  const global = scope === "global";
+  const key = global ? GLOBAL_GATE_KEY : handle;
+  const open = global || state.gateEditing === key;
+
+  // Built before the input so the `oninput` handler can close over it. The
+  // note reflects the TYPED value, not the stored one, which is the whole
+  // reason gateRisk is a pure function of both.
+  const note = h("div", { className: "gate__note" }, []);
+  const paint = (risk) => {
+    note.textContent = risk ? risk.message : "";
+    note.className = `gate__note${risk ? ` gate__note--${risk.severity}` : ""}`;
+  };
+
+  if (open && !global) paint(d.risk);
+
+  const input = h("input", {
+    className: "gate__input",
+    type: "text",
+    inputmode: "numeric",
+    value: global ? "" : String(d.gate),
+    placeholder: global ? String(d.gate) : "",
+    "aria-label": global
+      ? "Default gate percent"
+      : `Gate percent for ${handle}`,
+    oninput: (e) => {
+      if (global) return;
+      const parsed = gateSubmission(e.target.value, { scope });
+      paint(parsed.ok ? gateRisk(parsed.gate, fillPercent) : null);
+    },
+    onkeydown: (e) => {
+      if (e.key === "Enter") submit();
+      if (e.key === "Escape" && !global) {
+        state.gateEditing = null;
+        renderSidebar();
+      }
+    },
+  });
+
+  const submit = () => setGate(scope, handle, input.value);
+
+  return h("div", { className: `gate${global ? " gate--global" : ""}` }, [
+    h("div", { className: "gate__head" }, [
+      h("span", { className: "gate__label", title: d.label }, [d.label]),
+      global
+        ? null
+        : h(
+            "button",
+            {
+              className: "gate__btn",
+              type: "button",
+              "aria-expanded": open ? "true" : "false",
+              onclick: () => {
+                state.gateEditing = open ? null : key;
+                renderSidebar();
+              },
+            },
+            [open ? "Done" : "Edit"],
+          ),
+    ]),
+    ...(open
+      ? [
+          h("div", { className: "gate__form" }, [
+            input,
+            h("span", { className: "gate__pct" }, ["%"]),
+            h(
+              "button",
+              { className: "gate__btn", type: "button", onclick: submit },
+              ["Set"],
+            ),
+            // 🛑 OFFERED ONLY WHERE AN OVERRIDE EXISTS TO REMOVE. On an
+            // inherited gate a clear reports success and changes nothing, and
+            // the global has no layer below it at all.
+            d.canClear
+              ? h(
+                  "button",
+                  {
+                    className: "gate__btn",
+                    type: "button",
+                    onclick: () => setGate(scope, handle, ""),
+                  },
+                  ["Clear"],
+                )
+              : null,
+          ]),
+          note,
+        ]
+      : []),
+  ]);
+}
+
+/**
+ * Validate what was typed, then post it (#135 slice 4c).
+ *
+ * 🛑 REFUSED IN THE BROWSER BEFORE A ROUND TRIP. `gateSubmission` carries the
+ * same four clauses as the storage predicate, plus the scope rule: an empty
+ * box is a CLEAR for a handle and illegal for the global, which has no layer
+ * below it to fall back to.
+ */
+async function setGate(scope, handle, raw) {
+  const parsed = gateSubmission(raw, { scope });
+
+  if (!parsed.ok) return toast(parsed.reason, "error");
+
+  try {
+    await api("/api/context-gate", {
+      method: "POST",
+      body: JSON.stringify(
+        scope === "global"
+          ? { gate: parsed.gate }
+          : { handle, gate: parsed.gate },
+      ),
+    });
+    toast(
+      parsed.gate === null
+        ? `${handle} is back on the default gate`
+        : `gate for ${scope === "global" ? "new agents" : handle} is now ${parsed.gate}%`,
+    );
+    state.gateEditing = null;
+  } catch (e) {
+    toast(`gate change failed: ${e.message}`, "error");
+  }
+
+  // Refetched either way: a refused POST and a thrown request both leave the
+  // panel showing a number nobody has re-read.
+  await Promise.all([fetchWhoami(), fetchLiveAgents()]);
+  renderSidebar();
 }
 
 function sidebarItem({
@@ -2375,6 +2573,14 @@ async function boot() {
   // blocked agent was invisible until some unrelated wake event arrived. No
   // unit test could see it; opening the page did.
   await fetchApprovals();
+  // 🛑 BOTH OF THESE WERE IN refresh() ONLY, which is the trap the comment
+  // above names. MEASURED: a freshly opened page said "(no supervised agents
+  // running)" with two supervisors live, and "(nothing claimed)" over held
+  // claims, until an unrelated wake event arrived. Those panels SAY they are
+  // empty, so the lie reads as a fact. A test now asserts boot() fills
+  // everything refresh() does.
+  await fetchClaims();
+  await fetchLiveAgents();
 
   renderSidebar();
   renderPaneHeader();

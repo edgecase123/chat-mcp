@@ -311,3 +311,133 @@ test("🛑 both row stop buttons target the row's handle", () => {
     );
   }
 });
+
+/**
+ * #135 slice 4c — the gate control's wiring. Every test in
+ * `gate-control.test.ts` passes with this unwired, which is the same gap this
+ * file exists to close for the stop buttons.
+ */
+test("🛑 both gate controls are built by gateControl, with a denominator", () => {
+  // ⚠️ THE LOOKBEHIND EXCLUDES THE DECLARATION, so the count is call sites
+  // alone and the number means what this test's name says. Counting the
+  // declaration too would let one deleted call site hide behind it.
+  const found = APP_CODE.match(/(?<!function )gateControl\(\{/g);
+
+  // ⚠️ THE DENOMINATOR. TWO call sites: the per-agent row and the footer. One
+  // match means a scope was dropped, and the surviving claims below would then
+  // all be about the other one.
+  assert.notEqual(found, null, "nothing calls gateControl");
+  assert.equal(
+    found!.length,
+    2,
+    `expected 2 gateControl call sites, got ${found!.length}`,
+  );
+});
+
+/**
+ * 🛑 THE GATE IS STORED AGAINST THE CHILD AND THE STOP TARGETS THE SUPERVISOR.
+ * The two handles differ by a suffix, so posting the wrong one reads as
+ * correct and comes back 404.
+ */
+test("🛑 the per-row gate control is handed the CHILD handle, not the supervisor's", () => {
+  const row = APP_CODE.match(
+    /gateControl\(\{\s*scope: "handle",[\s\S]*?\n {16}\}\)/,
+  );
+
+  assert.notEqual(row, null, "the per-row gateControl call site is not found");
+  assert.match(row![0], /handle: a\.childHandle/, "the row posts a.handle");
+  assert.doesNotMatch(
+    row![0],
+    /handle: a\.handle/,
+    "the row gates the SUPERVISOR",
+  );
+});
+
+/**
+ * 🛑 THE DEFAULT COMES FROM THE PAYLOAD, NOT FROM A ROW. A peer reports the
+ * global only while it has no override, so deriving it from the rows renders
+ * nothing on a page where every agent is overridden.
+ */
+test("🛑 the footer reads the global default from whoami, not from the rows", () => {
+  const body = fnBody("fetchWhoami");
+
+  assert.match(body, /context_gate_default/, "fetchWhoami drops the default");
+  assert.match(
+    APP_CODE,
+    /resolved: state\.gateDefault/,
+    "the footer does not read state.gateDefault",
+  );
+});
+
+/**
+ * 🛑 THE VALIDATOR MUST RUN BEFORE THE POST. Its whole purpose is to answer the
+ * operator without a round trip, and the one shape it exists to catch — an
+ * empty box on the GLOBAL — is answered 400 by the route.
+ */
+test("🛑 setGate validates with gateSubmission before it posts", () => {
+  const body = fnBody("setGate");
+  const check = body.indexOf("gateSubmission(");
+  const post = body.indexOf("/api/context-gate");
+
+  assert.notEqual(check, -1, "setGate never calls gateSubmission");
+  assert.notEqual(post, -1, "setGate never posts to the gate route");
+  assert.ok(check < post, "setGate posts BEFORE it validates");
+  assert.match(body, /scope/, "setGate drops the scope argument");
+});
+
+/**
+ * ⚠️ A GATE CHANGE INVALIDATES BOTH PAYLOADS. The rows carry each agent's
+ * resolved gate and whoami carries the default, so refetching one leaves the
+ * other showing a number nobody has re-read.
+ */
+test("🛑 a gate change refetches both payloads, not just the rows", () => {
+  const body = fnBody("setGate");
+
+  assert.match(body, /fetchWhoami\(\)/, "setGate leaves the default stale");
+  assert.match(body, /fetchLiveAgents\(\)/, "setGate leaves the rows stale");
+  assert.match(body, /renderSidebar\(\)/, "setGate never repaints");
+});
+
+/**
+ * 🛑 THE GUARD `boot()`'s OWN DOCBLOCK ASKS FOR AND NEVER GOT. It says: "BOOT
+ * DOES NOT CALL refresh(), SO EVERY NEW VIEW MUST BE LISTED HERE TOO. The
+ * approvals card was added to refresh() only, which meant a blocked agent was
+ * invisible until some unrelated wake event arrived."
+ *
+ * That comment was written after the approvals card hit it, and two more
+ * panels hit it afterwards anyway. MEASURED on `origin/main`: `boot()` names
+ * neither `fetchLiveAgents` nor `fetchClaims`, so a freshly opened page said
+ * "(no supervised agents running)" with two supervisors live, until a wake
+ * event arrived. An empty panel and a panel nobody filled look identical.
+ *
+ * ⚠️ `fetchMessages` IS THE ONE EXEMPTION AND IT IS NOT A LOOPHOLE. It is
+ * conditional on `state.currentTarget` in `refresh()`, and on boot no
+ * conversation is open yet, so there is nothing to fetch. Every other fetch in
+ * `refresh()` is unconditional.
+ */
+test("🛑 every panel refresh() fills, boot() fills too — an empty panel must not lie", () => {
+  const refresh = fnBody("refresh");
+  const boot = fnBody("boot");
+  const EXEMPT = new Set(["fetchMessages"]);
+
+  const inRefresh = [
+    ...new Set([...refresh.matchAll(/\b(fetch[A-Z]\w*)\(/g)].map((m) => m[1]!)),
+  ];
+
+  // ⚠️ THE DENOMINATOR. A regex that matched nothing would make every claim
+  // below vacuously true, which is this file's recurring failure shape.
+  assert.ok(
+    inRefresh.length >= 4,
+    `only ${inRefresh.length} fetches found in refresh(); the regex has drifted`,
+  );
+
+  const missing = inRefresh.filter(
+    (f) => !EXEMPT.has(f) && !boot.includes(`${f}(`),
+  );
+
+  assert.deepEqual(
+    missing,
+    [],
+    `refresh() fills these and boot() does not, so they are empty on a fresh page load: ${missing.join(", ")}`,
+  );
+});

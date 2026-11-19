@@ -1313,7 +1313,8 @@ body {
   gap: 4px;
   margin-top: 4px;
 }
-.agent__stop {
+.agent__stop,
+.gate__btn {
   padding: 2px 8px;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -1323,7 +1324,8 @@ body {
   font-size: 11px;
   cursor: pointer;
 }
-.agent__stop:hover {
+.agent__stop:hover,
+.gate__btn:hover {
   background: var(--bg-inset);
 }
 /* Only the cut-mid-stream one is coloured. Both buttons in the danger colour
@@ -1331,6 +1333,74 @@ body {
 .agent__stop.is-destructive:hover {
   border-color: var(--danger);
   color: var(--danger);
+}
+
+/* #135 slice 4c — the gate control on an agent row, and the global default in
+   the panel footer.
+
+   🛑 THE RISK NOTE REUSES THE RAMP TOKENS AND DEFINES NO NEW COLOUR. An earlier
+   gauge read a `--warning` token that NO theme defined, behind a hardcoded
+   amber fallback, so one literal served both grounds. --ramp-1 and --danger are
+   each defined per theme and AA-checked. */
+.gate {
+  margin-top: 4px;
+  font-size: 11px;
+}
+.gate__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+/* The label takes the slack so the Edit button stays hard right, and a long
+   layer name truncates rather than wrapping the button onto its own line. */
+.gate__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  opacity: 0.65;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gate__form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+}
+.gate__input {
+  width: 3.5em;
+  padding: 1px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-inset);
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  text-align: right;
+}
+.gate__pct {
+  opacity: 0.65;
+}
+/* Collapses to nothing when there is no risk, so an empty note adds no gap. */
+.gate__note:empty {
+  display: none;
+}
+.gate__note {
+  margin-top: 3px;
+  line-height: 1.35;
+}
+.gate__note--soon {
+  color: var(--ramp-1);
+}
+.gate__note--silent {
+  color: var(--danger);
+}
+/* The footer default, aligned on .agent's own 8px inset like .agents__sweep, so
+   it reads as belonging to the panel rather than to the last row. */
+.gate--global {
+  padding: 4px 8px 0;
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
 }
 
 /* #40 — the sweep, BELOW the rows it sweeps. Aligned on .agent's own 8px

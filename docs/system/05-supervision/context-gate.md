@@ -77,6 +77,57 @@ child has no `agents` row, because a row UPDATE against a missing row is a
 silent no-op. A restart writes no row, and a child filling its window without
 ever reaching the bus is the case most in need of one.
 
+## Changing a gate from the browser
+
+The Agents panel carries the control. Each row shows its agent's gate and the
+layer that answered; the panel footer shows the global default.
+
+```
+smoke-a                      42%
+bound 2m · smoke-a-agent
+[Stop] [Stop now]
+Gate 25% · set for this agent      [Edit]
+  [ 25 ] %  [Set] [Clear]
+  this agent already reports 42% — a gate at or below its spawn fill
+  means nothing will restart it, and the supervisor says so once
+---------------------------------------------------
+Default gate 35%   [ __ ] % [Set]
+```
+
+🛑 **The row's gate belongs to the CHILD; the Stop buttons target the
+SUPERVISOR.** Those are two different handles on one row, and they differ by a
+suffix, so posting the wrong one reads as correct and comes back 404.
+
+🛑 **`[Clear]` appears only on a handle OVERRIDE.** A row reading 50 may be
+overridden to 50, following a global 50, or on the built-in. Clearing removes
+something in the first case only, so offering it on the other two is a button
+that reports success and changes nothing. `context_gate_source` is what
+separates them, and it is resolved server-side.
+
+🛑 **The global default has no `[Clear]`, and an empty box there is REFUSED in
+the browser.** An empty box is a clear, a clear needs a layer to fall back to,
+and nothing sits below the global. The route answers that shape 400, so
+`gateSubmission(raw, { scope: "global" })` refuses it before the round trip.
+Per handle the same empty box is legal and returns that handle to the default.
+
+⚠️ **The risk note is keyed on the agent's CURRENT fill, not its spawn floor.**
+`childFloor` is a local in the supervisor process and reaches no table, so the
+browser cannot see it. Current fill is always at or above that floor, which
+means a gate under current fill may fire at once OR silence the child forever —
+and the copy names the worse one, because it is the one an operator would not
+predict.
+
+⚠️ **The footer renders even with no agents running.** The default applies to
+agents spawned later, so hiding it on an empty panel hides it exactly when an
+operator is about to start one.
+
+### Why the default is its own payload field
+
+`/api/whoami` ships `context_gate_default` directly rather than letting the
+browser infer it from the rows. A peer reports the global only while it has no
+override of its own, so on a page where every agent is overridden the global
+appears nowhere in the rows at all.
+
 ## The ramp below the gate is the WEB UI's COLOUR
 
 `src/shim/context-ramp.ts` computes the quiet approach lee asked for — _"the
@@ -148,16 +199,17 @@ posts; it no longer drives any colour.
 
 ## Source files
 
-| File                             | Role                                             |
-| -------------------------------- | ------------------------------------------------ |
-| `src/storage/context-gate.ts`    | resolves the gate, validates every layer on read |
-| `src/shim/gauge-report.ts`       | `contextPercent`, the one rounding rule          |
-| `src/shim/context-ramp.ts`       | the quiet bands below the gate, as fractions     |
-| `src/cli/web/server.ts`          | ships `context_ramp` per peer on `/api/whoami`   |
-| `web/assets/logic.js`            | `rampBand` — which tick a fill has reached       |
-| `web/assets/style.css`           | the three `--ramp-*` tokens, one set per theme   |
-| `src/supervise/index.ts`         | the trigger, the per-child latch, the restart    |
-| `src/supervise/context-gauge.ts` | the driver's reading, normalised across vendors  |
+| File                             | Role                                               |
+| -------------------------------- | -------------------------------------------------- |
+| `src/storage/context-gate.ts`    | resolves the gate, validates every layer on read   |
+| `src/shim/gauge-report.ts`       | `contextPercent`, the one rounding rule            |
+| `src/shim/context-ramp.ts`       | the quiet bands below the gate, as fractions       |
+| `src/cli/web/server.ts`          | ships the ramp, each gate, and the default         |
+| `web/assets/logic.js`            | `rampBand`, `gateSubmission`, `gateControlDisplay` |
+| `web/assets/app.js`              | `gateControl` — the row and footer controls        |
+| `web/assets/style.css`           | the three `--ramp-*` tokens, one set per theme     |
+| `src/supervise/index.ts`         | the trigger, the per-child latch, the restart      |
+| `src/supervise/context-gauge.ts` | the driver's reading, normalised across vendors    |
 
 ## Related docs
 

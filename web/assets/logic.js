@@ -1386,6 +1386,11 @@ export function agentRow(agent, { nowMs = Date.now() } = {}) {
     handle: agent.handle,
     childHandle: agent.child?.handle ?? null,
     gauge: gaugeDisplay(agent.child),
+    // #135 slice 4c — the CHILD's gate, resolved server-side. Null with no
+    // child: there is no agent to gate, and inventing a number here would put
+    // a second copy of the three-layer default in the browser.
+    gate: agent.child?.context_gate ?? null,
+    gateSource: agent.child?.context_gate_source ?? null,
     // ⚠️ "bound", NEVER "uptime". `boundAtOf` fails open to now, and a clock
     // that disagrees would otherwise render a negative age.
     bound: known
