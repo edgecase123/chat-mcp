@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { gateSubmission, gateRisk } from "../../web/assets/logic.js";
+import {
+  gateSubmission,
+  gateRisk,
+  gateControlDisplay,
+} from "../../web/assets/logic.js";
 
 /**
  * #135 unit 4, slice 4b — the gate control's decisions, with no DOM under them.
@@ -191,4 +195,111 @@ test("the global scope refuses every illegal number the handle scope refuses", (
   const good = gateSubmission("50", { scope: "global" });
   assert.equal(good.ok, true, "a legal global gate was refused");
   assert.equal(good.gate, 50);
+});
+
+/**
+ * #135 slice 4c — what one gate control RENDERS, with no DOM under it.
+ *
+ * 🛑 THE NUMBER ALONE CANNOT TELL THE OPERATOR WHETHER `[Clear]` DOES
+ * ANYTHING. A row showing 50 may be overridden to 50, following a global 50,
+ * or sitting on the built-in — and clearing only has an effect in the first
+ * case. `resolveContextGateWithSource` answers which, and this turns that
+ * answer into the control's state.
+ */
+test("a per-handle OVERRIDE is the only state that offers a clear", () => {
+  const out = gateControlDisplay(
+    { gate: 25, source: "override" },
+    { scope: "handle" },
+  );
+
+  assert.equal(out.gate, 25);
+  assert.equal(out.canClear, true, "an override had nothing to clear");
+  assert.match(out.label, /25/);
+  assert.match(out.label, /this agent/i, "the label does not name the layer");
+});
+
+/**
+ * 🛑 THE TWO NEGATIVE CONTROLS FOR THE CLAUSE ABOVE. A `canClear` hardcoded
+ * true passes the override test and breaks both of these, and a hardcoded
+ * false does the reverse.
+ */
+test("an INHERITED gate offers no clear, because there is no override to remove", () => {
+  for (const source of ["global", "builtin"]) {
+    const out = gateControlDisplay({ gate: 50, source }, { scope: "handle" });
+    assert.equal(out.canClear, false, `${source} offered a pointless clear`);
+    assert.match(out.label, /50/);
+    assert.doesNotMatch(
+      out.label,
+      /this agent/i,
+      `${source} was labelled as an override`,
+    );
+  }
+});
+
+/** The two inherited layers must read apart, or the label is decoration. */
+test("the global default and the built-in default are labelled differently", () => {
+  const g = gateControlDisplay({ gate: 50, source: "global" }, {});
+  const b = gateControlDisplay({ gate: 50, source: "builtin" }, {});
+
+  assert.notEqual(g.label, b.label);
+  assert.match(b.label, /built-in/i);
+});
+
+/**
+ * ⚠️ THE RISK NOTE IS THE SAME `gateRisk` THE SET FORM USES, so a row showing
+ * a gate already under its agent's fill warns without the operator typing
+ * anything.
+ */
+test("a row whose gate is already under its agent's fill carries the silence warning", () => {
+  const out = gateControlDisplay(
+    { gate: 20, source: "override" },
+    { scope: "handle", fillPercent: 42 },
+  );
+
+  assert.ok(out.risk, "a gate under the current fill rendered no warning");
+  assert.equal(out.risk.severity, "silent");
+});
+
+/** The positive control: a safe gate must render NO note at all. */
+test("a row whose gate is well above its agent's fill carries no note", () => {
+  const out = gateControlDisplay(
+    { gate: 80, source: "override" },
+    { scope: "handle", fillPercent: 20 },
+  );
+
+  assert.equal(out.risk, null);
+});
+
+/**
+ * 🛑 THE GLOBAL SCOPE HAS NO SINGLE FILL TO WARN ABOUT. Every agent resolves
+ * the default against its own, so one warning there would name a number that
+ * belongs to nobody.
+ */
+test("the global scope never offers a clear and never carries a risk note", () => {
+  const out = gateControlDisplay(
+    { gate: 20, source: "global" },
+    { scope: "global", fillPercent: 42 },
+  );
+
+  assert.equal(out.canClear, false, "the global offered a clear");
+  assert.equal(out.risk, null, "the global warned about one agent's fill");
+  assert.match(out.label, /default/i);
+});
+
+/**
+ * 🛑 THE `!global` GUARD, ON ITS OWN. The test above feeds the global scope a
+ * `source` of "global", so `source === "override"` is already false there and
+ * dropping the scope guard changes nothing it can see.
+ *
+ * MEASURED: `canClear: source === "override"` — the guard deleted — passed 19
+ * of 19. The rule is "the global has no layer below it, whatever source it was
+ * handed", and this is the only case that states it.
+ */
+test("the global scope refuses a clear even when handed an override source", () => {
+  const out = gateControlDisplay(
+    { gate: 30, source: "override" },
+    { scope: "global" },
+  );
+
+  assert.equal(out.canClear, false, "the global offered a clear");
 });

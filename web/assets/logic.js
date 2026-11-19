@@ -1255,6 +1255,55 @@ export function gateRisk(gate, fillPercent) {
   return null;
 }
 
+/**
+ * How each of the three layers reads to an operator (#135 slice 4c).
+ *
+ * 🛑 "this agent" IS LOAD-BEARING, NOT DECORATION. It is the only word that
+ * distinguishes the one state where `[Clear]` does something, and a test
+ * asserts the two inherited layers do NOT carry it.
+ */
+const GATE_LAYER_LABEL = {
+  override: "set for this agent",
+  global: "from the default",
+  builtin: "built-in default",
+};
+
+/**
+ * One gate control's rendered state — the label, whether a clear is offered,
+ * and the risk note (#135 slice 4c).
+ *
+ * 🛑 THE NUMBER ALONE CANNOT SAY WHETHER `[Clear]` DOES ANYTHING. A row
+ * showing 50 may be overridden to 50, following a global 50, or on the
+ * built-in. Only `source` separates them, and only the first has an override
+ * to remove — so offering a clear on the other two is a button that reports
+ * success and changes nothing.
+ *
+ * 🛑 THE GLOBAL SCOPE CARRIES NO RISK NOTE. `gateRisk` is keyed on ONE agent's
+ * fill, and every agent resolves the default against its own, so a warning
+ * there would name a number belonging to nobody. It also never offers a clear:
+ * there is no layer below the global, which is the same rule
+ * `gateSubmission(…, { scope: "global" })` enforces on the empty box.
+ *
+ * @param {{ gate?: number, source?: string }} [resolved]
+ * @param {{ scope?: string, fillPercent?: number | null }} [opts]
+ */
+export function gateControlDisplay(
+  { gate, source } = {},
+  { scope = "handle", fillPercent = null } = {},
+) {
+  const global = scope === "global";
+  const layer = GATE_LAYER_LABEL[source] ?? GATE_LAYER_LABEL.builtin;
+
+  return {
+    gate,
+    label: global
+      ? `Default gate ${gate}%${source === "builtin" ? " \u00b7 built-in" : ""}`
+      : `Gate ${gate}% \u00b7 ${layer}`,
+    canClear: !global && source === "override",
+    risk: global ? null : gateRisk(gate, fillPercent),
+  };
+}
+
 /** A duration a human reads at a glance. Exported for its own test. */
 export function ageLabel(ms) {
   if (ms == null) return "never reported";
