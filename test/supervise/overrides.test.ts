@@ -344,3 +344,220 @@ test("a number value is refused with a message naming the quoted form", () => {
 
   assert.equal(cases.length, 3);
 });
+
+/* ------------------------------------------------------------------------ *
+ * #222 unit 3 — the `profile` key and the ADD-only merge.
+ *
+ * 🛑 THE CONTAINER SURFACE STAYS AT FIVE KEYS. `profile` is a POINTER to a
+ * second file, not a sixth thing the container can be told. That is why the
+ * handle file accepts six names and a profile file accepts five.
+ *
+ * 🛑 ADD-ONLY IS lee's RULING OF 2026-11-19 (`#mcp` 15889). A merge may
+ * overwrite a VALUE and may never drop a NAME, so every name the profile
+ * contributes survives whatever the handle file says.
+ * ------------------------------------------------------------------------ */
+
+/** A legal profile name, which is deliberately not a legal path. */
+const PROFILE_NAMES = ["reviewer", "browser", "browser-2", "a", "0"];
+
+test("the container keys stay at five and only a handle may name a profile", async () => {
+  const { ALLOWED_HANDLE_KEYS } =
+    await import("../../src/supervise/overrides.js");
+
+  assert.deepEqual([...ALLOWED_OVERRIDE_KEYS], ALLOWED);
+  assert.equal(ALLOWED_OVERRIDE_KEYS.length, 5);
+
+  // 🛑 THE POINTER IS NOT A CONTAINER SETTING. A `profile` added to
+  // ALLOWED_OVERRIDE_KEYS would read as a sixth thing docker is told.
+  assert.ok(!ALLOWED_OVERRIDE_KEYS.includes("profile" as never));
+  assert.deepEqual([...ALLOWED_HANDLE_KEYS], [...ALLOWED, "profile"]);
+  assert.equal(ALLOWED_HANDLE_KEYS.length, 6);
+});
+
+test("a handle override may name a profile", () => {
+  let accepted = 0;
+
+  for (const name of PROFILE_NAMES) {
+    assert.deepEqual(
+      parseHandleOverride({ profile: name }),
+      { profile: name },
+      `refused a legal profile name: ${name}`,
+    );
+    accepted += 1;
+  }
+
+  // 🛑 THE POSITIVE CONTROL. A parse that refused every name would satisfy
+  // every refusal below and report green.
+  assert.equal(accepted, PROFILE_NAMES.length);
+  assert.equal(accepted, 5);
+});
+
+/**
+ * 🛑 THE NAME BECOMES A FILENAME, so a name that is a path is a traversal.
+ * `profiles/../../.ssh/id_ed25519` is the shape this refuses, and refusing
+ * the dot and the slash outright is narrower than resolving the path and
+ * checking where it landed.
+ */
+test("a profile name can never be a path", () => {
+  const refused: [string, unknown][] = [
+    ["climbs out", "../escape"],
+    ["has a slash", "a/b"],
+    ["is a bare dot-dot", ".."],
+    ["carries an extension", "a.json"],
+    ["is dot-relative", "./a"],
+    ["is absolute", "/etc/passwd"],
+    ["is upper case", "Reviewer"],
+    ["is empty", ""],
+    ["leads with a dash", "-x"],
+    ["holds an underscore", "a_b"],
+    ["holds a space", "a b"],
+    ["is a number", 2],
+    ["is an array", ["reviewer"]],
+    ["is null", null],
+  ];
+
+  for (const [why, name] of refused) {
+    assert.throws(
+      () => parseHandleOverride({ profile: name }),
+      (err: unknown) => {
+        const message = (err as Error).message;
+
+        // 🛑 NOT THE GENERIC REFUSAL. Before `profile` was allowed at all,
+        // every case here threw `unknown key "profile"`, which matches
+        // /profile/i and made this whole test pass against no implementation.
+        assert.ok(
+          !/unknown key/i.test(message),
+          `${why} hit the unknown-key refusal, so the name was never checked: ${message}`,
+        );
+        assert.match(message, /profile name/i, `${why}: ${message}`);
+
+        return true;
+      },
+      `accepted a profile name that ${why}: ${JSON.stringify(name)}`,
+    );
+  }
+
+  assert.equal(refused.length, 14);
+});
+
+test("a profile file carries the five keys and may not name another profile", async () => {
+  const { parseProfile } = await import("../../src/supervise/overrides.js");
+
+  for (const key of ALLOWED) {
+    const out = parseProfile({ [key]: sampleFor(key) });
+
+    assert.ok(key in out, `a profile file dropped ${key}`);
+  }
+
+  // 🛑 NO CHAINING. A profile that names a profile is a graph, and a graph
+  // needs cycle detection the ruling never asked for.
+  assert.throws(
+    () => parseProfile({ profile: "reviewer" }),
+    (err: unknown) => {
+      const message = (err as Error).message;
+
+      // 🛑 ITS OWN SENTENCE, NOT THE GENERIC ONE. `unknown key "profile"`
+      // matches /profile/i and would tell the human nothing about why.
+      assert.ok(!/unknown key/i.test(message), message);
+      assert.match(message, /may not set a profile name/i, message);
+
+      return true;
+    },
+    "a profile named another profile",
+  );
+});
+
+test("the merge unions env, and the handle wins on a collision", async () => {
+  const { mergeOverrides } = await import("../../src/supervise/overrides.js");
+
+  const merged = mergeOverrides(
+    { env: { SHARED: "from-profile", ONLY_PROFILE: "1" } },
+    { env: { SHARED: "from-handle", ONLY_HANDLE: "1" } },
+  );
+
+  assert.deepEqual(merged.env, {
+    SHARED: "from-handle",
+    ONLY_PROFILE: "1",
+    ONLY_HANDLE: "1",
+  });
+});
+
+test("the merge unions readOnlyMounts, profile first, with no duplicate", async () => {
+  const { mergeOverrides } = await import("../../src/supervise/overrides.js");
+
+  const merged = mergeOverrides(
+    { readOnlyMounts: ["docs", "web/assets"] },
+    { readOnlyMounts: ["web/assets", "plans"] },
+  );
+
+  // 🛑 DEDUPED, because a repeated `-v` puts one directory at one destination
+  // twice and docker's own error for that is unreadable.
+  assert.deepEqual(merged.readOnlyMounts, ["docs", "web/assets", "plans"]);
+});
+
+test("image, memory and cpus are replaced by the handle", async () => {
+  const { mergeOverrides } = await import("../../src/supervise/overrides.js");
+
+  const merged = mergeOverrides(
+    { image: "node:22-slim", memory: "4g", cpus: "4" },
+    { memory: "2g" },
+  );
+
+  assert.deepEqual(merged, {
+    image: "node:22-slim",
+    memory: "2g",
+    cpus: "4",
+  });
+});
+
+/**
+ * 🛑 THE ADD-ONLY INVARIANT, AND IT IS THE WHOLE RULING. A handle may change
+ * what a name is set to. No handle file can express dropping the name.
+ */
+test("the merge can never remove an env name or a mount the profile set", async () => {
+  const { mergeOverrides } = await import("../../src/supervise/overrides.js");
+
+  const profile = {
+    env: { KEPT: "1", BLANKED: "1" },
+    readOnlyMounts: ["docs"],
+  };
+
+  const attempts: [string, Record<string, unknown>][] = [
+    ["an empty value", { env: { BLANKED: "" } }],
+    ["an empty env object", { env: {} }],
+    ["an empty mount list", { readOnlyMounts: [] }],
+    ["an unrelated key", { image: "node:22-slim" }],
+  ];
+
+  for (const [why, handle] of attempts) {
+    const merged = mergeOverrides(profile, handle);
+
+    for (const name of Object.keys(profile.env)) {
+      assert.ok(
+        merged.env && name in merged.env,
+        `${why} removed the env name ${name}`,
+      );
+    }
+
+    assert.ok(
+      merged.readOnlyMounts?.includes("docs"),
+      `${why} removed the mount docs`,
+    );
+  }
+
+  assert.equal(attempts.length, 4);
+});
+
+test("the merged result never carries the profile pointer", async () => {
+  const { mergeOverrides } = await import("../../src/supervise/overrides.js");
+
+  const merged = mergeOverrides(
+    { image: "node:22-slim" },
+    { profile: "reviewer", memory: "2g" },
+  );
+
+  // 🛑 A POINTER THAT SURVIVED THE MERGE WOULD REACH A SPAWN, where it is
+  // neither a docker flag nor an error anybody sees.
+  assert.ok(!("profile" in merged), "the pointer survived into the merge");
+  assert.deepEqual(merged, { image: "node:22-slim", memory: "2g" });
+});

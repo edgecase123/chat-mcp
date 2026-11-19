@@ -1,0 +1,95 @@
+---
+title: Per-handle container overrides
+updated: 2026-11-19
+covers:
+  - src/supervise/overrides.ts
+---
+
+# Per-handle container overrides
+
+How one agent gets a capability another agent does not: a validated JSON file
+per handle, optionally pointing at a shared profile. Read this before adding a
+key, and before writing a reader for either file.
+
+---
+
+## Two files, two layers
+
+```
+~/.chat-mcp/profiles/<name>.json     the five container keys
+~/.chat-mcp/overrides/<handle>.json  the five, plus `profile`
+                                     |
+                          mergeOverrides(profile, handle)
+                                     |
+                              one ContainerOverride
+```
+
+A handle file may stand alone. A profile exists so several handles can share
+one capability set without a second copy of it.
+
+🛑 **Both files sit outside every container mount.** `/work` is mounted, so an
+in-tree override would let an agent widen its own next spawn.
+
+## The keys
+
+| Key              | Value                            | Merge    |
+| ---------------- | -------------------------------- | -------- |
+| `env`            | object of NAME to string         | union    |
+| `readOnlyMounts` | array of project-relative paths  | union    |
+| `image`          | a registry reference             | replace  |
+| `memory`         | docker's own form, `512m`        | replace  |
+| `cpus`           | a decimal, `1.5`                 | replace  |
+| `profile`        | a profile name, handle file only | resolved |
+
+🛑 **The container surface is five keys. `profile` is a pointer, not a sixth
+thing docker is told.** That is why `ALLOWED_OVERRIDE_KEYS` holds five and
+`ALLOWED_HANDLE_KEYS` holds six, and why a profile file refuses `profile`.
+
+## ADD-only, which is a ruling and not a default
+
+**An override may change what a name is SET TO. It may never drop a name.**
+lee ruled this on 2026-11-19.
+
+- `env` and `readOnlyMounts` union, and the handle wins a name collision.
+- `{"BLANKED": ""}` sets the value to empty. It does not remove the name.
+- Removal, if it is ever wanted, is a separate key such as
+  `readOnlyMountsRemove`, never a sentinel character inside a value.
+
+🛑 **The reason a sentinel is refused: `checkReadOnlyMounts` has no allowlist
+pattern, so `!docs` is a legal mount path today.** A later sentinel syntax
+would silently redefine an existing file.
+
+## A profile name is not a path
+
+`^[a-z0-9][a-z0-9-]*$`. No dot, no slash, no upper case.
+
+🛑 **The name becomes a path segment, so a name that is a path is a
+traversal.** The refusal is on the characters rather than on where the
+resolved path landed, because two readings of one path is the shape that puts
+a directory at two destinations.
+
+**No chaining.** A profile may not name a profile. Two layers stay two layers,
+so resolution needs no cycle detection.
+
+## Common pitfalls
+
+- **An unresolvable profile name must be a loud refusal at spawn.** A silent
+  fall back to the default container shows an operator a capability the agent
+  did not get.
+- **A refusal names the whole file, not the key.** A partial parse would apply
+  the legal half of a file and silently drop the rest.
+- **`env` may not name `CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN` or
+  `CHAT_MCP_MCP_CONFIG`.** `docker run -e NAME` copies this process's value,
+  so an override that re-declared one would choose the agent's credential.
+
+---
+
+## Source files
+
+| File                         | Role                                             |
+| ---------------------------- | ------------------------------------------------ |
+| `src/supervise/overrides.ts` | The two allowlists, every value check, the merge |
+
+## Related docs
+
+- [container-isolation.md](container-isolation.md) — what the default container is, before any override

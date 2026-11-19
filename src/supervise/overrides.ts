@@ -21,7 +21,28 @@ export const ALLOWED_OVERRIDE_KEYS = [
 
 export type AllowedOverrideKey = (typeof ALLOWED_OVERRIDE_KEYS)[number];
 
-export type HandleOverride = Partial<Record<AllowedOverrideKey, unknown>>;
+/**
+ * Every key a human may write in a HANDLE file: the five, plus the pointer.
+ *
+ * 🛑 `profile` IS NOT A SIXTH CONTAINER KEY. It names a second file whose
+ * contents are the five. Putting it in `ALLOWED_OVERRIDE_KEYS` would read as
+ * another thing docker can be told, and a profile file would then accept it.
+ */
+export const ALLOWED_HANDLE_KEYS = [
+  ...ALLOWED_OVERRIDE_KEYS,
+  "profile",
+] as const;
+
+/** What reaches a spawn: the five keys, each already checked. */
+export type ContainerOverride = {
+  env?: Record<string, string>;
+  readOnlyMounts?: string[];
+  image?: string;
+  memory?: string;
+  cpus?: string;
+};
+
+export type HandleOverride = ContainerOverride & { profile?: string };
 
 /**
  * The escalations somebody reaches for on purpose, each with its own sentence.
@@ -190,8 +211,30 @@ function checkPattern(
   return value;
 }
 
-function isAllowed(key: string): key is AllowedOverrideKey {
-  return (ALLOWED_OVERRIDE_KEYS as readonly string[]).includes(key);
+/**
+ * A profile name, which is deliberately narrower than a filename.
+ *
+ * 🛑 THE NAME BECOMES A PATH SEGMENT. Refusing the dot and the slash outright
+ * is narrower than resolving the path and checking where it landed, and it
+ * cannot disagree with whatever the reader of the profiles directory does.
+ */
+const PROFILE_NAME = /^[a-z0-9][a-z0-9-]*$/;
+
+function checkProfileName(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new Error(
+      `a profile name must be a quoted string: ${JSON.stringify(value)}`,
+    );
+  }
+
+  if (!PROFILE_NAME.test(value)) {
+    throw new Error(
+      "a profile name holds only lower-case letters, digits and dashes, " +
+        `and starts with a letter or a digit: ${JSON.stringify(value)}`,
+    );
+  }
+
+  return value;
 }
 
 /**
@@ -201,7 +244,10 @@ function isAllowed(key: string): key is AllowedOverrideKey {
  * escalation sit beside a legal key and apply the legal half, so the human
  * would see a spawn that worked and a flag that silently did not.
  */
-export function parseHandleOverride(raw: unknown): HandleOverride {
+function parseAgainst(
+  raw: unknown,
+  allowed: readonly string[],
+): HandleOverride {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("an override must be a JSON object");
   }
@@ -213,10 +259,10 @@ export function parseHandleOverride(raw: unknown): HandleOverride {
 
     if (explained) throw new Error(explained);
 
-    if (!isAllowed(key)) {
+    if (!allowed.includes(key)) {
       throw new Error(
         `unknown key ${JSON.stringify(key)}; an override may set only ` +
-          ALLOWED_OVERRIDE_KEYS.join(", "),
+          allowed.join(", "),
       );
     }
 
@@ -225,8 +271,71 @@ export function parseHandleOverride(raw: unknown): HandleOverride {
       out.readOnlyMounts = checkReadOnlyMounts(value);
     else if (key === "image") out.image = checkPattern(key, value, IMAGE_REF);
     else if (key === "memory") out.memory = checkPattern(key, value, MEMORY);
-    else out.cpus = checkPattern(key, value, CPUS);
+    else if (key === "cpus") out.cpus = checkPattern(key, value, CPUS);
+    else out.profile = checkProfileName(value);
   }
 
   return out;
+}
+
+export function parseHandleOverride(raw: unknown): HandleOverride {
+  return parseAgainst(raw, ALLOWED_HANDLE_KEYS);
+}
+
+/**
+ * Validate one profile file, or throw naming the key.
+ *
+ * 🛑 A PROFILE MAY NOT NAME A PROFILE. A pointer inside a profile makes the
+ * files a graph, and resolving a graph needs cycle detection that lee's
+ * ruling of 2026-11-19 never asked for. Two layers, profile then handle.
+ */
+export function parseProfile(raw: unknown): ContainerOverride {
+  if (raw !== null && typeof raw === "object" && "profile" in raw) {
+    throw new Error(
+      "a profile may not set a profile name: only a handle points at a " +
+        "profile, so the files stay two layers rather than a graph",
+    );
+  }
+
+  return parseAgainst(raw, ALLOWED_OVERRIDE_KEYS);
+}
+
+/** The three keys a later value simply replaces. */
+const SCALAR_KEYS = ["image", "memory", "cpus"] as const;
+
+/**
+ * Apply a handle's override on top of its profile's, ADD-only.
+ *
+ * 🛑 ADD-ONLY IS lee's RULING OF 2026-11-19 (`#mcp` 15889). A handle may
+ * change what a name is SET TO. No handle file can express dropping a name
+ * the profile contributed, which is why this unions rather than replaces.
+ */
+export function mergeOverrides(
+  profile: ContainerOverride,
+  handle: HandleOverride,
+): ContainerOverride {
+  const merged: ContainerOverride = {};
+
+  if (profile.env || handle.env) {
+    merged.env = { ...profile.env, ...handle.env };
+  }
+
+  if (profile.readOnlyMounts || handle.readOnlyMounts) {
+    // 🛑 DEDUPED. A repeated `-v` puts one directory at one destination twice,
+    // and docker's own error for that names neither mount.
+    merged.readOnlyMounts = [
+      ...new Set([
+        ...(profile.readOnlyMounts ?? []),
+        ...(handle.readOnlyMounts ?? []),
+      ]),
+    ];
+  }
+
+  for (const key of SCALAR_KEYS) {
+    const value = handle[key] ?? profile[key];
+
+    if (value !== undefined) merged[key] = value;
+  }
+
+  return merged;
 }
