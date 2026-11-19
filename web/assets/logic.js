@@ -1169,11 +1169,26 @@ export function gaugeDisplay(peer) {
  * that rule and it exists only to answer the operator before a round trip —
  * the route refuses the same shapes, and a test asserts the stored value did
  * not move. If one side changes, both must.
+ *
+ * 🛑 `scope` EXISTS BECAUSE THE EMPTY BOX MEANS TWO DIFFERENT THINGS. Clearing
+ * a HANDLE returns it to the global default. The global has no layer below it,
+ * so `handleContextGateSet` answers 400 — and a validator whose job is to
+ * answer before a round trip must not wave through the one shape that is
+ * guaranteed to fail.
  */
-export function gateSubmission(raw) {
+export function gateSubmission(raw, { scope = "handle" } = {}) {
   const text = String(raw ?? "").trim();
 
-  if (text === "") return { ok: true, gate: null };
+  if (text === "") {
+    return scope === "global"
+      ? {
+          ok: false,
+          reason:
+            "the default gate cannot be cleared; every agent without an " +
+            "override of its own resolves it",
+        }
+      : { ok: true, gate: null };
+  }
 
   if (!/^\d+$/.test(text)) {
     return {
@@ -1238,6 +1253,55 @@ export function gateRisk(gate, fillPercent) {
   }
 
   return null;
+}
+
+/**
+ * How each of the three layers reads to an operator (#135 slice 4c).
+ *
+ * 🛑 "this agent" IS LOAD-BEARING, NOT DECORATION. It is the only word that
+ * distinguishes the one state where `[Clear]` does something, and a test
+ * asserts the two inherited layers do NOT carry it.
+ */
+const GATE_LAYER_LABEL = {
+  override: "set for this agent",
+  global: "from the default",
+  builtin: "built-in default",
+};
+
+/**
+ * One gate control's rendered state — the label, whether a clear is offered,
+ * and the risk note (#135 slice 4c).
+ *
+ * 🛑 THE NUMBER ALONE CANNOT SAY WHETHER `[Clear]` DOES ANYTHING. A row
+ * showing 50 may be overridden to 50, following a global 50, or on the
+ * built-in. Only `source` separates them, and only the first has an override
+ * to remove — so offering a clear on the other two is a button that reports
+ * success and changes nothing.
+ *
+ * 🛑 THE GLOBAL SCOPE CARRIES NO RISK NOTE. `gateRisk` is keyed on ONE agent's
+ * fill, and every agent resolves the default against its own, so a warning
+ * there would name a number belonging to nobody. It also never offers a clear:
+ * there is no layer below the global, which is the same rule
+ * `gateSubmission(…, { scope: "global" })` enforces on the empty box.
+ *
+ * @param {{ gate?: number, source?: string }} [resolved]
+ * @param {{ scope?: string, fillPercent?: number | null }} [opts]
+ */
+export function gateControlDisplay(
+  { gate, source } = {},
+  { scope = "handle", fillPercent = null } = {},
+) {
+  const global = scope === "global";
+  const layer = GATE_LAYER_LABEL[source] ?? GATE_LAYER_LABEL.builtin;
+
+  return {
+    gate,
+    label: global
+      ? `Default gate ${gate}%${source === "builtin" ? " \u00b7 built-in" : ""}`
+      : `Gate ${gate}% \u00b7 ${layer}`,
+    canClear: !global && source === "override",
+    risk: global ? null : gateRisk(gate, fillPercent),
+  };
 }
 
 /** A duration a human reads at a glance. Exported for its own test. */
@@ -1322,6 +1386,11 @@ export function agentRow(agent, { nowMs = Date.now() } = {}) {
     handle: agent.handle,
     childHandle: agent.child?.handle ?? null,
     gauge: gaugeDisplay(agent.child),
+    // #135 slice 4c — the CHILD's gate, resolved server-side. Null with no
+    // child: there is no agent to gate, and inventing a number here would put
+    // a second copy of the three-layer default in the browser.
+    gate: agent.child?.context_gate ?? null,
+    gateSource: agent.child?.context_gate_source ?? null,
     // ⚠️ "bound", NEVER "uptime". `boundAtOf` fails open to now, and a clock
     // that disagrees would otherwise render a negative age.
     bound: known

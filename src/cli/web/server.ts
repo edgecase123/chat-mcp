@@ -26,6 +26,7 @@ import {
   isLegalGate,
   resolveContextGate,
   resolveContextGateWithSource,
+  resolveDefaultContextGate,
   setGlobalContextGate,
   setHandleContextGate,
 } from "../../storage/context-gate.js";
@@ -580,6 +581,10 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
       unread: dao.roomUnreadCount(ctx.db, r.name, ctx.handle),
     })),
     discoverRooms,
+    // #135 slice 4c — the footer that EDITS the global default needs to show
+    // it, and no peer row can be relied on to carry it: a peer reports the
+    // global only while it has no override of its own.
+    context_gate_default: resolveDefaultContextGate(ctx.db),
     version: VERSION,
     // The two roots a dropped file path is shown relative to. The page
     // already lists directories under both through /api/files, so this adds
@@ -1198,6 +1203,11 @@ async function handleLiveAgents(
                 ...child,
                 ...gaugeFreshness(child.context_reported_at, now),
                 context_ramp: contextRampFor(ctx.db, child.handle),
+                // #135 slice 4c — the gate control sits on THIS row, so the
+                // number it edits and the layer it came from are resolved
+                // here. Slice 4a put them on whoami's peers only, which is a
+                // different payload from the one the Agents panel renders.
+                ...gateFields(ctx.db, child.handle),
               },
       };
     }),

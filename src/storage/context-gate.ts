@@ -129,6 +129,27 @@ export function resolveContextGateWithSource(
   const own = getAgent(db, handle)?.context_gate;
   if (isLegalGate(own)) return { gate: own, source: "override" };
 
+  return resolveDefaultContextGate(db);
+}
+
+/**
+ * The gate a handle with no override of its own resolves to, and which of the
+ * two remaining layers answered.
+ *
+ * 🛑 THE LAYER ORDER HAS ONE HOME AND THIS IS THE REST OF IT.
+ * `resolveContextGateWithSource` delegates here rather than re-testing the
+ * global itself, for the same reason the separate `contextGateSource` was
+ * deleted on unit 4: two copies of the order are two things to keep in step.
+ *
+ * ⚠️ THE OVERRIDE LAYER IS DELIBERATELY ABSENT. A caller that wants a specific
+ * handle's gate must go through `resolveContextGateWithSource`; this answers
+ * the question the global-default CONTROL asks, which no handle can answer
+ * because an overridden handle never reports the global at all.
+ */
+export function resolveDefaultContextGate(db: Db): {
+  gate: number;
+  source: Exclude<ContextGateSource, "override">;
+} {
   const global = getGlobalContextGate(db);
   if (global !== null) return { gate: global, source: "global" };
 

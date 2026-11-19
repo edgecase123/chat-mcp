@@ -311,3 +311,183 @@ test("🛑 both row stop buttons target the row's handle", () => {
     );
   }
 });
+
+/**
+ * #135 slice 4c — the gate control's wiring. Every test in
+ * `gate-control.test.ts` passes with this unwired, which is the same gap this
+ * file exists to close for the stop buttons.
+ */
+test("🛑 both gate controls are built by gateControl, with a denominator", () => {
+  // ⚠️ THE LOOKBEHIND EXCLUDES THE DECLARATION, so the count is call sites
+  // alone and the number means what this test's name says. Counting the
+  // declaration too would let one deleted call site hide behind it.
+  const found = APP_CODE.match(/(?<!function )gateControl\(\{/g);
+
+  // ⚠️ THE DENOMINATOR. TWO call sites: the per-agent row and the footer. One
+  // match means a scope was dropped, and the surviving claims below would then
+  // all be about the other one.
+  assert.notEqual(found, null, "nothing calls gateControl");
+  assert.equal(
+    found!.length,
+    2,
+    `expected 2 gateControl call sites, got ${found!.length}`,
+  );
+});
+
+/**
+ * 🛑 THE GATE IS STORED AGAINST THE CHILD AND THE STOP TARGETS THE SUPERVISOR.
+ * The two handles differ by a suffix, so posting the wrong one reads as
+ * correct and comes back 404.
+ */
+test("🛑 the per-row gate control is handed the CHILD handle, not the supervisor's", () => {
+  const row = APP_CODE.match(
+    /gateControl\(\{\s*scope: "handle",[\s\S]*?\n {16}\}\)/,
+  );
+
+  assert.notEqual(row, null, "the per-row gateControl call site is not found");
+  assert.match(row![0], /handle: a\.childHandle/, "the row posts a.handle");
+  assert.doesNotMatch(
+    row![0],
+    /handle: a\.handle/,
+    "the row gates the SUPERVISOR",
+  );
+});
+
+/**
+ * 🛑 THE DEFAULT COMES FROM THE PAYLOAD, NOT FROM A ROW. A peer reports the
+ * global only while it has no override, so deriving it from the rows renders
+ * nothing on a page where every agent is overridden.
+ */
+test("🛑 the footer reads the global default from whoami, not from the rows", () => {
+  const body = fnBody("fetchWhoami");
+
+  assert.match(body, /context_gate_default/, "fetchWhoami drops the default");
+  assert.match(
+    APP_CODE,
+    /resolved: state\.gateDefault/,
+    "the footer does not read state.gateDefault",
+  );
+});
+
+/**
+ * 🛑 THE VALIDATOR MUST RUN BEFORE THE POST. Its whole purpose is to answer the
+ * operator without a round trip, and the one shape it exists to catch — an
+ * empty box on the GLOBAL — is answered 400 by the route.
+ */
+test("🛑 setGate validates with gateSubmission before it posts", () => {
+  const body = fnBody("setGate");
+  const check = body.indexOf("gateSubmission(");
+  const post = body.indexOf("/api/context-gate");
+
+  assert.notEqual(check, -1, "setGate never calls gateSubmission");
+  assert.notEqual(post, -1, "setGate never posts to the gate route");
+  assert.ok(check < post, "setGate posts BEFORE it validates");
+  assert.match(body, /scope/, "setGate drops the scope argument");
+});
+
+/**
+ * ⚠️ A GATE CHANGE INVALIDATES BOTH PAYLOADS. The rows carry each agent's
+ * resolved gate and whoami carries the default, so refetching one leaves the
+ * other showing a number nobody has re-read.
+ */
+test("🛑 a gate change refetches both payloads, not just the rows", () => {
+  const body = fnBody("setGate");
+
+  assert.match(body, /fetchWhoami\(\)/, "setGate leaves the default stale");
+  assert.match(body, /fetchLiveAgents\(\)/, "setGate leaves the rows stale");
+  assert.match(body, /renderSidebar\(\)/, "setGate never repaints");
+});
+
+/**
+ * 🛑 THE GUARD `boot()`'s OWN DOCBLOCK ASKS FOR AND NEVER GOT. It says: "BOOT
+ * DOES NOT CALL refresh(), SO EVERY NEW VIEW MUST BE LISTED HERE TOO. The
+ * approvals card was added to refresh() only, which meant a blocked agent was
+ * invisible until some unrelated wake event arrived."
+ *
+ * That comment was written after the approvals card hit it, and two more
+ * panels hit it afterwards anyway. MEASURED on `origin/main`: `boot()` named
+ * neither `fetchLiveAgents` nor `fetchClaims`, so a freshly opened page said
+ * "(no supervised agents running)" with two supervisors live, until a wake
+ * event arrived. An empty panel and a panel nobody filled look identical.
+ *
+ * 🛑 IT KEYS ON FUNCTIONS THIS FILE DECLARES, NOT ON A `fetch` NAME PREFIX.
+ * The first cut matched `/fetch[A-Z]\w*\(/` over a floor of `>= 4`, which is
+ * the same fail-open shape as PR 325's: a rename OUT of the prefix drops the
+ * call from the set, the floor still clears on the survivors, and the missing
+ * name is then never checked against `boot()` at all.
+ *
+ * MEASURED across five arms, by claude2 reviewing this PR and then by me:
+ *
+ * ```
+ * arm                                        prefix+floor   declared-callee
+ * 1  clean tree                              pass           pass
+ * 2  fetchClaims cut from boot()             FAIL           FAIL
+ * 3  renamed to loadClaims AND cut           pass  <-OPEN   FAIL
+ * 4  await dropped AND cut                   FAIL           FAIL
+ * 5  Promise.all refactor, still in boot     pass           pass
+ * 6  declared `const … = async function`     n/a            FAIL
+ * 7  declared `const … = async () =>`        n/a            FAIL
+ * ```
+ *
+ * 🛑 ARMS 6 AND 7 ARE WHY `declared` READS TWO FORMS, NOT ONE. Keying only on
+ * `function name(` left a view declared as a `const` invisible to the matcher,
+ * and the floor's margin of one absorbed the shrink — the same arithmetic as
+ * the `>= 4` floor it replaced, one layer up. Raised by claude2 re-reviewing
+ * this PR, who measured the gap and then declined to claim their own fix
+ * worked, because their re-implementation and the real file disagreed. The
+ * real file is the instrument: patched and re-run here, it closes both arms.
+ *
+ * ⚠️ `await (\w+)\(` WAS ALSO MEASURED AND IS WORSE. It closes arm 3, reopens
+ * arm 4, and false-alarms on arm 5 — `await Promise.all([…])` collapses the
+ * set to `Promise`, and `setGate` in this same PR already uses that idiom.
+ *
+ * ⚠️ MATCHING EVERY CALLED IDENTIFIER WAS MEASURED AND IS WORSE STILL. It
+ * picks up `console.error`'s `error(` and `Promise.all`'s `all(`, so it
+ * false-alarms on a clean tree and needs an exemption list that grows.
+ *
+ * ⚠️ `fetchMessages` IS THE ONE EXEMPTION AND IT IS NOT A LOOPHOLE. It is
+ * conditional on `state.currentTarget` in `refresh()`, and on boot no
+ * conversation is open yet, so there is nothing to fetch. Every other call in
+ * the set is unconditional.
+ */
+test("🛑 every view refresh() fills, boot() fills too — an empty panel must not lie", () => {
+  const refresh = fnBody("refresh");
+  const boot = fnBody("boot");
+  const EXEMPT = new Set(["fetchMessages"]);
+
+  // Top-level functions `app.js` defines. A call to one of these is a view
+  // this file owns; `console.error` and `Promise.all` are not, which is what
+  // keeps the match from needing an exemption list that grows.
+  const declared = new Set([
+    ...[...APP_CODE.matchAll(/^(?:async )?function (\w+)\(/gm)].map(
+      (m) => m[1]!,
+    ),
+    ...[
+      ...APP_CODE.matchAll(/^const (\w+) = (?:async )?(?:function\s*)?\(/gm),
+    ].map((m) => m[1]!),
+  ]);
+
+  // 🛑 `refresh` ITSELF IS EXCLUDED BECAUSE fnBody CAPTURES THE SIGNATURE LINE.
+  // Without this the guard demands that boot() call refresh(), which is the one
+  // thing boot deliberately does not do.
+  const called = [
+    ...new Set([...refresh.matchAll(/\b(\w+)\(/g)].map((m) => m[1]!)),
+  ].filter((n) => declared.has(n) && n !== "refresh");
+
+  // ⚠️ THE DENOMINATOR. A match that collapsed to nothing would make the claim
+  // below vacuously true, which is this file's recurring failure shape.
+  assert.ok(
+    called.length >= 8,
+    `only ${called.length} app.js calls found in refresh(); the matcher has drifted: ${called.join(", ")}`,
+  );
+
+  const missing = called.filter(
+    (f) => !EXEMPT.has(f) && !boot.includes(`${f}(`),
+  );
+
+  assert.deepEqual(
+    missing,
+    [],
+    `refresh() calls these and boot() does not, so they are empty or unpainted on a fresh page load: ${missing.join(", ")}`,
+  );
+});
