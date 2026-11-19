@@ -1210,9 +1210,14 @@ const SOON_MARGIN = 5;
  * ⚠️ `>=`, NOT `>`. A gate exactly equal to the floor silences the child —
  * `checkContextGate` tests `childFloor >= gate`. Proven by "a gate under the
  * child's spawn fill does NOT restart it, and says why".
+ *
+ * ⚠️ A NULL GATE IS A CLEAR, NOT A ZERO, SO IT WARNS NOTHING. `null <= fill`
+ * is true, which put the clear in the `silent` branch and said the opposite of
+ * what a clear does. Proven by "a cleared gate warns nothing, because falling
+ * back to the global default still restarts".
  */
 export function gateRisk(gate, fillPercent) {
-  if (typeof fillPercent !== "number" || !Number.isFinite(fillPercent)) {
+  if (!Number.isFinite(gate) || !Number.isFinite(fillPercent)) {
     return null;
   }
 

@@ -114,3 +114,19 @@ test("with no known fill there is no warning, because there is nothing to compar
   assert.equal(gateRisk(10, null), null);
   assert.equal(gateRisk(10, undefined), null);
 });
+
+/**
+ * A CLEAR is not a low gate. `gateSubmission("")` answers `gate: null`, which
+ * hands the handle back to the global default, so something still restarts it.
+ * Warning "nothing will restart it" there states the opposite of what happens.
+ *
+ * 🛑 `fillPercent` IS TYPE-GUARDED AND `gate` WAS NOT. `null <= 20` is true,
+ * so the clear fell into the `silent` branch, while `undefined` reached the
+ * `soon` arithmetic, went NaN and returned null — which is why probing with
+ * `undefined` alone reports no fault.
+ */
+test("a cleared gate warns nothing, because falling back to the global default still restarts", () => {
+  assert.equal(gateRisk(null, 20), null);
+  assert.equal(gateRisk(undefined, 20), null);
+  assert.equal(gateRisk(Number.NaN, 20), null);
+});
