@@ -200,8 +200,8 @@ cost is that editing a file mid-session needs a supervisor restart.
 
 | key              | wired          | why not                                                    |
 | ---------------- | -------------- | ---------------------------------------------------------- |
-| `memory`         | ✅ `--memory`  |                                                            |
-| `cpus`           | ✅ `--cpus`    |                                                            |
+| `memory`         | ✅ `--memory`  | both containers — the install one has a floor, see below   |
+| `cpus`           | ✅ `--cpus`    | both containers — the install one has a floor, see below   |
 | `image`          | ✅ the operand |                                                            |
 | `env`            | ❌             | the operator's consent banner must show it too — see below |
 | `readOnlyMounts` | ❌             | same banner, and it must route through `checkedMountPath`  |
@@ -239,6 +239,50 @@ container as a command. A `--memory` below that point reaches `sh` inside the
 container as an unknown argument, so the container runs UNCAPPED and docker
 reports nothing — an operator reading `docker inspect` sees no limit and has no
 error to connect it to.
+
+### The install container inherits the caps, with a floor
+
+**lee ruled C on #222 open question 3:** `dockerInstallPlan` inherits the
+handle's `memory` and `cpus`, except a value below the floor is raised to the
+floor.
+
+```
+INSTALL_MEMORY_FLOOR  1g      src/supervise/installResources.ts
+INSTALL_CPUS_FLOOR    1
+
+override 256m  ->  --memory 1g      raised
+override 4g    ->  --memory 4g      inherited
+override 1024m ->  --memory 1024m   equal to the floor, so the spelling is kept
+no override    ->  no flag at all   NOT the floor
+```
+
+🛑 **AN ABSENT KEY EMITS NO FLAG, NOT THE FLOOR.** The floor raises a cap
+somebody asked for. Imposing one on an install that was never capped would cap
+every existing agent silently.
+
+⚠️ **THE FLOOR VALUES ARE A JUDGEMENT AND lee MAY CHANGE THEM.** They are not
+measured. `npm ci` is the heaviest thing the container ever does, so an agent
+capped for its own steady state would make the INSTALL the thing that dies —
+and an OOM kill inside `npm ci` surfaces as a half-written `node_modules`
+volume rather than as a cap error.
+
+🛑 **TWO SPELLINGS OF ONE SIZE MUST COMPARE EQUAL**, so the comparison runs
+through `memoryToBytes` rather than on the string. `1024m` is not below `1g`.
+
+🛑 **THE VALUE IS RE-CHECKED AT THIS CONSUMER, NOT TRUSTED FROM THE STORE.**
+`installResourceArgs` takes the override off a `SpawnOptions` a library caller
+supplies, exactly as `effectiveImage` does. An unparseable value compares
+FALSE against the floor rather than below it, so trusting one would SKIP the
+floor instead of raising to it — the fails-open direction. It throws through
+`assertMemory` / `assertCpus`, which wrap the store's own patterns so the two
+routes cannot disagree. Found by claude2 on PR 346.
+
+🛑 **THE AGENT ARGV CHECKS THE SAME WAY, AND IT USED TO TRUST TRUTHINESS.**
+`if (override?.memory)` passes `"0"`, and docker reads zero as no limit — so
+the container an operator capped ran uncapped. It is now `!== undefined` plus
+the assert, which is also what refuses the empty string rather than silently
+omitting the flag. Found by claude2 on PR 346, one function away from the
+install-path fix above.
 
 ## The consent banner names the image. It still omits `memory` and `cpus`.
 

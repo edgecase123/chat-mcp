@@ -288,6 +288,28 @@ export function assertImageRef(value: unknown): string {
 }
 
 /**
+ * The `memory` and `cpus` checks, reachable from the consumer that puts them
+ * in an argv.
+ *
+ * 🛑 THE SAME ARGUMENT AS `assertImageRef`, FOR THE SAME REASON. The store is
+ * not the only route in: `installResourceArgs` takes the override off a
+ * `SpawnOptions` a library caller supplies. An unparseable value compares
+ * FALSE against the floor rather than below it, so an unchecked one skips the
+ * floor it was supposed to be raised to. Found by claude2 on PR 346.
+ *
+ * ⚠️ THEY WRAP `checkPattern` RATHER THAN RE-READING THE PATTERNS, so the
+ * store cannot accept what the consumer refuses — and `refuseNoLimit` comes
+ * with them, which is how a zero reaching this route is refused too.
+ */
+export function assertMemory(value: unknown): string {
+  return checkPattern("memory", value, MEMORY);
+}
+
+export function assertCpus(value: unknown): string {
+  return checkPattern("cpus", value, CPUS);
+}
+
+/**
  * A profile name, which is deliberately narrower than a filename.
  *
  * 🛑 THE NAME BECOMES A PATH SEGMENT. Refusing the dot and the slash outright
