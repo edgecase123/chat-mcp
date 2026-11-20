@@ -221,13 +221,24 @@ test("every covers: entry on a docs/system page names a path that exists", () =>
   // block, loses its front matter, or has its entries re-indented to column 0
   // produces nothing and appears here — three mutants that all passed a
   // count-only check.
+  // 🛑 BOTH LISTS NEED A LITERAL PIN, NOT JUST `EXEMPT`. `NO_COVERS` is
+  // compared against the set it measures, so adding a page to it makes the
+  // comparison agree with itself: deleting `settings.md`'s block AND listing
+  // the page here was EXIT 0, 4 pass. claude1's second finding on PR 342.
+  assert.deepEqual(
+    NO_COVERS.map((e) => e.page),
+    ["docs/system/README.md", "docs/system/06-interfaces/stopping-agents.md"],
+    "only these two pages may contribute no covers: entries — widening the " +
+      "list is how a page stops being checked while every assertion agrees",
+  );
   assert.deepEqual(
     silent.slice().sort(),
     NO_COVERS.map((e) => e.page)
       .slice()
       .sort(),
-    `a page stopped contributing covers: entries. Expected only the pages in ` +
-      `NO_COVERS to be silent; got:\n${silent.join("\n")}`,
+    `a page stopped contributing covers: entries. Give it a covers: list; ` +
+      `adding it to NO_COVERS also needs the literal pin above edited, and ` +
+      `that is the review the page should get. Silent pages:\n${silent.join("\n")}`,
   );
 
   // The floor stays because it is free, but it is the WEAK check of the two:
