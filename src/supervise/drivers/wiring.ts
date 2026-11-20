@@ -1,19 +1,21 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AgentChild } from "../child.js";
-import { createLineParser } from "../child.js";
-import type { RateLimitSnapshot } from "../rate-limit.js";
-import type { ContextSnapshot } from "../context-gauge.js";
-import type { Denial } from "../denial.js";
 import type { VendorSpawn } from "../vendor.js";
+import { attachStreams, createEventFanout } from "./fanout.js";
 
 /**
- * Turn a spawned process into an `AgentChild`.
+ * Turn ONE long-lived spawned process into an `AgentChild`.
  *
  * 🛑 THIS EXISTED TWICE. The host driver and the container driver carried the
  * same callback arrays, the same line parser and the same six subscribe
  * methods, differing only in the event router and the stdin envelope — both
  * of which are now arguments. Keeping one copy is what makes a third vendor a
  * file rather than a third copy.
+ *
+ * 🛑 THE PROCESS OUTLIVES THE TURN HERE, AND THAT IS A VENDOR'S PROPERTY. A
+ * CLI that exits after every turn needs `wirePerTurnChild` instead, because
+ * `send` below writes to a stdin such a process has already closed.
+ * `VendorSpawn.processPerTurn` says which, and `spawnOnHost` picks.
  */
 export function wireAgentChild(
   child: ChildProcessWithoutNullStreams,
@@ -49,89 +51,14 @@ export function wireAgentChild(
     teardown?: () => Promise<void>;
   } = {},
 ): AgentChild {
-  const eventCbs: ((e: Record<string, unknown>) => void)[] = [];
-  const turnEndCbs: (() => void)[] = [];
-  const usageCbs: ((s: RateLimitSnapshot) => void)[] = [];
-  const contextCbs: ((s: ContextSnapshot) => void)[] = [];
-  const denialCbs: ((d: Denial) => void)[] = [];
-  const sessionCbs: ((id: string) => void)[] = [];
-  const stderrCbs: ((chunk: string) => void)[] = [];
-  let lastSession: string | null = null;
+  const fanout = createEventFanout(vendor);
 
-  const feed = createLineParser((parsed) => {
-    for (const cb of eventCbs) cb(parsed);
+  attachStreams(child, fanout);
 
-    vendor.routeEvent(parsed, {
-      turnEnd: () => {
-        for (const cb of turnEndCbs) cb();
-      },
-      usage: (snapshot) => {
-        for (const cb of usageCbs) cb(snapshot);
-      },
-      context: (snapshot) => {
-        for (const cb of contextCbs) cb(snapshot);
-      },
-      denial: (d) => {
-        for (const cb of denialCbs) cb(d);
-      },
-      session: (id) => {
-        // Only the FIRST sighting matters; every later event repeats it.
-        if (lastSession === id) return;
-        lastSession = id;
-        for (const cb of sessionCbs) cb(id);
-      },
-    });
-  });
-
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", feed);
-
-  // 🛑 ATTACHED HERE, NOT PER DRIVER, so no driver can ship without it. A
-  // containerized child died with its reason on this stream and nothing was
-  // listening — the prelude chains on `&&` and `npm` writes its errors here,
-  // so a failed install meant no agent started and no line said why.
-  //
-  // ⚠️ Buffered to a line break, because a chunk is not a line. `npm` emits
-  // partial writes, and logging raw chunks splits one error across entries.
-  child.stderr.setEncoding("utf8");
-  let errBuffer = "";
-
-  const emitErrLine = (raw: string): void => {
-    const line = raw.trim();
-    // An empty line carries nothing a reader needs, and a flush of pure
-    // whitespace would otherwise spam one entry per write.
-    if (line.length === 0) return;
-
-    for (const cb of stderrCbs) cb(line);
-  };
-
-  // ⚠️ `\r` COUNTS AS A BREAK, NOT JUST `\n`. `npm` and `docker pull` draw
-  // progress by returning the carriage without ever sending a newline, so a
-  // `\n`-only split buffered the whole run and delivered it as one entry
-  // thousands of characters long. Measured by claude2 on #229.
-  const BREAK = /\r\n|[\n\r]/;
-
-  child.stderr.on("data", (chunk: string) => {
-    errBuffer += chunk;
-    for (;;) {
-      const at = errBuffer.search(BREAK);
-      if (at < 0) break;
-
-      const [sep] = BREAK.exec(errBuffer.slice(at)) ?? ["\n"];
-      emitErrLine(errBuffer.slice(0, at));
-      errBuffer = errBuffer.slice(at + sep.length);
-    }
-  });
-
-  // 🔴 THE CASE THIS EXISTS FOR. A process that dies mid-line never sends the
-  // closing break, so draining only on a break dropped the ONE line naming why
-  // the container died. `end` is the only signal that no further break is
-  // coming. Raised by claude2 on PR 238 with a failing repro.
-  child.stderr.on("end", () => {
-    const residue = errBuffer;
-    errBuffer = "";
-    emitErrLine(residue);
-  });
+  // 🛑 ONE PROCESS, SO ITS EXIT *IS* THE AGENT'S. That equivalence is the
+  // whole reason this line is a pass-through rather than a policy, and it is
+  // exactly what `wirePerTurnChild` cannot say.
+  child.on("exit", (code, signal) => fanout.emitExit(code, signal));
 
   return {
     // The VENDOR's declaration, passed through. A hard-coded `true` here
@@ -141,32 +68,7 @@ export function wireAgentChild(
     send(text: string): void {
       child.stdin.write(vendor.encodeInput(text));
     },
-    onTurnEnd(cb): void {
-      turnEndCbs.push(cb);
-    },
-    onUsage(cb): void {
-      usageCbs.push(cb);
-    },
-    onContext(cb): void {
-      contextCbs.push(cb);
-    },
-    onDenial(cb): void {
-      denialCbs.push(cb);
-    },
-    onSession(cb): void {
-      sessionCbs.push(cb);
-      // A late subscriber must not miss an id that already arrived.
-      if (lastSession) cb(lastSession);
-    },
-    onStderr(cb): void {
-      stderrCbs.push(cb);
-    },
-    onEvent(cb): void {
-      eventCbs.push(cb);
-    },
-    onExit(cb): void {
-      child.on("exit", (code, signal) => cb(code, signal));
-    },
+    ...fanout.subscriptions,
     kill(): void {
       if (opts.stop) {
         opts.stop();
@@ -180,4 +82,34 @@ export function wireAgentChild(
     // a driver test asserting the contract can.
     ...(opts.teardown ? { awaitTeardown: opts.teardown } : {}),
   };
+}
+
+/**
+ * A vendor must SAY how long one of its processes lives, or the spawn fails.
+ *
+ * 🛑 A SEPARATE GUARD FROM `assertDeclaresCapabilities`, AND NOT AN OVERSIGHT.
+ * That one takes an `AgentChild` and iterates `child[field]`, so a field
+ * declared only on `VendorSpawn` is never read by it. Adding
+ * `processPerTurn` to `AgentChild` instead would push a spawn strategy into
+ * the contract the supervisor consumes, where nothing reads it. claude1
+ * reviewing #317's plan.
+ *
+ * 🛑 THE TYPE SYSTEM DOES NOT COVER THIS. `tsconfig.json` includes `src/**`
+ * only, so a test fake or a JavaScript driver omitting the field compiles and
+ * runs — and `undefined` is falsy, which reads as a long-lived process. The
+ * wiring would then write turn two into a closed pipe, and the agent would
+ * simply stop answering with nothing in any log.
+ */
+export function assertDeclaresProcessLifetime(
+  vendor: Pick<VendorSpawn, "processPerTurn">,
+): void {
+  if (typeof vendor.processPerTurn !== "boolean") {
+    throw new Error(
+      `vendor did not declare processPerTurn. A process lifetime is declared, never inferred: ` +
+        `an absent field reads as undefined, which is falsy, so the supervisor would wire a ` +
+        `long-lived child and write turn two to a stdin the CLI already closed. ` +
+        `Set processPerTurn to true (one process per turn, like cursor-agent) or false ` +
+        `(one process for many turns, like claude).`,
+    );
+  }
 }
