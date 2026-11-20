@@ -637,6 +637,23 @@ export function dockerRunPlan(
 
   if (opts.grant) args.push("-e", CONTAINER_MCP_CONFIG_ENV);
 
+  // 🛑 BEFORE THE IMAGE, OR THE CONTAINER RUNS UNCAPPED AND DOCKER SAYS
+  // NOTHING. `docker run` reads its own flags up to the image name and hands
+  // everything after it to the container as a command, so a `--memory` pushed
+  // below this line reaches `sh` inside the container as an unknown argument.
+  // The operator then reads `docker inspect`, sees no limit, and has no error
+  // to connect it to.
+  //
+  // ⚠️ ONLY THE TWO KEYS WITH NO SECOND CONSUMER. `image` is also read by
+  // `dockerInstallPlan` and by `runDependencyInstall`'s inspect guard, and
+  // `env`/`readOnlyMounts` are also what the operator's consent banner has to
+  // show — so wiring either here alone would make the plan disagree with
+  // something else that is already shipping.
+  const override = opts.containerOverride;
+
+  if (override?.memory) args.push("--memory", override.memory);
+  if (override?.cpus) args.push("--cpus", override.cpus);
+
   args.push("-w", CONTAINER_PROJECT_DIR, vendor.image);
 
   const cli = [opts.binary ?? vendor.binary, ...vendor.argsFor(opts, "docker")];

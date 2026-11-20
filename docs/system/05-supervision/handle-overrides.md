@@ -162,12 +162,70 @@ collision, not the profile` in `test/supervise/override-store.test.ts`.
 Verified non-vacuous by transposing the call: 1 of 12 goes red, and only that
 one, because `env` unions in both directions.
 
-## Not wired yet
+## The spawn seam
 
-**Nothing calls `resolveOverrideFor` at spawn time.** `dockerRunPlan` does not
-read an override, so these files change no container today. Where the call
-belongs is untraced — claude2 put the same seam at the `startSupervisor` call
-site for #132, in `src/index.ts` and `src/supervise/index.ts`.
+**`startSupervisor` resolves the override ONCE and injects it at the `spawnFn`
+wrapper.** `dockerRunPlan` reads it off `SpawnOptions.containerOverride` and
+never touches disk itself.
+
+```
+startSupervisor   resolveOverrideFor(handle)   once, before anything spawns
+      |
+   spawnFn        { ...o, containerOverride }  the ONE wrapper
+      |
+      +-- first start   -+
+      +-- restart       -+--> dockerRunPlan --> docker run flags
+      +-- replace       -+
+```
+
+🛑 **THE WRAPPER, NOT THE THREE CALL SITES.** An override added per call site
+is an override that will be at two of them next time someone adds a fourth,
+and the one it loses is the restart — so a handle restarted for a full context
+comes back uncapped with the operator's file still on disk. Pinned by
+_"a RESTARTED child carries the same override"_, which is red when the
+injection moves to the first call site and green when it does not.
+
+⚠️ **A HOST HANDLE WITH AN OVERRIDE FILE IS WARNED, NOT REFUSED.** Every key
+is a `docker run` flag, so a host spawn can honour none of them — and without a
+line saying so the file sits on disk looking effective. Refusing the start
+would be worse: it would break a handle configured for the mode it is going
+back to. Raised by claude2 reviewing PR 337.
+
+🛑 **AT START, NOT PER SPAWN.** A malformed or dangling override throws.
+`doRestart` kills the child before it respawns, so a throw at spawn time leaves
+the handle with no agent and no remedy short of restarting the supervisor. The
+cost is that editing a file mid-session needs a supervisor restart.
+
+### What is wired, and what is not
+
+| key              | wired         | why not                                                    |
+| ---------------- | ------------- | ---------------------------------------------------------- |
+| `memory`         | ✅ `--memory` |                                                            |
+| `cpus`           | ✅ `--cpus`   |                                                            |
+| `env`            | ❌            | the operator's consent banner must show it too — see below |
+| `readOnlyMounts` | ❌            | same banner, and it must route through `checkedMountPath`  |
+| `image`          | ❌            | also read by `dockerInstallPlan` and the inspect guard     |
+
+🛑 **THE RESOURCE FLAGS GO IN THE ARGV BEFORE THE IMAGE NAME.** `docker run`
+reads its own flags up to the image and hands everything after it to the
+container as a command. A `--memory` below that point reaches `sh` inside the
+container as an unknown argument, so the container runs UNCAPPED and docker
+reports nothing — an operator reading `docker inspect` sees no limit and has no
+error to connect it to.
+
+## 🔴 The consent banner reads no override
+
+**`describePlan` builds its `mounts:` line from `readMounts()` and its
+`env vars` line from the vendor plus `GH_TOKEN`.** It reads no override, and it
+has no field for `memory`, `cpus` or `image`.
+
+So an override setting `env` or `readOnlyMounts` would reach the spawn and
+never reach the sentence the operator agreed to.
+
+⚠️ **`isConfirmed` latches per handle, so the banner is shown on the FIRST
+start only.** An override written after that first start is shown to nobody at
+any time. That is why `env` and `readOnlyMounts` are not wired ahead of the
+banner.
 
 ## Related docs
 

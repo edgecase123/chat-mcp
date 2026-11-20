@@ -2212,3 +2212,90 @@ test("🛑 the flags come from the VENDOR, so this spawner contains neither spel
     "containerized.ts names --strict-mcp-config again",
   );
 });
+
+/**
+ * #222's first wired keys. `memory` and `cpus` are the two the agent container
+ * can take with no second consumer: `image` is also read by the install
+ * container and the inspect guard, and `env`/`readOnlyMounts` are also what
+ * the operator's consent banner has to show.
+ */
+test("a resolved override's memory reaches the agent container as --memory", () => {
+  setToken("sk-ant-oat-x");
+
+  const args = dockerArgsFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    containerOverride: { memory: "512m" },
+  });
+
+  const at = args.indexOf("--memory");
+
+  assert.ok(at > 0, `no --memory in ${args.join(" ")}`);
+  assert.equal(args[at + 1], "512m");
+});
+
+test("a resolved override's cpus reaches the agent container as --cpus", () => {
+  setToken("sk-ant-oat-x");
+
+  const args = dockerArgsFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    containerOverride: { cpus: "1.5" },
+  });
+
+  const at = args.indexOf("--cpus");
+
+  assert.ok(at > 0, `no --cpus in ${args.join(" ")}`);
+  assert.equal(args[at + 1], "1.5");
+});
+
+/**
+ * The paired control. Every handle that wants the default container resolves
+ * to `null`, and a flag emitted with an undefined value would reach docker as
+ * `--memory undefined` — which fails the spawn for every agent that configured
+ * nothing.
+ */
+test("no override means no --memory and no --cpus at all", () => {
+  setToken("sk-ant-oat-x");
+
+  const args = dockerArgsFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+
+  assert.ok(
+    !args.includes("--memory"),
+    "--memory was emitted with no override",
+  );
+  assert.ok(!args.includes("--cpus"), "--cpus was emitted with no override");
+});
+
+/**
+ * 🛑 BEFORE THE IMAGE, AND THIS IS THE ONE THAT CANNOT BE SEEN BY READING THE
+ * ARGV. `docker run` takes its own flags up to the image name and treats
+ * everything after it as the container's command. A `--memory` pushed after
+ * the image is handed to `sh` inside the container instead, where it is an
+ * unknown argument — so the container starts UNCAPPED and docker reports
+ * nothing. An operator reading `docker inspect` sees no limit and no error.
+ */
+test("🛑 the resource flags land BEFORE the image, not in the container's own argv", () => {
+  setToken("sk-ant-oat-x");
+
+  const args = dockerArgsFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    containerOverride: { memory: "512m", cpus: "1.5" },
+  });
+
+  const image = args.indexOf(claudeSpawn.image);
+
+  assert.ok(image > 0, `the image is not in ${args.join(" ")}`);
+  assert.ok(
+    args.indexOf("--memory") < image,
+    "--memory is after the image, so the container runs uncapped",
+  );
+  assert.ok(
+    args.indexOf("--cpus") < image,
+    "--cpus is after the image, so the container runs uncapped",
+  );
+});

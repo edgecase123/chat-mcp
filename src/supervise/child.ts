@@ -2,6 +2,7 @@ import type { RateLimitSnapshot } from "./rate-limit.js";
 import type { ContextSnapshot } from "./context-gauge.js";
 import type { Denial } from "./denial.js";
 import type { ChildGrant } from "./grant.js";
+import type { ContainerOverride } from "./overrides.js";
 
 /**
  * 🛑 THE SEAM. NOTHING IN THIS FILE KNOWS ANY CLI's EVENT SHAPES.
@@ -220,6 +221,17 @@ export interface SpawnOptions {
    * `DEFAULT_SHUTDOWN_GRACE_SECONDS` (60), per-handle overridable.
    */
   readonly shutdownGraceSeconds?: number;
+
+  /**
+   * The container keys this handle's operator granted it, already resolved
+   * through any profile pointer. `null` or absent means the default container.
+   *
+   * 🛑 RESOLVED BY THE SUPERVISOR, NOT READ HERE. `startSupervisor` reads it
+   * once and injects it at the one `spawnFn` wrapper, so a restart and a
+   * replace carry the same grant as the first start. A driver that read the
+   * file itself would be a fourth reader to keep in step.
+   */
+  readonly containerOverride?: ContainerOverride | null;
 }
 
 /**

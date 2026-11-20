@@ -8,6 +8,7 @@ import {
   runDependencyInstall,
   DEFAULT_SHUTDOWN_GRACE_SECONDS,
 } from "./drivers/containerized.js";
+import { resolveOverrideFor } from "./overrideStore.js";
 import { TurnQueue } from "./turn-queue.js";
 import {
   WakeListener,
@@ -248,6 +249,41 @@ export async function startSupervisor(
   // a second vendor could spell differently.
   const isContainerSpawn = selection.mode === "docker";
 
+  /**
+   * #222's grant, read ONCE per supervisor and injected at the spawn seam
+   * below.
+   *
+   * 🛑 RESOLVED HERE, NOT PER SPAWN, BECAUSE A RESTART MUST NOT BE ABLE TO
+   * REFUSE. A malformed or dangling override throws, and `doRestart` kills the
+   * child before it calls `spawnFn` — so a throw at spawn time leaves the
+   * handle with no agent at all and no remedy short of restarting the
+   * supervisor. Refused at START it is loud and nothing is running yet. Same
+   * reasoning as the cold-install ordering below.
+   *
+   * ⚠️ THE COST IS THAT AN EDIT MID-SESSION NEEDS A SUPERVISOR RESTART, not
+   * just an agent restart. Accepted rather than fixed: the alternative trades
+   * a stale limit for a handle that cannot come back.
+   *
+   * 🛑 RESOLVED FOR EVERY MODE, NOT ONLY A CONTAINER ONE. A host handle with
+   * an override file has written something no spawn can honour, and reading
+   * it only in the branch that consumes it means that file is refused for one
+   * mode and ignored in silence for the other.
+   */
+  const containerOverride = resolveOverrideFor(opts.handle);
+
+  // 🛑 SAID OUT LOUD, BECAUSE A HOST SPAWN CANNOT HONOUR ANY OF THESE KEYS.
+  // Every key is a `docker run` flag, so a host handle's override file sits on
+  // disk looking effective while the agent runs with no limit on it. Refusing
+  // the start would be worse: it would make a mode switch break a handle that
+  // was configured for the mode it is going back to. Raised by claude2
+  // reviewing PR 337.
+  if (!isContainerSpawn && containerOverride) {
+    log(
+      `"${opts.handle}" has a container override on file and is not running ` +
+        "in a container, so none of it applies to this agent",
+    );
+  }
+
   if (isContainerSpawn) {
     const { readToken } = await import("./auth.js");
     const { isConfirmed } = await import("./container.js");
@@ -309,7 +345,12 @@ export async function startSupervisor(
   // three places — first start, restart, replace — and a guard repeated three
   // times is a guard that will be two next time someone adds a fourth.
   const spawnFn = (o: SpawnOptions): AgentChild => {
-    const spawned = spawnRaw(o);
+    // 🛑 INJECTED HERE FOR THE SAME REASON THE GUARD BELOW IS WRAPPED HERE.
+    // The child is spawned in three places, and an override added at each
+    // call site is an override that will be at two of them next time someone
+    // adds a fourth. A restart that dropped it would bring the agent back
+    // UNCAPPED with the operator's file still on disk and nothing saying so.
+    const spawned = spawnRaw({ ...o, containerOverride });
 
     try {
       return assertDeclaresCapabilities(spawned);
