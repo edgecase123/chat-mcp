@@ -669,6 +669,10 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       if (selection.mode === "docker") {
         const { prepareAgentImage, isConfirmed, markConfirmed, describePlan } =
           await import("./supervise/container.js");
+        const { effectiveImage } =
+          await import("./supervise/drivers/containerized.js");
+        const { resolveOverrideFor } =
+          await import("./supervise/overrideStore.js");
         const { readMounts } = await import("./supervise/mounts.js");
         const { execSync } = await import("node:child_process");
 
@@ -694,6 +698,12 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
               binary: vendor.binary,
               networkMode:
                 "bridge (default, full outbound — narrowing is #134)",
+              // 🛑 THE EFFECTIVE IMAGE, NEVER `vendor.image`. An override may
+              // replace it, and the agent container, the install container
+              // and the inspect guard all read it through this one function
+              // so they cannot disagree. A banner reading the vendor tag
+              // would name an image the spawn does not run.
+              image: effectiveImage(vendor, resolveOverrideFor(handle)),
             }),
           );
 

@@ -240,27 +240,30 @@ container as an unknown argument, so the container runs UNCAPPED and docker
 reports nothing — an operator reading `docker inspect` sees no limit and has no
 error to connect it to.
 
-## 🔴 The consent banner reads no override
+## The consent banner names the image. It still omits `memory` and `cpus`.
 
 **`describePlan` builds its `mounts:` line from `readMounts()` and its
-`env vars` line from the vendor plus `GH_TOKEN`.** It reads no override, and it
-has no field for `memory`, `cpus` or `image`.
+`env vars` line from the vendor plus `GH_TOKEN`.**
 
-So an override setting `env` or `readOnlyMounts` would reach the spawn and
-never reach the sentence the operator agreed to.
+✅ **`image:` is now on the banner, and it is the EFFECTIVE image.** The line
+is resolved through `effectiveImage`, the same function the agent container,
+the install container and the inspect guard read — so the banner cannot name
+one image while another starts.
 
-🔴 **THREE WIRED KEYS ALREADY SIT IN THAT GAP, AND `image` IS THE WIDEST OF
-THEM.** `memory` and `cpus` narrow what the agent may consume, so a banner that
-does not name them understates the sandbox. **`image` replaces the filesystem
-and every tool in it**, which is a different thing entirely from a cap.
+🛑 **`ContainerPlan.image` IS REQUIRED, NOT OPTIONAL.** An optional field
+would let a future caller build a plan with no image and print a banner that
+silently went back to describing nothing. A required field makes that a
+typecheck failure, and adding it turned exactly one existing caller red.
+
+⚠️ **`memory` and `cpus` are still missing from the banner**, so it
+UNDERSTATES the sandbox. They narrow what the agent may consume rather than
+replacing what it runs, which is why `image` went first. Tracked on #222.
 
 ```
-memory / cpus    a banner that omits them UNDERSTATES the limits
-image            a banner that omits it DESCRIBES THE WRONG CONTAINER
+image            NAMED. the effective one, override included.
+memory / cpus    still omitted — the banner UNDERSTATES the limits
+env / readOnlyMounts   not wired yet; they reach no spawn today
 ```
-
-⚠️ **This is not an argument to unwire `image`.** It is the reason the banner
-question outranks the two keys still waiting on it. Tracked on #222.
 
 ⚠️ **`isConfirmed` latches per handle, so the banner is shown on the FIRST
 start only.** An override written after that first start is shown to nobody at

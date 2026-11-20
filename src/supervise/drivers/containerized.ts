@@ -13,7 +13,7 @@ import {
   checkedMountPath,
 } from "../containment.js";
 import { assertHandle } from "../../util/naming.js";
-import { assertImageRef } from "../overrides.js";
+import { assertImageRef, type ContainerOverride } from "../overrides.js";
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 
@@ -375,8 +375,16 @@ function projectMountArgs(
  * one image and loads it in another, and a native module built against one
  * runtime does not load in the other.
  */
-function effectiveImage(vendor: VendorSpawn, opts: SpawnOptions): string {
-  const image = opts.containerOverride?.image;
+export function effectiveImage(
+  vendor: VendorSpawn,
+  // 🛑 THE OVERRIDE ITSELF, NOT A `SpawnOptions`. The confirm banner resolves
+  // an image before any spawn exists, so a parameter shaped like spawn
+  // options would have forced it to fabricate one — and a fabricated options
+  // object is how a fourth reader of this value starts diverging from the
+  // three below.
+  override: ContainerOverride | null | undefined,
+): string {
+  const image = override?.image;
 
   // 🛑 RE-CHECKED HERE, BECAUSE THE STORE IS NOT THE ONLY ROUTE IN. Every
   // function that reaches this one is a library export taking
@@ -454,7 +462,7 @@ export function dockerInstallPlan(
     ...projectMountArgs(supervisorHandle, projectDir),
     "-w",
     CONTAINER_PROJECT_DIR,
-    effectiveImage(vendor, opts),
+    effectiveImage(vendor, opts.containerOverride),
     "sh",
     "-c",
     nodeModulesInstallStep(),
@@ -529,7 +537,7 @@ export function runDependencyInstall(
   // the plan runs the override's makes this guard a check on a different
   // image: it passes, and docker then fails on the real one with the bare
   // `Unable to find image` this block exists to replace.
-  const image = effectiveImage(vendor, opts);
+  const image = effectiveImage(vendor, opts.containerOverride);
 
   try {
     execFileSync("docker", ["image", "inspect", image], { stdio: "ignore" });
@@ -694,7 +702,11 @@ export function dockerRunPlan(
   if (override?.memory) args.push("--memory", override.memory);
   if (override?.cpus) args.push("--cpus", override.cpus);
 
-  args.push("-w", CONTAINER_PROJECT_DIR, effectiveImage(vendor, opts));
+  args.push(
+    "-w",
+    CONTAINER_PROJECT_DIR,
+    effectiveImage(vendor, opts.containerOverride),
+  );
 
   const cli = [opts.binary ?? vendor.binary, ...vendor.argsFor(opts, "docker")];
 
