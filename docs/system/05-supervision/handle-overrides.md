@@ -3,6 +3,7 @@ title: Per-handle container overrides
 updated: 2026-11-19
 covers:
   - src/supervise/overrides.ts
+  - src/supervise/overrideStore.ts
 ---
 
 # Per-handle container overrides
@@ -30,11 +31,18 @@ one capability set without a second copy of it.
 🛑 **Both files must sit outside every container mount.** `/work` is mounted,
 so an in-tree override would let an agent widen its own next spawn.
 
-⚠️ **NOT YET ENFORCED, because neither directory exists in code yet.** There is
-no `profilesDir()` or `overridesDir()` in `src/util/paths.ts`, and the guard
-that would cover them, `assertProjectDirOutsideState` in `containment.ts`,
-only reaches paths under `stateDir()`. **Whoever adds the reader owes that pin
-and its test.**
+✅ **ENFORCED, and by the guard that was read as the gap.** `profilesDir()` and
+`overridesDir()` are CHILDREN of `stateDir()`, so
+`assertProjectDirOutsideState`'s existing `stateDir()` branch refuses an
+overlapping project directory for both. Measured on all four spellings — the
+two directories, the state dir itself, and its parent.
+
+🛑 **A THIRD `assertDisjoint` CALL PER DIRECTORY WOULD BE DEAD CODE.** The
+`stateDir()` branch fires first, so the new branch is unreachable and a test
+for it could only pass vacuously. What ships instead is a test on the
+CONTAINMENT, `test/util/override-dirs.test.ts`. Move either directory out from
+under `stateDir()` — the way `manifestDir()` is a sibling — and it goes red,
+which is the signal the explicit call is then owed.
 
 ## The keys
 
@@ -109,10 +117,12 @@ so resolution needs no cycle detection.
 
 ## Common pitfalls
 
-- **An unresolvable profile name must be a loud refusal at spawn.** A silent
-  fall back to the default container shows an operator a capability the agent
-  did not get. ⚠️ **NOT BUILT. Nothing resolves a name yet**, so this is an
-  obligation on the reader rather than a description of today.
+- **An unresolvable profile name is a loud refusal.** A silent fall back to the
+  default container shows an operator a capability the agent did not get.
+  ✅ **BUILT.** `resolveOverrideFor` throws naming three things: which handle
+  asked, which name it asked for, and the path it looked at. The path is there
+  because an operator who wrote the file into the wrong tree sees a name they
+  recognise and a location they do not.
 - **A refusal names the whole file, not the key.** A partial parse would apply
   the legal half of a file and silently drop the rest.
 - **`env` may not name `CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN` or
@@ -123,9 +133,41 @@ so resolution needs no cycle detection.
 
 ## Source files
 
-| File                         | Role                                             |
-| ---------------------------- | ------------------------------------------------ |
-| `src/supervise/overrides.ts` | The two allowlists, every value check, the merge |
+| File                             | Role                                                     |
+| -------------------------------- | -------------------------------------------------------- |
+| `src/supervise/overrides.ts`     | The two allowlists, every value check, the merge. PURE   |
+| `src/supervise/overrideStore.ts` | Reads both files off disk and resolves the pointer       |
+| `src/util/paths.ts`              | `profilesDir`, `overridesDir`, and the two path builders |
+| `src/util/naming.ts`             | `assertProfileName` — the ONE copy of the name pattern   |
+
+🛑 **`overrides.ts` STAYS PURE, AND THE SPLIT IS WHY.** It is the module a
+reviewer reads to answer "what may a human write", and mixing `readFileSync`
+into it means every test of a value check needs a temp directory.
+
+🛑 **THE NAME PATTERN LIVES IN `util/naming.ts`, NOT `overrides.ts`.**
+`profilePathFor` needs it and `src/util` cannot import from `src/supervise`
+without a cycle — so a local regex in each place was two copies that could
+disagree about what a name is.
+
+## Still open
+
+**`mergeOverrides({ profile: handle, handle: profile })` still type-checks.**
+`HandleOverride` is `ContainerOverride` plus an optional key, so each is
+assignable to the other and the transposition is invisible to the compiler.
+Naming the arguments removed the POSITIONAL slip only. Branding the two layers
+would close it, and would ripple into the consumer type.
+
+⚠️ **What holds today is a test, not the type** — `🛑 the HANDLE wins a
+collision, not the profile` in `test/supervise/override-store.test.ts`.
+Verified non-vacuous by transposing the call: 1 of 12 goes red, and only that
+one, because `env` unions in both directions.
+
+## Not wired yet
+
+**Nothing calls `resolveOverrideFor` at spawn time.** `dockerRunPlan` does not
+read an override, so these files change no container today. Where the call
+belongs is untraced — claude2 put the same seam at the `startSupervisor` call
+site for #132, in `src/index.ts` and `src/supervise/index.ts`.
 
 ## Related docs
 
