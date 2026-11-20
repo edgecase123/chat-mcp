@@ -236,6 +236,19 @@ export async function startSupervisor(
   // spawn's `docker rm -f` (#154).
   await refuseIfSupervisorLive(opts.handle);
 
+  const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
+  const selection = resolveDriver({
+    driver: opts.driver,
+    container: opts.container,
+  });
+
+  // 🛑 THE MODE IS THE GATE, NOT A DRIVER-NAME STRING. `resolveDriver` already
+  // folds `--driver docker-claude` and `--container` into one `SandboxMode`,
+  // so every container-only decision in this function (mount banner included)
+  // reads `selection.mode` rather than re-deriving container-ness from a name
+  // a second vendor could spell differently.
+  const isContainerSpawn = selection.mode === "docker";
+
   /**
    * #222's grant, read ONCE per supervisor and injected at the spawn seam
    * below.
@@ -258,18 +271,18 @@ export async function startSupervisor(
    */
   const containerOverride = resolveOverrideFor(opts.handle);
 
-  const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
-  const selection = resolveDriver({
-    driver: opts.driver,
-    container: opts.container,
-  });
-
-  // 🛑 THE MODE IS THE GATE, NOT A DRIVER-NAME STRING. `resolveDriver` already
-  // folds `--driver docker-claude` and `--container` into one `SandboxMode`,
-  // so every container-only decision in this function (mount banner included)
-  // reads `selection.mode` rather than re-deriving container-ness from a name
-  // a second vendor could spell differently.
-  const isContainerSpawn = selection.mode === "docker";
+  // 🛑 SAID OUT LOUD, BECAUSE A HOST SPAWN CANNOT HONOUR ANY OF THESE KEYS.
+  // Every key is a `docker run` flag, so a host handle's override file sits on
+  // disk looking effective while the agent runs with no limit on it. Refusing
+  // the start would be worse: it would make a mode switch break a handle that
+  // was configured for the mode it is going back to. Raised by claude2
+  // reviewing PR 337.
+  if (!isContainerSpawn && containerOverride) {
+    log(
+      `"${opts.handle}" has a container override on file and is not running ` +
+        "in a container, so none of it applies to this agent",
+    );
+  }
 
   if (isContainerSpawn) {
     const { readToken } = await import("./auth.js");

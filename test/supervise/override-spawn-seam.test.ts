@@ -12,6 +12,8 @@ const { startSupervisor } = await import("../../src/supervise/index.js");
 const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 const { overridesDir, overridePathFor } =
   await import("../../src/util/paths.js");
+const { setToken } = await import("../../src/supervise/auth.js");
+const { markConfirmed } = await import("../../src/supervise/container.js");
 import { supervisorOptions } from "../support/supervisor-options.js";
 
 import type { ContainerOverride } from "../../src/supervise/overrides.js";
@@ -61,7 +63,11 @@ function writeOverride(handle: string, body: unknown): void {
   writeFileSync(overridePathFor(handle), JSON.stringify(body));
 }
 
-function supervisorFor(handle: string, seen: SpawnOptions[]) {
+function supervisorFor(
+  handle: string,
+  seen: SpawnOptions[],
+  extra: { container?: boolean; log?: (line: string) => void } = {},
+) {
   const db = new DatabaseSync(":memory:");
   migrate(db);
 
@@ -71,7 +77,8 @@ function supervisorFor(handle: string, seen: SpawnOptions[]) {
       db,
       extraDirs: DIRS,
       spawnChild: recordingChild(seen),
-      log: () => undefined,
+      log: extra.log ?? (() => undefined),
+      container: extra.container,
     }),
   );
 }
@@ -171,5 +178,90 @@ test("🛑 a malformed override refuses the START, and spawns nothing", async ()
     assert.equal(seen.length, 0, "a refused start still spawned a child");
   } finally {
     await started?.stop();
+  }
+});
+
+/**
+ * 🛑 EVERY OVERRIDE KEY IS A `docker run` FLAG, SO A HOST SPAWN CAN HONOUR
+ * NONE OF THEM. Without this line the operator's file sits on disk looking
+ * effective while the agent runs with no limit on it — the same silent class
+ * the rest of this unit exists to remove. Raised by claude2 reviewing PR 337.
+ *
+ * ⚠️ IT WARNS RATHER THAN REFUSING, deliberately. Refusing would make a mode
+ * switch break a handle that is configured for the mode it is going back to.
+ */
+test("🛑 a VALID override on a HOST handle is reported, not dropped in silence", async () => {
+  const seen: SpawnOptions[] = [];
+  const lines: string[] = [];
+  const handle = `ovr-${process.pid}-host`;
+  writeOverride(handle, { memory: "512m" });
+
+  const sup = await supervisorFor(handle, seen, {
+    log: (line) => lines.push(line),
+  });
+
+  try {
+    assert.equal(
+      lines.filter((l) => l.includes("not running in a container")).length,
+      1,
+      `no host-mode warning in ${JSON.stringify(lines)}`,
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * The paired control. A warning printed for a CONTAINERIZED handle would tell
+ * every correctly configured operator their override does not apply.
+ */
+test("a containerized handle with the same override is NOT warned about", async () => {
+  const seen: SpawnOptions[] = [];
+  const lines: string[] = [];
+  const handle = `ovr-${process.pid}-docker`;
+  writeOverride(handle, { memory: "512m" });
+
+  // Container mode refuses to start without a token and without a confirmed
+  // plan. This test is about the warning, not about either precondition.
+  setToken("sk-ant-oat-x");
+  markConfirmed(handle);
+
+  const sup = await supervisorFor(handle, seen, {
+    container: true,
+    log: (line) => lines.push(line),
+  });
+
+  try {
+    assert.deepEqual(
+      lines.filter((l) => l.includes("not running in a container")),
+      [],
+    );
+    assert.deepEqual(seen[0]?.containerOverride, { memory: "512m" });
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * The second control, on the other axis. A warning keyed on the MODE alone
+ * would fire for every host handle on the machine, which is almost all of
+ * them.
+ */
+test("a host handle with NO override file is not warned about either", async () => {
+  const seen: SpawnOptions[] = [];
+  const lines: string[] = [];
+  const handle = `ovr-${process.pid}-host-clean`;
+
+  const sup = await supervisorFor(handle, seen, {
+    log: (line) => lines.push(line),
+  });
+
+  try {
+    assert.deepEqual(
+      lines.filter((l) => l.includes("not running in a container")),
+      [],
+    );
+  } finally {
+    await sup.stop();
   }
 });

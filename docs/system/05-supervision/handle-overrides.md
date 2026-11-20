@@ -185,6 +185,12 @@ comes back uncapped with the operator's file still on disk. Pinned by
 _"a RESTARTED child carries the same override"_, which is red when the
 injection moves to the first call site and green when it does not.
 
+⚠️ **A HOST HANDLE WITH AN OVERRIDE FILE IS WARNED, NOT REFUSED.** Every key
+is a `docker run` flag, so a host spawn can honour none of them — and without a
+line saying so the file sits on disk looking effective. Refusing the start
+would be worse: it would break a handle configured for the mode it is going
+back to. Raised by claude2 reviewing PR 337.
+
 🛑 **AT START, NOT PER SPAWN.** A malformed or dangling override throws.
 `doRestart` kills the child before it respawns, so a throw at spawn time leaves
 the handle with no agent and no remedy short of restarting the supervisor. The
