@@ -63,6 +63,10 @@ export const claudeSpawn: VendorSpawn = {
   reportsUsage: true,
   reportsContext: true,
 
+  // One `claude -p --input-format stream-json` process reads many prompts off
+  // its stdin, so a turn does not cost a process here.
+  processPerTurn: false,
+
   argsFor: (opts: SpawnOptions, mode: SandboxMode): string[] =>
     mode === "docker" ? containerArgs(opts) : claudeArgs(opts),
 

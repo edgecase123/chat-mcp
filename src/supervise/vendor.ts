@@ -80,6 +80,23 @@ export interface VendorSpawn {
   /** This vendor's CLI reports context-window fullness. See `reportsUsage`. */
   readonly reportsContext: boolean;
 
+  /**
+   * This vendor's CLI exits after every turn, so one turn costs one process.
+   *
+   * 🛑 DECLARED, NOT INFERRED, for the same reason `reportsUsage` is — and
+   * here the inference would be from the SHAPE of a long-lived stdin, which
+   * looks identical either way until turn two silently goes unanswered.
+   *
+   * `false` is Claude Code: one process reads many prompts off a stream-json
+   * stdin. `true` is `cursor-agent -p`, whose stdin IS the prompt, read to
+   * EOF — measured on #317, not read off its docs.
+   *
+   * ⚠️ IT SELECTS A WIRING, NOT A FLAG. `spawnOnHost` reads it to choose
+   * between `wireAgentChild` and `wirePerTurnChild`, which disagree about
+   * what `send` does and about whether a process exit means the agent died.
+   */
+  readonly processPerTurn: boolean;
+
   readonly argsFor: (opts: SpawnOptions, mode: SandboxMode) => string[];
   /** The config path to point the CLI at, written first if the mode needs it. */
   readonly mcpConfigFor: (grant: ChildGrant, mode: SandboxMode) => string;
