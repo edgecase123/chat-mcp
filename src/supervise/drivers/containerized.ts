@@ -14,6 +14,7 @@ import {
 } from "../containment.js";
 import { assertHandle } from "../../util/naming.js";
 import { assertImageRef, type ContainerOverride } from "../overrides.js";
+import { installResourceArgs } from "../installResources.js";
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 
@@ -460,6 +461,9 @@ export function dockerInstallPlan(
     "run",
     "--rm",
     ...projectMountArgs(supervisorHandle, projectDir),
+    // 🛑 BEFORE THE IMAGE OPERAND BELOW, or the flag reaches `sh` inside the
+    // container as an unknown argument and the install runs uncapped.
+    ...installResourceArgs(opts.containerOverride),
     "-w",
     CONTAINER_PROJECT_DIR,
     effectiveImage(vendor, opts.containerOverride),

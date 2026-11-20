@@ -200,8 +200,8 @@ cost is that editing a file mid-session needs a supervisor restart.
 
 | key              | wired          | why not                                                    |
 | ---------------- | -------------- | ---------------------------------------------------------- |
-| `memory`         | ✅ `--memory`  |                                                            |
-| `cpus`           | ✅ `--cpus`    |                                                            |
+| `memory`         | ✅ `--memory`  | both containers — the install one has a floor, see below   |
+| `cpus`           | ✅ `--cpus`    | both containers — the install one has a floor, see below   |
 | `image`          | ✅ the operand |                                                            |
 | `env`            | ❌             | the operator's consent banner must show it too — see below |
 | `readOnlyMounts` | ❌             | same banner, and it must route through `checkedMountPath`  |
@@ -239,6 +239,35 @@ container as a command. A `--memory` below that point reaches `sh` inside the
 container as an unknown argument, so the container runs UNCAPPED and docker
 reports nothing — an operator reading `docker inspect` sees no limit and has no
 error to connect it to.
+
+### The install container inherits the caps, with a floor
+
+**lee ruled C on #222 open question 3:** `dockerInstallPlan` inherits the
+handle's `memory` and `cpus`, except a value below the floor is raised to the
+floor.
+
+```
+INSTALL_MEMORY_FLOOR  1g      src/supervise/installResources.ts
+INSTALL_CPUS_FLOOR    1
+
+override 256m  ->  --memory 1g      raised
+override 4g    ->  --memory 4g      inherited
+override 1024m ->  --memory 1024m   equal to the floor, so the spelling is kept
+no override    ->  no flag at all   NOT the floor
+```
+
+🛑 **AN ABSENT KEY EMITS NO FLAG, NOT THE FLOOR.** The floor raises a cap
+somebody asked for. Imposing one on an install that was never capped would cap
+every existing agent silently.
+
+⚠️ **THE FLOOR VALUES ARE A JUDGEMENT AND lee MAY CHANGE THEM.** They are not
+measured. `npm ci` is the heaviest thing the container ever does, so an agent
+capped for its own steady state would make the INSTALL the thing that dies —
+and an OOM kill inside `npm ci` surfaces as a half-written `node_modules`
+volume rather than as a cap error.
+
+🛑 **TWO SPELLINGS OF ONE SIZE MUST COMPARE EQUAL**, so the comparison runs
+through `memoryToBytes` rather than on the string. `1024m` is not below `1g`.
 
 ## The consent banner names the image. It still omits `memory` and `cpus`.
 
