@@ -265,3 +265,92 @@ test("a host handle with NO override file is not warned about either", async () 
     await sup.stop();
   }
 });
+
+/**
+ * 🛑 THE INSTALL CONTAINER IS A SECOND CONSUMER, AND IT IS NOT THE SPAWN SEAM.
+ * `installDeps` is handed an object built beside the spawn rather than through
+ * the `spawnFn` wrapper, so an override that reached every spawn still left
+ * the install container on the default image — and the agent reads the
+ * `node_modules` volume that container writes.
+ */
+test("the handle's resolved override reaches the INSTALL call as well as the spawn", async () => {
+  const seen: SpawnOptions[] = [];
+  const installed: SpawnOptions[] = [];
+  const handle = `ovr-${process.pid}-install`;
+  writeOverride(handle, { image: "ghcr.io/example/chat-mcp-chromium:1" });
+
+  // Container mode refuses to start without a token and without a confirmed
+  // plan. Neither precondition is what this test is about.
+  setToken("sk-ant-oat-x");
+  markConfirmed(handle);
+
+  const db = new DatabaseSync(":memory:");
+  migrate(db);
+
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: DIRS,
+      spawnChild: recordingChild(seen),
+      installDeps: (o: SpawnOptions) => {
+        installed.push(o);
+      },
+      log: () => undefined,
+      container: true,
+    }),
+  );
+
+  try {
+    assert.equal(
+      installed.length,
+      1,
+      `the install was not called exactly once: ${installed.length}`,
+    );
+    assert.deepEqual(installed[0]?.containerOverride, {
+      image: "ghcr.io/example/chat-mcp-chromium:1",
+    } satisfies ContainerOverride);
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * The paired control. An `installDeps` object built by SPREADING a resolved
+ * override in unconditionally would hand `containerOverride: undefined` to a
+ * handle that configured nothing, which reads the same as the key being
+ * absent — so the positive test alone cannot tell a wired call from a lucky
+ * one.
+ */
+test("a handle with NO override file hands the install call no override", async () => {
+  const seen: SpawnOptions[] = [];
+  const installed: SpawnOptions[] = [];
+  const handle = `ovr-${process.pid}-install-clean`;
+
+  setToken("sk-ant-oat-x");
+  markConfirmed(handle);
+
+  const db = new DatabaseSync(":memory:");
+  migrate(db);
+
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: DIRS,
+      spawnChild: recordingChild(seen),
+      installDeps: (o: SpawnOptions) => {
+        installed.push(o);
+      },
+      log: () => undefined,
+      container: true,
+    }),
+  );
+
+  try {
+    assert.equal(installed.length, 1);
+    assert.equal(installed[0]?.containerOverride, null);
+  } finally {
+    await sup.stop();
+  }
+});

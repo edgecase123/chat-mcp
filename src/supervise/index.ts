@@ -341,16 +341,22 @@ export async function startSupervisor(
         ? spawnContainerized(opts.vendor, o)
         : spawnOnHost(opts.vendor, o));
 
+  // 🛑 ONE INJECTION POINT FOR EVERY CONSUMER OF THE OVERRIDE. The child is
+  // spawned in three places — first start, restart, replace — and the install
+  // container is a fourth consumer on its own object. An override added at
+  // each site is an override that will be at three of them next time someone
+  // adds a fifth, and a restart that dropped it would bring the agent back
+  // UNCAPPED with the operator's file still on disk and nothing saying so.
+  const withOverride = (o: SpawnOptions): SpawnOptions => ({
+    ...o,
+    containerOverride,
+  });
+
   // 🛑 WRAPPED ONCE, NOT ASSERTED AT EACH CALL SITE. The child is spawned in
-  // three places — first start, restart, replace — and a guard repeated three
-  // times is a guard that will be two next time someone adds a fourth.
+  // three places, and a guard repeated three times is a guard that will be two
+  // next time someone adds a fourth.
   const spawnFn = (o: SpawnOptions): AgentChild => {
-    // 🛑 INJECTED HERE FOR THE SAME REASON THE GUARD BELOW IS WRAPPED HERE.
-    // The child is spawned in three places, and an override added at each
-    // call site is an override that will be at two of them next time someone
-    // adds a fourth. A restart that dropped it would bring the agent back
-    // UNCAPPED with the operator's file still on disk and nothing saying so.
-    const spawned = spawnRaw({ ...o, containerOverride });
+    const spawned = spawnRaw(withOverride(o));
 
     try {
       return assertDeclaresCapabilities(spawned);
@@ -435,11 +441,23 @@ export async function startSupervisor(
       : (o: SpawnOptions) => runDependencyInstall(opts.vendor, o));
 
   if (isContainerSpawn) {
-    installDeps({
-      ...opts,
-      cwd: childCwd,
-      supervisorHandle: opts.handle,
-    });
+    // 🛑 THROUGH `withOverride`, BECAUSE THE INSTALL CONTAINER CHOOSES THE
+    // IMAGE WHOSE `node_modules` THE AGENT THEN LOADS. It is a second consumer
+    // of the override on its own call object, which `spawnFn` cannot reach, so
+    // an `image` honoured at the spawn alone builds in one image and runs in
+    // another.
+    //
+    // ⚠️ WRAPPED AT THE ARGUMENT, NOT BY RENAMING THIS SEAM. Two source-grep
+    // guards in `bind-before-spawn.test.ts` anchor on the name `installDeps` —
+    // one on this call site, one on the statement above that must still name
+    // `opts.spawnChild`. A second variable satisfies neither.
+    installDeps(
+      withOverride({
+        ...opts,
+        cwd: childCwd,
+        supervisorHandle: opts.handle,
+      }),
+    );
   }
 
   /**
