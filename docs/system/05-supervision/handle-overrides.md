@@ -198,13 +198,40 @@ cost is that editing a file mid-session needs a supervisor restart.
 
 ### What is wired, and what is not
 
-| key              | wired         | why not                                                    |
-| ---------------- | ------------- | ---------------------------------------------------------- |
-| `memory`         | ✅ `--memory` |                                                            |
-| `cpus`           | ✅ `--cpus`   |                                                            |
-| `env`            | ❌            | the operator's consent banner must show it too — see below |
-| `readOnlyMounts` | ❌            | same banner, and it must route through `checkedMountPath`  |
-| `image`          | ❌            | also read by `dockerInstallPlan` and the inspect guard     |
+| key              | wired          | why not                                                    |
+| ---------------- | -------------- | ---------------------------------------------------------- |
+| `memory`         | ✅ `--memory`  |                                                            |
+| `cpus`           | ✅ `--cpus`    |                                                            |
+| `image`          | ✅ the operand |                                                            |
+| `env`            | ❌             | the operator's consent banner must show it too — see below |
+| `readOnlyMounts` | ❌             | same banner, and it must route through `checkedMountPath`  |
+
+🛑 **`image` HAS THREE READERS AND ONE RESOLVER.** `effectiveImage(vendor,
+opts)` in `drivers/containerized.ts` is the only place the choice is made.
+
+```
+dockerRunPlan                    the agent container's image operand
+dockerInstallPlan                the install container's image operand
+runDependencyInstall             what `docker image inspect` is asked about
+```
+
+**Honouring an override in one of the three is worse than honouring it in
+none.** The agent loads `node_modules` out of the volume the install container
+wrote, so two images means a native module built against one runtime and
+loaded by another. A guard that inspects the vendor's image while the plan runs
+the override's passes, and docker then fails on the real image with the bare
+`Unable to find image` the guard exists to replace.
+
+⚠️ **`--container` IS THE WRONG REMEDY FOR A MISSING OVERRIDE IMAGE**, so the
+refusal has two forms. That flag builds this project's own tag and never builds
+or pulls one a human named in a file. An operator told to re-run with it
+watches it succeed and hits the identical refusal.
+
+🛑 **THE INSTALL CALL IS NOT THE SPAWN SEAM.** `startSupervisor` builds the
+`installDeps` argument itself, beside the spawn rather than through the
+`spawnFn` wrapper, so the seam's injection cannot reach it. The override is put
+on that object explicitly, and a test asserts both the presence and the
+`null` control.
 
 🛑 **THE RESOURCE FLAGS GO IN THE ARGV BEFORE THE IMAGE NAME.** `docker run`
 reads its own flags up to the image and hands everything after it to the
@@ -221,6 +248,19 @@ has no field for `memory`, `cpus` or `image`.
 
 So an override setting `env` or `readOnlyMounts` would reach the spawn and
 never reach the sentence the operator agreed to.
+
+🔴 **THREE WIRED KEYS ALREADY SIT IN THAT GAP, AND `image` IS THE WIDEST OF
+THEM.** `memory` and `cpus` narrow what the agent may consume, so a banner that
+does not name them understates the sandbox. **`image` replaces the filesystem
+and every tool in it**, which is a different thing entirely from a cap.
+
+```
+memory / cpus    a banner that omits them UNDERSTATES the limits
+image            a banner that omits it DESCRIBES THE WRONG CONTAINER
+```
+
+⚠️ **This is not an argument to unwire `image`.** It is the reason the banner
+question outranks the two keys still waiting on it. Tracked on #222.
 
 ⚠️ **`isConfirmed` latches per handle, so the banner is shown on the FIRST
 start only.** An override written after that first start is shown to nobody at

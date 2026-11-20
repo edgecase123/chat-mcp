@@ -364,6 +364,23 @@ function projectMountArgs(
   ];
 }
 
+/**
+ * The image this spawn will actually run: the handle's override, or the
+ * vendor's own tag.
+ *
+ * 🛑 THREE CONSUMERS READ IT AND THEY MUST NOT DISAGREE. The agent container,
+ * the install container and the inspect guard each used `vendor.image`
+ * directly. Honouring an override in one of them installs `node_modules` in
+ * one image and loads it in another, and a native module built against one
+ * runtime does not load in the other.
+ */
+export function effectiveImage(
+  vendor: VendorSpawn,
+  opts: SpawnOptions,
+): string {
+  return opts.containerOverride?.image ?? vendor.image;
+}
+
 /** The one place that validates the field both `dockerRunPlan` and `spawnContainerized` need. */
 function requireSupervisorHandle(opts: SpawnOptions): string {
   if (!opts.supervisorHandle) {
@@ -432,7 +449,7 @@ export function dockerInstallPlan(
     ...projectMountArgs(supervisorHandle, projectDir),
     "-w",
     CONTAINER_PROJECT_DIR,
-    vendor.image,
+    effectiveImage(vendor, opts),
     "sh",
     "-c",
     nodeModulesInstallStep(),
@@ -483,9 +500,11 @@ export function runDependencyInstall(
   //
   // 🛑 `prepareAgentImage` CANNOT COVER THIS, BECAUSE IT BUILDS A DIFFERENT
   // THING FROM WHAT IS INSPECTED HERE. It only ever builds `IMAGE_TAG`, while
-  // this line inspects `vendor.image` — a per-vendor field. `claudeSpawn` is
-  // the only vendor today and sets them equal, so they agree by coincidence;
-  // a second vendor naming its own image would reach here with nothing built.
+  // this line inspects `effectiveImage` — the per-vendor field, or the
+  // handle's override on top of it. `claudeSpawn` is the only vendor today and
+  // sets them equal, so they agree by coincidence; a second vendor naming its
+  // own image, or any handle with an `image` override, reaches here with
+  // nothing built.
   //
   // ⚠️ `startSupervisor` IS ALSO A LIBRARY EXPORT. Its one production caller
   // is `src/index.ts`, immediately after `prepareAgentImage` — but nothing in
@@ -500,17 +519,30 @@ export function runDependencyInstall(
   // GONE, in both halves. `src/index.ts` now keys the block on
   // `selection.mode`, so that flag does enter it, and the
   // `imageNeedsBuild()`/`buildImage()` pair it named no longer exists there.
+  // 🛑 THE SAME VALUE THE PLAN ABOVE WILL RUN. Inspecting `vendor.image` while
+  // the plan runs the override's makes this guard a check on a different
+  // image: it passes, and docker then fails on the real one with the bare
+  // `Unable to find image` this block exists to replace.
+  const image = effectiveImage(vendor, opts);
+
   try {
-    execFileSync("docker", ["image", "inspect", vendor.image], {
-      stdio: "ignore",
-    });
+    execFileSync("docker", ["image", "inspect", image], { stdio: "ignore" });
   } catch {
+    // 🛑 TWO SENTENCES, BECAUSE `--container` IS THE WRONG FIX FOR AN OVERRIDE
+    // IMAGE. That flag builds this project's own tag and never builds or pulls
+    // one a human named in an override file, so an operator told to re-run
+    // with it watches it succeed and hits this refusal again.
+    const remedy = opts.containerOverride?.image
+      ? `it is named by this handle's override file, so nothing in this ` +
+        `project builds it — pull or build '${image}' on the host first, or ` +
+        "drop the `image` key to go back to the built-in agent image."
+      : "start this handle once with `--container`, which builds it, rather " +
+        "than with `--driver docker-claude`, which selects a container " +
+        "without building one.";
+
     throw new Error(
-      `the container image '${vendor.image}' is not on this machine, so no ` +
-        "agent was started and no dependencies were installed. Start this " +
-        "handle once with `--container`, which builds it, rather than with " +
-        "`--driver docker-claude`, which selects a container without building " +
-        "one.",
+      `the container image '${image}' is not on this machine, so no agent ` +
+        `was started and no dependencies were installed: ${remedy}`,
     );
   }
 
@@ -644,17 +676,19 @@ export function dockerRunPlan(
   // The operator then reads `docker inspect`, sees no limit, and has no error
   // to connect it to.
   //
-  // ⚠️ ONLY THE TWO KEYS WITH NO SECOND CONSUMER. `image` is also read by
-  // `dockerInstallPlan` and by `runDependencyInstall`'s inspect guard, and
-  // `env`/`readOnlyMounts` are also what the operator's consent banner has to
-  // show — so wiring either here alone would make the plan disagree with
-  // something else that is already shipping.
+  // ⚠️ `image` IS NOT HERE BECAUSE IT IS NOT A FLAG. It is pushed below as the
+  // image operand, through `effectiveImage`, which the install container and
+  // the inspect guard read too.
+  //
+  // ⚠️ `env`/`readOnlyMounts` ARE STILL UNWIRED. Both are also what the
+  // operator's consent banner has to show, so wiring either here alone would
+  // make the plan grant a capability the banner never named.
   const override = opts.containerOverride;
 
   if (override?.memory) args.push("--memory", override.memory);
   if (override?.cpus) args.push("--cpus", override.cpus);
 
-  args.push("-w", CONTAINER_PROJECT_DIR, vendor.image);
+  args.push("-w", CONTAINER_PROJECT_DIR, effectiveImage(vendor, opts));
 
   const cli = [opts.binary ?? vendor.binary, ...vendor.argsFor(opts, "docker")];
 

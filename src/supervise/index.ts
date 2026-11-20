@@ -435,10 +435,17 @@ export async function startSupervisor(
       : (o: SpawnOptions) => runDependencyInstall(opts.vendor, o));
 
   if (isContainerSpawn) {
+    // 🛑 THE OVERRIDE GOES ON THIS OBJECT TOO, NOT ONLY THROUGH THE SPAWN
+    // SEAM. This call object is built here rather than passing through the
+    // `spawnFn` wrapper, so the seam's injection cannot reach it — and the
+    // install container chooses the image whose `node_modules` the agent then
+    // loads. An `image` honoured at the spawn alone builds in one image and
+    // runs in another.
     installDeps({
       ...opts,
       cwd: childCwd,
       supervisorHandle: opts.handle,
+      containerOverride,
     });
   }
 

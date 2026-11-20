@@ -51,6 +51,44 @@ function dockerArgsFor(opts: Parameters<typeof dockerRunPlan>[1]) {
   return dockerRunPlanFor(opts).args;
 }
 
+/** An override image that cannot be confused with the vendor's own tag. */
+const OVERRIDE_IMAGE = "ghcr.io/example/chat-mcp-chromium:1";
+
+let freshInstances = 0;
+
+/**
+ * A FRESH `containerized.js`, for a test that mocked `node:child_process`.
+ *
+ * 🛑 A COUNTER, NOT A CLOCK. Node's module mocking only reaches an ESM named
+ * import at a new module instance, so the specifier has to differ per call —
+ * and `Date.now()` repeats inside one millisecond, which would hand the second
+ * caller the first caller's mock.
+ *
+ * ⚠️ THE CAST IS NOT COSMETIC. A template-literal specifier types as `any`, so
+ * without it every argument at this call site is unchecked. The number of such
+ * sites is pinned by `typecheck-config.test.ts`, which is why two tests share
+ * one of them rather than writing one each.
+ */
+async function freshContainerized() {
+  freshInstances += 1;
+
+  return (await import(
+    `../../../src/supervise/drivers/containerized.js?fresh=${freshInstances}`
+  )) as typeof import("../../../src/supervise/drivers/containerized.js");
+}
+
+/**
+ * The image a plan's argv actually runs, read BY POSITION.
+ *
+ * 🛑 `docker run` takes the image immediately before the container's own
+ * command, and both plans push `-w <dir> <image>` as one group. Searching the
+ * argv for an expected value instead would let an argv carrying NO image at
+ * all pass a test asserting the two plans agree.
+ */
+function imageIn(args: string[]): string | undefined {
+  return args[args.indexOf("-w") + 2];
+}
+
 /**
  * Mock `node:child_process` so both docker calls land on one `spawn` mock,
  * and record every `docker stop` argv.
@@ -2214,10 +2252,10 @@ test("🛑 the flags come from the VENDOR, so this spawner contains neither spel
 });
 
 /**
- * #222's first wired keys. `memory` and `cpus` are the two the agent container
- * can take with no second consumer: `image` is also read by the install
- * container and the inspect guard, and `env`/`readOnlyMounts` are also what
- * the operator's consent banner has to show.
+ * #222's resource keys. `memory` and `cpus` are read by the agent container
+ * and by nothing else, so these tests assert on one argv. `image` has three
+ * readers and is covered by its own block below; `env`/`readOnlyMounts` are
+ * also what the operator's consent banner has to show, and are not wired yet.
  */
 test("a resolved override's memory reaches the agent container as --memory", () => {
   setToken("sk-ant-oat-x");
@@ -2297,5 +2335,187 @@ test("🛑 the resource flags land BEFORE the image, not in the container's own 
   assert.ok(
     args.indexOf("--cpus") < image,
     "--cpus is after the image, so the container runs uncapped",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// #222's `image` key and its THREE consumers
+// ---------------------------------------------------------------------------
+
+/**
+ * 🛑 THREE READERS, ONE VALUE. The agent container, the install container and
+ * the inspect guard each named `vendor.image`. Wiring the override into the
+ * agent container alone builds `node_modules` in the DEFAULT image and runs
+ * the agent in the override's — and the agent READS that volume.
+ */
+test("a resolved override's image replaces the vendor image in the agent container", () => {
+  setToken("sk-ant-oat-x");
+
+  const args = dockerArgsFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    containerOverride: { image: OVERRIDE_IMAGE },
+  });
+
+  assert.ok(
+    args.includes(OVERRIDE_IMAGE),
+    `the override image is not in ${args.join(" ")}`,
+  );
+  assert.ok(
+    !args.includes(claudeSpawn.image),
+    "the vendor image is still in the agent argv",
+  );
+});
+
+test("a resolved override's image replaces the vendor image in the INSTALL container", () => {
+  const { args } = dockerInstallPlan(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    containerOverride: { image: OVERRIDE_IMAGE },
+  });
+
+  assert.ok(
+    args.includes(OVERRIDE_IMAGE),
+    `the override image is not in ${args.join(" ")}`,
+  );
+  assert.ok(
+    !args.includes(claudeSpawn.image),
+    "the vendor image is still in the install argv",
+  );
+});
+
+/**
+ * 🛑 THE DRIFT TEST, AND IT IS WHY THIS KEY COULD NOT SHIP BESIDE `memory`.
+ * The agent loads `node_modules` out of the volume the install container
+ * wrote, so two different images means a native module built against one
+ * runtime and loaded by another. Asserted as an EQUALITY between the two
+ * plans, which no single-consumer wiring can satisfy.
+ *
+ * ⚠️ THE IMAGE IS READ BY POSITION, NOT BY SEARCHING FOR THE VALUE. Searching
+ * for `OVERRIDE_IMAGE` would make the assertion look for the answer it is
+ * trying to prove, and an argv missing an image entirely would still pass the
+ * equality half.
+ */
+test("🛑 the install container and the agent container run the SAME image", () => {
+  setToken("sk-ant-oat-x");
+
+  const opts = {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    containerOverride: { image: OVERRIDE_IMAGE },
+  };
+
+  const agent = dockerArgsFor(opts);
+  const install = dockerInstallPlan(claudeSpawn, opts).args;
+
+  const agentImage = imageIn(agent);
+  const installImage = imageIn(install);
+
+  assert.equal(agentImage, OVERRIDE_IMAGE, `agent argv: ${agent.join(" ")}`);
+  assert.equal(
+    installImage,
+    agentImage,
+    `the two containers run different images: install ${installImage}, agent ${agentImage}`,
+  );
+});
+
+/** The paired control, on the same two positions. */
+test("no override means both containers run the vendor's own image", () => {
+  setToken("sk-ant-oat-x");
+
+  const opts = { cwd: PROJECT_DIR, supervisorHandle: "claude1" };
+
+  assert.equal(imageIn(dockerArgsFor(opts)), claudeSpawn.image);
+  assert.equal(
+    imageIn(dockerInstallPlan(claudeSpawn, opts).args),
+    claudeSpawn.image,
+  );
+});
+
+/**
+ * 🚨 THE GUARD HAS TO INSPECT WHAT THE SPAWN WILL ACTUALLY RUN. Inspecting
+ * `vendor.image` while the plan runs the override's turns the guard into a
+ * check on a different image: it passes, and docker then fails on the real one
+ * with `Unable to find image` — which is the bare message this guard exists to
+ * replace.
+ */
+test("🚨 the inspect guard inspects the OVERRIDE image, not the vendor's", async (t) => {
+  setToken("sk-ant-oat-x");
+  const inspected: string[] = [];
+
+  t.mock.module("node:child_process", {
+    namedExports: {
+      spawn: () => ({ on: () => undefined, unref: () => undefined }),
+      execFileSync: (_cmd: string, args: string[]) => {
+        if (args[0] === "image" && args[1] === "inspect") {
+          inspected.push(String(args[2]));
+        }
+        return Buffer.from("");
+      },
+    },
+  });
+
+  const { runDependencyInstall } = await freshContainerized();
+
+  runDependencyInstall(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    containerOverride: { image: OVERRIDE_IMAGE },
+  });
+
+  assert.deepEqual(inspected, [OVERRIDE_IMAGE]);
+});
+
+/**
+ * ⚠️ `--container` IS THE WRONG ADVICE FOR AN OVERRIDE IMAGE, so the refusal
+ * cannot be one sentence. That flag builds this project's own image tag and
+ * never builds or pulls one a human named in an override file. An operator
+ * told to re-run with `--container` runs it, watches it succeed, and hits the
+ * identical refusal.
+ */
+test("🚨 a missing OVERRIDE image refuses by naming the override, not --container", async (t) => {
+  setToken("sk-ant-oat-x");
+
+  t.mock.module("node:child_process", {
+    namedExports: {
+      spawn: () => ({ on: () => undefined, unref: () => undefined }),
+      execFileSync: (_cmd: string, args: string[]) => {
+        if (args[0] === "image" && args[1] === "inspect") {
+          throw new Error("No such image");
+        }
+        return Buffer.from("");
+      },
+    },
+  });
+
+  const { runDependencyInstall } = await freshContainerized();
+
+  assert.throws(
+    () =>
+      runDependencyInstall(claudeSpawn, {
+        cwd: PROJECT_DIR,
+        supervisorHandle: "claude1",
+        containerOverride: { image: OVERRIDE_IMAGE },
+      }),
+    (err: Error) => {
+      assert.match(
+        err.message,
+        new RegExp(OVERRIDE_IMAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+        "the refusal does not name the image that is missing",
+      );
+      assert.match(
+        err.message,
+        /override/i,
+        "the refusal does not say the image came from an override file",
+      );
+      // 🛑 THE NEGATIVE HALF, AND IT IS THE WHOLE POINT OF A SECOND SENTENCE.
+      assert.doesNotMatch(
+        err.message,
+        /--container/,
+        "the refusal still names a flag that never builds an override image",
+      );
+
+      return true;
+    },
   );
 });
