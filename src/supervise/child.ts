@@ -265,32 +265,61 @@ export function assertDeclaresCapabilities(child: AgentChild): AgentChild {
   return child;
 }
 
+export interface LineParser {
+  /** Take one chunk. Whole lines are parsed; a partial line is held back. */
+  feed(chunk: string): void;
+
+  /**
+   * No further chunk is coming — parse whatever is still held.
+   *
+   * 🔴 A HELD-BACK LINE IS UNRECOVERABLE WITHOUT THIS, AND FOR A CLI THAT
+   * EXITS EVERY TURN THAT IS FATAL. A long-lived child's partial line only
+   * waits for the next chunk, and another chunk always arrives. A per-turn
+   * child removes the next chunk: the process exits, so a final
+   * `{"type":"result"}` written without a trailing newline was held forever,
+   * no turn end ever fired, and `wirePerTurnChild` reported a COMPLETED turn
+   * as a dead agent. Found by claude1 reviewing PR 343.
+   */
+  flush(): void;
+}
+
 /** Split a byte stream into whole JSON lines. Partial lines are held back. */
 export function createLineParser(
   onLine: (parsed: Record<string, unknown>) => void,
-): (chunk: string) => void {
+): LineParser {
   let buffer = "";
 
-  return (chunk: string): void => {
-    buffer += chunk;
+  const emit = (raw: string): void => {
+    const line = raw.trim();
+    if (line.length === 0) return;
 
-    let newline = buffer.indexOf("\n");
-
-    while (newline !== -1) {
-      const line = buffer.slice(0, newline).trim();
-      buffer = buffer.slice(newline + 1);
-
-      if (line.length > 0) {
-        try {
-          onLine(JSON.parse(line) as Record<string, unknown>);
-        } catch {
-          // A non-JSON line on stdout is not fatal — the CLI may print
-          // something unstructured. Dropping it is better than killing the
-          // supervisor, and stderr is where real diagnostics go.
-        }
-      }
-
-      newline = buffer.indexOf("\n");
+    try {
+      onLine(JSON.parse(line) as Record<string, unknown>);
+    } catch {
+      // A non-JSON line on stdout is not fatal — the CLI may print
+      // something unstructured. Dropping it is better than killing the
+      // supervisor, and stderr is where real diagnostics go.
     }
+  };
+
+  return {
+    feed(chunk: string): void {
+      buffer += chunk;
+
+      let newline = buffer.indexOf("\n");
+
+      while (newline !== -1) {
+        emit(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+
+        newline = buffer.indexOf("\n");
+      }
+    },
+
+    flush(): void {
+      const residue = buffer;
+      buffer = "";
+      emit(residue);
+    },
   };
 }

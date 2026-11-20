@@ -13,10 +13,19 @@ export type TurnSpawner = (o: {
   resumeSessionId?: string;
 }) => ChildProcessWithoutNullStreams;
 
-/** One process, and whether its turn finished before it exited. */
+/** One process, and what the wiring knows about how its turn went. */
 interface Turn {
   readonly proc: ChildProcessWithoutNullStreams;
   sawTurnEnd: boolean;
+  /**
+   * A later `send` replaced this turn before it ended, so it was killed.
+   *
+   * ⚠️ DEFENSIVE. `AgentChild.send` documents that the caller must wait for
+   * the turn to end, and the supervisor's queue does. Without this flag the
+   * replaced process is never killed and leaks, and its exit then reads as
+   * `!sawTurnEnd` and declares a LIVE agent dead. claude1 on PR 343.
+   */
+  abandoned: boolean;
 }
 
 /**
@@ -63,6 +72,22 @@ export function wirePerTurnChild(
 
   let turn: Turn | null = null;
   let killed = false;
+  let exitReported = false;
+
+  /**
+   * Say the agent is gone, at most once.
+   *
+   * 🟡 A SECOND `kill()` WHILE IDLE EMITTED A SECOND `onExit`. The
+   * supervisor's `ifCurrent` gates on the child generation, which an exit
+   * does not move, so both passed it — it would drain the queue and clear the
+   * bus pid twice. An agent can only become gone once. claude1 on PR 343.
+   */
+  const reportExit = (code: number | null, signal: string | null): void => {
+    if (exitReported) return;
+
+    exitReported = true;
+    fanout.emitExit(code, signal);
+  };
 
   // 🛑 SUBSCRIBED BEFORE THE CALLER, AND THE ORDER IS LOAD-BEARING. The
   // supervisor's own `onTurnEnd` runs the queue, which calls `send` again and
@@ -86,13 +111,22 @@ export function wirePerTurnChild(
   };
 
   const beginTurn = (text: string): void => {
+    // 🛑 THE NORMAL PATH REACHES HERE WITH THE PREVIOUS PROCESS STILL ALIVE.
+    // Its turn-end event arrives on stdout before it exits, and the queue
+    // sends the next prompt from that event — so a finished turn is left to
+    // exit on its own. Only one that never ended is abandoned.
+    if (turn && !turn.sawTurnEnd) {
+      turn.abandoned = true;
+      turn.proc.kill();
+    }
+
     const proc = spawnTurn({
       // The id from the LAST result, read now rather than captured at wiring
       // time, because on turn one there is no id to capture.
       resumeSessionId: fanout.lastSessionId() ?? undefined,
     });
 
-    const started: Turn = { proc, sawTurnEnd: false };
+    const started: Turn = { proc, sawTurnEnd: false, abandoned: false };
     turn = started;
 
     attachStreams(proc, fanout);
@@ -104,8 +138,20 @@ export function wirePerTurnChild(
       // this handler owns the current turn.
       if (turn === started) turn = null;
 
+      // An abandoned turn's process was killed by the wiring itself, so its
+      // exit says nothing about whether the agent is alive — the turn that
+      // replaced it is.
+      if (started.abandoned) {
+        sayToOperator(
+          `a prompt arrived before the previous turn ended, so that turn was ` +
+            `killed, code=${code} signal=${signal}. Its answer is lost.`,
+        );
+
+        return;
+      }
+
       if (killed || !started.sawTurnEnd) {
-        fanout.emitExit(code, signal);
+        reportExit(code, signal);
         return;
       }
 
@@ -157,7 +203,7 @@ export function wirePerTurnChild(
       // AGENT IS STILL GONE. `onExit` is the only thing that takes the handle
       // offline and closes the socket, so a kill while idle that emitted
       // nothing would leave a dead agent reading as online.
-      fanout.emitExit(null, "SIGTERM");
+      reportExit(null, "SIGTERM");
     },
 
     // 🛑 NO `awaitTeardown`, DELIBERATELY. Between turns there is nothing to

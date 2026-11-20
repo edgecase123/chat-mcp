@@ -21,6 +21,16 @@ interface FakeProc {
   stdinEnded: boolean;
   killed: boolean;
   say(line: string): void;
+  /**
+   * Write to stdout WITHOUT a trailing newline.
+   *
+   * 🔴 THE SHAPE `say` CANNOT EXPRESS, AND THAT WAS THE GAP. `say` appends
+   * the newline itself, so no test using it could describe a final line that
+   * never got one — and that line is exactly what a per-turn child's turn end
+   * rides on. 2167 passing tests said nothing about this path.
+   */
+  sayPartial(text: string): void;
+  closeOut(): void;
   sayErr(chunk: string): void;
   closeErr(): void;
   exit(code: number | null, signal?: string | null): void;
@@ -65,6 +75,8 @@ function fakeProc(): FakeProc {
     stdinEnded: false,
     killed: false,
     say: (line: string) => stdout.emit("data", `${line}\n`),
+    sayPartial: (text: string) => stdout.emit("data", text),
+    closeOut: () => stdout.emit("end"),
     sayErr: (chunk: string) => stderr.emit("data", chunk),
     closeErr: () => stderr.emit("end"),
     exit: (code, signal = null) => lifecycle.emit("exit", code, signal),
@@ -306,5 +318,56 @@ test("🔴 control — spawnOnHost REFUSES an undeclared vendor before spawning"
         redispatchPrompt: () => "",
       } as unknown as VendorSpawn),
     /processPerTurn/,
+  );
+});
+
+test("🔴 a final result line with NO trailing newline still ends the turn", () => {
+  const h = harness();
+
+  h.agent.send("first");
+  // The line parser holds a partial line. For a long-lived child the next
+  // chunk releases it; a per-turn child has no next chunk.
+  h.spawned[0].sayPartial(JSON.stringify({ type: "result", session_id: "s" }));
+  h.spawned[0].closeOut();
+  h.spawned[0].exit(0);
+
+  assert.deepEqual(h.turnEnds, [1], "the turn DID complete");
+  assert.deepEqual(
+    h.exits,
+    [],
+    "without the stdout flush this reported a completed turn as a dead agent",
+  );
+});
+
+test("🟡 a second kill() does not report the agent gone twice", () => {
+  const h = harness();
+
+  h.agent.kill();
+  h.agent.kill();
+
+  assert.equal(
+    h.exits.length,
+    1,
+    "the supervisor would drain the queue and clear the bus pid twice",
+  );
+});
+
+test("🟡 a prompt during an unfinished turn kills that process, and is not a death", () => {
+  const h = harness();
+
+  h.agent.send("first");
+  // The caller is documented not to do this. The old process used to be
+  // orphaned, and its exit then declared a live agent dead.
+  h.agent.send("second");
+
+  assert.equal(h.spawned[0].killed, true, "the replaced process is not leaked");
+
+  h.spawned[0].exit(null, "SIGTERM");
+
+  assert.deepEqual(h.exits, [], "the turn that replaced it is alive");
+  assert.equal(
+    h.errLines.filter((l) => l.includes("Its answer is lost")).length,
+    1,
+    "a dropped answer is said out loud",
   );
 });

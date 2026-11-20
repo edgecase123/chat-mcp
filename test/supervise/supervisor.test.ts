@@ -195,7 +195,7 @@ test("a room message names the room", () => {
 
 test("the line parser holds back a partial line and never emits half an event", () => {
   const seen: Record<string, unknown>[] = [];
-  const feed = createLineParser((e) => seen.push(e));
+  const { feed } = createLineParser((e) => seen.push(e));
 
   feed('{"type":"sys');
   assert.equal(seen.length, 0, "a partial line must not be emitted");
@@ -209,7 +209,7 @@ test("the line parser holds back a partial line and never emits half an event", 
 
 test("a non-JSON line on stdout is dropped, not fatal", () => {
   const seen: Record<string, unknown>[] = [];
-  const feed = createLineParser((e) => seen.push(e));
+  const { feed } = createLineParser((e) => seen.push(e));
 
   feed('not json at all\n{"type":"result"}\n');
 

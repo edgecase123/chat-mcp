@@ -32,6 +32,16 @@ export interface EventFanout {
   /** One stdout chunk. Whole JSON lines are routed; a partial line is held. */
   feedStdout(chunk: string): void;
 
+  /**
+   * No further stdout chunk is coming — parse whatever line is still held.
+   *
+   * 🔴 THE ASYMMETRY WITH STDERR WAS THE BUG. Stderr flushed its residue at
+   * every process end and stdout did not, so a final event written without a
+   * trailing newline was held forever. Harmless for a long-lived child, fatal
+   * for a per-turn one. PR 343.
+   */
+  flushStdout(): void;
+
   /** One stderr chunk. Whole lines are emitted; a partial line is held. */
   feedStderr(chunk: string): void;
 
@@ -83,7 +93,7 @@ export function createEventFanout(vendor: FanoutVendor): EventFanout {
   const exitCbs: ((code: number | null, signal: string | null) => void)[] = [];
   let lastSession: string | null = null;
 
-  const feed = createLineParser((parsed) => {
+  const parser = createLineParser((parsed) => {
     for (const cb of eventCbs) cb(parsed);
 
     vendor.routeEvent(parsed, {
@@ -120,7 +130,9 @@ export function createEventFanout(vendor: FanoutVendor): EventFanout {
   };
 
   return {
-    feedStdout: feed,
+    feedStdout: (chunk: string): void => parser.feed(chunk),
+
+    flushStdout: (): void => parser.flush(),
 
     feedStderr(chunk: string): void {
       errBuffer += chunk;
@@ -196,6 +208,11 @@ export function attachStreams(
 ): void {
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk: string) => fanout.feedStdout(chunk));
+
+  // 🔴 THE LAST LINE MAY HAVE NO NEWLINE, AND FOR A PER-TURN CHILD THAT LINE
+  // IS THE TURN END. `end` is the only signal that no further chunk is
+  // coming, so without this a completed turn was reported as a dead agent.
+  child.stdout.on("end", () => fanout.flushStdout());
 
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => fanout.feedStderr(chunk));
