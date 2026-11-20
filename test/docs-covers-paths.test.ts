@@ -1,0 +1,273 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+import { committableFiles } from "./support/committable-files.js";
+
+/**
+ * 🛑 A `covers:` ENTRY NAMING A DELETED FILE FAILS SILENTLY. `docs/system`'s
+ * own README says every page lists the source files it describes, so that list
+ * is the first thing a reader uses to find the code behind a page. A rename or
+ * a delete leaves the pointer behind and nothing notices.
+ *
+ * #329 did it twice. Deleting `src/supervise/broker.ts` left it listed in
+ * `settings.md` and in `project-commands.md`; both were `covers:` entries, and
+ * the second survived one PR because the fix was memory rather than a check.
+ */
+
+const ROOT = join(import.meta.dirname, "..");
+
+/**
+ * Pages whose `covers:` entries are not expected to resolve.
+ *
+ * 🛑 THE TEMPLATE'S PLACEHOLDERS ARE THE POINT. `_template.md` names
+ * `src/path/to/...` so an author can see the shape; making those resolve would
+ * mean inventing files to satisfy a test.
+ *
+ * `docs/superpowers/**` needs no entry here — it is outside this scan by
+ * construction, and that is deliberate. lee ruled on 2026-11-19 that those
+ * pages stay as written, so a plan naming a since-deleted file is correct
+ * history rather than a stale pointer.
+ */
+const EXEMPT: readonly { page: string; why: string }[] = [
+  {
+    page: "docs/system/_template.md",
+    why: "its `covers:` entries are placeholders showing an author the shape",
+  },
+];
+
+function exemptReason(page: string): string | null {
+  return EXEMPT.find((e) => e.page === page)?.why ?? null;
+}
+
+/**
+ * Pages that contribute no `covers:` entries at all, each for a reason.
+ *
+ * 🛑 PINNED BY MEMBERSHIP, BECAUSE A COUNT CANNOT SEE ONE PAGE GO QUIET.
+ * `entries >= 50` had 17 of headroom against 67, so deleting `settings.md`'s
+ * `covers:` block, deleting its front matter, and re-indenting its entries to
+ * column 0 all left the suite green. Three separate doors, one cause: the
+ * guard counted entries instead of naming which pages produced none. claude1's
+ * finding on PR 342.
+ */
+const NO_COVERS: readonly { page: string; why: string }[] = [
+  {
+    page: "docs/system/README.md",
+    why: "the index. It lists the pages and describes no sources of its own",
+  },
+  {
+    page: "docs/system/06-interfaces/stopping-agents.md",
+    why: "🛑 A GAP, NOT A LICENCE. This page carries no front matter, so a reader gets no pointer into the code behind it. Writing one is its own change; this entry is what keeps the omission visible instead of silent",
+  },
+];
+
+/** Every `docs/system` page a commit would carry. */
+function systemPages(): string[] {
+  return committableFiles({ pathspec: "docs/system" }).filter((p) =>
+    p.endsWith(".md"),
+  );
+}
+
+/**
+ * The `covers:` entries in a page's YAML front matter, or `null` when the page
+ * has no front matter at all.
+ *
+ * `null` and `[]` stay separate answers so the shape of a failure is readable:
+ * a page with no front matter at all is a different mistake from one whose
+ * `covers:` key was dropped. The scan treats both as contributing nothing, and
+ * `NO_COVERS` is what says which pages are allowed to.
+ */
+function coversIn(text: string): string[] | null {
+  const frontMatter = /^---\n([\s\S]*?)\n---\n/.exec(text);
+  if (frontMatter === null) return null;
+
+  // 🛑 `[ \t]*`, NOT `[ \t]+`. A sequence at column 0 is valid YAML and means
+  // exactly the same thing, so a parser that requires indentation reads a
+  // correctly-written page as covering nothing. claude1 found it by mutation on
+  // PR 342; reporting that page as an offence would be a false red.
+  const block = /^covers:[ \t]*\n((?:[ \t]*-[ \t]*\S.*\n?)+)/m.exec(
+    frontMatter[1],
+  );
+  if (block === null) return [];
+
+  return block[1]
+    .split("\n")
+    .map((line) => line.trim().replace(/^-[ \t]*/, ""))
+    .filter((entry) => entry.length > 0);
+}
+
+/**
+ * Every path a commit would carry, plus every directory prefix of one.
+ *
+ * 🛑 A `covers:` ENTRY MAY NAME A DIRECTORY. `terminal-ui.md` lists
+ * `src/oneshot`, which `git ls-files` never returns on its own. Checking file
+ * membership alone would report a live directory as dangling, and the obvious
+ * repair — dropping directory entries from the scan — hides every pointer
+ * inside one.
+ */
+function resolvablePaths(): Set<string> {
+  const paths = new Set<string>();
+
+  for (const file of committableFiles()) {
+    paths.add(file);
+
+    const parts = file.split("/");
+    for (let i = 1; i < parts.length; i += 1) {
+      paths.add(parts.slice(0, i).join("/"));
+    }
+  }
+
+  return paths;
+}
+
+test("the parser reports what a page covers, so a clean tree is not a vacuous pass", () => {
+  // 🛑 THE EXTENSION ALTERNATION IS WHERE THIS GOES WRONG, SO IT IS TESTED
+  // FIRST. #341 was filed off a finding that turned out to be a scanner bug:
+  // a pattern ending `\.ts` truncates `App.tsx` to a path that does not exist,
+  // and its mirror `\.ts\b` cannot see `App.tsx` at all. Parsing the structured
+  // `covers:` list avoids guessing at extensions entirely — these cases pin
+  // that there is no extension matching left to get wrong.
+  assert.deepEqual(
+    coversIn(
+      "---\ntitle: T\ncovers:\n  - src/cli/ink/App.tsx\n  - src/oneshot\n---\n# T\n",
+    ),
+    ["src/cli/ink/App.tsx", "src/oneshot"],
+    "a .tsx path and a bare directory must both survive the parse intact",
+  );
+  assert.deepEqual(
+    coversIn("---\ntitle: T\ncovers:\n- src/cli/index.ts\n---\n# T\n"),
+    ["src/cli/index.ts"],
+    "a sequence at column 0 is valid YAML and must parse the same way",
+  );
+  assert.deepEqual(
+    coversIn("---\ntitle: T\nupdated: 2026-01-01\n---\n# T\n"),
+    [],
+    "front matter without a covers: key has no entries",
+  );
+  assert.equal(
+    coversIn("# T\n\ncovers: src/nope.ts\n"),
+    null,
+    "a page with no front matter is not a page with empty front matter",
+  );
+});
+
+test("the resolver distinguishes a live path from the one that motivated this guard", () => {
+  const resolvable = resolvablePaths();
+
+  // CONTROL. `App.tsx` exists and `App.ts` never did. A resolver that reports
+  // the first as missing, or the second as present, is the bug #341 records
+  // rather than a finding.
+  assert.ok(
+    resolvable.has("src/cli/ink/App.tsx"),
+    "src/cli/ink/App.tsx is tracked — a resolver that cannot see it is broken",
+  );
+  assert.ok(
+    !resolvable.has("src/cli/ink/App.ts"),
+    "src/cli/ink/App.ts has never existed — a resolver that finds it is broken",
+  );
+
+  // CONTROL. A directory entry must resolve, and a path under no tracked file
+  // must not.
+  assert.ok(
+    resolvable.has("src/oneshot"),
+    "src/oneshot is a tracked directory",
+  );
+  assert.ok(
+    !resolvable.has("src/supervise/broker.ts"),
+    "broker.ts was deleted in #329 — this is the exact pointer that went stale",
+  );
+});
+
+test("every covers: entry on a docs/system page names a path that exists", () => {
+  const pages = systemPages();
+  const scanned = pages.filter((p) => exemptReason(p) === null);
+  const resolvable = resolvablePaths();
+
+  const dangling: string[] = [];
+  const silent: string[] = [];
+  let entries = 0;
+
+  for (const page of scanned) {
+    const covers = coversIn(readFileSync(join(ROOT, page), "utf8")) ?? [];
+
+    if (covers.length === 0) silent.push(page);
+
+    for (const entry of covers) {
+      entries += 1;
+      if (!resolvable.has(entry)) dangling.push(`${page} — ${entry}`);
+    }
+  }
+
+  // 🛑 MEMBERSHIP, NOT A FLOOR, FOR WHAT IS SCANNED. A count threshold cannot
+  // see ONE page carved out: adding `settings.md` to `EXEMPT` dropped 9 of 67
+  // entries and every floor stayed green. Proven by mutation while writing
+  // this. So the exemption list is pinned exactly, and growing it has to be a
+  // deliberate edit here that a reviewer sees.
+  assert.deepEqual(
+    EXEMPT.map((e) => e.page),
+    ["docs/system/_template.md"],
+    "only the template may be exempt — a real page carved out of this scan " +
+      "silently stops being checked",
+  );
+  assert.equal(
+    scanned.length,
+    pages.length - EXEMPT.length,
+    "every page that is not exempt must reach the check",
+  );
+
+  // 🛑 WHICH PAGES WENT QUIET, NOT HOW MANY ENTRIES THERE WERE. This is the
+  // assertion the floor below cannot make. A page that loses its `covers:`
+  // block, loses its front matter, or has its entries re-indented to column 0
+  // produces nothing and appears here — three mutants that all passed a
+  // count-only check.
+  // 🛑 BOTH LISTS NEED A LITERAL PIN, NOT JUST `EXEMPT`. `NO_COVERS` is
+  // compared against the set it measures, so adding a page to it makes the
+  // comparison agree with itself: deleting `settings.md`'s block AND listing
+  // the page here was EXIT 0, 4 pass. claude1's second finding on PR 342.
+  assert.deepEqual(
+    NO_COVERS.map((e) => e.page),
+    ["docs/system/README.md", "docs/system/06-interfaces/stopping-agents.md"],
+    "only these two pages may contribute no covers: entries — widening the " +
+      "list is how a page stops being checked while every assertion agrees",
+  );
+  assert.deepEqual(
+    silent.slice().sort(),
+    NO_COVERS.map((e) => e.page)
+      .slice()
+      .sort(),
+    `a page stopped contributing covers: entries. Give it a covers: list; ` +
+      `adding it to NO_COVERS also needs the literal pin above edited, and ` +
+      `that is the review the page should get. Silent pages:\n${silent.join("\n")}`,
+  );
+
+  // The floor stays because it is free, but it is the WEAK check of the two:
+  // 67 entries against a floor of 50 leaves room to lose a whole page.
+  assert.ok(
+    entries >= 50,
+    `only ${entries} covers: entries were parsed from ${scanned.length} pages`,
+  );
+
+  assert.deepEqual(
+    dangling,
+    [],
+    `a covers: entry names a path that does not exist. ` +
+      `${dangling.length} of ${entries} entries, over ${scanned.length} pages ` +
+      `(${silent.length} page(s) contribute none):\n` +
+      dangling.join("\n"),
+  );
+});
+
+test("every carve-out still matches a real page", () => {
+  const pages = systemPages();
+
+  // Both lists, because a carve-out for a deleted page is a carve-out nobody
+  // reads — and the next author who adds that filename inherits it silently.
+  for (const { page, why } of [...EXEMPT, ...NO_COVERS]) {
+    assert.ok(
+      pages.includes(page),
+      `"${page}" matches nothing — drop the carve-out rather than leave it ` +
+        `in place for a page that no longer exists. Reason on file: ${why}`,
+    );
+  }
+});
