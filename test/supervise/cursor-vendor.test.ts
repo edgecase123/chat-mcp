@@ -155,6 +155,24 @@ test("the session id is routed off the terminal event", () => {
   assert.deepEqual(r.calls, ["session:sess-7", "turnEnd"]);
 });
 
+/**
+ * 🛑 THE PAIRED CASE, WITHOUT WHICH THE DOCBLOCK ABOVE `routeCursorEvent`
+ * COULD BE WRONG AND NOTHING WOULD FAIL. Found by claude1 on PR 345: the
+ * comment said the id "rides the terminal event", which is an observation of
+ * one CLI build, while the code takes it off any event. Narrowing to
+ * `type === "result"` is then an equivalent mutant against the test above.
+ *
+ * ⚠️ IT MUST NOT END THE TURN. A session id is not a turn boundary, and
+ * routing both off one event is how an in-flight turn gets closed early.
+ */
+test("🛑 a session id on a NON-terminal event is routed, and does not end the turn", () => {
+  const r = recorder();
+
+  routeCursorEvent({ type: "assistant", session_id: "sess-9" }, r.on);
+
+  assert.deepEqual(r.calls, ["session:sess-9"]);
+});
+
 test("🔴 the usage and context sinks are NEVER called, matching both declarations", () => {
   // 🛑 #219 IS THE FAILURE THIS GUARDS. Declaring `reportsUsage: true` while
   // the router never calls the sink tells the operator a reading is coming and

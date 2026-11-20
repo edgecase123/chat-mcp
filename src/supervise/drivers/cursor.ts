@@ -97,8 +97,13 @@ export function routeCursorEvent(
     session?(id: string): void;
   },
 ): void {
-  // The session id rides the terminal event, not an init event, so a resumable
-  // grant is only known once the first turn has finished.
+  // 🛑 ANY EVENT THAT CARRIES ONE, NOT THE TERMINAL EVENT ONLY. On #317 the id
+  // was observed on the result event, so a resumable grant is in practice
+  // known once the first turn has finished — but that is an OBSERVATION of one
+  // CLI build and this routing does not depend on it. Narrowing to
+  // `type === "result"` would drop the id from a build that emits it earlier,
+  // and the only symptom is a grant that silently stops being resumable.
+  // Pinned by the non-terminal case in `cursor-vendor.test.ts`.
   const id = event.session_id;
 
   if (typeof id === "string" && on.session) on.session(id);
