@@ -41,6 +41,27 @@ function exemptReason(page: string): string | null {
   return EXEMPT.find((e) => e.page === page)?.why ?? null;
 }
 
+/**
+ * Pages that contribute no `covers:` entries at all, each for a reason.
+ *
+ * 🛑 PINNED BY MEMBERSHIP, BECAUSE A COUNT CANNOT SEE ONE PAGE GO QUIET.
+ * `entries >= 50` had 17 of headroom against 67, so deleting `settings.md`'s
+ * `covers:` block, deleting its front matter, and re-indenting its entries to
+ * column 0 all left the suite green. Three separate doors, one cause: the
+ * guard counted entries instead of naming which pages produced none. claude1's
+ * finding on PR 342.
+ */
+const NO_COVERS: readonly { page: string; why: string }[] = [
+  {
+    page: "docs/system/README.md",
+    why: "the index. It lists the pages and describes no sources of its own",
+  },
+  {
+    page: "docs/system/06-interfaces/stopping-agents.md",
+    why: "🛑 A GAP, NOT A LICENCE. This page carries no front matter, so a reader gets no pointer into the code behind it. Writing one is its own change; this entry is what keeps the omission visible instead of silent",
+  },
+];
+
 /** Every `docs/system` page a commit would carry. */
 function systemPages(): string[] {
   return committableFiles({ pathspec: "docs/system" }).filter((p) =>
@@ -52,15 +73,20 @@ function systemPages(): string[] {
  * The `covers:` entries in a page's YAML front matter, or `null` when the page
  * has no front matter at all.
  *
- * `null` and `[]` are different answers and the caller needs both: an index
- * page legitimately carries neither, while a page with front matter and no
- * `covers:` key has dropped its pointers.
+ * `null` and `[]` stay separate answers so the shape of a failure is readable:
+ * a page with no front matter at all is a different mistake from one whose
+ * `covers:` key was dropped. The scan treats both as contributing nothing, and
+ * `NO_COVERS` is what says which pages are allowed to.
  */
 function coversIn(text: string): string[] | null {
   const frontMatter = /^---\n([\s\S]*?)\n---\n/.exec(text);
   if (frontMatter === null) return null;
 
-  const block = /^covers:[ \t]*\n((?:[ \t]+-[ \t]*\S.*\n?)+)/m.exec(
+  // 🛑 `[ \t]*`, NOT `[ \t]+`. A sequence at column 0 is valid YAML and means
+  // exactly the same thing, so a parser that requires indentation reads a
+  // correctly-written page as covering nothing. claude1 found it by mutation on
+  // PR 342; reporting that page as an offence would be a false red.
+  const block = /^covers:[ \t]*\n((?:[ \t]*-[ \t]*\S.*\n?)+)/m.exec(
     frontMatter[1],
   );
   if (block === null) return [];
@@ -110,6 +136,11 @@ test("the parser reports what a page covers, so a clean tree is not a vacuous pa
     "a .tsx path and a bare directory must both survive the parse intact",
   );
   assert.deepEqual(
+    coversIn("---\ntitle: T\ncovers:\n- src/cli/index.ts\n---\n# T\n"),
+    ["src/cli/index.ts"],
+    "a sequence at column 0 is valid YAML and must parse the same way",
+  );
+  assert.deepEqual(
     coversIn("---\ntitle: T\nupdated: 2026-01-01\n---\n# T\n"),
     [],
     "front matter without a covers: key has no entries",
@@ -154,16 +185,13 @@ test("every covers: entry on a docs/system page names a path that exists", () =>
   const resolvable = resolvablePaths();
 
   const dangling: string[] = [];
+  const silent: string[] = [];
   let entries = 0;
-  let withoutFrontMatter = 0;
 
   for (const page of scanned) {
-    const covers = coversIn(readFileSync(join(ROOT, page), "utf8"));
+    const covers = coversIn(readFileSync(join(ROOT, page), "utf8")) ?? [];
 
-    if (covers === null) {
-      withoutFrontMatter += 1;
-      continue;
-    }
+    if (covers.length === 0) silent.push(page);
 
     for (const entry of covers) {
       entries += 1;
@@ -188,9 +216,22 @@ test("every covers: entry on a docs/system page names a path that exists", () =>
     "every page that is not exempt must reach the check",
   );
 
-  // 🛑 THE DENOMINATOR, ASSERTED. A parse that silently matches nothing
-  // reports zero dangling entries, which is indistinguishable from a clean
-  // tree. This floor is what tells the difference.
+  // 🛑 WHICH PAGES WENT QUIET, NOT HOW MANY ENTRIES THERE WERE. This is the
+  // assertion the floor below cannot make. A page that loses its `covers:`
+  // block, loses its front matter, or has its entries re-indented to column 0
+  // produces nothing and appears here — three mutants that all passed a
+  // count-only check.
+  assert.deepEqual(
+    silent.slice().sort(),
+    NO_COVERS.map((e) => e.page)
+      .slice()
+      .sort(),
+    `a page stopped contributing covers: entries. Expected only the pages in ` +
+      `NO_COVERS to be silent; got:\n${silent.join("\n")}`,
+  );
+
+  // The floor stays because it is free, but it is the WEAK check of the two:
+  // 67 entries against a floor of 50 leaves room to lose a whole page.
   assert.ok(
     entries >= 50,
     `only ${entries} covers: entries were parsed from ${scanned.length} pages`,
@@ -201,19 +242,21 @@ test("every covers: entry on a docs/system page names a path that exists", () =>
     [],
     `a covers: entry names a path that does not exist. ` +
       `${dangling.length} of ${entries} entries, over ${scanned.length} pages ` +
-      `(${withoutFrontMatter} page(s) carry no front matter and were skipped):\n` +
+      `(${silent.length} page(s) contribute none):\n` +
       dangling.join("\n"),
   );
 });
 
-test("every exemption still matches a real page", () => {
+test("every carve-out still matches a real page", () => {
   const pages = systemPages();
 
-  for (const { page, why } of EXEMPT) {
+  // Both lists, because a carve-out for a deleted page is a carve-out nobody
+  // reads — and the next author who adds that filename inherits it silently.
+  for (const { page, why } of [...EXEMPT, ...NO_COVERS]) {
     assert.ok(
       pages.includes(page),
-      `"${page}" matches nothing — drop the exemption rather than leave a ` +
-        `carve-out for a page that no longer exists. Reason on file: ${why}`,
+      `"${page}" matches nothing — drop the carve-out rather than leave it ` +
+        `in place for a page that no longer exists. Reason on file: ${why}`,
     );
   }
 });
