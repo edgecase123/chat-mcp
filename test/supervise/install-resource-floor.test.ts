@@ -139,6 +139,42 @@ test("the resource flags come BEFORE the image operand", () => {
   assert.ok(cpus < image, `--cpus must precede the image: ${args.join(" ")}`);
 });
 
+/**
+ * 🔴 FAILS CLOSED. Found by claude2 on PR 346: an unparseable value compares
+ * FALSE against the floor rather than below it, so trusting it SKIPS the floor
+ * instead of raising to it. The store's own regex refuses these, but
+ * `installResourceArgs` takes the override off a `SpawnOptions` a library
+ * caller supplies — the same argument `assertImageRef` already makes.
+ */
+test("an unparseable memory value THROWS rather than skipping the floor", () => {
+  for (const bad of ["100mb", "1.5g", "abc", "", "-512m"]) {
+    assert.throws(
+      () => installResourceArgs({ memory: bad }),
+      /`memory` is not a legal value/,
+      `${JSON.stringify(bad)} must not reach an argv`,
+    );
+  }
+});
+
+test("an unparseable cpus value THROWS rather than skipping the floor", () => {
+  for (const bad of ["two", "", "-1"]) {
+    assert.throws(
+      () => installResourceArgs({ cpus: bad }),
+      /`cpus` is not a legal value/,
+      `${JSON.stringify(bad)} must not reach an argv`,
+    );
+  }
+});
+
+/**
+ * 🛑 ZERO IS NO LIMIT, NOT A SMALL ONE, so it must not be read as below the
+ * floor and quietly raised. `refuseNoLimit` rides along with the check.
+ */
+test("a zero cap is REFUSED on this route too, not floored", () => {
+  assert.throws(() => installResourceArgs({ memory: "0" }), /may not be zero/);
+  assert.throws(() => installResourceArgs({ cpus: "0" }), /may not be zero/);
+});
+
 test("an uncapped install container still carries no resource flags", () => {
   const args = installArgv();
 

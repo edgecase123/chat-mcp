@@ -269,6 +269,14 @@ volume rather than as a cap error.
 🛑 **TWO SPELLINGS OF ONE SIZE MUST COMPARE EQUAL**, so the comparison runs
 through `memoryToBytes` rather than on the string. `1024m` is not below `1g`.
 
+🛑 **THE VALUE IS RE-CHECKED AT THIS CONSUMER, NOT TRUSTED FROM THE STORE.**
+`installResourceArgs` takes the override off a `SpawnOptions` a library caller
+supplies, exactly as `effectiveImage` does. An unparseable value compares
+FALSE against the floor rather than below it, so trusting one would SKIP the
+floor instead of raising to it — the fails-open direction. It throws through
+`assertMemory` / `assertCpus`, which wrap the store's own patterns so the two
+routes cannot disagree. Found by claude2 on PR 346.
+
 ## The consent banner names the image. It still omits `memory` and `cpus`.
 
 **`describePlan` builds its `mounts:` line from `readMounts()` and its

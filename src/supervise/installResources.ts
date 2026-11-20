@@ -1,3 +1,4 @@
+import { assertCpus, assertMemory } from "./overrides.js";
 import type { ContainerOverride } from "./overrides.js";
 
 /**
@@ -51,19 +52,29 @@ export function installResourceArgs(
   const args: string[] = [];
   const { memory, cpus } = override ?? {};
 
+  // 🛑 CHECKED HERE, BECAUSE THE STORE IS NOT THE ONLY ROUTE IN. An
+  // unparseable value compares FALSE against the floor rather than below it,
+  // so trusting it would skip the floor instead of raising to it — the
+  // fails-open direction. `effectiveImage` re-checks its own value four lines
+  // below for the same reason.
   if (memory !== undefined) {
+    const checked = assertMemory(memory);
     const floored =
-      memoryToBytes(memory) < memoryToBytes(INSTALL_MEMORY_FLOOR)
+      memoryToBytes(checked) < memoryToBytes(INSTALL_MEMORY_FLOOR)
         ? INSTALL_MEMORY_FLOOR
-        : memory;
+        : checked;
 
     args.push("--memory", floored);
   }
 
   if (cpus !== undefined) {
+    const checked = assertCpus(cpus);
+
     args.push(
       "--cpus",
-      Number(cpus) < Number(INSTALL_CPUS_FLOOR) ? INSTALL_CPUS_FLOOR : cpus,
+      Number(checked) < Number(INSTALL_CPUS_FLOOR)
+        ? INSTALL_CPUS_FLOOR
+        : checked,
     );
   }
 
