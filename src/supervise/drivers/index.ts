@@ -19,6 +19,8 @@ import type { SandboxMode } from "../vendor.js";
 const ALIASES: Record<string, { vendor: string; mode: SandboxMode }> = {
   claude: { vendor: "claude", mode: "host" },
   "docker-claude": { vendor: "claude", mode: "docker" },
+  cursor: { vendor: "cursor", mode: "host" },
+  "docker-cursor": { vendor: "cursor", mode: "docker" },
 };
 
 const DEFAULT_VENDOR = "claude";

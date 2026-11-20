@@ -1,11 +1,13 @@
 import { claudeCodeAdapter } from "./claude-code.js";
 import { claudeCodeContextAdapter } from "./claude-code-context.js";
+import { cursorAdapter } from "./cursor.js";
 import type { Adapter, AdapterInstallOptions, AdapterResult } from "./types.js";
 import type { VendorSpawn } from "../supervise/vendor.js";
 
 const REGISTRY: readonly Adapter[] = [
   claudeCodeAdapter,
   claudeCodeContextAdapter,
+  cursorAdapter,
 ];
 
 export function listAdapters(): readonly Adapter[] {

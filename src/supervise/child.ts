@@ -8,9 +8,13 @@ import type { ContainerOverride } from "./overrides.js";
  * 🛑 THE SEAM. NOTHING IN THIS FILE KNOWS ANY CLI's EVENT SHAPES.
  *
  * Claude Code signals turn completion with a `{"type":"result"}` stream-json
- * event. Cursor's ACP returns a `stopReason` on the `session/prompt` JSON-RPC
- * response — a protocol field, not an event to watch for. Each driver maps its
- * own signals onto the semantic callbacks below.
+ * event. So, as it turns out, does `cursor-agent` — measured on #317.
+ *
+ * 🛑 TWO VENDORS SHARING A SPELLING IS THE ARGUMENT FOR THIS SEAM, NOT
+ * AGAINST IT. A coincidence reads exactly like a contract, so code above the
+ * driver that sniffed `event.type === 'result'` would pass for both and fail
+ * only on the third vendor. Each driver maps its own signals onto the semantic
+ * callbacks below, whatever those signals happen to spell.
  *
  * ⚠️ THE CLAUDE-SPECIFIC HALF USED TO LIVE HERE, and so did a denial parser
  * that matched Claude's exact wording. A second driver would have had to
@@ -70,14 +74,14 @@ export interface AgentChild {
    * The turn finished and another message may be sent.
    *
    * 🛑 SEMANTIC, NOT A RAW EVENT, AND THAT IS THE WHOLE POINT. Claude Code
-   * signals completion with a `{"type":"result"}` stream-json event. Cursor's
-   * ACP returns a `stopReason` on the `session/prompt` JSON-RPC response —
-   * a protocol field, not an event to watch for.
+   * and `cursor-agent` both happen to spell completion `{"type":"result"}`,
+   * which is a coincidence rather than a contract.
    *
    * ⚠️ An earlier version had `TurnQueue` sniffing `event.type === 'result'`
-   * itself. A Cursor driver would then NEVER end a turn, and the supervisor
-   * would hang forever after the first message. **Each driver maps its own
-   * signal to this; nothing above the driver knows either shape.**
+   * itself. **That shortcut is now MORE dangerous, not less**: it would pass
+   * for both shipped vendors and strand the first one that disagrees, with the
+   * supervisor hanging after its first message. **Each driver maps its own
+   * signal to this; nothing above the driver knows any shape.**
    */
   onTurnEnd(cb: () => void): void;
 

@@ -11,6 +11,21 @@ import {
 
 export const IMAGE_TAG = "chat-mcp-agent:local";
 
+/**
+ * The Cursor agent image, ruled separate by lee 2026-11-20: *"cursor should
+ * have its own image"*.
+ *
+ * 🛑 ONE IMAGE PER VENDOR, BECAUSE THE CONTAINER IS THE SECURITY BOUNDARY.
+ * A single image carrying both CLIs would put a second agent CLI inside every
+ * sandbox that has no use for it, which is the opposite of what #222 exists to
+ * achieve.
+ *
+ * ⚠️ NOTHING BUILDS THIS TAG YET. Unit 2 only declares it, so a containerized
+ * Cursor spawn fails on a missing image rather than silently running the
+ * Claude one. Unit 3 owns the Dockerfile.
+ */
+export const CURSOR_IMAGE_TAG = "chat-mcp-cursor-agent:local";
+
 export interface ContainerPlan {
   readonly mountPaths: readonly string[];
   readonly envVarNames: readonly string[];

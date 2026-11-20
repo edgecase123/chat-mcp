@@ -114,11 +114,13 @@ export class TurnQueue {
    * The driver says the turn ended. Release whatever is queued.
    *
    * 🛑 NO EVENT SHAPE IS KNOWN HERE, DELIBERATELY. This used to sniff
-   * `event.type === 'result'`, which is Claude Code's terminal event and
-   * nobody else's. Cursor's ACP returns a `stopReason` on a JSON-RPC
-   * response, so a Cursor driver would never have ended a turn and the
-   * supervisor would have hung after the first message. **The driver decides
-   * what completion looks like; this only reacts to it.**
+   * `event.type === 'result'`, which is Claude Code's terminal event.
+   *
+   * ⚠️ `cursor-agent` TURNED OUT TO SPELL IT THE SAME WAY, so that shortcut
+   * would now pass for both shipped vendors — and that is exactly why it is
+   * still wrong. The next CLI that disagrees would never end a turn and the
+   * supervisor would hang after its first message. **The driver decides what
+   * completion looks like; this only reacts to it.**
    */
   turnEnded(): void {
     this.state = "idle";
