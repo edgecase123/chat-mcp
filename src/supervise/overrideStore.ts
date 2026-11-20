@@ -79,11 +79,22 @@ function parseFile<T>(path: string, parse: (raw: unknown) => T): T {
  * file wants the default container. A handle that NAMES a profile has asked
  * for something specific, so falling back would show the operator a capability
  * the agent did not get.
+ *
+ * 🛑 `forHandle` CHANGES THE REFUSAL SENTENCE AND NOTHING ELSE. It exists so
+ * `resolveOverrideFor` can name who asked without a second copy of
+ * exists-then-parse. The copy was there, and the one with tests was the one no
+ * spawn would ever reach — so a later hardening here, a size cap or a mode
+ * check, would have missed the path that matters. Found by claude2 on PR 334.
  */
-export function readProfile(name: string): ContainerOverride {
+export function readProfile(
+  name: string,
+  forHandle: string | null = null,
+): ContainerOverride {
   const path = profilePathFor(name);
 
-  if (!existsSync(path)) throw new Error(missingProfileRefusal(name, null));
+  if (!existsSync(path)) {
+    throw new Error(missingProfileRefusal(name, forHandle));
+  }
 
   return parseFile(path, parseProfile);
 }
@@ -121,14 +132,8 @@ export function resolveOverrideFor(handle: string): ContainerOverride | null {
 
   if (pointer === undefined) return container;
 
-  const path = profilePathFor(pointer);
-
-  if (!existsSync(path)) {
-    throw new Error(missingProfileRefusal(pointer, handle));
-  }
-
   return mergeOverrides({
-    profile: parseFile(path, parseProfile),
+    profile: readProfile(pointer, handle),
     handle: own,
   });
 }

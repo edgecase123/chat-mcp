@@ -164,6 +164,39 @@ test("readProfile refuses a name with no file and says where it looked", () => {
 });
 
 /**
+ * 🛑 `resolveOverrideFor` GOES THROUGH `readProfile`, AND THIS IS WHAT HOLDS
+ * THAT.
+ *
+ * It re-implemented exists-then-parse instead of calling it, so the exported
+ * reader was the one with tests and the copy a spawn reaches was the one
+ * without. A hardening added to `readProfile` later — a size cap, a mode check,
+ * a symlink check — would have silently missed the resolve path. Found by
+ * claude2 on PR 334.
+ *
+ * ⚠️ IT COMPARES THE MESSAGES BYTE FOR BYTE. The two copies differed in exactly
+ * ONE argument, which is a difference no "both throw" assertion can see.
+ */
+test("🛑 the resolve path and readProfile produce ONE refusal, not two copies of one", () => {
+  writeHandle("viaresolve", '{"profile": "still-absent"}');
+
+  // ⚠️ `assert.throws` RETURNS UNDEFINED, so the error has to be caught here.
+  const refusalFrom = (run: () => unknown): string => {
+    try {
+      run();
+    } catch (err) {
+      return (err as Error).message;
+    }
+
+    throw new Error("expected a refusal and got none");
+  };
+
+  assert.equal(
+    refusalFrom(() => resolveOverrideFor("viaresolve")),
+    refusalFrom(() => readProfile("still-absent", "viaresolve")),
+  );
+});
+
+/**
  * 🛑 THE NAME IS VALIDATED BEFORE IT IS A PATH. A traversing pointer inside a
  * handle file must be refused as a NAME, not resolved and then found missing —
  * the second reading is how `../../etc/passwd` becomes a path the reader opens.
