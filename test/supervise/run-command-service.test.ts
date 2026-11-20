@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -146,7 +152,14 @@ test("a command name absent from the manifest is refused however it is spelled",
   );
 });
 
-test("a script outside the project directory is refused", async () => {
+/**
+ * 🛑 THIS IS A PARSE-TIME REFUSAL, NOT A CONTAINMENT ONE, AND THE OLD NAME HID
+ * THAT. A lexical `..` never reaches `checkedScriptPath`, because the manifest
+ * reader rejects the manifest first — so the public sentence is the
+ * no-manifest one. The containment wiring is covered by the symlink test below,
+ * which is the only shape the parser cannot see.
+ */
+test("a manifest naming a traversal script is refused when it is PARSED", async () => {
   const built = project(
     { commands: [{ name: "escape", script: "../../etc/hosts" }] },
     { "gate.sh": "#!/bin/sh\necho hi\n" },
@@ -157,10 +170,92 @@ test("a script outside the project directory is refused", async () => {
     () => runCommandFor("escapee", "escape", {}, { sandbox: "host" }),
     (err: unknown) => {
       assert.ok(err instanceof Refusal);
+      assert.equal(err.message, "this agent has no usable command manifest");
+      // The reason is the PARSER's, and it stays in the host-side detail.
+      assert.match(String(err.detail), /must stay inside the project/);
+
+      return true;
+    },
+  );
+});
+
+/**
+ * 🛑 THE UNIT TEST ON `checkedScriptPath` PROVES THE FUNCTION REFUSES. THIS
+ * PROVES THE SERVICE CALLS IT. Deleting the call leaves `containment.test.ts`
+ * green, and a symlink is the one escape the manifest parser cannot see.
+ */
+test("a script that SYMLINKS out of the project is refused", async () => {
+  const built = project(GATE);
+  install("linker", built);
+  // `/bin/echo`, not `/bin/sh`: a mutant that DELETES the containment call must
+  // run the target and exit, never sit on an interactive shell's stdin for the
+  // 15-minute command timeout.
+  symlinkSync("/bin/echo", join(built.dir, "scripts", "gate.sh"));
+
+  await assert.rejects(
+    () => runCommandFor("linker", "run-gate", {}, { sandbox: "host" }),
+    (err: unknown) => {
+      assert.ok(err instanceof Refusal);
+      assert.match(err.message, /not inside the project directory/);
+
+      return true;
+    },
+  );
+});
+
+/**
+ * 🛑 NO HOST PATH CROSSES THE BOUNDARY. The caller writes the manifest, so a
+ * refusal that names what a path resolved to is an arbitrary-path existence and
+ * realpath oracle for the whole host.
+ */
+test("the CONTAINMENT refusal carries no host path", async () => {
+  const built = project(GATE);
+  install("linker2", built);
+  symlinkSync("/bin/echo", join(built.dir, "scripts", "gate.sh"));
+
+  await assert.rejects(
+    () => runCommandFor("linker2", "run-gate", {}, { sandbox: "host" }),
+    (err: unknown) => {
+      assert.ok(err instanceof Refusal);
+      // 🛑 THE BRANCH FIRST. Six public sentences out of this service are
+      // slashless, so a refusal that lands EARLIER satisfies the no-path
+      // assertion below while covering nothing.
+      assert.match(err.message, /not inside the project directory/);
       assert.equal(
-        err.message.includes("/etc/hosts"),
+        err.message.includes("/"),
         false,
-        "no host path to the caller",
+        `the refusal leaked a path: ${err.message}`,
+      );
+
+      return true;
+    },
+  );
+});
+
+/**
+ * ⚠️ THE SIBLING ABOVE STOPS AT `checkedScriptPath`. This one reaches
+ * `runScript`, where `execFile` puts the absolute path into `err.message` — a
+ * different mechanism for the same property, so neither covers the other.
+ */
+test("a SPAWN FAILURE carries no host path", async () => {
+  const built = project(GATE, { "gate.sh": "#!/bin/sh\necho hi\n" });
+  install("unrunnable", built);
+
+  // Not executable, so `execFile` fails with EACCES naming the full path.
+  chmodSync(join(built.dir, "scripts", "gate.sh"), 0o644);
+
+  await assert.rejects(
+    () => runCommandFor("unrunnable", "run-gate", {}, { sandbox: "host" }),
+    (err: unknown) => {
+      assert.ok(err instanceof Refusal);
+      // 🛑 THE BRANCH FIRST, for the same reason as the test above. `run-script`
+      // builds this sentence from `err.code`, so the match proves the call
+      // reached `execFile` rather than being refused on the way there.
+      assert.match(err.message, /could not be started \(EACCES\)/);
+      assert.equal(
+        err.message.includes("/"),
+        false,
+        `the refusal leaked a path: ${err.message}`,
       );
 
       return true;
@@ -199,4 +294,60 @@ test("rewriting the registration does not move where a command runs", async () =
   assert.equal(result.exitCode, 0);
   assert.match(result.stdout, /real/);
   assert.doesNotMatch(result.stdout, /decoy/);
+});
+
+/**
+ * 🛑 THE TRUST BOUNDARY, AT THE LAYER THE CALL NOW ENTERS.
+ *
+ * The script's CONTENT AT RUN TIME is what runs. A containerized agent holds
+ * the project directory read-write, so that content is the agent's to choose.
+ * No symlink and no race are required.
+ *
+ * `O_NOFOLLOW` would not close this: pinning the inode pins bytes the agent
+ * already controls. The test exists so that a later validate-at-install step
+ * cannot be mistaken for closing the hole.
+ */
+test("the script content present at RUN time runs, not what was installed", async () => {
+  const dir = install(
+    "runtime",
+    project(GATE, { "gate.sh": "#!/bin/sh\necho first\n" }),
+  );
+
+  writeFileSync(join(dir, "scripts", "gate.sh"), "#!/bin/sh\necho second\n");
+  chmodSync(join(dir, "scripts", "gate.sh"), 0o755);
+
+  const result = await runCommandFor(
+    "runtime",
+    "run-gate",
+    {},
+    { sandbox: "host" },
+  );
+
+  assert.equal(result.stdout.trim(), "second");
+});
+
+/**
+ * 🛑 THE MANIFEST ALONE IS SUFFICIENT. `projects.json` is consulted on neither
+ * the present nor the absent path, so a handle nobody registered still runs its
+ * own commands.
+ */
+test("a handle with a manifest but NO registration still runs its command", async () => {
+  installManifestOnly(
+    "unreg",
+    project(GATE, { "gate.sh": "#!/bin/sh\necho no-registration\n" }),
+  );
+
+  // POSITIVE CONTROL. `dirsFor` throws on an unregistered handle, so without
+  // this the test could not tell "never registered" from "registered somewhere".
+  assert.throws(() => dirsFor("unreg"), /no project directory registered/);
+
+  const result = await runCommandFor(
+    "unreg",
+    "run-gate",
+    {},
+    { sandbox: "host" },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.match(result.stdout, /no-registration/);
 });
