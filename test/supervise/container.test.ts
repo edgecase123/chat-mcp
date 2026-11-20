@@ -72,13 +72,15 @@ test("a malformed container.json logs the path before falling back, instead of w
   );
 });
 
-test("the printed plan names mounts, env var NAMES only, binary and network", () => {
+test("the printed plan names mounts, env var NAMES only, binary, network and image", () => {
   const plan = describePlan({
     mountPaths: ["/work", "/root/.chat-mcp"],
     envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
     binary: "claude",
     networkMode: "bridge (default, full outbound)",
+    image: "chat-mcp-agent:local",
   });
+  assert.match(plan, /chat-mcp-agent:local/);
   assert.match(plan, /\/work/);
   assert.match(plan, /CLAUDE_CODE_OAUTH_TOKEN/);
   assert.doesNotMatch(

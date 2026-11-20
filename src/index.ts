@@ -669,33 +669,14 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       if (selection.mode === "docker") {
         const { prepareAgentImage, isConfirmed, markConfirmed, describePlan } =
           await import("./supervise/container.js");
-        const { readMounts } = await import("./supervise/mounts.js");
+        const { buildConfirmPlan } = await import("./supervise/confirmPlan.js");
         const { execSync } = await import("node:child_process");
 
         // 🛑 CONSENT BEFORE THE BUILD. The build is minutes of docker, and
         // spending it before asking leaves an operator who answers "n" having
         // paid for an image they refused.
         if (!isConfirmed(handle)) {
-          const extra = Object.keys(readMounts().agents[handle] ?? {}).map(
-            (k) => `/mnt/${k}`,
-          );
-          const { hasGhToken } = await import("./supervise/auth.js");
-          const { CONTAINER_GH_TOKEN_ENV } =
-            await import("./supervise/drivers/containerized.js");
-          // Listed only when one is on file, because that is exactly when
-          // `dockerRunPlan` passes it. A banner naming a credential the
-          // container will not receive is the misleading-operator class #136
-          // was about.
-          const ghEnvVar = hasGhToken() ? [CONTAINER_GH_TOKEN_ENV] : [];
-          console.log(
-            describePlan({
-              mountPaths: ["/work", ...extra],
-              envVarNames: [vendor.authEnvVar, ...ghEnvVar],
-              binary: vendor.binary,
-              networkMode:
-                "bridge (default, full outbound — narrowing is #134)",
-            }),
-          );
+          console.log(describePlan(buildConfirmPlan(vendor, handle)));
 
           // 🛑 REFUSES RATHER THAN READING EOF AS "no". `rl.question` resolves
           // to `''` with no terminal attached, which failed the `y` test and

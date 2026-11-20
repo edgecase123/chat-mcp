@@ -16,6 +16,16 @@ export interface ContainerPlan {
   readonly envVarNames: readonly string[];
   readonly binary: string;
   readonly networkMode: string;
+
+  /**
+   * The image the container will actually run.
+   *
+   * 🛑 THE OPERATOR WAS CONFIRMING A CONTAINER NOBODY HAD NAMED. The banner
+   * listed mounts, env var names, binary and network, and an override may
+   * replace the IMAGE — so an operator could approve a plan and a different
+   * image would start, as PID 1 beside three credentials.
+   */
+  readonly image: string;
 }
 
 interface ContainerState {
@@ -261,5 +271,6 @@ export function describePlan(plan: ContainerPlan): string {
     `  env vars (names only): ${plan.envVarNames.join(", ")}`,
     `  binary: ${plan.binary}`,
     `  network: ${plan.networkMode}`,
+    `  image: ${plan.image}`,
   ].join("\n");
 }
