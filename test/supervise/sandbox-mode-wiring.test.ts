@@ -321,10 +321,8 @@ test("🚨 run_command over the STDIO SHIM runs the script on the host", async (
  *
  * 🛑 THE GATE THIS COVERS IS THE SHIM TOOL'S. `host-bus.ts` is the one line
  * that builds the context with `sandbox: "docker"`, and it binds an
- * `McpHttpListener` over `buildServer(ctx)` — the shim tools, not a broker.
- * Measured both ways: neutering the shim's gate turns this test red, and
- * neutering `broker.ts`'s does not, because nothing in `src/` constructs a
- * `CommandBroker`. `broker.test.ts` covers that one.
+ * `McpHttpListener` over `buildServer(ctx)` — the shim tools. Measured:
+ * neutering the shim's gate turns this test red.
  */
 test("🚨 list_commands over the HOST BUS refuses, and names no command", async (t) => {
   const handle = `hostbus-list-${process.pid}`;

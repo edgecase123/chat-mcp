@@ -264,10 +264,10 @@ test("a SPAWN FAILURE carries no host path", async () => {
 });
 
 /**
- * 🛑 THE SIBLING OF `broker.test.ts`'s REGISTRATION TEST, AT THIS LAYER.
+ * 🛑 THE ONLY PLACE THE REGISTRATION IMMUNITY IS PINNED.
  *
- * That one drives the socket. This service is reachable with no socket at all,
- * so the immunity needs pinning where the call now enters.
+ * This service is where a `run_command` call enters, and it is reachable with
+ * no socket at all.
  *
  * 🛑 THE REGISTRATION HOLDS ONLY THE DECOY, NEVER BOTH. `registerProject`
  * APPENDS, so registering real-then-decoy leaves real at index 0 and any
