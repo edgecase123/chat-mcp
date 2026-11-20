@@ -13,6 +13,7 @@ import {
   checkedMountPath,
 } from "../containment.js";
 import { assertHandle } from "../../util/naming.js";
+import { assertImageRef } from "../overrides.js";
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
 
@@ -374,11 +375,15 @@ function projectMountArgs(
  * one image and loads it in another, and a native module built against one
  * runtime does not load in the other.
  */
-export function effectiveImage(
-  vendor: VendorSpawn,
-  opts: SpawnOptions,
-): string {
-  return opts.containerOverride?.image ?? vendor.image;
+function effectiveImage(vendor: VendorSpawn, opts: SpawnOptions): string {
+  const image = opts.containerOverride?.image;
+
+  // 🛑 RE-CHECKED HERE, BECAUSE THE STORE IS NOT THE ONLY ROUTE IN. Every
+  // function that reaches this one is a library export taking
+  // `containerOverride` directly, so a caller outside `resolveOverrideFor`
+  // would otherwise put an unchecked string in the image OPERAND slot. This is
+  // the one chokepoint all three readers pass through.
+  return image === undefined ? vendor.image : assertImageRef(image);
 }
 
 /** The one place that validates the field both `dockerRunPlan` and `spawnContainerized` need. */
@@ -505,6 +510,7 @@ export function runDependencyInstall(
   // sets them equal, so they agree by coincidence; a second vendor naming its
   // own image, or any handle with an `image` override, reaches here with
   // nothing built.
+  //
   //
   // ⚠️ `startSupervisor` IS ALSO A LIBRARY EXPORT. Its one production caller
   // is `src/index.ts`, immediately after `prepareAgentImage` — but nothing in

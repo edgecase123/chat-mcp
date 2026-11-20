@@ -270,6 +270,24 @@ function checkPattern(
 }
 
 /**
+ * The `image` check, reachable from the consumer that puts it in an argv.
+ *
+ * 🛑 THE STORE IS NOT THE ONLY ROUTE TO A SPAWN. `startSupervisor`,
+ * `dockerRunPlan` and `spawnContainerized` are library exports taking
+ * `SpawnOptions.containerOverride` directly, so a caller that never went
+ * through `resolveOverrideFor` reaches the image OPERAND slot with no check —
+ * and a value starting `-` is a docker flag, which promotes the next argv
+ * entry to the image.
+ *
+ * ⚠️ IT WRAPS `checkPattern` RATHER THAN RE-READING `IMAGE_REF`. Two readings
+ * of one pattern is the shape where the store accepts what the consumer
+ * refuses, which is worse than either alone.
+ */
+export function assertImageRef(value: unknown): string {
+  return checkPattern("image", value, IMAGE_REF);
+}
+
+/**
  * A profile name, which is deliberately narrower than a filename.
  *
  * 🛑 THE NAME BECOMES A PATH SEGMENT. Refusing the dot and the slash outright

@@ -2519,3 +2519,41 @@ test("🚨 a missing OVERRIDE image refuses by naming the override, not --contai
     },
   );
 });
+
+/**
+ * 🚨 THE OVERRIDE STORE IS NOT THE ONLY ROUTE TO A SPAWN. `dockerRunPlan`,
+ * `dockerInstallPlan`, `spawnContainerized` and `startSupervisor` are all
+ * library exports taking `containerOverride` directly, so a caller that never
+ * went through `resolveOverrideFor` reaches the image OPERAND slot. A value
+ * starting `-` is a docker flag there, which promotes the next argv entry to
+ * the image. Raised by `security-scanner` on PR 339.
+ *
+ * ⚠️ THE POSITIVE CONTROL IS THE BLOCK ABOVE, which puts `OVERRIDE_IMAGE`
+ * through both plans and asserts it lands — so a resolver that refused
+ * everything would fail there rather than passing here.
+ */
+test("🚨 an override image that bypassed the store is still refused by both plans", () => {
+  setToken("sk-ant-oat-x");
+
+  // `--privileged` is the flag smuggle; the empty string is the one the
+  // sibling keys tolerate, because they are skipped when falsy and an image
+  // operand cannot be skipped.
+  for (const bad of ["--privileged", "", "node:22 --privileged", "-v/:/host"]) {
+    const opts = {
+      cwd: PROJECT_DIR,
+      supervisorHandle: "claude1",
+      containerOverride: { image: bad },
+    };
+
+    assert.throws(
+      () => dockerArgsFor(opts),
+      /image/,
+      `the agent plan accepted ${JSON.stringify(bad)} as an image`,
+    );
+    assert.throws(
+      () => dockerInstallPlan(claudeSpawn, opts),
+      /image/,
+      `the install plan accepted ${JSON.stringify(bad)} as an image`,
+    );
+  }
+});
