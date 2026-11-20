@@ -10,6 +10,8 @@
  * ["--privileged", "node:22"] }` reached a consumer that spreads into argv.
  */
 
+import { assertProfileName } from "../util/naming.js";
+
 /** Every key a human may write in an override file. */
 export const ALLOWED_OVERRIDE_KEYS = [
   "env",
@@ -229,8 +231,14 @@ function refuseNoLimit(key: "memory" | "cpus", value: string): void {
 
   if (Number(digits) === 0) {
     throw new Error(
-      `\`${key}\` may not be zero: docker reads zero as no limit, so the ` +
-        "override would widen the container rather than narrow it",
+      // 🛑 THE MEASURED FACT, AND NOTHING WIDER. An earlier wording said the
+      // override "would widen the container rather than narrow it", which the
+      // code does not enforce: `"memory": "64g"` over a profile's `"512m"`
+      // widens it too and is accepted, correctly, because a handle replaces a
+      // scalar. Only the removal of the cap is refused. Found by claude2 on
+      // PR 333.
+      `\`${key}\` may not be zero: docker reads zero as no limit, so this ` +
+        "removes the cap instead of setting one",
     );
   }
 }
@@ -267,22 +275,14 @@ function checkPattern(
  * 🛑 THE NAME BECOMES A PATH SEGMENT. Refusing the dot and the slash outright
  * is narrower than resolving the path and checking where it landed, and it
  * cannot disagree with whatever the reader of the profiles directory does.
+ *
+ * 🛑 THE PATTERN MOVED TO `util/naming.ts` TO KEEP THAT TRUE. `profilePathFor`
+ * is the reader's path builder, and `src/util` cannot import from
+ * `src/supervise` without a cycle — so a local regex here was the second copy
+ * the sentence above forbids.
  */
-const PROFILE_NAME = /^[a-z0-9][a-z0-9-]*$/;
-
 function checkProfileName(value: unknown): string {
-  if (typeof value !== "string") {
-    throw new Error(
-      `a profile name must be a quoted string: ${JSON.stringify(value)}`,
-    );
-  }
-
-  if (!PROFILE_NAME.test(value)) {
-    throw new Error(
-      "a profile name holds only lower-case letters, digits and dashes, " +
-        `and starts with a letter or a digit: ${JSON.stringify(value)}`,
-    );
-  }
+  assertProfileName(value);
 
   return value;
 }

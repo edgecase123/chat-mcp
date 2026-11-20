@@ -15,6 +15,19 @@
 const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const ROOM_RE = /^#[a-z0-9][a-z0-9_-]{0,63}$/;
 
+/**
+ * A container-profile name, which is NARROWER than a handle.
+ *
+ * 🛑 NO UNDERSCORE, UNLIKE A HANDLE. The two patterns disagree, and a profile
+ * name validated with `assertHandle` would land on disk under a name the
+ * file's own value check then refuses.
+ *
+ * 🛑 ONE COPY, HERE, BECAUSE THE NAME IS READ TWICE. It is a path segment in
+ * `profilePathFor` and a value in a handle file, and a second regex is how the
+ * path builder and the value check come to disagree about what a name is.
+ */
+const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
+
 export function isRoomName(s: string): boolean {
   return ROOM_RE.test(s);
 }
@@ -45,6 +58,36 @@ export function handleRefusal(s: string): string {
 export function assertHandle(s: string): void {
   if (!isHandle(s)) {
     throw new Error(handleRefusal(s));
+  }
+}
+
+export function isProfileName(s: string): boolean {
+  return PROFILE_NAME_RE.test(s);
+}
+
+/**
+ * The refusal text, in one place, for the same reason `handleRefusal` is.
+ *
+ * `checkProfileName` reports a bad value inside a file and `profilePathFor`
+ * reports a bad path segment. Both quote the name, so an operator who typed it
+ * in one place and sees it refused in the other reads one sentence.
+ */
+export function profileNameRefusal(s: string): string {
+  return (
+    "a profile name holds only lower-case letters, digits and dashes, " +
+    `and starts with a letter or a digit: ${JSON.stringify(s)}`
+  );
+}
+
+export function assertProfileName(s: unknown): asserts s is string {
+  if (typeof s !== "string") {
+    throw new Error(
+      `a profile name must be a quoted string: ${JSON.stringify(s)}`,
+    );
+  }
+
+  if (!isProfileName(s)) {
+    throw new Error(profileNameRefusal(s));
   }
 }
 
