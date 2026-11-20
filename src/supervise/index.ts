@@ -8,6 +8,7 @@ import {
   runDependencyInstall,
   DEFAULT_SHUTDOWN_GRACE_SECONDS,
 } from "./drivers/containerized.js";
+import { resolveOverrideFor } from "./overrideStore.js";
 import { TurnQueue } from "./turn-queue.js";
 import {
   WakeListener,
@@ -235,6 +236,28 @@ export async function startSupervisor(
   // spawn's `docker rm -f` (#154).
   await refuseIfSupervisorLive(opts.handle);
 
+  /**
+   * #222's grant, read ONCE per supervisor and injected at the spawn seam
+   * below.
+   *
+   * 🛑 RESOLVED HERE, NOT PER SPAWN, BECAUSE A RESTART MUST NOT BE ABLE TO
+   * REFUSE. A malformed or dangling override throws, and `doRestart` kills the
+   * child before it calls `spawnFn` — so a throw at spawn time leaves the
+   * handle with no agent at all and no remedy short of restarting the
+   * supervisor. Refused at START it is loud and nothing is running yet. Same
+   * reasoning as the cold-install ordering below.
+   *
+   * ⚠️ THE COST IS THAT AN EDIT MID-SESSION NEEDS A SUPERVISOR RESTART, not
+   * just an agent restart. Accepted rather than fixed: the alternative trades
+   * a stale limit for a handle that cannot come back.
+   *
+   * 🛑 RESOLVED FOR EVERY MODE, NOT ONLY A CONTAINER ONE. A host handle with
+   * an override file has written something no spawn can honour, and reading
+   * it only in the branch that consumes it means that file is refused for one
+   * mode and ignored in silence for the other.
+   */
+  const containerOverride = resolveOverrideFor(opts.handle);
+
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
   const selection = resolveDriver({
     driver: opts.driver,
@@ -309,7 +332,12 @@ export async function startSupervisor(
   // three places — first start, restart, replace — and a guard repeated three
   // times is a guard that will be two next time someone adds a fourth.
   const spawnFn = (o: SpawnOptions): AgentChild => {
-    const spawned = spawnRaw(o);
+    // 🛑 INJECTED HERE FOR THE SAME REASON THE GUARD BELOW IS WRAPPED HERE.
+    // The child is spawned in three places, and an override added at each
+    // call site is an override that will be at two of them next time someone
+    // adds a fourth. A restart that dropped it would bring the agent back
+    // UNCAPPED with the operator's file still on disk and nothing saying so.
+    const spawned = spawnRaw({ ...o, containerOverride });
 
     try {
       return assertDeclaresCapabilities(spawned);
