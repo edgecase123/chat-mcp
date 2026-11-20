@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import type { Stats } from "node:fs";
-import { assertHandle } from "./naming.js";
+import { assertHandle, assertProfileName } from "./naming.js";
 
 /**
  * 🛑 UNDER THE TEST RUNNER, THE DEFAULT PATH IS REFUSED. Ruled by lee.
@@ -192,6 +192,48 @@ export function ensureManifestDir(): string {
   chmodVerified(dir, STATE_DIR_MODE);
 
   return dir;
+}
+
+/**
+ * Where the shared container profiles live, one JSON file per profile name.
+ *
+ * 🛑 A CHILD OF THE STATE DIR, AND THAT IS WHAT COVERS IT. A project directory
+ * that overlaps either of these two is refused by
+ * `assertProjectDirOutsideState`'s `stateDir()` branch, so neither owes a
+ * branch of its own. Pinned by `test/util/override-dirs.test.ts` — move either
+ * one out from under `stateDir()` and that test goes red, which is the signal
+ * the explicit `assertDisjoint` call is then owed.
+ *
+ * ⚠️ UNLIKE `manifestDir()`, WHICH IS A SIBLING ON PURPOSE. The manifest is the
+ * authorization surface the broker executes from and `stateDir()` used to be
+ * bind-mounted read-write. That mount is gone, so a child is safe again.
+ */
+export function profilesDir(): string {
+  return join(stateDir(), "profiles");
+}
+
+/** Where the per-handle override files live. Same containment as `profilesDir`. */
+export function overridesDir(): string {
+  return join(stateDir(), "overrides");
+}
+
+/**
+ * 🛑 The name becomes a filename, so it is validated — with the PROFILE-name
+ * rule, not `assertHandle`. A handle may hold an underscore and a profile name
+ * may not, so `assertHandle` would write a file under a name the value check
+ * inside a handle file refuses.
+ */
+export function profilePathFor(name: string): string {
+  assertProfileName(name);
+
+  return join(profilesDir(), `${name}.json`);
+}
+
+/** 🛑 The handle becomes a filename, so it is validated. See the test. */
+export function overridePathFor(handle: string): string {
+  assertHandle(handle);
+
+  return join(overridesDir(), `${handle}.json`);
 }
 
 export function adaptersDir(): string {

@@ -14,6 +14,7 @@ const {
   manifestPathFor,
   mcpConfigPathFor,
   notifyPathFor,
+  overridePathFor,
   socketPathFor,
 } = await import("../../src/util/paths.js");
 
@@ -33,6 +34,10 @@ const BUILDERS: ReadonlyArray<readonly [string, (handle: string) => string]> = [
   ["mcpConfigPathFor", mcpConfigPathFor],
   ["manifestPathFor", manifestPathFor],
   ["adapterScriptPath", (handle) => adapterScriptPath("claude-code", handle)],
+  // 🛑 WORSE THAN A MISDELIVERED WAKE. This file IS the capability grant, so an
+  // unvalidated handle reads another agent's container override — or, on
+  // case-insensitive APFS, shares one file with it.
+  ["overridePathFor", overridePathFor],
 ];
 
 test("🛑 EVERY path builder that makes a handle into a filename REFUSES an illegal handle", () => {
