@@ -92,8 +92,8 @@ export function resolveCwd(
     throw err;
   }
 
-  // One implementation of "is this inside that", shared with the command
-  // broker's script check. Two copies of a containment rule drift.
+  // One implementation of "is this inside that", shared with
+  // `containment.ts`'s script check. Two copies of a containment rule drift.
   const ok = dirs.some((dir) => realContains(dir, real));
 
   if (!ok) {

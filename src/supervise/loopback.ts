@@ -5,8 +5,8 @@ import type { AddressInfo, Server } from "node:net";
  * through `host.docker.internal` on Docker Desktop, measured. The token is what
  * separates callers; this only keeps a host listener off the operator's LAN.
  *
- * Extracted rather than copied, so the warning above cannot drift between the
- * two host listeners that share it — `CommandBroker` and `McpHttpListener`.
+ * Extracted rather than inlined into its one caller, `McpHttpListener`, so the
+ * warning above has one home if a second host listener is ever added.
  */
 export const BIND_ADDRESS = "127.0.0.1";
 

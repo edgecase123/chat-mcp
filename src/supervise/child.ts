@@ -209,8 +209,8 @@ export interface SpawnOptions {
    * — `dirname('scripts/gate.sh')` covers `scripts/lib/` only because that
    * project nests that way (lee, 2026-11-11).
    *
-   * 🛑 THE GUARANTEE IS NARROW: the agent cannot change WHAT THE BROKER
-   * INVOKES. It is not "the broker runs only trusted code" — the agent still
+   * 🛑 THE GUARANTEE IS NARROW: the agent cannot change WHICH FILE THE HOST
+   * INVOKES. It is not "the host runs only trusted code" — the agent still
    * writes every other file, and a gate runs the agent's own application code.
    */
   readonly readOnlyPaths?: readonly string[];

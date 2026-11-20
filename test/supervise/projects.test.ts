@@ -33,7 +33,7 @@ test("and the loud error comes from dirsFor, not from the read", () => {
  * 🛑 #183. A project directory ABOVE the state directory puts the whole sandbox
  * back inside the container, read-write. `-v $HOME:/work` carries
  * `~/.chat-mcp`, `~/.chat-mcp-manifests` and `chat.db` straight in — and the
- * manifest is the authorization surface the broker executes from.
+ * manifest is the authorization surface its commands are run from.
  *
  * Refused at REGISTRATION as well as at spawn, so the operator finds out when
  * they type it rather than when an agent starts.

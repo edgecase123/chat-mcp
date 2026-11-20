@@ -14,8 +14,8 @@ const MCP_PATH = "/mcp";
 /**
  * 🛑 PRE-AUTH SOCKETS ARE A HOST-WIDE RESOURCE. `host.docker.internal` reaches
  * this from EVERY container on the machine, not only ours, and the supervisor
- * holds every handle's session and its SQLite handle. `CommandBroker` caps the
- * same two halves, count and idle time.
+ * holds every handle's session and its SQLite handle. Both halves are capped,
+ * count and idle time.
  */
 const DEFAULT_MAX_CONNECTIONS = 8;
 

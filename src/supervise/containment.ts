@@ -120,7 +120,8 @@ function containsWhenCreated(dir: string, target: string): boolean {
  * bind-mounted read-write on every containerized spawn, so this changed nothing
  * the container could already reach. That mount is gone, so the project mount
  * is the only remaining route in. `manifestDir()` was always the live half,
- * because it is bind-mounted nowhere and the broker executes from it.
+ * because it is bind-mounted nowhere and `run-command-service` executes from
+ * it.
  *
  * 🛑 BOTH PATHS ARE STILL NEEDED, AND A SYMLINK IS WHAT SEPARATES THEM.
  * `manifestDir()` is `${stateDir()}-manifests`, a sibling, so an ancestor of
@@ -144,7 +145,7 @@ export function assertProjectDirOutsideState(projectDir: string): void {
     projectDir,
     manifestDir(),
     "manifest directory",
-    "the agent could edit the manifest the broker executes from",
+    "the agent could edit the manifest its commands are run from",
   );
 }
 
@@ -280,8 +281,8 @@ export interface MountPath {
  *   -v <proj>/real-scripts:/work/scripts:ro
  *   /work/real-scripts                  STILL WRITABLE, same host directory
  *
- * The broker resolves `scripts/gate.sh` through the symlink too, so the agent
- * writes the file the broker runs. Refusing is what makes the mount hold
+ * `run-command-service` resolves `scripts/gate.sh` through the symlink too, so
+ * the agent writes the file it runs. Refusing is what makes the mount hold
  * ACROSS spawns: once the path is a real directory and mounted, the kernel
  * refuses to unlink, rename or re-point the mountpoint — measured, so the agent
  * cannot turn it into a symlink later either.

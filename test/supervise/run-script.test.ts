@@ -99,8 +99,8 @@ test("a spawn failure with no numeric code is a refusal, not a zero exit", async
 /**
  * 🛑 THE REAL RUNNER, DELIBERATELY. `execFile` is what writes the absolute
  * script path into `err.message`, so a fabricated error cannot prove the
- * message handed back is safe. The broker makes this string the reply an
- * agent in a container reads.
+ * message handed back is safe. `run-command-service` makes this string the
+ * reply an agent reads.
  */
 test("a spawn failure does not hand back the absolute script path", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "run-script-"));

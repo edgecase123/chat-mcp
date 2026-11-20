@@ -150,10 +150,10 @@ the directory `0700` and the database `0600`. On macOS and Linux chat-mcp reads
 the mode back after setting it and **refuses to start** rather than run without
 that guarantee.
 
-🛑 **Loopback is not a containment boundary.** A supervisor's listener, the
-command broker and the browser UI each bind `127.0.0.1`, and a container
-reaches a host `127.0.0.1` through `host.docker.internal`. **A minted token is
-what separates callers**, not the bind address.
+🛑 **Loopback is not a containment boundary.** A supervisor's MCP listener and
+the browser UI each bind `127.0.0.1`, and a container reaches a host
+`127.0.0.1` through `host.docker.internal`. **A minted token is what separates
+callers**, not the bind address.
 
 **Use it to** put real branch names, ticket numbers and code in the channel.
 

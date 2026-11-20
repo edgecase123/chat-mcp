@@ -8,9 +8,9 @@ export interface McpHttpOptions {
    * 🛑 THE CALLER'S IDENTITY COMES FROM ITS SECRET, NEVER FROM A FIELD IT
    * FILLS IN. Return the handle a token belongs to, or null to refuse.
    *
-   * Injected rather than implemented here, so this and `CommandBroker` share
-   * one comparison instead of each writing their own. Production passes
-   * `authenticateToken` from `handle-tokens.ts`.
+   * Injected rather than implemented here, so the comparison has one home
+   * rather than one per listener. Production passes `authenticateToken` from
+   * `handle-tokens.ts`.
    */
   readonly authenticate: (token: string) => string | null;
 
@@ -52,8 +52,8 @@ interface Session {
  *
  * 🛑 THIS BINDS NOTHING AND MUST NOT. A bound listener reaching `main` without
  * authentication is reachable from ANY container on the machine through
- * `host.docker.internal` — measured on Docker Desktop, and `broker.ts` carries
- * the same warning. The caller owns the socket and hands requests in.
+ * `host.docker.internal` — measured on Docker Desktop, and `loopback.ts`
+ * carries the same warning. The caller owns the socket and hands requests in.
  *
  * 🛑 EVERY REQUEST RE-AUTHENTICATES. A session id is a routing key, never a
  * credential — pinned by `🛑 a known session id with NO token is refused`.

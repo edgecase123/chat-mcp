@@ -9,7 +9,7 @@ import {
 /**
  * The commands a supervised agent may ask the host to run.
  *
- * 🛑 THE MANIFEST IS THE WHOLE AUTHORIZATION SURFACE. The broker runs
+ * 🛑 THE MANIFEST IS THE WHOLE AUTHORIZATION SURFACE. `run-script` spawns with
  * `execFile`, never a shell, and every argv entry comes from a declared
  * param — so a value the schema does not describe cannot reach the process
  * table. `resolveArgv` refuses an undeclared param rather than dropping it,
@@ -55,12 +55,12 @@ export interface CommandManifest {
    *
    * 🛑 IT IS DECLARED HERE RATHER THAN READ FROM `projects.json`, because that
    * file lives inside the state directory every container mounts READ-WRITE.
-   * An agent that can rewrite it points the broker at a tree of its own
-   * choosing, and no read-only mount helps — it protects the scripts of
+   * An agent that can rewrite it points `run-command-service` at a tree of its
+   * own choosing, and no read-only mount helps — it protects the scripts of
    * whichever tree gets picked, not which tree gets picked.
    *
    * `dirsFor` still decides where an AGENT works. That is a different question
-   * from what the BROKER runs, and the two shared one answer.
+   * from what `run-command-service` RUNS, and the two shared one answer.
    */
   readonly projectDir: string;
 
@@ -192,7 +192,7 @@ function containedScript(commandName: string, raw: unknown): string {
 }
 
 /**
- * The directory the broker runs this manifest's commands in.
+ * The directory `run-command-service` runs this manifest's commands in.
  *
  * 🛑 ABSOLUTE, UNLIKE EVERY OTHER PATH HERE. A script path is relative because
  * it is resolved against this one. This one has nothing to be resolved against
@@ -353,7 +353,8 @@ export function parseManifest(raw: unknown): CommandManifest {
  * which read as empty. Those two degrade to "nothing registered", and
  * `dirsFor` turns that back into a loud error. Nothing does that for a
  * manifest, so an empty reading would present itself as "this project offers
- * no commands" and send the operator to the broker instead of their comma.
+ * no commands" and send the operator digging through the run path instead of
+ * their own misplaced comma.
  */
 export function readManifest(path: string): CommandManifest {
   if (!existsSync(path)) {
@@ -376,8 +377,8 @@ export function readManifest(path: string): CommandManifest {
 /**
  * The commands an agent is allowed to see: names and param schemas only.
  *
- * 🛑 NEVER THE SCRIPT PATH. The agent asks for a command by name and the
- * broker owns the mapping, so a path never crosses the boundary.
+ * 🛑 NEVER THE SCRIPT PATH. The agent asks for a command by name and
+ * `run-command-service` owns the mapping, so a path never crosses the boundary.
  */
 export function listCommands(manifest: CommandManifest): ListedCommand[] {
   // 🛑 COPIES, NOT THE LIVE ARRAYS. `readonly` is compile-time only, so a
