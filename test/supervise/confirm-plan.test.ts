@@ -14,6 +14,10 @@ const { overridePathFor, overridesDir } =
 const { buildConfirmPlan } = await import("../../src/supervise/confirmPlan.js");
 const { describePlan } = await import("../../src/supervise/container.js");
 const { registerMount } = await import("../../src/supervise/mounts.js");
+const { setGhToken, clearGhToken } =
+  await import("../../src/supervise/auth.js");
+const { CONTAINER_GH_TOKEN_ENV } =
+  await import("../../src/supervise/drivers/containerized.js");
 
 import type { VendorSpawn } from "../../src/supervise/vendor.js";
 
@@ -79,7 +83,30 @@ test("a registered mount appears in the plan's mount paths", () => {
 
 /** No token on file means the banner must not promise one. */
 test("the GitHub token env var is absent from the plan when none is on file", () => {
+  clearGhToken();
+
   const plan = buildConfirmPlan(vendor, `cp-nogh-${process.pid}`);
 
   assert.deepEqual(plan.envVarNames, ["CLAUDE_CODE_OAUTH_TOKEN"]);
+});
+
+/**
+ * 🔴 THE OTHER DIRECTION. Found by claude2 on PR 344: replacing the whole
+ * conditional with an empty array passed every other test here, because only
+ * the absent case was asserted. The banner must name the credential the
+ * container WILL receive, which is the #136 class.
+ */
+test("the GitHub token env var IS named when one is on file", () => {
+  try {
+    setGhToken("ghp-x");
+
+    const plan = buildConfirmPlan(vendor, `cp-gh-${process.pid}`);
+
+    assert.deepEqual(plan.envVarNames, [
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      CONTAINER_GH_TOKEN_ENV,
+    ]);
+  } finally {
+    clearGhToken();
+  }
 });
