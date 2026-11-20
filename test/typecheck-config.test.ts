@@ -196,9 +196,15 @@ test("🛑 CI runs the typecheck, or nothing enforces any of this", () => {
  *
  * ⚠️ THIS PINS THE COUNT RATHER THAN BANNING THE SHAPE. A new one is then a
  * deliberate act with a failing test beside it, instead of a silent hole.
+ *
+ * ⚠️ THE TENTH IS THE ONLY ONE THAT CARRIES THE CAST, and it was added by
+ * #222's `image` wiring. Two tests needed a fresh module instance; both go
+ * through one `freshContainerized()` helper rather than writing a site each.
+ * The other nine are still uncast — converting them is the change this
+ * docblock names, and it is still owed.
  */
-test("⚠️ the dynamic imports that type as `any` are the nine already known", () => {
-  const known = 9;
+test("⚠️ the template-literal dynamic imports are the ten already known", () => {
+  const known = 10;
   // `testFilesOnDisk` already matches `.mts`, which is where one of the nine
   // lives, so the walk needs no second pass for it.
   const sites = testFilesOnDisk().flatMap((file) => {
