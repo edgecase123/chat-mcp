@@ -96,6 +96,10 @@ dated spec as documentation.
 Every page carries `covers:` frontmatter listing the source files it describes.
 **When you change those files, update the page in the same commit.**
 
+`test/docs-covers-paths.test.ts` refuses a `covers:` entry naming a path that
+does not exist, so a rename or a delete that leaves the pointer behind turns
+the suite red rather than sitting there. An entry may name a directory.
+
 Start a new page from [`_template.md`](_template.md).
 
 **A claim in a doc needs the same evidence as a claim in a comment.** If a page

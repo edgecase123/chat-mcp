@@ -171,13 +171,26 @@ test("every covers: entry on a docs/system page names a path that exists", () =>
     }
   }
 
+  // 🛑 MEMBERSHIP, NOT A FLOOR, FOR WHAT IS SCANNED. A count threshold cannot
+  // see ONE page carved out: adding `settings.md` to `EXEMPT` dropped 9 of 67
+  // entries and every floor stayed green. Proven by mutation while writing
+  // this. So the exemption list is pinned exactly, and growing it has to be a
+  // deliberate edit here that a reviewer sees.
+  assert.deepEqual(
+    EXEMPT.map((e) => e.page),
+    ["docs/system/_template.md"],
+    "only the template may be exempt — a real page carved out of this scan " +
+      "silently stops being checked",
+  );
+  assert.equal(
+    scanned.length,
+    pages.length - EXEMPT.length,
+    "every page that is not exempt must reach the check",
+  );
+
   // 🛑 THE DENOMINATOR, ASSERTED. A parse that silently matches nothing
   // reports zero dangling entries, which is indistinguishable from a clean
-  // tree. These two floors are what tell the difference.
-  assert.ok(
-    scanned.length >= 14,
-    `only ${scanned.length} docs/system pages reached the check`,
-  );
+  // tree. This floor is what tells the difference.
   assert.ok(
     entries >= 50,
     `only ${entries} covers: entries were parsed from ${scanned.length} pages`,
