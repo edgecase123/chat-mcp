@@ -162,22 +162,53 @@ function sampleFor(key: string): unknown {
  * point outside the project.
  * ------------------------------------------------------------------------ */
 
-/** The three names the spawn already pushes as credentials. */
-const RESERVED = ["CLAUDE_CODE_OAUTH_TOKEN", "GH_TOKEN", "CHAT_MCP_MCP_CONFIG"];
+/** Every name the spawn pushes as a credential, across every vendor. */
+const RESERVED = [
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CURSOR_API_KEY",
+  "GH_TOKEN",
+  "CHAT_MCP_MCP_CONFIG",
+];
 
-test("the reserved names are exactly what the spawn pushes as credentials", async () => {
+/**
+ * 🛑 THE UNION ACROSS EVERY VENDOR, NOT `claudeSpawn` ALONE. The earlier cut
+ * read one vendor, so a second vendor's `authEnvVar` was the one thing that
+ * could falsify the invariant and the one thing the test could not see —
+ * `env: {CURSOR_API_KEY}` was accepted while this reported green. Found by
+ * claude1 on PR 345.
+ *
+ * ⚠️ NO HARDCODED COUNT. A literal `3` turns red when a vendor is ADDED
+ * correctly, which reads as the fix being wrong. The denominator below is the
+ * vendor count instead, so the instrument says how many vendors it saw.
+ */
+test("the reserved names are the union of what every vendor pushes", async () => {
   const { containerCredentialEnvVars } =
     await import("../../src/supervise/drivers/containerized.js");
-  const { claudeSpawn } = await import("../../src/adapters/claude-spawn.js");
+  const { vendorsWithSpawn, spawnFor } =
+    await import("../../src/adapters/index.js");
+
+  const vendors = vendorsWithSpawn();
+
+  // 🛑 THE DENOMINATOR. A registry this test could not read would make the
+  // union empty and every assertion below it vacuous.
+  assert.ok(
+    vendors.length >= 2,
+    `the union needs more than one vendor to mean anything: saw ${vendors.join(", ") || "none"}`,
+  );
+
+  const union = new Set<string>();
+
+  for (const vendor of vendors) {
+    for (const name of containerCredentialEnvVars(spawnFor(vendor))) {
+      union.add(name);
+    }
+  }
+
+  assert.deepEqual([...RESERVED_ENV_NAMES].sort(), [...union].sort());
 
   // 🛑 NOT A SECOND HAND-KEPT LIST. Two literals that merely coincide is how
   // the credential scrub rotted before, per containerized.ts's own docblock.
-  assert.deepEqual(
-    [...RESERVED_ENV_NAMES].sort(),
-    [...containerCredentialEnvVars(claudeSpawn)].sort(),
-  );
   assert.deepEqual([...RESERVED_ENV_NAMES].sort(), [...RESERVED].sort());
-  assert.equal(RESERVED_ENV_NAMES.length, 3);
 });
 
 test("env may not name a credential the spawn already sets", () => {
@@ -192,7 +223,7 @@ test("env may not name a credential the spawn already sets", () => {
     refused += 1;
   }
 
-  assert.equal(refused, 3);
+  assert.equal(refused, RESERVED.length);
 });
 
 test("env accepts an ordinary name and a string value", () => {

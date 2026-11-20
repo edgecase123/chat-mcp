@@ -125,9 +125,12 @@ so resolution needs no cycle detection.
   recognise and a location they do not.
 - **A refusal names the whole file, not the key.** A partial parse would apply
   the legal half of a file and silently drop the rest.
-- **`env` may not name `CLAUDE_CODE_OAUTH_TOKEN`, `GH_TOKEN` or
+- **`env` may not name any vendor's credential, nor `GH_TOKEN` or
   `CHAT_MCP_MCP_CONFIG`.** `docker run -e NAME` copies this process's value,
   so an override that re-declared one would choose the agent's credential.
+  The refused set is the UNION across every vendor this build can spawn —
+  `CLAUDE_CODE_OAUTH_TOKEN` and `CURSOR_API_KEY` today. A per-vendor set would
+  refuse one CLI's credential while handing over another's.
 
 ---
 
