@@ -1,6 +1,6 @@
 ---
 title: Settings reference
-updated: 2026-11-15
+updated: 2026-11-19
 covers:
   - src/index.ts
   - src/util/paths.ts
@@ -8,7 +8,6 @@ covers:
   - src/cli/color.ts
   - src/storage/db.ts
   - src/notify/transport.ts
-  - src/supervise/broker.ts
   - src/supervise/mcp-listener.ts
   - src/supervise/mcp-http.ts
   - src/supervise/run-command-service.ts
@@ -114,15 +113,10 @@ not by reading every module. Verify before treating it as exhaustive.
 
 | Area         | Constant                     | Value  | Location                                                                         |
 | ------------ | ---------------------------- | ------ | -------------------------------------------------------------------------------- |
-| Broker       | max in-flight                | 4      | `supervise/broker.ts`                                                            |
-| Broker       | max connections              | 8      | `supervise/broker.ts`                                                            |
-| Broker       | idle timeout                 | 60 s   | `supervise/broker.ts`                                                            |
-| Broker       | max line                     | 64 KB  | `supervise/broker.ts`                                                            |
 | MCP listener | max connections              | 8      | `supervise/mcp-listener.ts`                                                      |
 | MCP listener | receive timeout              | 10 s   | `supervise/mcp-listener.ts`                                                      |
 | MCP listener | max unauthenticated refusals | 3      | `supervise/mcp-listener.ts`                                                      |
 | MCP HTTP     | max body                     | 4 MB   | `supervise/mcp-http.ts`                                                          |
-| Shim         | broker deadline              | 16 min | `shim/broker-client.ts`                                                          |
 | Shim         | gauge stale-after            | 15 min | `shim/gauge-freshness.ts`                                                        |
 | Shim         | planning band                | 50     | `shim/gauge.ts` — `BANDS[0].warn`                                                |
 | Supervisor   | graceful restart timeout     | 30 s   | `supervise/index.ts`                                                             |
