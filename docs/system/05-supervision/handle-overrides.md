@@ -250,6 +250,12 @@ is resolved through `effectiveImage`, the same function the agent container,
 the install container and the inspect guard read — so the banner cannot name
 one image while another starts.
 
+🛑 **THE PLAN IS BUILT BY `buildConfirmPlan(vendor, handle)`, NOT INLINE.** It
+was first built inside the `agents start` commander action, where nothing
+could call it — so the only available guard was a grep over the call site's
+source text, and that guard passed a call that resolved no override at all.
+Assert on the returned plan, never on how the call is spelled.
+
 🛑 **`ContainerPlan.image` IS REQUIRED, NOT OPTIONAL.** An optional field
 would let a future caller build a plan with no image and print a banner that
 silently went back to describing nothing. A required field makes that a
