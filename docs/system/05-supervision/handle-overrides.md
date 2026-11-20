@@ -277,6 +277,13 @@ floor instead of raising to it — the fails-open direction. It throws through
 `assertMemory` / `assertCpus`, which wrap the store's own patterns so the two
 routes cannot disagree. Found by claude2 on PR 346.
 
+🛑 **THE AGENT ARGV CHECKS THE SAME WAY, AND IT USED TO TRUST TRUTHINESS.**
+`if (override?.memory)` passes `"0"`, and docker reads zero as no limit — so
+the container an operator capped ran uncapped. It is now `!== undefined` plus
+the assert, which is also what refuses the empty string rather than silently
+omitting the flag. Found by claude2 on PR 346, one function away from the
+install-path fix above.
+
 ## The consent banner names the image. It still omits `memory` and `cpus`.
 
 **`describePlan` builds its `mounts:` line from `readMounts()` and its

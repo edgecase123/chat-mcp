@@ -13,7 +13,12 @@ import {
   checkedMountPath,
 } from "../containment.js";
 import { assertHandle } from "../../util/naming.js";
-import { assertImageRef, type ContainerOverride } from "../overrides.js";
+import {
+  assertCpus,
+  assertImageRef,
+  assertMemory,
+  type ContainerOverride,
+} from "../overrides.js";
 import { installResourceArgs } from "../installResources.js";
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
@@ -703,8 +708,18 @@ export function dockerRunPlan(
   // make the plan grant a capability the banner never named.
   const override = opts.containerOverride;
 
-  if (override?.memory) args.push("--memory", override.memory);
-  if (override?.cpus) args.push("--cpus", override.cpus);
+  // 🛑 `!== undefined`, NOT TRUTHINESS, AND CHECKED RATHER THAN TRUSTED.
+  // `"0"` is truthy, and docker reads zero as NO LIMIT — so the old test
+  // pushed `--memory 0` and the container an operator capped ran uncapped.
+  // The assert carries `refuseNoLimit`, which is what refuses it. Found by
+  // claude2 on PR 346, one function away from the same fix.
+  if (override?.memory !== undefined) {
+    args.push("--memory", assertMemory(override.memory));
+  }
+
+  if (override?.cpus !== undefined) {
+    args.push("--cpus", assertCpus(override.cpus));
+  }
 
   args.push(
     "-w",

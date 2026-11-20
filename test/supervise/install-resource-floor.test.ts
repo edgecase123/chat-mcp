@@ -18,6 +18,9 @@ const {
 const { dockerInstallPlan } =
   await import("../../src/supervise/drivers/containerized.js");
 const { claudeSpawn } = await import("../../src/adapters/claude-spawn.js");
+const { dockerRunPlan } =
+  await import("../../src/supervise/drivers/containerized.js");
+const { setToken } = await import("../../src/supervise/auth.js");
 
 const PROJECT_DIR = mkdtempSync(join(tmpdir(), "chat-mcp-install-floor-proj-"));
 
@@ -180,4 +183,73 @@ test("an uncapped install container still carries no resource flags", () => {
 
   assert.equal(flagValue(args, "--memory"), undefined);
   assert.equal(flagValue(args, "--cpus"), undefined);
+});
+
+/**
+ * 🔴 THE SAME BUG ONE FUNCTION AWAY, found by claude2 on PR 346. The agent
+ * argv pushed the override's values raw, and the test was `if (override?.
+ * memory)` — truthiness, which `"0"` passes. Docker reads zero as NO LIMIT, so
+ * the container an operator capped ran uncapped.
+ *
+ * 🛑 I FIXED THE INSTALL PATH AND LEFT ITS SIBLING. An audit scoped by the
+ * function I was editing could not see it.
+ */
+test("the AGENT argv refuses a zero cap rather than running uncapped", () => {
+  setToken("sk-ant-oat-x");
+
+  for (const override of [{ memory: "0" }, { cpus: "0" }]) {
+    assert.throws(
+      () =>
+        dockerRunPlan(claudeSpawn, {
+          cwd: PROJECT_DIR,
+          supervisorHandle: "claude1",
+          bus: { url: "http://127.0.0.1:1/", token: "t" },
+          containerOverride: override,
+        }),
+      /may not be zero/,
+      `${JSON.stringify(override)} must not reach the agent argv`,
+    );
+  }
+});
+
+/**
+ * 🔴 WHY `!== undefined` AND NOT TRUTHINESS. With the assert in place, `"0"`
+ * throws either way, because `"0"` is truthy. The empty string is the one
+ * value that separates them: truthiness SKIPS it and the container runs
+ * uncapped with no error, which is the fails-open direction.
+ *
+ * Without this test, reverting the condition to truthiness is an equivalent
+ * mutant — measured, not assumed.
+ */
+test("the AGENT argv refuses an EMPTY cap rather than silently omitting it", () => {
+  setToken("sk-ant-oat-x");
+
+  for (const override of [{ memory: "" }, { cpus: "" }]) {
+    assert.throws(
+      () =>
+        dockerRunPlan(claudeSpawn, {
+          cwd: PROJECT_DIR,
+          supervisorHandle: "claude1",
+          bus: { url: "http://127.0.0.1:1/", token: "t" },
+          containerOverride: override,
+        }),
+      /is not a legal value/,
+      `${JSON.stringify(override)} must not be silently dropped`,
+    );
+  }
+});
+
+test("the AGENT argv refuses an unparseable cap", () => {
+  setToken("sk-ant-oat-x");
+
+  assert.throws(
+    () =>
+      dockerRunPlan(claudeSpawn, {
+        cwd: PROJECT_DIR,
+        supervisorHandle: "claude1",
+        bus: { url: "http://127.0.0.1:1/", token: "t" },
+        containerOverride: { memory: "1.5g" },
+      }),
+    /`memory` is not a legal value/,
+  );
 });
