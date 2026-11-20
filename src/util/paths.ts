@@ -205,7 +205,7 @@ export function ensureManifestDir(): string {
  * the explicit `assertDisjoint` call is then owed.
  *
  * ⚠️ UNLIKE `manifestDir()`, WHICH IS A SIBLING ON PURPOSE. The manifest is the
- * authorization surface the broker executes from and `stateDir()` used to be
+ * authorization surface commands are run from and `stateDir()` used to be
  * bind-mounted read-write. That mount is gone, so a child is safe again.
  */
 export function profilesDir(): string {

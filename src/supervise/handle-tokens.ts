@@ -132,8 +132,8 @@ function parseTokenFile(path: string): TokenFile {
 
 /**
  * 🛑 THE CALLER'S IDENTITY COMES FROM ITS SECRET, NEVER FROM A FIELD IT FILLS
- * IN. This is what `BrokerOptions.authenticate` and `McpHttpService` both
- * want, so neither invents its own comparison.
+ * IN. This is what `McpHttpOptions.authenticate` wants, so a caller never
+ * invents its own comparison.
  *
  * Both sides are fixed-width digests, so a wrong-length token is refused
  * rather than raising out of `timingSafeEqual` — pinned by `🛑 a token of the

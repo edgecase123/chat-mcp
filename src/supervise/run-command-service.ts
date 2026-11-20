@@ -78,10 +78,9 @@ const running = new Map<string, number>();
 /**
  * Takes one of `handle`'s slots, or refuses.
  *
- * 🛑 REFUSES, NEVER WAITS, BY lee's RULING OF 2026-11-15: "refuse immediately,
- * match the broker's wording". A parked call is invisible latency that the
- * caller cannot tell apart from a hung command, so it leaves no correct
- * reaction available.
+ * 🛑 REFUSES, NEVER WAITS, BY lee's RULING OF 2026-11-15. A parked call is
+ * invisible latency that the caller cannot tell apart from a hung command, so
+ * it leaves no correct reaction available.
  *
  * 🛑 SYNCHRONOUS, WHICH IS WHAT MAKES THE CHECK AND THE INCREMENT ATOMIC. An
  * `await` between the two would let two arrivals both pass the check.

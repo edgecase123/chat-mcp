@@ -135,8 +135,8 @@ test("the project dir is bind-mounted to the fixed in-container work dir", () =>
  * is a child of `stateDir()`, and `authenticateToken` trusts whatever digest
  * is on disk — so a container could overwrite `tokens/claude1.json` with a
  * digest it chose, present the matching token, and BE claude1 against both the
- * MCP listener and the command broker. It also exposed `chat.db` and
- * `secrets.env` outright.
+ * MCP listener and the command broker, since deleted. It also exposed
+ * `chat.db` and `secrets.env` outright.
  *
  * The bus is reached over HTTP now, so nothing in there is needed.
  */
@@ -834,7 +834,7 @@ test("🛑 a declared path that is a SYMLINK INSIDE the project REFUSES, or the 
 
   // Mounting `<dir>/real-scripts` at `/work/linked:ro` would leave
   // `/work/real-scripts` writable — the same host directory, under its real
-  // name — and the broker resolves `linked/gate.sh` through the symlink too.
+  // name — and the run path resolves `linked/gate.sh` through the symlink too.
   assert.throws(
     () =>
       dockerArgsFor({

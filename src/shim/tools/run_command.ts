@@ -28,7 +28,7 @@ const text = (payload: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(payload) }],
 });
 
-/** What either tool resolves to when nothing refused it. Mirrors the broker's own dispatch. */
+/** What either tool resolves to when nothing refused it. */
 type Answer = { commands: ListedCommand[] } | ScriptResult;
 
 /** Said to the caller when the failure is not a `Refusal` written for them. */

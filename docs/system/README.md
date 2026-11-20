@@ -31,15 +31,15 @@ listed here will not be found. Add the row in the same commit as the page.
 
 ### [05 — Supervision](05-supervision/)
 
-| File                                                            | What it covers                                                                                                                                                          |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [agent-liveness.md](05-supervision/agent-liveness.md)           | How `online` is computed, why a containerized child's row holds the supervisor's pid, and what the exit handler clears                                                  |
-| [child-output.md](05-supervision/child-output.md)               | The three streams a child writes to, which reach the log, and why stderr went unread                                                                                    |
-| [activity-pulse.md](05-supervision/activity-pulse.md)           | How the web UI learns an agent is working, why the supervisor is the HTTP client, and the 401 a url-as-token causes                                                     |
-| [project-commands.md](05-supervision/project-commands.md)       | How an agent runs a declared project command on the host, the three limits that bound it, how an operator sets them in `limits.json`, and the second cap in `broker.ts` |
-| [container-isolation.md](05-supervision/container-isolation.md) | The two containers a spawn runs, which one holds the credentials, why the dependency install is not it, and what is still open                                          |
-| [handle-overrides.md](05-supervision/handle-overrides.md)       | The two override files, why the container surface stays at five keys, the ADD-only merge, and why a profile name may not be a path                                      |
-| [context-gate.md](05-supervision/context-gate.md)               | How a child's context fill triggers its own restart, which of the three layers decides the gate, and why a gate of 50 restarts a container child about every 9 turns    |
+| File                                                            | What it covers                                                                                                                                                       |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [agent-liveness.md](05-supervision/agent-liveness.md)           | How `online` is computed, why a containerized child's row holds the supervisor's pid, and what the exit handler clears                                               |
+| [child-output.md](05-supervision/child-output.md)               | The three streams a child writes to, which reach the log, and why stderr went unread                                                                                 |
+| [activity-pulse.md](05-supervision/activity-pulse.md)           | How the web UI learns an agent is working, why the supervisor is the HTTP client, and the 401 a url-as-token causes                                                  |
+| [project-commands.md](05-supervision/project-commands.md)       | How an agent runs a declared project command on the host, the three limits that bound it, and how an operator sets them in `limits.json`                             |
+| [container-isolation.md](05-supervision/container-isolation.md) | The two containers a spawn runs, which one holds the credentials, why the dependency install is not it, and what is still open                                       |
+| [handle-overrides.md](05-supervision/handle-overrides.md)       | The two override files, why the container surface stays at five keys, the ADD-only merge, and why a profile name may not be a path                                   |
+| [context-gate.md](05-supervision/context-gate.md)               | How a child's context fill triggers its own restart, which of the three layers decides the gate, and why a gate of 50 restarts a container child about every 9 turns |
 
 ### [06 — Interfaces](06-interfaces/)
 

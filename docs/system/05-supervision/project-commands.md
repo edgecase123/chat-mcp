@@ -1,13 +1,12 @@
 ---
 title: Project commands
-updated: 2026-11-17
+updated: 2026-11-19
 covers:
   - src/supervise/commands.ts
   - src/supervise/run-command-service.ts
   - src/supervise/command-limits.ts
   - src/supervise/run-script.ts
   - src/shim/tools/run_command.ts
-  - src/supervise/broker.ts
 ---
 
 # Project commands
@@ -20,13 +19,12 @@ three limits that bound it, and how an operator changes them.
 ## The path
 
 ```
-shim run_command.ts ──────→ runCommandFor ──→ runScript ──→ child_process
-broker.ts            ─ ─ ┘   (dead: no src/ importer, see pitfalls)
+shim run_command.ts ──→ runCommandFor ──→ runScript ──→ child_process
 ```
 
-Both consumers reach the host through `runCommandFor`, which is the only place
-that authorizes a command and the only place that limits it. **Only the shim
-tool can run today.**
+The shim tool reaches the host through `runCommandFor`, which is the only place
+that authorizes a command and the only place that limits it. **It is the only
+route in.**
 
 **The manifest decides everything.** A command's name, its script and its
 directory come from `manifestDir()/<handle>.json`, which the agent cannot edit.
@@ -125,9 +123,7 @@ seam. An option passed there beats the file.
 ### What the cap does and does not do
 
 - **A command over the cap is REFUSED, at once.** It reads _"the command runner
-  is busy; retry"_. That is the SHAPE of the broker's own cap refusal, not the
-  same sentence: the broker says _"the broker is busy; retry"_, and there is no
-  broker on this route to name. Nothing queues and nothing waits.
+  is busy; retry"_. Nothing queues and nothing waits.
 - **A command refused for its name or its script path takes no slot**, so it is
   refused for the real reason rather than told to retry.
 - **A failed command returns its slot**, so one failure cannot wedge a handle.
@@ -221,20 +217,14 @@ the next arrival. It does not interrupt work already in flight.
 
 ## Common pitfalls
 
-🛑 **`broker.ts` has a second cap, and the broker route is DEAD at runtime.**
-`maxInFlight` limits dispatches per broker, across all of that broker's handles,
-and the guard in `Broker.accept` refuses the 5th envelope before dispatch
-reaches the per-handle cap. Both defaults are 4, so on that route the
-per-handle cap could never bite.
+🛑 **THE SHIM TOOL IS THE ONLY ROUTE, AND THE PER-HANDLE CAP GOVERNS IT.** A
+socket transport used to offer a second one, with a cap of its own counted per
+transport rather than per handle. Both defaults were 4, so on that route the
+per-handle cap could never bite. It was deleted in #329 — it had no `src/`
+importer and could not run.
 
-**It cannot run today. Measured:** nothing in `src/` imports `broker.ts`,
-nothing in `src/` imports `broker-client.ts`, and nothing in `src/` sets
-`CHAT_MCP_BROKER_PORT` or `CHAT_MCP_BROKER_TOKEN`. `CommandBroker.bind` is
-called only from tests. #191 deletes the module.
-
-⚠️ **So there is ONE live route — the shim tool — and the per-handle cap governs
-it. If the broker is ever revived, `maxInFlight` binds first and is the wrong
-shape**, because it is per broker rather than per handle.
+⚠️ **A SECOND ROUTE WOULD HAVE TO CAP PER HANDLE.** A cap counted per transport
+binds first and is the wrong shape, which is the mistake the deleted one made.
 
 ⚠️ **The per-handle counters are module state, so one process means one set.**
 That is per-handle today because one process serves one handle:
@@ -252,7 +242,6 @@ depend on that.
 | `src/supervise/command-limits.ts`      | Reads `limits.json` and refuses an unreadable one |
 | `src/supervise/run-script.ts`          | Spawns the process and classifies how it ended    |
 | `src/shim/tools/run_command.ts`        | The `list_commands` and `run_command` tools       |
-| `src/supervise/broker.ts`              | The socket consumer, with its own `maxInFlight`   |
 
 ## Related docs
 

@@ -83,8 +83,8 @@ export function runScript(
       }
 
       // 🛑 NEVER forward `err.message`. `execFile` writes the absolute script
-      // path into it on a spawn failure, and `broker.ts` makes this string the
-      // reply an agent inside a container reads.
+      // path into it on a spawn failure, and `run-command-service` makes this
+      // string the reply an agent reads.
       const code = typeof err.code === "string" ? err.code : "unknown";
 
       reject(new Error(`the command could not be started (${code})`));
