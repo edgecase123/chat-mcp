@@ -231,8 +231,14 @@ function refuseNoLimit(key: "memory" | "cpus", value: string): void {
 
   if (Number(digits) === 0) {
     throw new Error(
-      `\`${key}\` may not be zero: docker reads zero as no limit, so the ` +
-        "override would widen the container rather than narrow it",
+      // 🛑 THE MEASURED FACT, AND NOTHING WIDER. An earlier wording said the
+      // override "would widen the container rather than narrow it", which the
+      // code does not enforce: `"memory": "64g"` over a profile's `"512m"`
+      // widens it too and is accepted, correctly, because a handle replaces a
+      // scalar. Only the removal of the cap is refused. Found by claude2 on
+      // PR 333.
+      `\`${key}\` may not be zero: docker reads zero as no limit, so this ` +
+        "removes the cap instead of setting one",
     );
   }
 }
