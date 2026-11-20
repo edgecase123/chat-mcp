@@ -217,6 +217,10 @@ test("the CONTAINMENT refusal carries no host path", async () => {
     () => runCommandFor("linker2", "run-gate", {}, { sandbox: "host" }),
     (err: unknown) => {
       assert.ok(err instanceof Refusal);
+      // 🛑 THE BRANCH FIRST. Six public sentences out of this service are
+      // slashless, so a refusal that lands EARLIER satisfies the no-path
+      // assertion below while covering nothing.
+      assert.match(err.message, /not inside the project directory/);
       assert.equal(
         err.message.includes("/"),
         false,
@@ -244,6 +248,10 @@ test("a SPAWN FAILURE carries no host path", async () => {
     () => runCommandFor("unrunnable", "run-gate", {}, { sandbox: "host" }),
     (err: unknown) => {
       assert.ok(err instanceof Refusal);
+      // 🛑 THE BRANCH FIRST, for the same reason as the test above. `run-script`
+      // builds this sentence from `err.code`, so the match proves the call
+      // reached `execFile` rather than being refused on the way there.
+      assert.match(err.message, /could not be started \(EACCES\)/);
       assert.equal(
         err.message.includes("/"),
         false,
