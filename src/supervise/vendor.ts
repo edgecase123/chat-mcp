@@ -92,14 +92,14 @@ export interface VendorSpawn {
    * 🛑 PER VENDOR, BECAUSE ONE FILENAME IS NOT A LOCATION TWO CLIs AGREE ON.
    * A CLI with a config-path flag reads wherever it is pointed, so the name
    * is free. A CLI without one reads a FIXED path, so for it the path IS the
-   * wiring — and one shared filename is a file it never opens.
+   * wiring — and one shared filename is a file it never opens. `cursor-agent`
+   * has no such flag, so its containerized agent reached the bus never while
+   * reporting a clean start (#372).
    *
    * ⚠️ THE OLD NAME IS NOT SPELLED HERE ON PURPOSE. `state-dir-perms.test.ts`
    * forbids any file but `paths.ts` from quoting the host state directory's
    * name, and it reads COMMENTS as well as code. See `claude-spawn.ts` for the
    * value this used to be.
-   * `cursor-agent` has no such flag, so its containerized agent reached the
-   * bus never while reporting a clean start (#372).
    *
    * 🛑 REQUIRED, AND NO FRAMEWORK DEFAULT FROM `containerHome`. The same
    * argument as `containerBinary`: a default lets the next flagless vendor

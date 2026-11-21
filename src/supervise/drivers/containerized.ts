@@ -89,9 +89,10 @@ export { containerPathFor };
  * landed where it never looks and its contained agent reached the bus never
  * while reporting a clean start (#372).
  *
- * ⚠️ KEPT AS A FUNCTION so the write and the flags cannot read two different
- * sources. `dockerRunPlan` passes `mcpConfigFor(grant, "docker")` to the flags
- * and this to the write, and those two agreeing is asserted.
+ * ⚠️ KEPT AS A FUNCTION so the write resolves its path in ONE place. That is
+ * not a guarantee the flags agree with it: `dockerRunPlan` passes
+ * `mcpConfigFor(grant, "docker")` to the flags and this to the write, so the
+ * two naming the same file is ASSERTED by a test, not structural.
  */
 export function containerMcpConfigPath(vendor: VendorSpawn): string {
   return vendor.containerMcpConfigPath;
