@@ -195,14 +195,20 @@ test("a non-container (bare host) spawn never gets a mount banner", async () => 
  * rendered identically here, because the entry embeds the key twice around a
  * fixed ` -> `. This misinformed the child; it never corrupted consent.
  */
-test("🔴 a mount key containing a comma and a space stays ONE entry", async () => {
+test("🔴 a mount key containing a comma and a space stays ONE entry of two", async () => {
   const db = new DatabaseSync(":memory:");
   migrate(db);
   const handle = `mb-comma-${process.pid}`;
   setToken("sk-ant-oat-x");
 
+  // 🛑 TWO MOUNTS, NOT ONE. With one, the line count cannot fail: the old
+  // joined format put everything on a single line, and that line contained
+  // `" -> /mnt/"` too. The assertion whose MESSAGE explains the defect has to
+  // be the one that goes red. Caught by claude2 on PR 357.
   const extra = mkdtempSync(join(tmpdir(), "chat-mcp-mb-comma-"));
+  const extra2 = mkdtempSync(join(tmpdir(), "chat-mcp-mb-comma2-"));
   registerMount(handle, "data, backup", extra);
+  registerMount(handle, "memory", extra2);
   confirmHandle(handle);
 
   const sent: string[] = [];
@@ -233,10 +239,11 @@ test("🔴 a mount key containing a comma and a space stays ONE entry", async ()
 
     assert.equal(
       entryLines.length,
-      1,
-      `one mount must print as one line, got:\n${banner}`,
+      2,
+      `two mounts must print as two lines, got:\n${banner}`,
     );
     assert.match(banner, /"data, backup" -> \/mnt\/data, backup/);
+    assert.match(banner, /"memory" -> \/mnt\/memory/);
   } finally {
     await sup.stop();
   }
