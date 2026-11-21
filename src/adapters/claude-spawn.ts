@@ -55,6 +55,11 @@ function containerArgs(opts: SpawnOptions): string[] {
 export const claudeSpawn: VendorSpawn = {
   vendor: "claude",
   binary: "claude",
+
+  // On `PATH` in both filesystems, so the two agree. Recorded rather than
+  // derived — a vendor whose paths happen to match still declares both.
+  containerBinary: "claude",
+
   image: IMAGE_TAG,
   containerHome: "/root",
   authEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",

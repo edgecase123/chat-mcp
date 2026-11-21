@@ -31,18 +31,22 @@ export const CURSOR_HOST_BINARY: string = join(
 );
 
 /**
- * Where unit 3's Cursor image must install the same binary.
+ * Where the Cursor image installs `cursor-agent`, as `VendorSpawn.containerBinary`.
  *
- * 🛑 `VendorSpawn.binary` IS ONE STRING FOR BOTH SANDBOX MODES, so the host
- * path and the container path cannot both be it. The host path wins today
- * because the host spawn is what unit 2 ships. **Unit 3 must either install
- * the CLI at this exact path and make `binary` mode-aware, or reconcile the
- * two — it cannot assume the host value works inside the image**, because
- * `homedir()` on the host is not `/root`.
+ * 🛑 THE DOCKERFILE IS THE SOURCE, AND THIS VALUE ONCE DISAGREED WITH IT. It
+ * said `/root/.local/bin/cursor-agent`, copying the host layout, and that
+ * directory does not exist in the image — the install unpacks to
+ * `/opt/cursor-agent` and symlinks here. `container-binary.test.ts` now reads
+ * the `ln -s` target out of the `cli-cursor` lineage, so the two cannot drift
+ * again.
+ *
+ * ⚠️ NOT COMPARED TO `CURSOR_CONTAINER_HOME`. The guard this replaced asserted
+ * that it sits under that constant, a coupling the image does not have. Two
+ * constants checked against each other, wrong together, passing.
  */
-export const CURSOR_CONTAINER_BINARY = "/root/.local/bin/cursor-agent";
+export const CURSOR_CONTAINER_BINARY = "/usr/local/bin/cursor-agent";
 
-/** The container's `HOME`, which `CURSOR_CONTAINER_BINARY` sits under. */
+/** The container's `HOME`. The bus resolves its state dir from it. */
 export const CURSOR_CONTAINER_HOME = "/root";
 
 /**

@@ -60,7 +60,24 @@ export interface VendorSpawn {
    * pins this against the registry's own `vendor`, so the two cannot drift.
    */
   readonly vendor: string;
+
+  /** The CLI to exec on the HOST. */
   readonly binary: string;
+
+  /**
+   * The CLI to exec INSIDE the container, a different filesystem.
+   *
+   * 🛑 A SECOND FIELD BECAUSE ONE STRING CANNOT NAME TWO FILESYSTEMS. `binary`
+   * alone was exec'd in both modes, and Cursor's is an absolute host path
+   * under `homedir()`. A containerized Cursor agent exited 127 and reported as
+   * a dead agent rather than a missing CLI, so it had never once started.
+   *
+   * 🛑 REQUIRED, NOT OPTIONAL, for the reason already written on `image`. An
+   * optional field lets the next vendor inherit the host path silently, which
+   * is this defect again under a new vendor's name.
+   */
+  readonly containerBinary: string;
+
   readonly image: string;
   /**
    * The container's `HOME`. The bus resolves its state dir from it, so an

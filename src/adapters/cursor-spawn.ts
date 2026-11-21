@@ -2,6 +2,7 @@ import type { SpawnOptions } from "../supervise/child.js";
 import type { ChildGrant } from "../supervise/grant.js";
 import type { SandboxMode, VendorSpawn } from "../supervise/vendor.js";
 import {
+  CURSOR_CONTAINER_BINARY,
   CURSOR_CONTAINER_HOME,
   CURSOR_HOST_BINARY,
   cursorArgs,
@@ -22,6 +23,12 @@ import { CURSOR_IMAGE_TAG } from "../supervise/container.js";
 export const cursorSpawn: VendorSpawn = {
   vendor: "cursor",
   binary: CURSOR_HOST_BINARY,
+
+  // 🛑 THE TWO PATHS ARE DIFFERENT FILES, AND THAT IS THE WHOLE POINT OF THE
+  // SECOND FIELD. The host installer writes under `homedir()`; the image
+  // symlinks into `/usr/local/bin`.
+  containerBinary: CURSOR_CONTAINER_BINARY,
+
   image: CURSOR_IMAGE_TAG,
   containerHome: CURSOR_CONTAINER_HOME,
   authEnvVar: "CURSOR_API_KEY",
