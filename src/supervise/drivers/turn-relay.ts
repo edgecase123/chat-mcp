@@ -1,14 +1,15 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
+import type { VendorSpawn } from "../vendor.js";
 
 /**
  * The container-side half of a per-turn vendor.
  *
  * 🛑 IT EXISTS BECAUSE THE SUPERVISOR'S STDIN AND `cursor-agent`'s DISAGREE
- * ABOUT LIFETIME. `wireAgentChild` writes one line to one long-lived stdin and
+ * ABOUT LIFETIME. `wireAgentChild` writes one prompt to a long-lived stdin and
  * never closes it; `cursor-agent -p` reads stdin to EOF and treats the whole of
- * it as ONE prompt. Wired together directly the agent blocks on an EOF that
- * never comes and emits zero frames — #380.
+ * it as ONE prompt. Wired together the agent blocks on an EOF that never comes
+ * and emits zero frames — #380.
  *
  * So this runs as the container's command, keeps the container alive across
  * turns, and gives each turn its own process with its own EOF.
@@ -18,8 +19,13 @@ import type { Readable, Writable } from "node:stream";
  * turn, which is the work #372 exists to have made succeed once.
  */
 
-/** Marks the end of one turn in the vendor's own event stream. */
-const TURN_END = /"type"\s*:\s*"result"/;
+/**
+ * The relay's own exit code for a line on stdin that was never framed.
+ *
+ * Distinct from any `cursor-agent` status, so the cause is readable from the
+ * container's exit alone.
+ */
+export const UNFRAMED_PROMPT_EXIT = 65;
 
 /**
  * One prompt as one line, whatever bytes it contains.
@@ -32,9 +38,22 @@ export function frameTurn(prompt: string): string {
   return `${Buffer.from(prompt, "utf8").toString("base64")}\n`;
 }
 
-/** The inverse of {@link frameTurn}. */
-export function unframeTurn(line: string): string {
-  return Buffer.from(line, "base64").toString("utf8");
+/**
+ * The inverse of {@link frameTurn}, or null for a line that was never framed.
+ *
+ * 🛑 IT VALIDATES BY ROUND TRIP, BECAUSE DECODING CANNOT FAIL.
+ * `Buffer.from(x, "base64")` ignores every character outside the alphabet
+ * rather than throwing, so an unframed `"review PR 384 please"` decodes to
+ * binary garbage and the agent answers a prompt nobody wrote. Re-encoding and
+ * comparing is the only check that rejects it. claude2 on PR 384.
+ */
+export function unframeTurn(line: string): string | null {
+  const trimmed = line.trim();
+  const decoded = Buffer.from(trimmed, "base64");
+
+  return decoded.toString("base64") === trimmed
+    ? decoded.toString("utf8")
+    : null;
 }
 
 export interface TurnRelayIo {
@@ -44,16 +63,22 @@ export interface TurnRelayIo {
   readonly output: Writable;
   /** Kept SEPARATE from `output`: the fan-out treats stderr as operator text. */
   readonly errorOutput?: Writable;
+  /**
+   * 🛑 THE SUPERVISOR'S OWN ROUTER, NOT A SECOND OPINION ABOUT TURN ENDS.
+   * A private matcher here can DISAGREE with the one the supervisor runs, and
+   * a disagreement in this direction — relay says the turn ended, supervisor
+   * says it did not — leaves the child gone, the container alive and the queue
+   * `inTurn` forever, which `index.ts` already names as a state it reached
+   * once. Sharing the function makes that unrepresentable. claude2 on PR 384.
+   */
+  readonly routeEvent: VendorSpawn["routeEvent"];
   spawnTurn(prompt: string): ChildProcessWithoutNullStreams;
   /** Ends the relay, and with it the container. */
   exit(code: number | null): void;
 }
 
 /** Split a buffer into whole lines, returning the unterminated remainder. */
-function takeLines(buffered: string): {
-  lines: string[];
-  rest: string;
-} {
+function takeLines(buffered: string): { lines: string[]; rest: string } {
   const parts = buffered.split("\n");
   const rest = parts.pop() ?? "";
 
@@ -69,7 +94,26 @@ export function runTurnRelay(io: TurnRelayIo): void {
     pending = rest;
 
     for (const line of lines) {
-      if (line.trim().length > 0) startTurn(io, unframeTurn(line));
+      if (line.trim().length === 0) continue;
+
+      const prompt = unframeTurn(line);
+
+      if (prompt === null) {
+        // 🛑 REFUSE LOUDLY RATHER THAN ANSWER GARBAGE, AND EXIT RATHER THAN
+        // DROP IT. `per-turn.ts` records the house rule for this shape: a
+        // dropped prompt that names itself beats a silent hang. Returning here
+        // instead would leave the supervisor's queue waiting on a turn that
+        // will never start.
+        io.errorOutput?.write(
+          "turn-relay: a line on stdin was not a framed prompt, so no turn " +
+            "was started; the supervisor and this relay disagree about framing\n",
+        );
+        io.exit(UNFRAMED_PROMPT_EXIT);
+
+        return;
+      }
+
+      startTurn(io, prompt);
     }
   });
 
@@ -78,16 +122,42 @@ export function runTurnRelay(io: TurnRelayIo): void {
     let sawTurnEnd = false;
     let tail = "";
 
+    /** The supervisor's verdict on one line, never this file's own. */
+    const readLine = (line: string): void => {
+      let event: unknown;
+
+      try {
+        event = JSON.parse(line);
+      } catch {
+        // Not an event. The supervisor's parser skips it too.
+        return;
+      }
+
+      if (typeof event !== "object" || event === null) return;
+
+      relay.routeEvent(event as Record<string, unknown>, {
+        turnEnd: () => {
+          sawTurnEnd = true;
+        },
+        // The supervisor owns these. The relay only needs the turn boundary,
+        // and a router that calls them must still find them callable.
+        usage: () => undefined,
+        context: () => undefined,
+        denial: () => undefined,
+        session: () => undefined,
+      });
+    };
+
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       // Passed through FIRST and unchanged. The supervisor's parser owns this
-      // stream; scanning it here must not reshape it.
+      // stream; reading it here must not reshape it.
       relay.output.write(chunk);
 
       const { lines, rest } = takeLines(tail + chunk);
       tail = rest;
 
-      for (const line of lines) if (TURN_END.test(line)) sawTurnEnd = true;
+      for (const line of lines) readLine(line);
     });
 
     if (relay.errorOutput) {
@@ -96,16 +166,26 @@ export function runTurnRelay(io: TurnRelayIo): void {
       child.stderr.on("data", (chunk: string) => errors.write(chunk));
     }
 
+    // 🛑 A SPAWN FAILURE EMITS `error` AND NO `exit`, so without this the
+    // relay dies of an uncaught exception and the supervisor gets node's
+    // status instead of the cause. claude2 on PR 384.
+    child.on("error", (err: Error) => {
+      relay.errorOutput?.write(
+        `turn-relay: the turn failed to start: ${err.message}\n`,
+      );
+      relay.exit(1);
+    });
+
     // 🛑 WRITE THEN END, IN THAT ORDER AND ALWAYS. The `end` is the EOF the
     // agent is waiting for, and it is the entire fix for #380.
     child.stdin.write(prompt);
     child.stdin.end();
 
     child.on("exit", (code: number | null) => {
-      // 🛑 A FINAL RESULT LINE WITH NO TRAILING NEWLINE STILL ENDS THE TURN.
-      // A long-lived child's next chunk releases a partial line; a per-turn
-      // child has no next chunk, so the remainder is checked here or never.
-      if (TURN_END.test(tail)) sawTurnEnd = true;
+      // 🛑 A FINAL EVENT WITH NO TRAILING NEWLINE STILL ENDS THE TURN. A
+      // long-lived child's next chunk releases a partial line; a per-turn child
+      // has no next chunk, so the remainder is read here or never.
+      if (tail.trim().length > 0) readLine(tail);
 
       // 🛑 ROW 3 OF `per-turn.ts`'s TABLE, AND IT IS THE LOAD-BEARING ONE.
       // `cursor-agent` without `--trust` exits 1 having emitted nothing.

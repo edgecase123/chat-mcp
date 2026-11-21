@@ -6,7 +6,10 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   frameTurn,
   runTurnRelay,
+  unframeTurn,
+  UNFRAMED_PROMPT_EXIT,
 } from "../../../src/supervise/drivers/turn-relay.js";
+import { routeCursorEvent } from "../../../src/supervise/drivers/cursor.js";
 
 /**
  * 🛑 THE CONTAINER-SIDE HALF OF #380, DRIVEN BY A FAKE RATHER THAN BY CURSOR.
@@ -23,6 +26,8 @@ interface FakeTurn {
   say(line: string): void;
   /** stdout WITHOUT a trailing newline — the shape `say` cannot express. */
   sayPartial(text: string): void;
+  /** What node does when a spawn fails: `error`, and no `exit` ever. */
+  fail(err: Error): void;
   exit(code: number | null): void;
 }
 
@@ -64,6 +69,7 @@ function fakeTurn(): FakeTurn {
     say: (line: string) => stdout.emit("data", `${line}\n`),
     sayPartial: (text: string) => stdout.emit("data", text),
     exit: (code: number | null) => lifecycle.emit("exit", code, null),
+    fail: (err: Error) => lifecycle.emit("error", err),
   };
 
   return turn;
@@ -72,6 +78,7 @@ function fakeTurn(): FakeTurn {
 interface Harness {
   readonly input: PassThrough;
   readonly written: () => string;
+  readonly errors: () => string;
   readonly turns: FakeTurn[];
   readonly prompts: string[];
   readonly exits: (number | null)[];
@@ -87,6 +94,12 @@ function harness(): Harness {
     seen += c.toString("utf8");
   });
 
+  const errorOutput = new PassThrough();
+  let errors = "";
+  errorOutput.on("data", (c: Buffer) => {
+    errors += c.toString("utf8");
+  });
+
   const turns: FakeTurn[] = [];
   const prompts: string[] = [];
   const exits: (number | null)[] = [];
@@ -94,6 +107,11 @@ function harness(): Harness {
   runTurnRelay({
     input,
     output,
+    errorOutput,
+    // 🛑 THE REAL ROUTER, NOT A STAND-IN. The property under test is that the
+    // relay and the supervisor cannot disagree about a turn end, and a fake
+    // router would be exactly the second opinion this is meant to exclude.
+    routeEvent: routeCursorEvent,
     spawnTurn: (prompt: string) => {
       prompts.push(prompt);
       const turn = fakeTurn();
@@ -107,6 +125,7 @@ function harness(): Harness {
   return {
     input,
     written: () => seen,
+    errors: () => errors,
     turns,
     prompts,
     exits,
@@ -252,4 +271,83 @@ test("frameTurn emits exactly one line, whatever the prompt contains", () => {
 
   assert.equal(framed.endsWith("\n"), true);
   assert.equal(framed.trimEnd().includes("\n"), false);
+});
+
+/**
+ * 🛑 FINDING 1 ON PR 384, AND THE REGRESSION TEST FOR IT. The relay used to
+ * regex the RAW TEXT for `"type":"result"`, while the supervisor PARSES and
+ * reads the TOP-LEVEL `type`. A nested result satisfied the regex and not the
+ * parse, which leaves the child gone, the container alive and the supervisor's
+ * queue `inTurn` forever.
+ */
+test("🛑 a NESTED result does not end the turn, because the supervisor says it does not", () => {
+  const h = harness();
+
+  h.send("go");
+  h.turns[0].say(
+    JSON.stringify({ type: "assistant", payload: { type: "result" } }),
+  );
+  h.turns[0].exit(1);
+
+  assert.deepEqual(
+    h.exits,
+    [1],
+    "a nested result was read as a turn end, so the queue would wedge forever",
+  );
+});
+
+/**
+ * 🛑 WHY THE FIX IS A SHARED PREDICATE AND NOT "ANY OUTPUT AT ALL".
+ * `routeCursorEvent` records that the init event is the FIRST line of the
+ * stream, so a crash after init is a child that emitted output and no turn
+ * end. Treating any byte as a turn end wedges exactly there — the likelier
+ * case than the nested result above.
+ */
+test("🛑 output WITHOUT a turn end is still a death — init then crash", () => {
+  const h = harness();
+
+  h.send("go");
+  h.turns[0].say(
+    JSON.stringify({ type: "system", subtype: "init", session_id: "s-1" }),
+  );
+  h.turns[0].exit(1);
+
+  assert.deepEqual(h.exits, [1]);
+});
+
+/**
+ * 🛑 FINDING 2 ON PR 384. `Buffer.from(x, "base64")` ignores every character
+ * outside the alphabet instead of throwing, so an unframed prompt decodes to
+ * garbage and the agent answers something nobody wrote.
+ */
+test("🛑 an UNFRAMED line starts no turn and ends the relay loudly", () => {
+  const h = harness();
+
+  h.input.write("review PR 384 please\n");
+
+  assert.equal(h.turns.length, 0, "a garbage prompt was handed to a turn");
+  assert.deepEqual(h.exits, [UNFRAMED_PROMPT_EXIT]);
+  assert.match(h.errors(), /not a framed prompt/);
+});
+
+test("🔴 control — unframeTurn accepts what frameTurn produced", () => {
+  const prompt = "line one\nline two";
+
+  assert.equal(unframeTurn(frameTurn(prompt)), prompt);
+  assert.equal(unframeTurn("review PR 384 please"), null);
+});
+
+/**
+ * 🛑 FINDING 3 ON PR 384. A spawn failure emits `error` and NO `exit`, so
+ * without a handler the relay died of an uncaught exception and the supervisor
+ * got node's status rather than the cause.
+ */
+test("🛑 a turn that fails to SPAWN exits the relay instead of throwing", () => {
+  const h = harness();
+
+  h.send("go");
+  h.turns[0].fail(new Error("spawn cursor-agent ENOENT"));
+
+  assert.deepEqual(h.exits, [1]);
+  assert.match(h.errors(), /failed to start/);
 });
