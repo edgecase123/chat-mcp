@@ -119,6 +119,19 @@ function setSecret(key: string, token: string): void {
     throw new Error("refusing to store a token containing a newline");
   }
 
+  // A clipboard that held something other than a credential is how one gets
+  // here, and the only symptom used to be a container exiting 1 with its
+  // vendor reporting an invalid key. Interior only, because the trim above is
+  // a documented contract — a trailing newline from `pbpaste` is the normal
+  // case.
+  //
+  // `\s` is the boundary, not "no invisible characters". It does not match
+  // U+200B and `trim()` does not strip it, so a zero-width mis-paste still
+  // stores. Narrowing that needs a vendor key format nobody publishes.
+  if (/\s/.test(trimmed)) {
+    throw new Error("refusing to store a token containing whitespace");
+  }
+
   const secrets = readSecrets();
 
   secrets.set(key, trimmed);

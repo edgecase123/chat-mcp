@@ -128,6 +128,34 @@ test("a single trailing newline is trimmed, not treated as an embedded one", () 
   assert.equal(readGhToken(), "ghp-trailing");
 });
 
+/**
+ * #368's guard. A clipboard holding something other than a credential is the
+ * realistic way one gets here, and the only symptom used to be a container
+ * exiting 1 with its vendor reporting an invalid key.
+ *
+ * Interior, because the trim above is a documented contract. `\s` is the
+ * boundary: it does not match U+200B, and `trim()` does not strip it either,
+ * so a zero-width mis-paste still stores.
+ */
+test("a token with an interior space is refused rather than stored", () => {
+  assert.throws(() => setToken("sk-ant-oat head"), /whitespace/);
+  assert.throws(() => setGhToken("ghp head"), /whitespace/);
+});
+
+test("a token with an interior tab is refused rather than stored", () => {
+  assert.throws(() => setToken("sk-ant-oat\thead"), /whitespace/);
+});
+
+/**
+ * Pins the guard ORDER, not just its presence. An embedded newline is also
+ * whitespace, so a guard placed ahead of the newline one would still throw —
+ * with the wrong message, and the operator loses the one word that names what
+ * their paste did to the file.
+ */
+test("an embedded newline still reports as a newline, not as whitespace", () => {
+  assert.throws(() => setToken("sk-ant-oat-head\nsk-ant-oat-tail"), /newline/);
+});
+
 test("hasGhToken answers presence without the caller ever holding the value", () => {
   clearGhToken();
   assert.equal(hasGhToken(), false);
