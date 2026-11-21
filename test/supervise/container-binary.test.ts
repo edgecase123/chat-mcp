@@ -127,7 +127,33 @@ test("🛑 cursor's container binary is where the image INSTALLS cursor-agent", 
  * ⚠️ ASSERTED ON THE SERVED HELP, NOT ON THE SOURCE TEXT. A source pin greens
  * on a default that moved into a variable, and commander prints the effective
  * default here.
+ *
+ * 🛑 THE WHOLE ENTRY, NEVER ONE LINE. Commander wraps the description column at
+ * 80 with no TTY, and `--driver` already wraps onto a second line in this same
+ * output. A one-line read of a wrapped entry cannot see a `(default:` that
+ * landed below the fold, so it would green on the defect once the description
+ * grew. claude1 measured the margin at 6 characters on PR 364.
  */
+
+/** One option's full help entry, continuation lines included. */
+function helpEntryFor(help: string, term: string): string {
+  const lines = help.split("\n");
+  const start = lines.findIndex((l) => l.includes(term));
+
+  if (start === -1) return "";
+
+  const entry = [lines[start]!];
+
+  // A continuation is indented past the option column; the next OPTION starts
+  // with its own dashes. `--help` itself is always last, so this terminates.
+  for (const line of lines.slice(start + 1)) {
+    if (/^\s*-/.test(line) || line.trim() === "") break;
+    entry.push(line);
+  }
+
+  return entry.join("\n");
+}
+
 test("🛑 --binary has NO static default, so the vendor's value is reachable", () => {
   const help = execFileSync(
     process.execPath,
@@ -141,12 +167,44 @@ test("🛑 --binary has NO static default, so the vendor's value is reachable", 
     { encoding: "utf8" },
   );
 
-  const line = help.split("\n").find((l) => l.includes("--binary <path>"));
+  const entry = helpEntryFor(help, "--binary <path>");
 
-  assert.ok(line, "`supervise --help` no longer documents --binary at all");
+  assert.ok(entry, "`supervise --help` no longer documents --binary at all");
   assert.ok(
-    !/\(default:/.test(line),
-    `a default here shadows every vendor's container binary; got: ${line.trim()}`,
+    !/\(default:/.test(entry),
+    `a default here shadows every vendor's container binary; got: ${entry.trim()}`,
+  );
+});
+
+/**
+ * 🛑 THE CONTROL FOR THE GUARD ABOVE, BECAUSE A WRAPPED ENTRY IS THE FAILURE
+ * MODE IT WAS JUST FIXED FOR. `--driver` wraps today and its `(default:` sits
+ * on the SECOND line, so `helpEntryFor` finding it proves the reader follows a
+ * wrap. A one-line read returns the first line alone and this goes red.
+ */
+test("⚠️ control — the entry reader follows a WRAPPED option's second line", () => {
+  const help = execFileSync(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      new URL("../../src/index.ts", import.meta.url).pathname,
+      "supervise",
+      "--help",
+    ],
+    { encoding: "utf8" },
+  );
+
+  const entry = helpEntryFor(help, "--driver <name>");
+
+  assert.ok(
+    entry.includes("\n"),
+    "--driver no longer wraps, so this control no longer exercises a wrap",
+  );
+  assert.match(
+    entry,
+    /\(default:/,
+    "the wrapped half of --driver's description was not read",
   );
 });
 
