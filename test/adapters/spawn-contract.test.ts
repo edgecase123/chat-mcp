@@ -57,14 +57,20 @@ test("spawnFor resolves the claude vendor to a spawn block", () => {
 });
 
 test("🛑 spawnFor throws and names what exists, rather than falling back", () => {
-  // A silent fallback to claude would mean asking for cursor and getting
-  // claude, which looks exactly like cursor working.
-  assert.throws(() => spawnFor("cursor"), /cursor/);
-  assert.throws(() => spawnFor("cursor"), /claude/);
+  // A silent fallback would mean asking for one vendor and getting another,
+  // which looks exactly like the asked-for vendor working.
+  //
+  // ⚠️ THE SUBJECT IS `codex`, NOT `cursor`. It was `cursor` until #317 unit 2
+  // built that vendor, at which point this test asserted a throw that no
+  // longer happens. **A control must name a vendor this build genuinely does
+  // not have**, so it moves the day the named one ships.
+  assert.throws(() => spawnFor("codex"), /codex/);
+  assert.throws(() => spawnFor("codex"), /claude/);
+  assert.throws(() => spawnFor("codex"), /cursor/);
 });
 
 test("vendorsWithSpawn lists every vendor that can be spawned", () => {
-  assert.deepEqual([...vendorsWithSpawn()].sort(), ["claude"]);
+  assert.deepEqual([...vendorsWithSpawn()].sort(), ["claude", "cursor"]);
 });
 
 test("🛑 nothing under supervise/ imports adapters/, so the dependency stays one-way", () => {

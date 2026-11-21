@@ -78,15 +78,25 @@ export const EXPLAINED_REFUSALS = new Map<string, string>([
 ]);
 
 /**
- * The env names the spawn already pushes as credentials.
+ * The env names the spawn already pushes as credentials, across EVERY vendor.
  *
  * 🛑 AN OVERRIDE MAY NOT NAME ONE. `docker run -e NAME` copies this process's
  * value, so an override that re-declared one would decide which credential the
- * agent receives. Pinned equal to `containerCredentialEnvVars` by test, so the
- * two cannot drift into merely coinciding.
+ * agent receives.
+ *
+ * 🛑 THE UNION, NOT ONE VENDOR'S SET. Each vendor contributes its own
+ * `authEnvVar`, and a name absent here is accepted — so a per-vendor list
+ * would refuse Claude's credential and hand over Cursor's. Found by claude1 on
+ * PR 345.
+ *
+ * ⚠️ A LITERAL, BECAUSE `supervise/` MAY NOT IMPORT `adapters/`. Deriving the
+ * union here would need the registry, which `spawn-contract.test.ts` forbids
+ * this layer from reaching. The test derives it instead and fails when a new
+ * vendor's name is missing from this list.
  */
 export const RESERVED_ENV_NAMES = [
   "CLAUDE_CODE_OAUTH_TOKEN",
+  "CURSOR_API_KEY",
   "GH_TOKEN",
   "CHAT_MCP_MCP_CONFIG",
 ] as const;

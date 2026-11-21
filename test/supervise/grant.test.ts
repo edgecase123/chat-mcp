@@ -504,9 +504,12 @@ test("the injected vendor is a real spawner with a real re-dispatch template", a
   assert.equal(typeof vendor.redispatchPrompt, "function");
   assert.equal(typeof vendor.argsFor, "function");
 
-  // 🛑 A silent fallback would mean asking for Cursor and getting Claude,
-  // which looks exactly like Cursor working.
-  assert.throws(() => spawnFor("cursor"), /cursor/);
+  // 🛑 A silent fallback would mean asking for one vendor and getting
+  // another, which looks exactly like the asked-for vendor working.
+  //
+  // ⚠️ `codex` BECAUSE `cursor` NOW EXISTS (#317 unit 2). A control naming a
+  // vendor the build has asserts nothing.
+  assert.throws(() => spawnFor("codex"), /codex/);
 });
 
 /**
