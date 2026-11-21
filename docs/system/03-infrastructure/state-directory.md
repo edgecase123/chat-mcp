@@ -8,6 +8,8 @@ covers:
   - src/supervise/container.ts
   - src/supervise/mounts.ts
   - src/supervise/registrations.ts
+  - src/supervise/confirmPlan.ts
+  - src/cli/web/credential.ts
   - src/supervise/auth.ts
   - src/supervise/handle-tokens.ts
 ---
@@ -143,8 +145,13 @@ what is **running**, and this says what the operator **configured**.
 🛑 **THE TIER COMES FROM `/api/whoami`, WHICH NOW RETURNS THE CALLER'S OWN
 `capabilities`.** It is not inferred from a missing `mode` key: an empty agent
 list has no `mode` on any row, which would read as non-admin and hide the form
-exactly when nothing is registered yet. The field discloses nothing, because
-the caller is already exercising those capabilities to reach the route.
+exactly when nothing is registered yet.
+
+⚠️ **THE FIELD DISCLOSES NOTHING, AND "the caller already exercised these to
+reach here" IS NOT WHY.** `/api/whoami` is `read`-tier, so a `read` caller
+reaches it without holding anything else. The reason it is safe is that a
+bearer can already enumerate its own tier by probing a 200 against the 403 at
+`server.ts`, so a grant is not a secret from the bearer. Settled on PR 375.
 
 ⚠️ **IN PRODUCTION TODAY EVERY BROWSER IS `admin`.** `ALL_CAPABILITIES` is
 the only credential minted, so the read-only rendering is reachable from tests
@@ -159,6 +166,45 @@ only way out of `docker`, because a flag may tighten the mode and never loosen
 it. Tightening is never interrupted, and registering a brand-new handle is not
 treated as a loosening — there is no recorded decision to undo, and a dialog on
 every registration is how the one that matters gets clicked through.
+
+### Approving a contained handle's plan from the card
+
+A `docker` handle cannot start until an operator has approved the **container
+plan** — the mounts, the env var names, the binary, the network mode, the image
+and the two cap lines. Until #132 slice 4b that approval existed only at a
+terminal, and `src/index.ts` refuses outright when it has no stdin, so a handle
+registered from the browser could not be approved from the browser.
+
+| route                          | tier    | answers                                     |
+| ------------------------------ | ------- | ------------------------------------------- |
+| `GET /api/agents/plan?handle=` | `admin` | the plan, the verdict and what moved        |
+| `POST /api/agents/confirm`     | `admin` | records an approval, or refuses a stale one |
+
+🛑 **THE PLAN IS ITS OWN ROUTE AND IS NOT A FIELD ON `GET /api/agents`.**
+Building one needs `spawnFor`, which **throws** for a vendor this build cannot
+spawn, and `agents.json` accepts any non-empty vendor string. Folded into the
+list route, one mistyped row would `500` the card that is meant to display it.
+
+🛑 **THE CONFIRM CARRIES THE PLAN THE OPERATOR SAW.** A bare `{handle}` POST
+would approve a freshly built plan rather than the one on screen, which is the
+substitution this gate exists to prevent. The server rebuilds the plan, diffs
+it against the posted one, and a non-empty diff is a `409` naming each changed
+field — nothing is recorded.
+
+🛑 **NEITHER ROUTE IS `read`, INCLUDING THE GET.** The plan names mount paths,
+env var names and the image, which together are a map of what the container is
+handed. Both are listed in `ADMIN_ROUTES` and in neither read set.
+
+⚠️ **THE CARD FORMATS NOTHING ITSELF.** `web/assets/logic.js` cannot import
+from `src/`, so the route sends `planText` from `describePlan` and `changeText`
+from `describeChanges` — the same words the terminal banner prints. A formatter
+in the browser would be free to drift from it, and `describePlan` carries rules
+a reader depends on: one mount per line and quoted, and `no limit` said out
+loud for an absent cap.
+
+⚠️ **A `host` ROW HAS NO PLAN CONTROL AT ALL**, because it will not run a
+container. The route `409`s such a handle rather than showing a hypothetical
+one an operator could approve.
 
 ## The two entries whose location will surprise you
 

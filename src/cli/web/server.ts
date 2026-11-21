@@ -69,7 +69,16 @@ import {
   unregisterAgent,
   type AgentRegistration,
 } from "../../supervise/registrations.js";
-import { vendorsWithSpawn } from "../../adapters/index.js";
+import { spawnFor, vendorsWithSpawn } from "../../adapters/index.js";
+import { buildConfirmPlan } from "../../supervise/confirmPlan.js";
+import {
+  confirmVerdict,
+  describeChanges,
+  describePlan,
+  diffPlans,
+  markConfirmed,
+  type ContainerPlan,
+} from "../../supervise/container.js";
 import { packageVersion } from "../../util/version.js";
 import {
   aroundWindow,
@@ -504,6 +513,10 @@ export async function route(
     return handleRegisterAgent(req, res);
   if (path === "/api/agents/forget" && req.method === "POST")
     return handleForgetAgent(req, res);
+  if (path === "/api/agents/plan" && req.method === "GET")
+    return handleAgentPlan(url, res);
+  if (path === "/api/agents/confirm" && req.method === "POST")
+    return handleConfirmAgentPlan(req, res);
   if (path === "/api/search" && req.method === "GET")
     return handleSearch(url, res, ctx);
   if (path === "/api/approvals/answer" && req.method === "POST")
@@ -647,6 +660,180 @@ async function handleForgetAgent(
   }
 
   respondJson(res, { handle: body.handle, forgotten: true });
+}
+
+/**
+ * The container plan for one handle, or why there is none.
+ *
+ * 🛑 ONE RESOLUTION FOR BOTH ROUTES. The GET shows a plan and the POST
+ * approves one, so a second copy of these three refusals would be free to
+ * disagree about which handles have a plan at all.
+ *
+ * 🛑 ONLY A CALLER MISTAKE BECOMES A 4xx, which is why `spawnFor` is called
+ * on its own line. `buildConfirmPlan` reads three files, and a failed read has
+ * to stay a 500 — the split `handleRegisterAgent` already makes.
+ */
+interface PlanRefusal {
+  readonly error: string;
+  readonly status: number;
+}
+
+type PlanLookup = { readonly plan: ContainerPlan } | PlanRefusal;
+
+function containerPlanFor(handle: string): PlanLookup {
+  const { agents } = readRegistrations();
+
+  // `Object.hasOwn`, so `__proto__` is a missing handle rather than an
+  // inherited object with no `mode`.
+  if (!Object.hasOwn(agents, handle)) {
+    return {
+      error: `"${handle}" has no registration, so there is no plan to approve`,
+      status: 404,
+    };
+  }
+
+  const record = agents[handle];
+
+  // 🛑 A HOST HANDLE IS REFUSED, NOT SHOWN A HYPOTHETICAL. The plan describes
+  // a container this handle will not start, and an operator who approved one
+  // would have recorded a decision about nothing.
+  if (record.mode !== "docker") {
+    return {
+      error:
+        `"${handle}" is registered to run on the host rather than contained, ` +
+        "so it has no container plan",
+      status: 409,
+    };
+  }
+
+  try {
+    return { plan: buildConfirmPlan(spawnFor(record.vendor), handle) };
+  } catch (e) {
+    // `spawnFor` is the only throw reachable here and it names the vendor.
+    return { error: (e as Error).message, status: 409 };
+  }
+}
+
+function isRefusal(lookup: PlanLookup): lookup is PlanRefusal {
+  return "error" in lookup;
+}
+
+/**
+ * The plan one handle must approve, with whether it already has — #132.
+ *
+ * 🛑 ITS OWN ROUTE, NEVER A FIELD ON `GET /api/agents`. `spawnFor` throws for
+ * a vendor this build cannot spawn and the store takes any non-empty vendor
+ * string, so folded into the list route one mistyped row would 500 the whole
+ * card. `/api/agents` is what the card renders from and it must not be able to
+ * fail on one handle.
+ */
+function handleAgentPlan(url: URL, res: ServerResponse): void {
+  const handle = url.searchParams.get("handle") ?? "";
+
+  if (handle.length === 0) {
+    return respondJson(
+      res,
+      { error: "handle must be a non-empty query parameter" },
+      400,
+    );
+  }
+
+  const lookup = containerPlanFor(handle);
+
+  if (isRefusal(lookup)) {
+    return respondJson(res, { error: lookup.error }, lookup.status);
+  }
+
+  const verdict = confirmVerdict(handle, lookup.plan);
+  const changes = verdict.kind === "changed" ? verdict.changes : [];
+
+  respondJson(res, {
+    handle,
+    // Flattened to the kind, so the browser reads one string. The changes are
+    // lifted alongside it rather than nested inside the one verdict that
+    // carries them.
+    verdict: verdict.kind,
+    // 🛑 THE STRUCTURED PLAN IS WHAT THE CONFIRM ECHOES BACK, so it is sent
+    // as well as the text. The browser diffs nothing itself; it returns this
+    // object unchanged and the server re-derives the comparison.
+    plan: lookup.plan,
+    // 🛑 FORMATTED HERE, BECAUSE `web/assets/logic.js` CANNOT IMPORT FROM
+    // `src/`. `describePlan` owns the rules a reader depends on — one mount
+    // per line and quoted, and `no limit` said out loud for an absent cap —
+    // and a copy in the browser would be free to drift from the terminal
+    // banner. The same reason `rampFor` is computed server-side.
+    planText: describePlan(lookup.plan),
+    changes,
+    changeText: describeChanges(changes),
+  });
+}
+
+/**
+ * Record that an operator approved the plan they were SHOWN.
+ *
+ * 🛑 THE PLAN IS REQUIRED AND THERE IS DELIBERATELY NO BARE-HANDLE FORM. A
+ * POST carrying only a handle would approve a freshly built plan, which is not
+ * necessarily the one on screen — and approving an unread plan is the exact
+ * substitution this gate exists to prevent. `confirmVerdict` already separates
+ * `changed` from `unseen` for the same reason.
+ */
+async function handleConfirmAgentPlan(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as {
+    handle?: unknown;
+    plan?: unknown;
+  };
+
+  if (typeof body.handle !== "string" || body.handle.length === 0) {
+    return respondJson(
+      res,
+      { error: "handle must be a non-empty string" },
+      400,
+    );
+  }
+
+  if (
+    typeof body.plan !== "object" ||
+    body.plan === null ||
+    Array.isArray(body.plan)
+  ) {
+    return respondJson(
+      res,
+      { error: "plan must be the object GET /api/agents/plan returned" },
+      400,
+    );
+  }
+
+  const lookup = containerPlanFor(body.handle);
+
+  if (isRefusal(lookup)) {
+    return respondJson(res, { error: lookup.error }, lookup.status);
+  }
+
+  // 🛑 THE SHOWN PLAN IS THE `before`, SO A FIELD IT NEVER CARRIED READS AS
+  // CHANGED. `diffPlans` takes a Partial for that reason, which also makes a
+  // hand-written body fail closed rather than approve seven unread fields.
+  const changes = diffPlans(body.plan as Partial<ContainerPlan>, lookup.plan);
+
+  if (changes.length > 0) {
+    return respondJson(
+      res,
+      {
+        error:
+          `the container plan for "${body.handle}" changed since it was ` +
+          "shown, so nothing was approved",
+        changes,
+        changeText: describeChanges(changes),
+      },
+      409,
+    );
+  }
+
+  markConfirmed(body.handle, lookup.plan);
+
+  respondJson(res, { handle: body.handle, confirmed: true });
 }
 
 function respondJson(res: ServerResponse, body: unknown, status = 200): void {

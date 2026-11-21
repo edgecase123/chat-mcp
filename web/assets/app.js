@@ -47,6 +47,9 @@ import {
   registrationFormError,
   loosenConfirmText,
   forgetConfirmText,
+  planApproveLabel,
+  planVerdictClass,
+  planVerdictLabel,
   stopAllConfirmText,
   stopAllVisible,
   stopButtonClass,
@@ -147,6 +150,15 @@ const state = {
   // half-typed handle held only in an input is wiped by the next wake.
   registrationDraft: { handle: "", vendor: "", mode: "docker" },
   registrationError: null,
+  // #132 slice 4b — one handle's container plan, as `/api/agents/plan`
+  // returned it. Keyed by handle so re-reading one row cannot blank another's.
+  plans: {},
+  // Which row's panel is open, at most one: the plan is seven lines and the
+  // sidebar is narrow.
+  planOpen: null,
+  // The row with a request in flight, so its two buttons can be disabled
+  // without disabling every row's.
+  planBusy: null,
 };
 
 const el = {
@@ -1739,6 +1751,155 @@ async function forgetRegistration(handle) {
 }
 
 /**
+ * Read one handle's container plan into state, or throw what the route said.
+ *
+ * 🛑 ITS OWN ROUTE, NOT A FIELD ON `/api/agents`. Building a plan needs
+ * `spawnFor`, which throws for a vendor this build cannot spawn, so a plan
+ * folded into the list route would let one mistyped row blank the whole card.
+ */
+async function readPlan(handle) {
+  state.plans[handle] = await api(
+    `/api/agents/plan?handle=${encodeURIComponent(handle)}`,
+  );
+}
+
+/** Open one row's plan panel, or close it when it is already the open one. */
+async function openPlan(handle) {
+  if (state.planOpen === handle) {
+    state.planOpen = null;
+    renderSidebar();
+    return;
+  }
+
+  state.planBusy = handle;
+  renderSidebar();
+
+  try {
+    await readPlan(handle);
+    state.planOpen = handle;
+  } catch (e) {
+    // A host row and an unspawnable vendor both 409 here, and the route's own
+    // sentence says which. Paraphrasing would be a second copy of the rules.
+    toast(`No container plan for ${handle}: ${e.message}`, "warn");
+    state.planOpen = null;
+  }
+
+  state.planBusy = null;
+  renderSidebar();
+}
+
+/**
+ * Record that the operator approved the plan ON SCREEN.
+ *
+ * 🛑 THE RENDERED PLAN IS POSTED BACK, NEVER A BARE HANDLE. The route rebuilds
+ * the plan and refuses when it has moved, and posting what was rendered is the
+ * whole reason that refusal can mean anything.
+ *
+ * 🛑 THE PANEL IS RE-READ AFTER EITHER OUTCOME. A 409 means the plan moved, so
+ * the operator now has to see the NEW one and what changed — which is what the
+ * plan route already returns.
+ */
+async function approvePlan(handle) {
+  const shown = state.plans[handle];
+
+  if (shown === undefined) return;
+
+  state.planBusy = handle;
+  renderSidebar();
+
+  try {
+    await api("/api/agents/confirm", {
+      method: "POST",
+      body: JSON.stringify({ handle, plan: shown.plan }),
+    });
+    toast(`Approved the container plan for ${handle}`, "info");
+  } catch (e) {
+    toast(`Not approved: ${e.message}`, "warn");
+  }
+
+  state.planBusy = null;
+
+  try {
+    await readPlan(handle);
+  } catch {
+    delete state.plans[handle];
+    state.planOpen = null;
+  }
+
+  renderSidebar();
+}
+
+/**
+ * The plan affordance on a CONTAINED row.
+ *
+ * 🛑 ONLY WHERE `storedMode` IS `docker`. A host handle has no container plan
+ * and the route 409s it, so the control would offer something that cannot
+ * exist — and `storedMode` is null below admin, which is the tier this route
+ * needs anyway.
+ */
+function planControls(handle) {
+  const open = state.planOpen === handle;
+  const busy = state.planBusy === handle;
+  const plan = state.plans[handle];
+
+  return [
+    h(
+      "button",
+      {
+        className: "registration__plan-toggle",
+        type: "button",
+        disabled: busy,
+        onclick: () => void openPlan(handle),
+      },
+      [busy ? "working…" : open ? "Hide plan" : "Container plan"],
+    ),
+    ...(open && plan !== undefined ? [planPanel(handle, plan)] : []),
+  ];
+}
+
+/**
+ * The plan, in place, with what changed above it and the approve control below.
+ *
+ * 🛑 THE SERVER'S `planText`, NEVER A FORMATTER HERE. `describePlan` owns rules
+ * a reader depends on — one mount per line and quoted, `no limit` said out loud
+ * for an absent cap — and this file cannot import from `src/`. A copy here
+ * would be free to drift from the banner the terminal prints.
+ *
+ * 🛑 THE DIFF GOES ABOVE THE PLAN. It is the only part an operator who already
+ * approved once has not read, and below the seven lines it is the part they
+ * scroll past.
+ */
+function planPanel(handle, plan) {
+  const approve = planApproveLabel(plan.verdict);
+
+  return h("div", { className: "registration__plan" }, [
+    h(
+      "div",
+      {
+        className: `registration__plan-verdict${planVerdictClass(plan.verdict)}`,
+      },
+      [planVerdictLabel(plan.verdict)],
+    ),
+    plan.changeText
+      ? h("pre", { className: "registration__plan-changes" }, [plan.changeText])
+      : null,
+    h("pre", { className: "registration__plan-text" }, [plan.planText]),
+    approve === null
+      ? null
+      : h(
+          "button",
+          {
+            className: "registration__plan-approve",
+            type: "button",
+            disabled: state.planBusy === handle,
+            onclick: () => void approvePlan(handle),
+          },
+          [approve],
+        ),
+  ]);
+}
+
+/**
  * The Registered card: one row per stored pair, plus the form that writes one.
  *
  * 🛑 THE FORM IS ADMIN-ONLY, AND SO IS Forget. `POST /api/agents` and
@@ -1779,6 +1940,7 @@ function registrationSection() {
               },
               [r.mode],
             ),
+            ...(r.storedMode === "docker" ? planControls(r.handle) : []),
             r.canForget
               ? h(
                   "button",
