@@ -116,10 +116,10 @@ test("an unregistered handle resolves exactly as the flag-only path did", () => 
  * pin that the escalation survives composition.
  *
  * 🛑 BOTH REFUSAL PATHS ARE COVERED, BECAUSE THEY ARE DIFFERENT GUARDS. A
- * stray comma dies in the `JSON.parse` wrapper at `registrations.ts:119`; a
- * mode outside `host | docker` dies in `parseRecord` at `:88`. An earlier cut
- * of this test named the comma and exercised only the second, so the claim
- * was true and this test was not what proved it. Raised by claude2 on PR 362.
+ * stray comma dies in `readRegistrations`'s `JSON.parse` wrapper; a mode
+ * outside `host | docker` dies in `parseRecord`'s `MODES` check. An earlier
+ * cut of this test named the comma and exercised only the second, so the
+ * claim was true and this test was not what proved it.
  *
  * ⚠️ THE REGEX ANCHORS ON THE REFUSAL PREFIX, NOT ON A WORD IN THE DETAIL.
  * `/mode/` greened on any error whose message happened to contain "mode".
