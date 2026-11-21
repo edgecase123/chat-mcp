@@ -6,14 +6,21 @@ import { join } from "node:path";
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-container-"));
 
-const {
-  imageNeedsBuild,
-  buildImage,
-  isConfirmed,
-  markConfirmed,
-  describePlan,
-  IMAGE_TAG,
-} = await import("../../src/supervise/container.js");
+const { imageNeedsBuild, buildImage, confirmVerdict, describePlan, IMAGE_TAG } =
+  await import("../../src/supervise/container.js");
+
+/** Any valid plan — this file's confirm assertions are about the STORE. */
+const PLAN = {
+  mountPaths: ["/work"],
+  envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+  binary: "claude",
+  networkMode: "bridge",
+  image: IMAGE_TAG,
+  memory: null,
+  cpus: null,
+  installMemory: null,
+  installCpus: null,
+};
 
 function fakeRunner(
   calls: { cmd: string; args: string[] }[],
@@ -47,24 +54,13 @@ test("buildImage invokes docker build with the image tag", () => {
   assert.ok(build!.args.includes(IMAGE_TAG));
 });
 
-test("a handle is unconfirmed until markConfirmed runs", () => {
-  assert.equal(isConfirmed("claude1"), false);
-  markConfirmed("claude1");
-  assert.equal(isConfirmed("claude1"), true);
-});
-
-test("confirming one handle does not confirm another", () => {
-  markConfirmed("claude1");
-  assert.equal(isConfirmed("claude2"), false);
-});
-
 test("a malformed container.json logs the path before falling back, instead of wiping state with no trace", (t) => {
   const path = join(process.env.CHAT_MCP_HOME!, "container.json");
   writeFileSync(path, "{ this is not json");
 
   const errorMock = t.mock.method(console, "error", () => {});
 
-  assert.equal(isConfirmed("claude1"), false);
+  assert.equal(confirmVerdict("claude1", PLAN).kind, "unseen");
   assert.equal(errorMock.mock.calls.length, 1);
   assert.ok(
     String(errorMock.mock.calls[0].arguments[0]).includes(path),

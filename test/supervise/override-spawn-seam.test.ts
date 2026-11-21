@@ -13,8 +13,8 @@ const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 const { overridesDir, overridePathFor } =
   await import("../../src/util/paths.js");
 const { setToken } = await import("../../src/supervise/auth.js");
-const { markConfirmed } = await import("../../src/supervise/container.js");
 import { supervisorOptions } from "../support/supervisor-options.js";
+import { confirmHandle } from "../support/confirm-plan.js";
 
 import type { ContainerOverride } from "../../src/supervise/overrides.js";
 import type { SpawnOptions } from "../../src/supervise/child.js";
@@ -224,7 +224,7 @@ test("a containerized handle with the same override is NOT warned about", async 
   // Container mode refuses to start without a token and without a confirmed
   // plan. This test is about the warning, not about either precondition.
   setToken("sk-ant-oat-x");
-  markConfirmed(handle);
+  confirmHandle(handle);
 
   const sup = await supervisorFor(handle, seen, {
     container: true,
@@ -282,7 +282,7 @@ test("the handle's resolved override reaches the INSTALL call as well as the spa
   // Container mode refuses to start without a token and without a confirmed
   // plan. Neither precondition is what this test is about.
   setToken("sk-ant-oat-x");
-  markConfirmed(handle);
+  confirmHandle(handle);
 
   const db = new DatabaseSync(":memory:");
   migrate(db);
@@ -328,7 +328,7 @@ test("a handle with NO override file hands the install call no override", async 
   const handle = `ovr-${process.pid}-install-clean`;
 
   setToken("sk-ant-oat-x");
-  markConfirmed(handle);
+  confirmHandle(handle);
 
   const db = new DatabaseSync(":memory:");
   migrate(db);

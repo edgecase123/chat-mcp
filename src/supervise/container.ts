@@ -71,7 +71,19 @@ export interface ContainerPlan {
 
 interface ContainerState {
   builtHash: string | null;
-  confirmed: Record<string, boolean>;
+
+  /**
+   * The plan each handle approved, keyed by handle.
+   *
+   * 🛑 THE PLAN IS STORED, NOT A HASH. A digest can say that something
+   * changed; only the plan can say the image WAS `chat-mcp-agent:local`. The
+   * hash is derivable from the plan and the plan is not derivable from the
+   * hash, so storing the hash throws away the re-prompt's content.
+   *
+   * ⚠️ `true` IS THE PRE-FINGERPRINT SHAPE and still appears on disk. It
+   * records which plan was approved nowhere, so it compares to nothing.
+   */
+  confirmed: Record<string, ContainerPlan | true>;
 }
 
 const EMPTY_STATE: ContainerState = { builtHash: null, confirmed: {} };
@@ -293,16 +305,152 @@ export function prepareAgentImage(
   buildImage(run);
 }
 
-export function isConfirmed(handle: string): boolean {
-  return readContainerState().confirmed[handle] === true;
+export interface PlanChange {
+  readonly field: string;
+  readonly from: string;
+  readonly to: string;
 }
 
-export function markConfirmed(handle: string): void {
+/**
+ * Whether the handle may start without asking, and why not when it may not.
+ *
+ * `legacy` is separate from `unseen` so the re-prompt can say the approval is
+ * being re-taken rather than taken for the first time.
+ */
+export type ConfirmVerdict =
+  | { readonly kind: "confirmed" }
+  | { readonly kind: "unseen" }
+  | { readonly kind: "legacy" }
+  | { readonly kind: "changed"; readonly changes: readonly PlanChange[] };
+
+/** What a field the stored plan never carried reads as. */
+const NOT_RECORDED = "(not recorded)";
+
+interface PlanField {
+  readonly label: string;
+  readonly keys: readonly (keyof ContainerPlan)[];
+  readonly read: (plan: Partial<ContainerPlan>) => string;
+}
+
+function asList(value: unknown): string {
+  return Array.isArray(value) ? value.join(", ") : NOT_RECORDED;
+}
+
+function asText(value: unknown): string {
+  return typeof value === "string" ? value : NOT_RECORDED;
+}
+
+/**
+ * ⚠️ `undefined` AND `null` MEAN DIFFERENT THINGS HERE. `null` is a cap the
+ * operator declined to set, which the banner prints as `no limit`. `undefined`
+ * is a field the stored plan never carried, which must not read as a decision.
+ */
+function asCap(agent: unknown, install: unknown): string {
+  if (agent === undefined) return NOT_RECORDED;
+
+  return capLine(agent as string | null, (install ?? null) as string | null);
+}
+
+/**
+ * The banner's lines, and which plan fields each one reads.
+ *
+ * 🛑 ONE LINE PER OPERATOR DECISION, NOT ONE PER FIELD. `installMemory` is
+ * derived from `memory`, so diffing the two separately would report a single
+ * decision as two changes.
+ *
+ * 🛑 `keys` EXISTS SO THE COVERAGE CAN BE ASSERTED. A field added to
+ * `ContainerPlan` that no line reads is a change the operator is never shown,
+ * and nothing else in the suite can see that gap.
+ */
+const PLAN_FIELDS: readonly PlanField[] = [
+  { label: "mounts", keys: ["mountPaths"], read: (p) => asList(p.mountPaths) },
+  {
+    label: "env vars",
+    keys: ["envVarNames"],
+    read: (p) => asList(p.envVarNames),
+  },
+  { label: "binary", keys: ["binary"], read: (p) => asText(p.binary) },
+  {
+    label: "network",
+    keys: ["networkMode"],
+    read: (p) => asText(p.networkMode),
+  },
+  { label: "image", keys: ["image"], read: (p) => asText(p.image) },
+  {
+    label: "memory",
+    keys: ["memory", "installMemory"],
+    read: (p) => asCap(p.memory, p.installMemory),
+  },
+  {
+    label: "cpus",
+    keys: ["cpus", "installCpus"],
+    read: (p) => asCap(p.cpus, p.installCpus),
+  },
+];
+
+/** Every `ContainerPlan` field the diff reads. Asserted against the type. */
+export const PLAN_FIELD_KEYS: readonly string[] = PLAN_FIELDS.flatMap(
+  (field) => field.keys,
+);
+
+/**
+ * What changed between the plan the operator approved and the one about to
+ * run, named as the banner names it.
+ *
+ * ⚠️ `before` IS PARTIAL ON PURPOSE. It came off disk, possibly from an older
+ * build, so a field it never carried reads as `(not recorded)` and therefore
+ * as CHANGED. Reading the gap as equal is the fails-open direction.
+ */
+export function diffPlans(
+  before: Partial<ContainerPlan>,
+  after: ContainerPlan,
+): PlanChange[] {
+  const changes: PlanChange[] = [];
+
+  for (const field of PLAN_FIELDS) {
+    const from = field.read(before);
+    const to = field.read(after);
+
+    if (from !== to) changes.push({ field: field.label, from, to });
+  }
+
+  return changes;
+}
+
+export function confirmVerdict(
+  handle: string,
+  plan: ContainerPlan,
+): ConfirmVerdict {
+  const stored = readContainerState().confirmed[handle];
+
+  if (stored === undefined) return { kind: "unseen" };
+
+  // 🛑 lee RULED A, 2026-11-20. A legacy `true` counts as NOT confirmed, so
+  // the handle re-prompts once at a terminal. Treating it as confirmed would
+  // bless an override written after the original approval, which is the exact
+  // defect this gate exists to close.
+  if (typeof stored !== "object" || stored === null) return { kind: "legacy" };
+
+  const changes = diffPlans(stored, plan);
+
+  return changes.length === 0
+    ? { kind: "confirmed" }
+    : { kind: "changed", changes };
+}
+
+export function markConfirmed(handle: string, plan: ContainerPlan): void {
   const state = readContainerState();
   writeContainerState({
     ...state,
-    confirmed: { ...state.confirmed, [handle]: true },
+    confirmed: { ...state.confirmed, [handle]: plan },
   });
+}
+
+/** The changed lines, one per line, for the re-prompt. */
+export function describeChanges(changes: readonly PlanChange[]): string {
+  return changes
+    .map((change) => `  ${change.field}: ${change.from} -> ${change.to}`)
+    .join("\n");
 }
 
 /** What an absent cap reads as, so the uncapped case is said out loud. */

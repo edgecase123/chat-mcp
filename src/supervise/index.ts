@@ -286,7 +286,8 @@ export async function startSupervisor(
 
   if (isContainerSpawn) {
     const { readToken } = await import("./auth.js");
-    const { isConfirmed } = await import("./container.js");
+    const { confirmVerdict, describeChanges } = await import("./container.js");
+    const { buildConfirmPlan } = await import("./confirmPlan.js");
 
     if (!readToken()) {
       throw new Error(
@@ -294,10 +295,24 @@ export async function startSupervisor(
           "`pbpaste | chat-mcp auth set-token` (stdin, never argv)",
       );
     }
-    if (!isConfirmed(opts.handle)) {
+    // 🛑 COMPARED, NOT LATCHED. A per-handle boolean meant an override
+    // written AFTER the first approval was shown to nobody, ever — the
+    // banner described a container and a different one ran.
+    const verdict = confirmVerdict(
+      opts.handle,
+      buildConfirmPlan(opts.vendor, opts.handle),
+    );
+
+    if (verdict.kind !== "confirmed") {
+      const reconfirm =
+        `run \`chat-mcp supervise ${opts.handle} --container\` ` +
+        "interactively once to approve it";
+
       throw new Error(
-        `container plan for "${opts.handle}" is not confirmed; run ` +
-          `\`chat-mcp supervise ${opts.handle} --container\` interactively once first`,
+        verdict.kind === "changed"
+          ? `the container plan for "${opts.handle}" changed since it was ` +
+              `approved:\n${describeChanges(verdict.changes)}\n${reconfirm}`
+          : `container plan for "${opts.handle}" is not confirmed; ${reconfirm}`,
       );
     }
   }

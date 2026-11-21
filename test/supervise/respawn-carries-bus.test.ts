@@ -16,8 +16,8 @@ const { startSupervisor } = await import("../../src/supervise/index.js");
 const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 const { claudeSpawn } = await import("../../src/adapters/claude-spawn.js");
 const { setToken } = await import("../../src/supervise/auth.js");
-const { markConfirmed } = await import("../../src/supervise/container.js");
 import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
+import { confirmHandle } from "../support/confirm-plan.js";
 
 /**
  * 🛑 A CONTAINERIZED RESPAWN USED TO DROP `bus` AND THE AGENT DIED.
@@ -68,7 +68,7 @@ async function containerSupervisor(handle: string, children: SpawnOptions[]) {
   // The container gate, satisfied in the temp CHAT_MCP_HOME above — not the
   // operator's real one.
   setToken("sk-ant-oat-x");
-  markConfirmed(handle);
+  confirmHandle(handle);
 
   const sup = await startSupervisor({
     handle,

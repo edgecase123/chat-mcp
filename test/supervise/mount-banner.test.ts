@@ -13,9 +13,9 @@ const { migrate } = await import("../../src/storage/db.js");
 const { startSupervisor } = await import("../../src/supervise/index.js");
 const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 const { setToken } = await import("../../src/supervise/auth.js");
-const { markConfirmed } = await import("../../src/supervise/container.js");
 const { registerMount } = await import("../../src/supervise/mounts.js");
 import { supervisorOptions } from "../support/supervisor-options.js";
+import { confirmHandle } from "../support/confirm-plan.js";
 
 const DIRS = [process.cwd()];
 
@@ -46,10 +46,14 @@ test("a fresh container spawn prepends the mount banner to the FIRST prompt only
   migrate(db);
   const handle = `mb-${process.pid}`;
   setToken("sk-ant-oat-x");
-  markConfirmed(handle);
 
   const extra = mkdtempSync(join(tmpdir(), "chat-mcp-mb-extra-"));
   registerMount(handle, "local-context", extra);
+
+  // 🛑 CONFIRMED AFTER THE MOUNT, because the mount is part of the plan. An
+  // approval taken first is an approval of a different container, and the gate
+  // now says so rather than starting it.
+  confirmHandle(handle);
 
   const sent: string[] = [];
   const children: ReturnType<typeof fakeChild>[] = [];
@@ -111,10 +115,14 @@ test("the docker-claude driver gets the mount banner even without an explicit co
   migrate(db);
   const handle = `mb-driver-only-${process.pid}`;
   setToken("sk-ant-oat-x");
-  markConfirmed(handle);
 
   const extra = mkdtempSync(join(tmpdir(), "chat-mcp-mb-extra-"));
   registerMount(handle, "local-context", extra);
+
+  // 🛑 CONFIRMED AFTER THE MOUNT, because the mount is part of the plan. An
+  // approval taken first is an approval of a different container, and the gate
+  // now says so rather than starting it.
+  confirmHandle(handle);
 
   const sent: string[] = [];
   const sup = await startSupervisor(
