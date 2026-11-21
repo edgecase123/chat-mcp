@@ -60,6 +60,17 @@ export const CURSOR_CONTAINER_HOME = "/root";
  * enables tools and still leaves the bus servers unapproved, which is the same
  * silent-denial shape that cost a week on Claude Code's two permission flags.
  */
+/**
+ * The flags that continue an existing `cursor-agent` session.
+ *
+ * 🛑 ONE SPELLING, ASKABLE BY THE RELAY. The turn relay appends these itself
+ * for every turn after the first, so a second copy inside `cursorArgs` is a
+ * spelling that can drift from the one the relay passes.
+ */
+export function cursorResumeFlags(sessionId: string): readonly string[] {
+  return ["--resume", sessionId];
+}
+
 export function cursorArgs(opts: SpawnOptions = {}): string[] {
   const args = [
     "-p",
@@ -73,7 +84,9 @@ export function cursorArgs(opts: SpawnOptions = {}): string[] {
   ];
 
   if (opts.model) args.push("--model", opts.model);
-  if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
+  if (opts.resumeSessionId) {
+    args.push(...cursorResumeFlags(opts.resumeSessionId));
+  }
 
   return args;
 }

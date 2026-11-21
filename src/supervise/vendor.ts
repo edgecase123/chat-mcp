@@ -162,6 +162,18 @@ export interface VendorSpawn {
   readonly processPerTurn: boolean;
 
   readonly argsFor: (opts: SpawnOptions, mode: SandboxMode) => string[];
+
+  /**
+   * The flags that continue session `sessionId`, which `argsFor` must pass.
+   *
+   * 🛑 ASKABLE SEPARATELY BECAUSE THE TURN RELAY HAS NO `SpawnOptions`. It
+   * runs inside the container, builds every turn's argv after the first from
+   * the base argv it was handed, and knows only the id the last turn reported.
+   * A vendor that spelled `--resume` inline inside `argsFor` left it nothing
+   * to append, so turn two started a fresh session and the agent forgot the
+   * task between turns.
+   */
+  readonly resumeFlags: (sessionId: string) => readonly string[];
   /** The config path to point the CLI at, written first if the mode needs it. */
   readonly mcpConfigFor: (grant: ChildGrant, mode: SandboxMode) => string;
 
