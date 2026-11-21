@@ -48,6 +48,18 @@ const ALLOWED_KEYS = ["vendor", "mode"] as const;
  */
 const MODES: readonly SandboxMode[] = ["host", "docker"];
 
+/**
+ * A CALLER's mistake in a registration — a bad handle, an unknown mode, an
+ * extra key. Distinct from a failed write.
+ *
+ * 🛑 A TYPE, SO AN API CAN RETURN 400 WITHOUT RE-VALIDATING. `server.ts` maps
+ * only this class to a 4xx and rethrows everything else, which is the rule
+ * `RoomSendInputError` already carries: a full disk must stay a 500. A blanket
+ * catch around `registerAgent` cannot tell the two apart, and a second copy of
+ * the rules in the handler would be free to drift from these ones.
+ */
+export class RegistrationInputError extends Error {}
+
 export function registrationsPath(): string {
   return join(stateDir(), "agents.json");
 }
@@ -60,17 +72,27 @@ export function registrationsPath(): string {
  * there is a registration no agent can ever be started from.
  */
 function parseRecord(handle: string, raw: unknown): AgentRegistration {
-  assertHandle(handle);
+  // 🛑 RECLASSIFIED, NOT RE-CHECKED. `assertHandle` is the one home for the
+  // handle rules and it throws a plain Error, which an API would report as a
+  // 500. Re-testing the shape here would be the second copy this file's
+  // header already refuses.
+  try {
+    assertHandle(handle);
+  } catch (e) {
+    throw new RegistrationInputError((e as Error).message);
+  }
 
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    throw new Error(`"${handle}" must map to an object of vendor and mode`);
+    throw new RegistrationInputError(
+      `"${handle}" must map to an object of vendor and mode`,
+    );
   }
 
   const record = raw as Record<string, unknown>;
 
   for (const key of Object.keys(record)) {
     if (!(ALLOWED_KEYS as readonly string[]).includes(key)) {
-      throw new Error(
+      throw new RegistrationInputError(
         `"${handle}" has an unknown key "${key}": this file holds ` +
           `${ALLOWED_KEYS.join(" and ")} only`,
       );
@@ -80,13 +102,13 @@ function parseRecord(handle: string, raw: unknown): AgentRegistration {
   const { vendor, mode } = record;
 
   if (typeof vendor !== "string" || vendor.length === 0) {
-    throw new Error(
+    throw new RegistrationInputError(
       `"${handle}" needs a non-empty vendor string, got ${JSON.stringify(vendor)}`,
     );
   }
 
   if (!MODES.includes(mode as SandboxMode)) {
-    throw new Error(
+    throw new RegistrationInputError(
       `"${handle}" has mode ${JSON.stringify(mode)}: it must be one of ` +
         `${MODES.join(", ")}. Refusing rather than reading an unknown mode as host.`,
     );

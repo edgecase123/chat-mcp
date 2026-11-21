@@ -62,6 +62,13 @@ import {
   realContainedDir,
   resolveHintQuery,
 } from "./file-hints.js";
+import {
+  RegistrationInputError,
+  readRegistrations,
+  registerAgent,
+  unregisterAgent,
+  type AgentRegistration,
+} from "../../supervise/registrations.js";
 import { packageVersion } from "../../util/version.js";
 import {
   aroundWindow,
@@ -490,6 +497,12 @@ export async function route(
     return handleContextGateSet(req, res, ctx);
   if (path === "/api/agents/stop" && req.method === "POST")
     return handleStopAgents(req, res, ctx);
+  if (path === "/api/agents" && req.method === "GET")
+    return handleRegistrations(res);
+  if (path === "/api/agents" && req.method === "POST")
+    return handleRegisterAgent(req, res);
+  if (path === "/api/agents/forget" && req.method === "POST")
+    return handleForgetAgent(req, res);
   if (path === "/api/search" && req.method === "GET")
     return handleSearch(url, res, ctx);
   if (path === "/api/approvals/answer" && req.method === "POST")
@@ -508,6 +521,94 @@ export async function route(
 }
 
 // ── API handlers ─────────────────────────────────────────────────────────
+
+/**
+ * The (vendor, mode) pair each handle is started with — #132.
+ *
+ * 🛑 NOT `/api/agents/live`, WHICH IS THE SOCKET REGISTER. A handle can be
+ * connected without being registered and registered without being connected,
+ * so the two surfaces answer different questions and neither substitutes.
+ */
+function handleRegistrations(res: ServerResponse): void {
+  respondJson(res, readRegistrations());
+}
+
+/**
+ * Store one handle's pair, replacing any record it had.
+ *
+ * 🛑 REPLACE, NEVER MERGE, AND THERE IS DELIBERATELY NO PATCH VERB.
+ * `registerAgent`'s docblock gives the reason: both fields are required, so a
+ * merge could only carry a stale half — and the stale half is `mode`, which
+ * decides whether the agent is contained.
+ */
+async function handleRegisterAgent(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as {
+    handle?: unknown;
+    vendor?: unknown;
+    mode?: unknown;
+  };
+
+  if (typeof body.handle !== "string" || body.handle.length === 0) {
+    return respondJson(
+      res,
+      { error: "handle must be a non-empty string" },
+      400,
+    );
+  }
+
+  // 🛑 ONLY A CALLER MISTAKE BECOMES A 4xx. `registerAgent` also writes, and a
+  // failed write or a full disk must stay a 500 — the same split
+  // `handleSend`'s `RoomSendInputError` catch makes. The store owns the rules;
+  // this maps their one error class.
+  try {
+    const stored = registerAgent(body.handle, {
+      vendor: body.vendor,
+      mode: body.mode,
+    } as AgentRegistration);
+    respondJson(res, { handle: body.handle, ...stored });
+  } catch (e) {
+    if (e instanceof RegistrationInputError) {
+      return respondJson(res, { error: e.message }, 400);
+    }
+    throw e;
+  }
+}
+
+/**
+ * Forget one handle's registration.
+ *
+ * ⚠️ A HANDLE WITH NO RECORD IS A 200, NOT A 404. `unregisterAgent` writes
+ * nothing in that case, including not creating the file, so there is no state
+ * for a 404 to describe and a retry must not start failing.
+ */
+async function handleForgetAgent(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as { handle?: unknown };
+
+  if (typeof body.handle !== "string" || body.handle.length === 0) {
+    return respondJson(
+      res,
+      { error: "handle must be a non-empty string" },
+      400,
+    );
+  }
+
+  try {
+    unregisterAgent(body.handle);
+  } catch (e) {
+    if (e instanceof RegistrationInputError) {
+      return respondJson(res, { error: e.message }, 400);
+    }
+    throw e;
+  }
+
+  respondJson(res, { handle: body.handle, forgotten: true });
+}
 
 function respondJson(res: ServerResponse, body: unknown, status = 200): void {
   res.statusCode = status;
