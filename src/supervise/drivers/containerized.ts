@@ -7,7 +7,12 @@ import type { AgentChild, BusEndpoint, SpawnOptions } from "../child.js";
 import type { VendorSpawn } from "../vendor.js";
 import { wireAgentChild } from "./wiring.js";
 import { mountsFor, containerPathFor } from "../mounts.js";
-import { GH_TOKEN_KEY, readGhToken, readToken } from "../auth.js";
+import {
+  GH_TOKEN_KEY,
+  missingVendorTokenMessage,
+  readGhToken,
+  readVendorToken,
+} from "../auth.js";
 import {
   assertProjectDirOutsideState,
   checkedMountPath,
@@ -593,15 +598,16 @@ export function dockerRunPlan(
   vendor: VendorSpawn,
   opts: SpawnOptions,
 ): DockerRunPlan {
-  const token = readToken();
-  // Optional, unlike the Claude token. Most handles need no GitHub access, and
-  // one that does not must still be able to start.
+  // 🛑 THIS VENDOR'S OWN CREDENTIAL. One shared `readToken()` was injected
+  // under whatever name the vendor declared, so a Cursor container received a
+  // Claude subscription token as `CURSOR_API_KEY` — and `cursor-agent` sent it
+  // to Cursor as its own key. #347.
+  const token = readVendorToken(vendor);
+  // Optional, unlike the agent credential. Most handles need no GitHub access,
+  // and one that does not must still be able to start.
   const ghToken = readGhToken();
   if (!token) {
-    throw new Error(
-      "no Claude OAuth token on file; run `claude setup-token` on the host, then " +
-        "`pbpaste | chat-mcp auth set-token` (stdin, never argv)",
-    );
+    throw new Error(missingVendorTokenMessage(vendor));
   }
 
   const { supervisorHandle, projectDir } = containerTarget(opts);

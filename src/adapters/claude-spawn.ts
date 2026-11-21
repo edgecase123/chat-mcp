@@ -53,10 +53,12 @@ function containerArgs(opts: SpawnOptions): string[] {
 }
 
 export const claudeSpawn: VendorSpawn = {
+  vendor: "claude",
   binary: "claude",
   image: IMAGE_TAG,
   containerHome: "/root",
   authEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
+  authSetupHint: "run `claude setup-token` on the host",
 
   // `routeClaudeEvent` calls both sinks, so both are true here and nowhere
   // else. A vendor that routes neither declares `false` and still starts.

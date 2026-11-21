@@ -20,10 +20,20 @@ import { CURSOR_IMAGE_TAG } from "../supervise/container.js";
  * needed on the host too, so there is nothing for the container to drop.
  */
 export const cursorSpawn: VendorSpawn = {
+  vendor: "cursor",
   binary: CURSOR_HOST_BINARY,
   image: CURSOR_IMAGE_TAG,
   containerHome: CURSOR_CONTAINER_HOME,
   authEnvVar: "CURSOR_API_KEY",
+
+  /**
+   * 🛑 A DASHBOARD, NOT A CLI COMMAND. `cursor-agent login` stores a login on
+   * the host that a Linux container cannot read — `apiKeySource: "login"` in
+   * its own init event. Only a dashboard-issued key reaches a container, and a
+   * fine-grained one was measured working on #347: `apiKeySource: "env"`.
+   */
+  authSetupHint:
+    "create a Cursor API key at https://cursor.com/dashboard/api (a host login cannot be read by a container)",
 
   /**
    * 🛑 BOTH FALSE, AND THIS CORRECTS MY OWN MEASUREMENT NOTE ON #317.

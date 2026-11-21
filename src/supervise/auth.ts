@@ -22,7 +22,13 @@ export function secretsEnvPath(): string {
   return join(stateDir(), "secrets.env");
 }
 
-const CLAUDE_TOKEN_KEY = "CLAUDE_CODE_OAUTH_TOKEN";
+/**
+ * 🛑 ONE STRING, for the reason `GH_TOKEN_KEY` below spells out. It is also
+ * `claudeSpawn.authEnvVar`, and `per-vendor-auth.test.ts` pins the two
+ * together — this module cannot import an adapter, so the equality needs a
+ * test rather than a shared constant.
+ */
+export const CLAUDE_TOKEN_KEY = "CLAUDE_CODE_OAUTH_TOKEN";
 
 /**
  * 🛑 THE STORAGE KEY AND THE INJECTED ENV VAR NAME ARE ONE STRING, NOT TWO
@@ -124,12 +130,66 @@ function readSecret(key: string): string | null {
   return readSecrets().get(key)?.trim() ?? null;
 }
 
+/**
+ * This vendor's own credential, keyed off the env var it is injected under.
+ *
+ * 🛑 ONE TOKEN PER VENDOR, BECAUSE ONE TOKEN FOR ALL OF THEM SENT A CLAUDE
+ * SUBSCRIPTION CREDENTIAL TO CURSOR'S SERVERS. `dockerRunPlan` read a single
+ * `readToken()` and injected it under whatever name the vendor declared, so
+ * the name changed per vendor and the value never did. #347.
+ *
+ * ⚠️ `null` IS A SUPPORTED ANSWER AND THE CALLER MUST REFUSE ON IT. Measured
+ * on #347: `CURSOR_API_KEY` set to a credential Cursor cannot use OVERRIDES a
+ * working login rather than filling a gap, so injecting the wrong token is
+ * worse than injecting none — the container exits 1 before its first event.
+ */
+export function readVendorToken(vendor: { authEnvVar: string }): string | null {
+  return readSecret(vendor.authEnvVar);
+}
+
+export function setVendorToken(
+  vendor: { authEnvVar: string },
+  token: string,
+): void {
+  setSecret(vendor.authEnvVar, token);
+}
+
+/**
+ * The Claude-specific aliases, kept because four test files seed through them.
+ *
+ * 🛑 ALIASES OF THE LIVE PATH, NOT A SECOND ONE. They had zero production
+ * callers the moment `dockerRunPlan` went per-vendor, and a helper that no
+ * longer shares the code it is testing is how a test keeps passing against a
+ * path the application abandoned. Routing them through the same `readSecret`
+ * key means there is nothing for them to diverge from. Raised by claude1 on
+ * PR 354; deleting them and reseeding those tests is a follow-up, not this
+ * security fix's business.
+ */
 export function setToken(token: string): void {
   setSecret(CLAUDE_TOKEN_KEY, token);
 }
 
 export function readToken(): string | null {
   return readSecret(CLAUDE_TOKEN_KEY);
+}
+
+/**
+ * The refusal for a containerized spawn with no credential on file.
+ *
+ * 🛑 ONE BUILDER FOR BOTH REFUSAL SITES. `startSupervisor` and
+ * `dockerRunPlan` each carried their own copy of this sentence, and both
+ * copies named Claude. A second vendor made them wrong in two places at once.
+ */
+export function missingVendorTokenMessage(vendor: {
+  vendor: string;
+  authEnvVar: string;
+  authSetupHint: string;
+}): string {
+  return (
+    `no ${vendor.authEnvVar} on file; ${vendor.authSetupHint}, then ` +
+    `\`pbpaste | chat-mcp auth set-token --vendor ${vendor.vendor}\` ` +
+    `(stdin, never argv)`
+  );
 }
 
 export function setGhToken(token: string): void {
