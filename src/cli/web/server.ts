@@ -536,6 +536,11 @@ export async function route(
  *
  * ⚠️ FILTERED HERE AND NOT IN `readRegistrations`. The spawn path reads the
  * same store and needs `mode`.
+ *
+ * 🛑 THE NON-ADMIN BRANCH LISTS ITS KEYS RATHER THAN SPREADING `config`, SO A
+ * FIELD ADDED LATER IS WITHHELD UNTIL SOMEONE NAMES IT. Spreading would read
+ * better and would disclose that field on the day it lands. Raised by claude2
+ * on PR 369; failing closed is the answer.
  */
 function handleRegistrations(res: ServerResponse, ctx: RouteContext): void {
   const config = readRegistrations();
