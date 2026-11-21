@@ -84,6 +84,34 @@ export interface VendorSpawn {
    * image whose HOME differs from this value loses the bus silently.
    */
   readonly containerHome: string;
+
+  /**
+   * Where the bus config must land INSIDE the container for this CLI to read
+   * it. The prelude writes it there; nothing on the host is touched.
+   *
+   * 🛑 PER VENDOR, BECAUSE ONE FILENAME IS NOT A LOCATION TWO CLIs AGREE ON.
+   * A CLI with a config-path flag reads wherever it is pointed, so the name
+   * is free. A CLI without one reads a FIXED path, so for it the path IS the
+   * wiring — and one shared filename is a file it never opens.
+   *
+   * ⚠️ THE OLD NAME IS NOT SPELLED HERE ON PURPOSE. `state-dir-perms.test.ts`
+   * forbids any file but `paths.ts` from quoting the host state directory's
+   * name, and it reads COMMENTS as well as code. See `claude-spawn.ts` for the
+   * value this used to be.
+   * `cursor-agent` has no such flag, so its containerized agent reached the
+   * bus never while reporting a clean start (#372).
+   *
+   * 🛑 REQUIRED, AND NO FRAMEWORK DEFAULT FROM `containerHome`. The same
+   * argument as `containerBinary`: a default lets the next flagless vendor
+   * inherit a path it does not read, which is this defect under a new name.
+   *
+   * ⚠️ A VENDOR MAY STILL BUILD ITS OWN VALUE FROM ITS OWN `containerHome`,
+   * and `cursorSpawn` does. That is not the banned shape — `cursor-agent`'s
+   * documented location is literally `$HOME/.cursor/mcp.json`, so the two are
+   * the same fact rather than two constants that happen to agree.
+   */
+  readonly containerMcpConfigPath: string;
+
   readonly authEnvVar: string;
 
   /**

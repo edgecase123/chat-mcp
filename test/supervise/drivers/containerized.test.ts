@@ -18,12 +18,14 @@ process.env.CHAT_MCP_HOME = mkdtempSync(
   join(tmpdir(), "chat-mcp-docker-driver-"),
 );
 
-const { setToken, setGhToken, clearGhToken } =
+const { setToken, setVendorToken, setGhToken, clearGhToken } =
   await import("../../../src/supervise/auth.js");
 const { stateDir } = await import("../../../src/util/paths.js");
 const { registerMount, mountsPath } =
   await import("../../../src/supervise/mounts.js");
 const { claudeSpawn } = await import("../../../src/adapters/claude-spawn.js");
+const { cursorSpawn } = await import("../../../src/adapters/cursor-spawn.js");
+const { listAdapters } = await import("../../../src/adapters/index.js");
 const {
   dockerRunPlan,
   dockerInstallPlan,
@@ -2165,10 +2167,14 @@ test("🚨 a missing image refuses by NAME, not as a dependency failure", async 
  * this spawner used to push both onto every vendor's argv. `argsFor` exists so
  * no generic spawner knows a flag name, and this one knew two.
  *
- * ⚠️ THE PATH HALF WAS NEVER THE PROBLEM. The prelude writes the file to
- * `containerMcpConfigPath(vendor)`, so a vendor that reads a fixed location
- * only needs the file to land there. Cursor reads `~/.cursor/mcp.json` with no
- * path flag at all, so for it the two flags are argv it would reject.
+ * 🛑 THE PATH HALF WAS THE PROBLEM TOO, AND THIS COMMENT USED TO DENY IT. It
+ * said a flagless vendor "only needs the file to land there", naming Cursor's
+ * real `~/.cursor/mcp.json` in the same breath as an assertion that the file
+ * lands at a shared `.chat-mcp-mcp.json`. Both halves were written down and
+ * nothing compared them, so #372 shipped under a comment describing it.
+ *
+ * ⚠️ THIS VENDOR DECLARES CLAUDE'S PATH, so it tests the FLAGS alone. The
+ * path is `FIXED_PATH_VENDOR` below, which declares a different one.
  */
 const FLAGLESS_VENDOR = {
   ...claudeSpawn,
@@ -2205,6 +2211,157 @@ test("🛑 a vendor that names NO config flags gets none, and still has its conf
     script.includes(containerMcpConfigPath(FLAGLESS_VENDOR)),
     "the config was written somewhere this vendor does not read",
   );
+});
+
+// ---------------------------------------------------------------------------
+// the MCP config PATH belongs to the vendor too (#372)
+// ---------------------------------------------------------------------------
+
+/**
+ * A vendor whose CLI reads a FIXED path inside a dotdir, as `cursor-agent`
+ * does.
+ *
+ * 🛑 THE DECLARED PATH IS ONE CLAUDE'S SPAWN COULD NEVER PRODUCE. A shared
+ * `${containerHome}/.chat-mcp-mcp.json` regression cannot satisfy these
+ * assertions by coincidence, which a `/root`-shaped path would have let it do.
+ */
+const FIXED_PATH_VENDOR = {
+  ...claudeSpawn,
+  containerHome: "/home/agent",
+  containerMcpConfigPath: "/home/agent/.vendorcli/mcp.json",
+  mcpConfigFlags: () => [],
+};
+
+/** The one prelude step that writes the config, for `vendor`. */
+function configStepFor(vendor: Parameters<typeof dockerRunPlan>[0]): string {
+  setVendorToken(vendor, "token-for-this-vendor");
+
+  const { args } = dockerRunPlan(vendor, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    bus: BUS,
+    grant: childGrant({ handle: "claude1-agent", configPath: "/unused.json" }),
+  });
+
+  const script = args.find((a) => a.includes("umask 077"));
+
+  assert.ok(script, "no prelude step writes the config at all");
+
+  return script;
+}
+
+test("🛑 the config lands where the VENDOR says, never at one shared filename", () => {
+  const script = configStepFor(FIXED_PATH_VENDOR);
+
+  assert.ok(
+    script.includes("/home/agent/.vendorcli/mcp.json"),
+    `the declared path is not in the prelude: ${script}`,
+  );
+
+  // 🛑 THE `DontInclude` HALF IS WHAT KILLS THE DEFECT. #372 was a file that
+  // landed at the shared name while a comment said the path did not matter, so
+  // asserting only the presence of the right path would pass on a prelude that
+  // wrote BOTH.
+  assert.ok(
+    !script.includes(".chat-mcp-mcp.json"),
+    `the shared filename is still being written: ${script}`,
+  );
+});
+
+test("🛑 the dotdir is CREATED first, or exec never runs and NO agent starts", () => {
+  const script = configStepFor(FIXED_PATH_VENDOR);
+
+  assert.ok(
+    script.includes("mkdir -p '/home/agent/.vendorcli'"),
+    `nothing creates the directory: ${script}`,
+  );
+
+  // 🛑 ORDER, NOT PRESENCE. `prelude` chains on `&&`, so a mkdir after the
+  // redirect is a step that runs only once the thing it enables has failed.
+  assert.ok(
+    script.indexOf("mkdir -p") < script.indexOf("printf"),
+    `the mkdir runs after the write: ${script}`,
+  );
+
+  // The umask opens the subshell, so a mkdir inside it cannot be world-readable
+  // on the way to a file holding a bus-wide bearer token.
+  assert.ok(
+    script.indexOf("umask 077") < script.indexOf("mkdir -p"),
+    `the mkdir escaped the umask subshell: ${script}`,
+  );
+});
+
+test("⚠️ control — claude's own path is UNCHANGED, so the two above are not a rename", () => {
+  const script = configStepFor(claudeSpawn);
+
+  assert.ok(
+    script.includes("/root/.chat-mcp-mcp.json"),
+    `claude's path moved: ${script}`,
+  );
+  assert.ok(
+    script.includes("mkdir -p '/root'"),
+    `claude lost the mkdir: ${script}`,
+  );
+});
+
+test("🛑 cursor declares the path cursor-agent ACTUALLY reads, and the prelude serves it", () => {
+  // 🛑 READ OFF THE EMITTED SCRIPT, NOT OFF THE CONSTANT. A test comparing
+  // `cursorSpawn.containerMcpConfigPath` to a literal is two constants that
+  // agree; this asserts what a container is handed.
+  //
+  // ⚠️ THE AUTHORITY IS `cursor-agent mcp --help`, measured on #372: it reads
+  // `.cursor/mcp.json or ~/.cursor/mcp.json` and the binary has no
+  // config-path flag among its 24 long flags.
+  const script = configStepFor(cursorSpawn);
+
+  assert.ok(
+    script.includes("/root/.cursor/mcp.json"),
+    `cursor's config is not written where it reads: ${script}`,
+  );
+  assert.ok(
+    script.includes("mkdir -p '/root/.cursor'"),
+    `the Cursor image has no /root/.cursor, so this must create it: ${script}`,
+  );
+});
+
+test("🛑 the FLAGS and the WRITE cannot name two different files, for every spawnable vendor", () => {
+  const spawns = listAdapters()
+    .map((a) => a.spawn)
+    .filter((s): s is NonNullable<typeof s> => Boolean(s));
+
+  // 🛑 THE DENOMINATOR IS ASSERTED. A registry filter that stopped matching
+  // would otherwise pass this loop with nothing in it.
+  assert.ok(
+    spawns.length >= 2,
+    `only ${spawns.length} spawnable vendors found, so the loop proves nothing`,
+  );
+
+  for (const vendor of spawns) {
+    assert.equal(
+      vendor.mcpConfigFor(
+        childGrant({ handle: "a", configPath: "/host/path.json" }),
+        "docker",
+      ),
+      containerMcpConfigPath(vendor),
+      `${vendor.vendor} points its CLI at one path and writes another`,
+    );
+  }
+});
+
+test("⚠️ control — the host mode still returns the GRANT's path, for both vendors", () => {
+  // 🛑 OR THE TEST ABOVE IS SATISFIED BY A `mcpConfigFor` THAT IGNORES `mode`.
+  // Cursor's host path must stay unwired: writing `~/.cursor/mcp.json` on the
+  // host would clobber the operator's own configuration.
+  for (const vendor of [claudeSpawn, cursorSpawn]) {
+    assert.equal(
+      vendor.mcpConfigFor(
+        childGrant({ handle: "a", configPath: "/host/path.json" }),
+        "host",
+      ),
+      "/host/path.json",
+      `${vendor.vendor} leaked a container path into host mode`,
+    );
+  }
 });
 
 test("⚠️ control — claude DOES get both flags, so the test above is not vacuous", () => {

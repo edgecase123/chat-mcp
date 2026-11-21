@@ -87,16 +87,38 @@ cannot distinguish from an agent that had nothing to say.
 near-identical pair _is_ an activator/enabler split, and Cursor has no
 equivalent — do not carry the habit across.
 
-## Why a Cursor child cannot reach the bus yet
+## How a contained Cursor child reaches the bus
 
-Cursor reads its MCP configuration from a fixed location that belongs to the
-human using Cursor. **Nothing in this project writes a file the user owns**, so
-`mcpConfigFlags` is empty and the config this build writes is never read.
+🛑 **`cursor-agent` accepts NO config-path flag.** Measured on #372 against the
+live binary: `cursor-agent mcp --help` names `.cursor/mcp.json or
+~/.cursor/mcp.json`, and no config-path option appears among its 24 long flags.
 
-The consequence is stated rather than hidden: a Cursor child starts, answers
-and ends its turn, and has no bus tools. Whether `cursor-agent` accepts any
-config-path flag is **unmeasured**. Failing with no bus is the right failure,
-because the alternative fails by destroying the operator's configuration.
+**So for Cursor the PATH is the wiring, and `mcpConfigFlags` is correctly
+empty.** `--approve-mcps` is what makes the file take effect — without it the
+server is prompted for, and a supervised child has no TTY to answer with.
+
+| mode     | where the config goes    | why                                         |
+| -------- | ------------------------ | ------------------------------------------- |
+| `docker` | `/root/.cursor/mcp.json` | the image has no operator config to clobber |
+| host     | the grant's own path     | `~/.cursor/mcp.json` is the human's file    |
+
+⚠️ **A HOST Cursor child still reaches no bus, and that is still deliberate.**
+The only way to wire it is a file this project may not own. That is a separate
+decision from the container one.
+
+🛑 **`VendorSpawn.containerMcpConfigPath` is REQUIRED and per-vendor.** It was
+one `${containerHome}/.chat-mcp-mcp.json` for every vendor, which works only
+for a CLI that can be POINTED at a path. Claude Code can be; Cursor cannot. So
+the file landed where Cursor never looks, and its contained agent reached the
+bus never while reporting a clean start — #372.
+
+🛑 **The prelude `mkdir -p`s the directory before writing.** The Cursor image
+has no `/root/.cursor`, and `prelude` chains on `&&`, so a failed redirect
+means `exec "$@"` never runs and no agent starts at all.
+
+⚠️ **Still unproven: that this produces a working TURN.** The flags and the
+paths are measured; a live containerized Cursor turn needs #317's acceptance
+harness and has not been run.
 
 ## One image per vendor
 
