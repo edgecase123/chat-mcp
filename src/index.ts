@@ -435,7 +435,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
   program
     .command("auth <action> [token]")
     .description(
-      "Manage the shared credentials for containerized agents: set-token, set-gh-token, clear-gh-token",
+      "Manage the per-vendor credentials for containerized agents: set-token, set-gh-token, clear-gh-token",
     )
     .option(
       "--vendor <name>",

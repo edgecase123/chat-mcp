@@ -155,7 +155,7 @@ export function setVendorToken(
 }
 
 /**
- * The Claude-specific aliases, kept because four test files seed through them.
+ * The Claude-specific aliases, kept because the test suite seeds through them.
  *
  * 🛑 ALIASES OF THE LIVE PATH, NOT A SECOND ONE. They had zero production
  * callers the moment `dockerRunPlan` went per-vendor, and a helper that no
