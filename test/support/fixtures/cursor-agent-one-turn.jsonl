@@ -1,0 +1,16 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/work","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","model":"Auto","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Reply with exactly the word: pong"}]},"session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27"}
+{"type":"thinking","subtype":"delta","text":"The","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219292528}
+{"type":"thinking","subtype":"delta","text":" user","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219292610}
+{"type":"thinking","subtype":"delta","text":" wants","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219292667}
+{"type":"thinking","subtype":"delta","text":" me","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219292782}
+{"type":"thinking","subtype":"delta","text":" to","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219292840}
+{"type":"thinking","subtype":"delta","text":" reply","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219292923}
+{"type":"thinking","subtype":"delta","text":" with","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219292952}
+{"type":"thinking","subtype":"delta","text":" exactly","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219293066}
+{"type":"thinking","subtype":"delta","text":" the","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219293181}
+{"type":"thinking","subtype":"delta","text":" word","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219293235}
+{"type":"thinking","subtype":"delta","text":" \"pong\".","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219293370}
+{"type":"thinking","subtype":"completed","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","timestamp_ms":1795219293566}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"pong"}]},"session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27"}
+{"type":"result","subtype":"success","duration_ms":3333,"duration_api_ms":3333,"is_error":false,"result":"pong","session_id":"2fb62aea-5657-4e6d-a70c-07d35e831a27","request_id":"8002b6bf-14c8-4c3d-9bae-c4f84604529c","usage":{"inputTokens":13918,"outputTokens":57,"cacheReadTokens":3968,"cacheWriteTokens":0,"reasoningTokens":56}}
