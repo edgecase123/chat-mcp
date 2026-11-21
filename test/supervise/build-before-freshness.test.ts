@@ -149,26 +149,60 @@ test("🚨 the injected freshness check is the one that is consulted", () => {
 });
 
 /**
- * 🛑 THE CLAIM THIS PINS: `prepareAgentImage` BUILDS A DIFFERENT THING FROM
- * WHAT `runDependencyInstall` INSPECTS.
+ * 🛑 THE CLAIM THIS PINS: EXACTLY WHICH VENDORS NAME AN IMAGE NOTHING BUILDS.
  *
- * The build only ever produces `IMAGE_TAG`, and
- * `containerized.ts:runDependencyInstall` inspects `vendor.image`. They agree
- * today because `claudeSpawn` sets its image to `IMAGE_TAG` — a coincidence,
- * not a constraint. A second vendor naming its own image would reach the
- * install step with nothing built, which is why that refusal stays.
+ * `buildImage` produces one tag, `IMAGE_TAG`. A vendor naming anything else
+ * reaches `runDependencyInstall` with nothing built and is refused there,
+ * which is lee's ruling of 2026-11-15 and not a defect.
  *
- * ⚠️ THIS TEST EXISTS BECAUSE A COMMENT IN `containerized.ts` ASSERTS IT. If
- * it ever fails, fix the comment in the same change — a vendor whose image is
- * NOT the built tag makes the refusal load-bearing rather than defensive.
+ * 🛑 THIS USED TO READ "the only vendor" AND ASSERT ABOUT `claudeSpawn` ALONE.
+ * `cursorSpawn` then landed with an image that is NOT the built tag, and this
+ * test stayed green — it was scoped to a vendor NAME rather than to the
+ * property, so the condition its own docblock said should fail it arrived
+ * invisibly. Enumerated instead, a third vendor forces the decision on the day
+ * it is added.
+ *
+ * ⚠️ A FAILURE HERE IS A QUESTION, NOT A BUG. Add the vendor to the expected
+ * list once you have confirmed the refusal is what you want for it.
  */
-test("🚨 the only vendor's image IS the tag the build produces, and nothing else guarantees it", async () => {
+test("🚨 exactly the vendors listed here name an image the build never produces", async () => {
   const { IMAGE_TAG } = await import("../../src/supervise/container.js");
-  const { claudeSpawn } = await import("../../src/adapters/claude-spawn.js");
+  const { vendorsWithSpawn, spawnFor } =
+    await import("../../src/adapters/index.js");
 
-  assert.equal(
-    claudeSpawn.image,
-    IMAGE_TAG,
-    "the vendor names an image prepareAgentImage never builds, so a containerized start refuses after a successful build",
+  const unbuilt = [...vendorsWithSpawn()]
+    .map((name) => spawnFor(name))
+    .filter((spawn) => spawn.image !== IMAGE_TAG)
+    .map((spawn) => spawn.vendor)
+    .sort();
+
+  assert.deepEqual(
+    unbuilt,
+    ["cursor"],
+    "a vendor names an image prepareAgentImage never builds, so a containerized start is refused at the install step",
+  );
+});
+
+/**
+ * 🛑 THE SKIP IS WIRED ON THE SAME VALUE THE INSPECT USES. `prepareAgentImage`
+ * now takes the effective image and declines to build `IMAGE_TAG` for a handle
+ * that will not run it. Pinned here rather than only in
+ * `override-image-skips-build.test.ts` because this file owns the build's
+ * contract, and a reader of the enumeration above needs to find it.
+ */
+test("a vendor image that is not the built tag does not trigger a build", () => {
+  const r = recorder(false);
+
+  prepareAgentImage(r.compile, {
+    image: "chat-mcp-cursor-agent:local",
+    run: r.run,
+    needsBuild: r.needsBuild,
+    logLine: r.logLine,
+  });
+
+  assert.deepEqual(
+    r.args.filter((a) => a[0] === "build"),
+    [],
+    "an unbuildable vendor image still paid for a build of the project tag",
   );
 });

@@ -67,9 +67,24 @@ resolveDriver({driver, container}).mode === "docker"
   1 CONFIRM   the plan is printed, the operator answers y        once per handle
   2 COMPILE   npm run build                                      EVERY start
   3 BUILD     chat-mcp-agent:local, when the inputs hash moved   when dist moved
+             SKIPPED ENTIRELY when the handle runs another image
   |
   startSupervisor()
 ```
+
+🛑 **STEP 3 IS SKIPPED WHEN THE PLAN'S IMAGE IS NOT `chat-mcp-agent:local`.**
+`prepareAgentImage` takes the effective image and returns after the compile
+when it is anything else, logging one line that names it.
+
+**Without that, an `image` override paid for a full build of this project's
+tag and was THEN refused for not having its own image on the machine.** The
+refusal is correct and is lee's ruling of 2026-11-15; what was wrong was
+spending minutes of docker before it.
+
+⚠️ **The freshness check is skipped too, not just the build.**
+`imageNeedsBuild` inspects `chat-mcp-agent:local` and hashes this project's
+sources, so consulting it for a handle on another image is a verdict about the
+wrong thing — and it is the call that decides whether the minutes are spent.
 
 🛑 **STEP 2 IS UNCONDITIONAL, AND IT HAS TO COME BEFORE STEP 3.** The inputs
 hash covers `dist`, which is build OUTPUT. The compile used to sit inside step
