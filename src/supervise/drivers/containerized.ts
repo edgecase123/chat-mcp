@@ -15,8 +15,10 @@ import {
 import { assertHandle } from "../../util/naming.js";
 import {
   assertCpus,
+  assertEnv,
   assertImageRef,
   assertMemory,
+  assertReadOnlyMounts,
   type ContainerOverride,
 } from "../overrides.js";
 import { installResourceArgs } from "../installResources.js";
@@ -604,6 +606,16 @@ export function dockerRunPlan(
 
   const { supervisorHandle, projectDir } = containerTarget(opts);
 
+  // 🛑 CHECKED HERE, NOT TRUSTED FROM THE STORE. This is a library export
+  // taking `containerOverride` directly, so a caller that never went through
+  // `resolveOverrideFor` reaches the argv with an unchecked value — the same
+  // hole `assertImageRef` and `assertMemory` exist to plug.
+  const override = opts.containerOverride;
+  const overrideEnv = override?.env ? assertEnv(override.env) : {};
+  const overrideMounts = override?.readOnlyMounts
+    ? assertReadOnlyMounts(override.readOnlyMounts)
+    : [];
+
   const args = [
     "run",
     "-i",
@@ -629,13 +641,26 @@ export function dockerRunPlan(
   // "run `chat-mcp auth set-gh-token`" it should get.
   if (ghToken) args.push("-e", CONTAINER_GH_TOKEN_ENV);
 
+  // 🛑 BY NAME, LIKE EVERY OTHER `-e` HERE. The value goes in the env below,
+  // because an argv entry is readable through `ps` for the life of the
+  // container. `assertEnv` has already refused every credential name, so a
+  // handle file cannot decide which token the agent receives.
+  for (const name of Object.keys(overrideEnv)) args.push("-e", name);
+
   // 🛑 BOTH SIDES COME FROM ONE CHECKED VALUE. A host side built from the
   // realpath and a container side built from the raw declared string let a
   // symlink put one directory at two container paths, only one read-only.
   //
   // Order does not matter — measured both ways, the daemon sorts bind
   // destinations. ⚠️ Docker 24.0.7 / macOS, UNRUN ON LINUX.
-  for (const entry of opts.readOnlyPaths ?? []) {
+  //
+  // 🛑 ONE LIST AND ONE EMITTER, COVERING BOTH SOURCES. The override's entries
+  // go through this same containment check and the same `node_modules`
+  // refusal; a second emitter beside this loop is how one of the two lists
+  // comes to miss a guard the other one has.
+  const mountedDests = new Set<string>();
+
+  for (const entry of [...(opts.readOnlyPaths ?? []), ...overrideMounts]) {
     const { host, inner } = checkedMountPath(
       projectDir,
       entry,
@@ -662,6 +687,14 @@ export function dockerRunPlan(
       );
     }
 
+    // 🛑 ONE SPEC PER DESTINATION, BECAUSE DOCKER REFUSES A DUPLICATE AND
+    // NAMES NEITHER MOUNT. Deduping cannot drop a distinct mount:
+    // `checkedMountPath` derives `inner` from the declared string and refuses
+    // any symlink, so one destination always resolves to one host path.
+    if (mountedDests.has(inner)) continue;
+
+    mountedDests.add(inner);
+
     args.push("-v", `${host}:${CONTAINER_PROJECT_DIR}/${inner}:ro`);
   }
 
@@ -679,7 +712,14 @@ export function dockerRunPlan(
     args.push("-v", `${hostDir}:${containerPathFor(key)}:ro`);
   }
 
-  const env: NodeJS.ProcessEnv = { ...process.env, [vendor.authEnvVar]: token };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    // 🛑 BEFORE THE CREDENTIAL, NOT AFTER. `assertEnv` refuses every reserved
+    // name, so this cannot collide today — but spreading it last would let a
+    // name added to one list and not the other silently beat the token.
+    ...overrideEnv,
+    [vendor.authEnvVar]: token,
+  };
 
   // 🛑 DELETED, NOT MERELY LEFT UNSET. This inherits `process.env`, so a
   // `GH_TOKEN` exported in the supervisor's own shell would sit in the docker
@@ -702,12 +742,6 @@ export function dockerRunPlan(
   // ⚠️ `image` IS NOT HERE BECAUSE IT IS NOT A FLAG. It is pushed below as the
   // image operand, through `effectiveImage`, which the install container and
   // the inspect guard read too.
-  //
-  // ⚠️ `env`/`readOnlyMounts` ARE STILL UNWIRED. Both are also what the
-  // operator's consent banner has to show, so wiring either here alone would
-  // make the plan grant a capability the banner never named.
-  const override = opts.containerOverride;
-
   // 🛑 `!== undefined`, NOT TRUTHINESS, AND CHECKED RATHER THAN TRUSTED.
   // `"0"` is truthy, and docker reads zero as NO LIMIT — so the old test
   // pushed `--memory 0` and the container an operator capped ran uncapped.
