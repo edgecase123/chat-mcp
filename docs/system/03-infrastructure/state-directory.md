@@ -122,6 +122,44 @@ ADMIN ∩ READ intersection to exactly this one path, because that clause lets
 `RegistrationInputError`, which the handler maps; anything else — a failed
 write, a full disk — stays a `500`.
 
+⚠️ **`GET /api/agents` ALSO NAMES THE VENDORS THIS BUILD CAN SPAWN**, at
+every tier, as a top-level `vendors` array from `vendorsWithSpawn()`. The write
+route accepts **any** non-empty vendor string and `spawnFor` is what throws —
+at START time, one step removed from whoever typed it. So the surface that
+collects a vendor constrains it, and it has to constrain it to this build.
+
+## The Registered card in the web UI
+
+`web/assets/app.js` renders a **Registered** section in the sidebar, below the
+running-agents panel and above Peers. Claims say what is locked, Agents says
+what is **running**, and this says what the operator **configured**.
+
+| who sees what                 | `read`          | `admin`   |
+| ----------------------------- | --------------- | --------- |
+| handle and vendor             | yes             | yes       |
+| `mode`                        | `(needs admin)` | the label |
+| Forget, and the register form | hidden          | shown     |
+
+🛑 **THE TIER COMES FROM `/api/whoami`, WHICH NOW RETURNS THE CALLER'S OWN
+`capabilities`.** It is not inferred from a missing `mode` key: an empty agent
+list has no `mode` on any row, which would read as non-admin and hide the form
+exactly when nothing is registered yet. The field discloses nothing, because
+the caller is already exercising those capabilities to reach the route.
+
+⚠️ **IN PRODUCTION TODAY EVERY BROWSER IS `admin`.** `ALL_CAPABILITIES` is
+the only credential minted, so the read-only rendering is reachable from tests
+alone. It is groundwork for the per-route scoping lee ruled on 2026-11-11, not
+a live restriction.
+
+🛑 **A `host` ROW SAYS "FULL HOST ACCESS", NOT JUST "host".** The word alone
+reads like a neutral default while being the loosest setting in the file.
+
+🛑 **MOVING A HANDLE FROM `docker` TO `host` CONFIRMS FIRST.** That is the
+only way out of `docker`, because a flag may tighten the mode and never loosen
+it. Tightening is never interrupted, and registering a brand-new handle is not
+treated as a loosening — there is no recorded decision to undo, and a dialog on
+every registration is how the one that matters gets clicked through.
+
 ## The two entries whose location will surprise you
 
 **`manifestDir()` is a SIBLING, not a child.** It resolves to

@@ -1335,6 +1335,97 @@ body {
   color: var(--danger);
 }
 
+/* #132 slice 4a — a STORED (vendor, mode) pair. Shares .claim's and .agent's
+   left-border shape: all three panels answer "what is going on", and a fourth
+   shape would read as a different kind of thing.
+
+   🛑 IT DEFINES NO NEW COLOUR. The loose state reuses --danger, which every
+   theme defines and which the contrast checks already cover. An earlier gauge
+   read a --warning token no theme defined, behind a hardcoded amber fallback. */
+.registration {
+  padding: 4px 8px;
+  border-left: 2px solid var(--border, #333);
+  margin-bottom: 6px;
+}
+.registration__head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.registration__handle {
+  font-size: 12px;
+  word-break: break-all;
+}
+.registration__vendor {
+  font-size: 11px;
+  color: var(--fg-faint);
+}
+.registration__mode {
+  font-size: 11px;
+  color: var(--fg-muted);
+  word-break: break-word;
+}
+/* 🛑 COLOUR IS NOT THE ONLY CARRIER. The label itself reads "FULL HOST
+   ACCESS", so WCAG 1.4.1 is answered by the text and this only reinforces it. */
+.registration__mode.is-loose {
+  color: var(--danger);
+}
+.registration__forget {
+  padding: 2px 8px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.registration__forget:hover {
+  background: var(--bg-inset);
+}
+
+/* The form that writes a pair. Below the rows, so the operator reads what is
+   configured before reaching the control that changes it. */
+.registration-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.registration__input,
+.registration__select {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+}
+.registration-form__submit {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.registration-form__submit:hover {
+  background: var(--bg-inset);
+}
+/* flex-basis 100% so a message never shares a row with the controls it is
+   about. */
+.registration-form__error {
+  flex: 1 1 100%;
+  font-size: 11px;
+  color: var(--danger);
+}
+
 /* #135 slice 4c — the gate control on an agent row, and the global default in
    the panel footer.
 
