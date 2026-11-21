@@ -23,27 +23,42 @@ const repo = process.argv[3] ?? SELF;
  * commit. Paths outside these roots cannot reach `dist/`, so a stray note does
  * not count.
  *
- * ⚠️ IT FAILS SAFE AND NO TEST COVERS THAT, BECAUSE NOTHING CAN REACH IT.
- * An include-less or unparseable `tsconfig.json` falls back to the whole tree.
- * Every way of producing one also makes git call `tsconfig.json` modified —
- * even `chmod 000`, since git reports a file it cannot hash as changed — and
- * `tsconfig.json` is itself a build input. So the fallback cannot change the
- * answer, and a test asserting it was green against a fallback failing OPEN.
+ * ⚠️ AN EMPTY ANSWER MEANS THE WHOLE TREE, AND IT IS REACHABLE. A `tsconfig`
+ * with neither `include` nor `files` compiles its whole directory, and a root
+ * that is itself a glob spans the tree too. Both are the right answer rather
+ * than a fallback, and both have tests. An earlier comment here called the
+ * empty case unreachable; a committed `files`-only tsconfig reaches it with
+ * the tree clean, which is claude1's finding on PR 383.
  */
 const ALWAYS = ["package.json", "package-lock.json", "tsconfig.json"];
 
 function buildInputs() {
   try {
-    const include = JSON.parse(
+    const config = JSON.parse(
       readFileSync(join(repo, "tsconfig.json"), "utf8"),
-    ).include;
-
-    if (!Array.isArray(include) || include.length === 0) return [];
-
-    // "src/**/*" is the whole `src` tree to git, which takes paths not globs.
-    const roots = new Set(
-      include.map((glob) => String(glob).split("/")[0]).filter(Boolean),
     );
+    const patterns = [
+      ...(Array.isArray(config.include) ? config.include : []),
+      ...(Array.isArray(config.files) ? config.files : []),
+    ];
+
+    // `tsc` compiles the whole containing directory when neither is given.
+    if (patterns.length === 0) return [];
+
+    const roots = new Set();
+
+    for (const pattern of patterns) {
+      // "./src/**/*" names the same root as "src/**/*"; git takes paths.
+      const first = String(pattern).replace(/^\.\//, "").split("/")[0];
+
+      // "**/*.ts" and "." genuinely span the tree, so narrowing would UNDER
+      // report. Answering empty hands the whole tree to `git status`.
+      if (!first || first === "." || first === ".." || first.includes("*")) {
+        return [];
+      }
+
+      roots.add(first);
+    }
 
     return [...roots, ...ALWAYS];
   } catch {

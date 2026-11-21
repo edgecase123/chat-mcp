@@ -45,7 +45,7 @@ test("the stamper writes the commit git reports for this tree", () => {
 });
 
 /** A throwaway repo with one commit, so a dirty case can be MADE not waited for. */
-function scratchRepo(): string {
+function scratchRepo(config: unknown = { include: ["src/**/*"] }): string {
   const dir = mkdtempSync(join(tmpdir(), "chat-mcp-repo-"));
   const run = (...args: string[]) =>
     execFileSync("git", args, { cwd: dir, encoding: "utf8" });
@@ -55,10 +55,7 @@ function scratchRepo(): string {
   run("config", "user.name", "t");
   mkdirSync(join(dir, "src"));
   writeFileSync(join(dir, "src", "a.ts"), "export const a = 1;\n");
-  writeFileSync(
-    join(dir, "tsconfig.json"),
-    JSON.stringify({ include: ["src/**/*"] }, null, 2) + "\n",
-  );
+  writeFileSync(join(dir, "tsconfig.json"), JSON.stringify(config) + "\n");
   run("add", "-A");
   run("commit", "-qm", "one");
 
@@ -242,6 +239,69 @@ test("a source root added to tsconfig starts counting toward dirty", () => {
       true,
       "a file under the new root was ignored",
     );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+//
+// 🛑 FIVE LEGAL `tsconfig` SPELLINGS, AND TWO OF THEM USED TO COLLAPSE THE
+// SCOPE TO THE WHOLE TREE. claude1's finding on PR 383. Splitting a raw
+// pattern on "/" answered "." for a leading "./" and "**" for a leading
+// double star.
+//
+// ⚠️ WHOLE-TREE IS THE RIGHT ANSWER FOR TWO OF THESE ROWS, NOT A FALLBACK.
+// A pattern that spans the tree, and a config that names nothing, both
+// genuinely compile everything, so narrowing them would UNDER report.
+//
+// ⚠️ LINE COMMENTS, NOT A DOCBLOCK: a glob ending the pattern would close the
+// block early, which is how the first cut of this failed to parse at all.
+//
+test("every legal tsconfig spelling scopes dirty to what it compiles", () => {
+  const cases = [
+    {
+      name: "./src/**/*",
+      config: { include: ["./src/**/*"] },
+      strayCounts: false,
+    },
+    { name: "src/**/*", config: { include: ["src/**/*"] }, strayCounts: false },
+    { name: "files only", config: { files: ["src/a.ts"] }, strayCounts: false },
+    { name: "**/*.ts", config: { include: ["**/*.ts"] }, strayCounts: true },
+    { name: "neither key", config: { compilerOptions: {} }, strayCounts: true },
+  ];
+
+  for (const { name, config, strayCounts } of cases) {
+    const repo = scratchRepo(config);
+
+    try {
+      writeFileSync(join(repo, "notes.md"), "scratch\n");
+
+      assert.equal(
+        stamp(repo).dirty,
+        strayCounts,
+        `${name}: a stray note ${strayCounts ? "was ignored" : "counted"}`,
+      );
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  }
+
+  assert.equal(cases.length, 5, "the denominator moved; re-read the table");
+});
+
+/**
+ * ⚠️ THE WHOLE-TREE CASE IS REACHABLE WITH THE TREE OTHERWISE CLEAN, which is
+ * what makes it a behaviour rather than a fallback. A committed `files`-only
+ * tsconfig is not modified, so nothing else can be what turns `dirty` on.
+ */
+test("a source file under a files-only tsconfig still counts", () => {
+  const repo = scratchRepo({ files: ["src/a.ts"] });
+
+  try {
+    assert.equal(stamp(repo).dirty, false, "the fixture was already dirty");
+    writeFileSync(join(repo, "src", "a.ts"), "export const a = 2;\n");
+
+    assert.equal(stamp(repo).dirty, true);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
