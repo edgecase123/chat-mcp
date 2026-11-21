@@ -331,6 +331,21 @@ This will run the agent inside a Docker container:
 ⚠️ **`env vars` stays on one line.** `ENV_NAME` is `/^[A-Z][A-Z0-9_]*$/`, so a
 name cannot contain a comma or a space and the joined form is unambiguous.
 
+🛑 **THE AGENT'S OWN MOUNT BANNER HAD THE SAME JOIN**, in
+`mountBannerPrefix` (`supervise/index.ts`). It now prints one entry per line
+with the KEY quoted:
+
+```
+Mounted directories:
+  "local-context" -> /mnt/local-context
+  "data, backup" -> /mnt/data, backup
+```
+
+⚠️ **That one was never an exact collision**, unlike the consent banner's. The
+entry embeds the key twice around a fixed `->`, so no two distinct key sets
+rendered identically — measured by exhaustive search. It misinformed the child
+about its own filesystem; it never corrupted an operator's consent.
+
 ✅ **`image:` is now on the banner, and it is the EFFECTIVE image.** The line
 is resolved through `effectiveImage`, the same function the agent container,
 the install container and the inspect guard read — so the banner cannot name
