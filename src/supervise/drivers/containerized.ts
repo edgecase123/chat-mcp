@@ -28,6 +28,10 @@ import {
 } from "../overrides.js";
 import { installResourceArgs } from "../installResources.js";
 import { createHash } from "node:crypto";
+import { posix } from "node:path";
+
+/** `dirname` with the CONTAINER's separator, never the host's. */
+const posixDirname = posix.dirname;
 import { realpathSync } from "node:fs";
 
 export const CONTAINER_PROJECT_DIR = "/work";
@@ -76,9 +80,22 @@ export const DEFAULT_SHUTDOWN_GRACE_SECONDS = 60;
 
 export { containerPathFor };
 
-/** Where the prelude writes the config, inside the container only. */
+/**
+ * Where the prelude writes the config, inside the container only.
+ *
+ * 🛑 THE VENDOR'S OWN ANSWER, NOT ONE FILENAME FOR ALL OF THEM. This returned
+ * `${containerHome}/.chat-mcp-mcp.json` for every vendor, which works only for
+ * a CLI that can be POINTED at a path. `cursor-agent` cannot be, so the file
+ * landed where it never looks and its contained agent reached the bus never
+ * while reporting a clean start (#372).
+ *
+ * ⚠️ KEPT AS A FUNCTION so the write resolves its path in ONE place. That is
+ * not a guarantee the flags agree with it: `dockerRunPlan` passes
+ * `mcpConfigFor(grant, "docker")` to the flags and this to the write, so the
+ * two naming the same file is ASSERTED by a test, not structural.
+ */
 export function containerMcpConfigPath(vendor: VendorSpawn): string {
-  return `${vendor.containerHome}/.chat-mcp-mcp.json`;
+  return vendor.containerMcpConfigPath;
 }
 
 /** The listener's host-side url, as the container must dial it. */
@@ -129,12 +146,23 @@ export function buildContainerMcpConfig(bus: BusEndpoint): string {
  *
  * `exec` also matters on its own: the supervisor drives the child over stdin,
  * and a forked `sh` sitting in the middle would own the pipe instead.
+ *
+ * 🛑 `mkdir -p` IS NOT DEFENSIVE, IT IS LOAD-BEARING. A vendor whose CLI reads
+ * a fixed path reads it inside a DOTDIR, and the image does not create one it
+ * was never told about — `/root/.cursor` does not exist in the Cursor image.
+ * `prelude` chains on `&&`, so a failed redirect means `exec "$@"` never runs
+ * and NO agent starts, which reads as the same hang #372 is about.
+ *
+ * ⚠️ INSIDE THE `umask 077` SUBSHELL, so the directory is not world-readable
+ * either. It is on the path to a file holding a bus-wide bearer token.
  */
 function mcpConfigStep(vendor: VendorSpawn): string {
   const path = containerMcpConfigPath(vendor);
+  // The CONTAINER's separator, so `posix` rather than the host's `dirname`.
+  const dir = posixDirname(path);
 
   // umask, because the file holds a bearer token for the whole bus.
-  return `(umask 077; printf "%s" "$${CONTAINER_MCP_CONFIG_ENV}" > '${path}')`;
+  return `(umask 077; mkdir -p '${dir}' && printf "%s" "$${CONTAINER_MCP_CONFIG_ENV}" > '${path}')`;
 }
 
 /**

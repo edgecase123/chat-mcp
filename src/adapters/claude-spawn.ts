@@ -7,8 +7,16 @@ import {
   routeClaudeEvent,
 } from "../supervise/drivers/claude.js";
 import { redispatchPrompt } from "../supervise/drivers/claude-redispatch.js";
-import { containerMcpConfigPath } from "../supervise/drivers/containerized.js";
 import { IMAGE_TAG } from "../supervise/container.js";
+
+/**
+ * Where the prelude writes the bus config for a contained Claude child.
+ *
+ * ⚠️ A chat-mcp-OWNED NAME, AND IT CAN BE, because `--mcp-config` points the
+ * CLI at whatever this says. A vendor with no such flag has no such freedom —
+ * see `VendorSpawn.containerMcpConfigPath`.
+ */
+const CONTAINER_MCP_CONFIG_PATH = "/root/.chat-mcp-mcp.json";
 
 /**
  * Claude Code's spawn contract: the only place this CLI's flag names live.
@@ -62,6 +70,7 @@ export const claudeSpawn: VendorSpawn = {
 
   image: IMAGE_TAG,
   containerHome: "/root",
+  containerMcpConfigPath: CONTAINER_MCP_CONFIG_PATH,
   authEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
   authSetupHint: "run `claude setup-token` on the host",
 
@@ -81,7 +90,7 @@ export const claudeSpawn: VendorSpawn = {
   // Docker: a path that exists only INSIDE the container, written there by the
   // spawn prelude. Nothing is written on the host, and nothing is mounted.
   mcpConfigFor: (grant: ChildGrant, mode: SandboxMode): string =>
-    mode === "docker" ? containerMcpConfigPath(claudeSpawn) : grant.configPath,
+    mode === "docker" ? CONTAINER_MCP_CONFIG_PATH : grant.configPath,
 
   // 🛑 ALL OR NEITHER. `--mcp-config` ADDS to whatever the cwd already
   // configures, so without `--strict-mcp-config` the child also loads the
