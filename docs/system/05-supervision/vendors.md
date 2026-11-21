@@ -112,11 +112,41 @@ path wins today. The host's `cursor-agent` lives under the user's home; the
 image's cannot. Reconciling those two is the container work's first job, not an
 assumption it may make.
 
+## One credential per vendor, never one for all of them
+
+**`secrets.env` holds a token per vendor, keyed by that vendor's
+`authEnvVar`.** The storage key and the injected env var name are one string,
+so a rename cannot store under one name and inject the other.
+
+Store one with the vendor named:
+
+```bash
+pbpaste | chat-mcp auth set-token --vendor cursor
+```
+
+`--vendor` defaults to `claude`, so the existing command is unchanged.
+
+🛑 **A SHARED TOKEN SENT A CLAUDE SUBSCRIPTION CREDENTIAL TO CURSOR.**
+`dockerRunPlan` read one `readToken()` and injected it under whatever name the
+vendor declared — the name changed per vendor and the value never did. #347.
+
+⚠️ **Injecting the wrong token is worse than injecting none.** Measured on
+#347: a `CURSOR_API_KEY` that Cursor cannot use **overrides a working login**
+rather than filling a gap, and the container exits 1 before its first event.
+So a spawn with no credential on file refuses, naming the vendor's env var and
+how to obtain the key.
+
+**`VendorSpawn.authSetupHint` carries that instruction**, because it is a
+vendor's. A Cursor key comes from a web dashboard; a Claude token comes from
+`claude setup-token`. One refusal message naming the wrong CLI sends the
+operator to the wrong place.
+
 ## Adding a third vendor
 
 1. A driver under `src/supervise/drivers/` — the only file naming that CLI's
    flags and event shapes.
-2. A spawn block under `src/adapters/` declaring the three capability booleans.
+2. A spawn block under `src/adapters/` declaring the three capability booleans,
+   its `authEnvVar`, and the `authSetupHint` naming how to obtain that credential.
 3. An `Adapter` carrying that spawn block, registered in `src/adapters/index.ts`.
 4. Two `ALIASES` entries — the vendor name, and `docker-<vendor>`.
 5. **Re-point any negative control that asserts the vendor cannot be spawned.**

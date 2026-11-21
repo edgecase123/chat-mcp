@@ -26,6 +26,15 @@ export const cursorSpawn: VendorSpawn = {
   authEnvVar: "CURSOR_API_KEY",
 
   /**
+   * 🛑 A DASHBOARD, NOT A CLI COMMAND. `cursor-agent login` stores a login on
+   * the host that a Linux container cannot read — `apiKeySource: "login"` in
+   * its own init event. Only a dashboard-issued key reaches a container, and a
+   * fine-grained one was measured working on #347: `apiKeySource: "env"`.
+   */
+  authSetupHint:
+    "create a Cursor API key at https://cursor.com/dashboard/api (a host login cannot be read by a container)",
+
+  /**
    * 🛑 BOTH FALSE, AND THIS CORRECTS MY OWN MEASUREMENT NOTE ON #317.
    *
    * That note recorded `reportsUsage: TRUE` because `result.usage` carries

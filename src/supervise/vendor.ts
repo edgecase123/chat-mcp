@@ -61,6 +61,16 @@ export interface VendorSpawn {
   readonly authEnvVar: string;
 
   /**
+   * How an operator OBTAINS this vendor's credential, in one clause.
+   *
+   * 🛑 A VENDOR FIELD BECAUSE THE INSTRUCTION IS A VENDOR'S. `dockerRunPlan`
+   * refuses a spawn with no credential on file, and its message sent every
+   * vendor to `claude setup-token`. A Cursor operator following that is
+   * pointed at the wrong CLI for a key that lives in a web dashboard.
+   */
+  readonly authSetupHint: string;
+
+  /**
    * This vendor's CLI reports usage-window state, and its `routeEvent` calls
    * the `usage` sink.
    *
