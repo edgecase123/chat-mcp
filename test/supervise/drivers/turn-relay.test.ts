@@ -430,3 +430,77 @@ test("🔴 control — a turn reporting no id leaves the previous one in place",
 
   assert.equal(h.requests[2].resumeSessionId, "s-1");
 });
+
+/**
+ * 🛑 TWO FRAMED PROMPTS IN ONE CHUNK USED TO START TWO TURNS AT ONCE, and both
+ * symptoms are bad. The loud one is that their stdout interleaves into corrupt
+ * JSON on the one stream the supervisor parses. The QUIET one is that turn two
+ * gets `resume: undefined`, so the agent forgets the task — the exact bug this
+ * relay exists to prevent, reappearing by another door.
+ *
+ * ⚠️ NOT REACHABLE THROUGH THE SUPERVISOR TODAY, and that is checked rather
+ * than assumed: `index.ts` holds the only `child.send` call site tree-wide and
+ * `TurnQueue.dispatch` sends only from `idle`. The guard is here because
+ * the relay is a separate PROCESS from the queue that protects it, so the
+ * contract is unstated on both sides. claude2 on PR 385.
+ */
+test("🛑 two framed prompts in ONE chunk start ONE turn, not two", () => {
+  const h = harness();
+
+  h.input.write(frameTurn("first") + frameTurn("second"));
+
+  assert.equal(h.turns.length, 1);
+  assert.deepEqual(h.prompts, ["first"]);
+});
+
+test("🛑 the queued prompt starts when the running turn exits", () => {
+  const h = harness();
+
+  h.input.write(frameTurn("first") + frameTurn("second"));
+  h.turns[0].say(JSON.stringify({ type: "result", session_id: "s-1" }));
+  h.turns[0].exit(0);
+
+  assert.equal(h.turns.length, 2);
+  assert.equal(h.prompts[1], "second");
+});
+
+/**
+ * 🛑 THE QUIET HALF OF THE SAME BUG. Serialising is what makes `sessionId`
+ * single-writer, so the queued turn resumes rather than starting fresh.
+ */
+test("🛑 a queued prompt resumes the session the turn before it reported", () => {
+  const h = harness();
+
+  h.input.write(frameTurn("first") + frameTurn("second"));
+  h.turns[0].say(JSON.stringify({ type: "result", session_id: "s-1" }));
+  h.turns[0].exit(0);
+
+  assert.equal(h.requests[1].resumeSessionId, "s-1");
+});
+
+/**
+ * 🔴 CONTROL — queueing must not DELAY a prompt that arrives while idle. A
+ * guard that queued unconditionally would pass every test above and never
+ * start turn one.
+ */
+test("🔴 control — a prompt arriving while idle starts immediately", () => {
+  const h = harness();
+
+  h.send("only");
+
+  assert.equal(h.turns.length, 1);
+});
+
+/**
+ * 🛑 A DEATH BEATS THE QUEUE. If the running turn exits with no turn end the
+ * relay is gone, so a queued prompt must not be started into a dying relay.
+ */
+test("🛑 a queued prompt is NOT started when the running turn dies", () => {
+  const h = harness();
+
+  h.input.write(frameTurn("first") + frameTurn("second"));
+  h.turns[0].exit(1);
+
+  assert.equal(h.turns.length, 1, "a turn was started into a dying relay");
+  assert.deepEqual(h.exits, [1]);
+});

@@ -114,6 +114,22 @@ export function runTurnRelay(io: TurnRelayIo): void {
    */
   let sessionId = io.initialSessionId;
 
+  /**
+   * 🛑 ONE TURN AT A TIME, AND THE QUEUE THAT USUALLY ENFORCES THAT IS IN
+   * ANOTHER PROCESS. Two framed prompts arriving in one chunk used to start two
+   * children: their stdout interleaved into corrupt JSON on the one stream the
+   * supervisor parses, and — the quieter half — the second got no resume id, so
+   * the agent forgot the task.
+   *
+   * ⚠️ UNREACHABLE THROUGH THE SUPERVISOR TODAY, CHECKED NOT ASSUMED.
+   * `index.ts` holds the only `child.send` call site and `turn-queue.ts`
+   * dispatches only from `idle`. This guard exists because the contract between
+   * those two files and this process is unstated on both sides, and because
+   * serialising is also what makes `sessionId` single-writer. claude2 on PR 385.
+   */
+  const waiting: string[] = [];
+  let inTurn = false;
+
   io.input.setEncoding("utf8");
   io.input.on("data", (chunk: string) => {
     const { lines, rest } = takeLines(pending + chunk);
@@ -139,11 +155,22 @@ export function runTurnRelay(io: TurnRelayIo): void {
         return;
       }
 
-      startTurn(io, prompt);
+      offer(prompt);
     }
   });
 
+  function offer(prompt: string): void {
+    if (inTurn) {
+      waiting.push(prompt);
+
+      return;
+    }
+
+    startTurn(io, prompt);
+  }
+
   function startTurn(relay: TurnRelayIo, prompt: string): void {
+    inTurn = true;
     const child = relay.spawnTurn({ prompt, resumeSessionId: sessionId });
     let sawTurnEnd = false;
     let tail = "";
@@ -222,7 +249,20 @@ export function runTurnRelay(io: TurnRelayIo): void {
       // `cursor-agent` without `--trust` exits 1 having emitted nothing.
       // Reporting that as a turn end would advance the supervisor's queue past
       // a prompt that was never answered, so it propagates as a death.
-      if (!sawTurnEnd) relay.exit(code);
+      //
+      // 🛑 A DEATH BEATS THE QUEUE, AND RETURNS. Draining into a relay that is
+      // exiting would start a turn whose output nobody will read.
+      if (!sawTurnEnd) {
+        relay.exit(code);
+
+        return;
+      }
+
+      inTurn = false;
+
+      const next = waiting.shift();
+
+      if (next !== undefined) startTurn(relay, next);
     });
   }
 }
