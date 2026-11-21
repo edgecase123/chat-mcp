@@ -69,6 +69,7 @@ import {
   unregisterAgent,
   type AgentRegistration,
 } from "../../supervise/registrations.js";
+import { vendorsWithSpawn } from "../../adapters/index.js";
 import { packageVersion } from "../../util/version.js";
 import {
   aroundWindow,
@@ -544,9 +545,20 @@ export async function route(
  */
 function handleRegistrations(res: ServerResponse, ctx: RouteContext): void {
   const config = readRegistrations();
+  // #132 slice 4a — what THIS BUILD can spawn, for the card's vendor control.
+  //
+  // 🛑 SERVED RATHER THAN HARDCODED IN THE BROWSER, and at every tier. The
+  // route takes any non-empty vendor string and `spawnFor` is what throws, at
+  // start time — so the operator learns their typo one step removed from the
+  // form. A copy in `app.js` would keep offering a vendor the day an adapter
+  // leaves `REGISTRY`.
+  //
+  // ⚠️ TOP LEVEL, NOT A ROW FIELD. The hand-listing below is about per-handle
+  // config, and this is a property of the build.
+  const vendors = vendorsWithSpawn();
 
   if (ctx.capabilities.includes("admin")) {
-    respondJson(res, config);
+    respondJson(res, { ...config, vendors });
     return;
   }
 
@@ -557,7 +569,7 @@ function handleRegistrations(res: ServerResponse, ctx: RouteContext): void {
     ]),
   );
 
-  respondJson(res, { agents });
+  respondJson(res, { agents, vendors });
 }
 
 /**
@@ -695,6 +707,16 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
   respondJson(res, {
     handle: ctx.handle,
     session_id: me?.session_id,
+    // #132 slice 4a — the caller's OWN tier, so a surface can say what it is
+    // withholding instead of rendering a control the server will 403.
+    //
+    // 🛑 DISCLOSES NOTHING. The caller is already exercising these to reach
+    // this route, so naming them grants no reach it did not have.
+    //
+    // 🛑 `ctx.capabilities`, NEVER `ALL_CAPABILITIES`. That constant is the
+    // only credential minted today, so the two are equal in production and a
+    // test is the only thing that can tell them apart.
+    capabilities: ctx.capabilities,
     peers: peers.map((a) => ({
       ...a,
       ...gaugeFreshness(a.context_reported_at, now),

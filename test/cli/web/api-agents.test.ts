@@ -21,6 +21,7 @@ const { COOKIE_NAME, ALL_CAPABILITIES } =
   await import("../../../src/cli/web/credential.js");
 const { readRegistrations, registerAgent } =
   await import("../../../src/supervise/registrations.js");
+const { vendorsWithSpawn } = await import("../../../src/adapters/index.js");
 
 /**
  * The stored (vendor, mode) pairs behind `/api/agents` — #132 slice 3.
@@ -248,4 +249,39 @@ test("an admin caller still receives mode", async (t) => {
     vendor: "claude",
     mode: "host",
   });
+});
+
+/**
+ * #132 slice 4a — the vendor list the card's dropdown is built from.
+ *
+ * 🛑 THE ROUTE DOES NOT VALIDATE `vendor` AGAINST THE REGISTRY. `registerAgent`
+ * takes any non-empty string, and `spawnFor` is what throws — at START time,
+ * one step removed from the operator who typed it. So the card constrains the
+ * input instead, and it has to constrain it to what THIS BUILD can spawn.
+ *
+ * 🛑 SERVED, NOT HARDCODED IN THE BROWSER. A copy in `app.js` would keep
+ * offering a vendor the day an adapter is dropped from `REGISTRY`, and the
+ * only symptom is a start that throws.
+ */
+test("GET names the vendors this build can actually spawn", async (t) => {
+  const h = await harness();
+  t.after(() => close(h));
+
+  const body = await get(h);
+
+  assert.deepEqual(body.vendors, vendorsWithSpawn());
+  assert.ok(
+    (body.vendors as string[]).includes("claude"),
+    "the list must be non-empty, or the control it feeds is vacuous",
+  );
+});
+
+/** Below `admin` the list is still needed — the card says what it withholds. */
+test("a non-admin caller receives the vendor list too", async (t) => {
+  const h = await harness(["read"]);
+  t.after(() => close(h));
+
+  const body = await get(h);
+
+  assert.deepEqual(body.vendors, vendorsWithSpawn());
 });

@@ -1948,3 +1948,156 @@ export function dotTitle({ kind, working }) {
 
   return "Working — producing output now";
 }
+
+// ── Agent registration card (#132 slice 4a) ──────────────────────────────
+
+/**
+ * The two sandbox modes, and what each one GRANTS rather than what it is
+ * called.
+ *
+ * 🛑 "host" ALONE DOES NOT TELL AN OPERATOR WHAT IT COSTS. It is the loosest
+ * setting in the file and reads like a neutral default, so the consequence is
+ * spelled out everywhere the word appears.
+ */
+const MODE_LABELS = {
+  docker: "docker — contained",
+  host: "host — FULL HOST ACCESS",
+};
+
+/** What a withheld `mode` reads as. */
+const MODE_WITHHELD = "(needs admin)";
+
+/** The modes a draft may name. Matches `MODES` in `registrations.ts`. */
+const FORM_MODES = ["host", "docker"];
+
+/**
+ * One row per registered handle, ordered by handle.
+ *
+ * 🛑 AN ABSENT `mode` RENDERS AS WITHHELD, NEVER AS EITHER MODE.
+ * `/api/agents` drops the field below `admin`, so guessing would show a
+ * contained agent as loose or a loose one as contained. Both are wrong and
+ * the second is the dangerous one.
+ *
+ * ⚠️ ORDERED, BECAUSE `agents.json` IS AN OBJECT. Insertion order would
+ * reshuffle the list under the operator on the refresh after a write.
+ *
+ * @param {{agents?: Record<string, {vendor: string, mode?: string}>}} [payload]
+ * @param {readonly string[]} capabilities the CALLER's own, from /api/whoami
+ */
+export function registrationRows(payload, capabilities = []) {
+  const agents = payload?.agents ?? {};
+  const admin = capabilities.includes("admin");
+
+  return Object.keys(agents)
+    .sort()
+    .map((handle) => {
+      const stored = agents[handle]?.mode;
+
+      return {
+        handle,
+        vendor: agents[handle]?.vendor ?? "(unknown)",
+        mode: MODE_LABELS[stored] ?? MODE_WITHHELD,
+        // The raw value, for the form the row populates. Null when withheld,
+        // so nothing downstream can read the label back as a mode.
+        storedMode: MODE_LABELS[stored] ? stored : null,
+        // 🛑 THE CAPABILITY, NOT THE PRESENCE OF `mode`. An admin looking at a
+        // handle whose mode somehow failed to serve still holds the tier, and
+        // keying on the field would hide a control the route would accept.
+        canForget: admin,
+      };
+    });
+}
+
+/**
+ * What the card says when nothing is registered.
+ *
+ * 🛑 NOT A BLANK, for the same reason as the claims panel: an empty card and
+ * one that failed to load look identical.
+ */
+export function registrationsPanelEmpty() {
+  return "(no agents registered — every handle starts on the default)";
+}
+
+/**
+ * What a caller below `admin` is not being shown.
+ *
+ * 🛑 SAID OUT LOUD. `/api/agents` withholds `mode` and refuses the writes, so
+ * a silent card would read as "no agent is contained".
+ *
+ * @returns {string | null} null when nothing is withheld
+ */
+export function registrationNotice(capabilities = []) {
+  if (capabilities.includes("admin")) return null;
+
+  return (
+    "Read-only: each agent's mode is withheld, and registering or forgetting " +
+    "one needs admin."
+  );
+}
+
+/**
+ * Why a draft cannot be submitted, named field by field.
+ *
+ * 🛑 THE VENDOR IS CHECKED AGAINST WHAT THE BUILD CAN SPAWN, which the server
+ * sends. `POST /api/agents` takes any non-empty string and `spawnFor` throws
+ * at START time, so without this the operator learns of a typo one step
+ * removed from the form that made it.
+ *
+ * @returns {string | null} null when the draft is submittable
+ */
+export function registrationFormError(draft, vendors = []) {
+  const handle = (draft?.handle ?? "").trim();
+
+  if (handle.length === 0) return "A handle is required.";
+
+  if (!vendors.includes(draft?.vendor)) {
+    return (
+      `This build cannot spawn "${draft?.vendor}". It has: ` +
+      `${vendors.join(", ")}.`
+    );
+  }
+
+  if (!FORM_MODES.includes(draft?.mode)) {
+    return `"${draft?.mode}" is not a mode. Pick one of: ${FORM_MODES.join(", ")}.`;
+  }
+
+  return null;
+}
+
+/**
+ * The confirm shown when a write would LOOSEN a handle's sandbox.
+ *
+ * 🛑 ONE DIRECTION ONLY. Slice 2 settled that a flag may tighten the mode and
+ * never loosen it, so the card's write is the only way out of `docker` — and
+ * it is the one that needs reading twice.
+ *
+ * 🛑 A NEW HANDLE IS NOT A LOOSENING and is deliberately not confirmed. There
+ * is no recorded decision to undo, and a dialog on every registration is how
+ * the one that matters gets clicked through.
+ *
+ * @returns {string | null} null unless the mode goes docker -> host
+ */
+export function loosenConfirmText(handle, from, to) {
+  if (from !== "docker" || to !== "host") return null;
+
+  return (
+    `Give ${handle} FULL HOST ACCESS?\n\n` +
+    "It runs contained today. On its next start it will run directly on this " +
+    "machine, with the same reach as the operator."
+  );
+}
+
+/**
+ * The confirm shown before a registration is removed.
+ *
+ * ⚠️ FORGETTING IS NOT TIGHTENING. The handle falls back to whatever the
+ * start-time default resolves to, which may be looser than the record being
+ * deleted.
+ */
+export function forgetConfirmText(handle) {
+  return (
+    `Forget the registration for ${handle}?\n\n` +
+    "It will start on the default for its driver instead, which may not be " +
+    "the mode recorded here."
+  );
+}

@@ -41,6 +41,12 @@ import {
   claimsPanelEmpty,
   agentRow,
   agentsPanelEmpty,
+  registrationRows,
+  registrationsPanelEmpty,
+  registrationNotice,
+  registrationFormError,
+  loosenConfirmText,
+  forgetConfirmText,
   stopAllConfirmText,
   stopAllVisible,
   stopButtonClass,
@@ -125,6 +131,22 @@ const state = {
   // any peer status change, so a pulse held only as a class is dropped by the
   // next `wake` — mid-turn, which is exactly when it is the only signal.
   activity: new Set(),
+  // #132 slice 4a — the STORED (vendor, mode) pairs, from /api/agents. Not
+  // `agents`, which is the socket register: a handle can be in either without
+  // being in the other.
+  registrations: { agents: {} },
+  // What this build can spawn, served alongside the pairs. The route takes any
+  // non-empty vendor string, so the form is the only thing that can refuse an
+  // unspawnable one before it is stored.
+  vendors: [],
+  // This browser's OWN tier, from /api/whoami. The card says what it withholds
+  // rather than rendering a control the route will 403.
+  capabilities: [],
+  // 🛑 IT LIVES HERE AND NOT IN THE DOM, for the same reason as `gateEditing`:
+  // renderSidebar() rebuilds the whole sidebar on any peer status change, so a
+  // half-typed handle held only in an input is wiped by the next wake.
+  registrationDraft: { handle: "", vendor: "", mode: "docker" },
+  registrationError: null,
 };
 
 const el = {
@@ -214,6 +236,7 @@ async function fetchWhoami() {
   state.discoverRooms = data.discoverRooms;
   state.roots = data.roots ?? null;
   state.gateDefault = data.context_gate_default ?? null;
+  state.capabilities = data.capabilities ?? [];
   el.myHandle.textContent = `${data.handle} · v${data.version}`;
 }
 
@@ -382,6 +405,11 @@ function renderSidebar() {
         ]),
   ]);
   el.sidebar.appendChild(agentsSection);
+
+  // Registered agents (#132 slice 4a) — BELOW the running panel and ABOVE
+  // Peers. Claims say what is locked, Agents says what is RUNNING, and this
+  // says what the operator CONFIGURED. Running outranks configured.
+  el.sidebar.appendChild(registrationSection());
 
   // Peers
   const peersSection = h("div", { className: "sidebar__section" }, [
@@ -1600,6 +1628,7 @@ async function refresh() {
     await fetchApprovals();
     await fetchClaims();
     await fetchLiveAgents();
+    await fetchRegistrations();
     if (state.currentTarget) await fetchMessages(state.currentTarget);
     renderSidebar();
     renderPaneHeader();
@@ -1608,6 +1637,242 @@ async function refresh() {
   } catch (e) {
     console.error("refresh failed", e);
   }
+}
+
+// ── Agent registration (#132 slice 4a) ─────────────────────
+
+/**
+ * The stored (vendor, mode) pairs, and the vendors this build can spawn.
+ *
+ * 🛑 `/api/agents`, NOT `/api/agents/live`. That one is the socket register —
+ * who is connected now. This is what the operator configured, and a handle can
+ * be in either without being in the other.
+ */
+async function fetchRegistrations() {
+  try {
+    const data = await api("/api/agents");
+    state.registrations = { agents: data.agents ?? {} };
+    state.vendors = data.vendors ?? [];
+  } catch (e) {
+    // A failed fetch must not blank the card. An empty list and a failed load
+    // look identical, and what disappears here is which agents are contained.
+    console.error("registrations fetch failed", e);
+  }
+}
+
+/**
+ * Store one handle's pair, replacing whatever it had.
+ *
+ * 🛑 VALIDATE, THEN CONFIRM, THEN WRITE, IN THAT ORDER. The route accepts any
+ * non-empty vendor string and `spawnFor` is what throws, at start time — so a
+ * typo is otherwise reported one step removed from the form that made it.
+ */
+async function submitRegistration() {
+  const draft = state.registrationDraft;
+  const invalid = registrationFormError(draft, state.vendors);
+
+  if (invalid !== null) {
+    state.registrationError = invalid;
+    renderSidebar();
+    return;
+  }
+
+  // 🛑 THE ONLY WAY OUT OF `docker`. Slice 2 settled that a flag may tighten
+  // the mode and never loosen it, so this write is the loosening path and is
+  // the one that has to be read twice.
+  const loosening = loosenConfirmText(
+    draft.handle.trim(),
+    state.registrations.agents[draft.handle.trim()]?.mode ?? null,
+    draft.mode,
+  );
+
+  if (loosening !== null && !confirm(loosening)) return;
+
+  state.registrationError = null;
+
+  try {
+    await api("/api/agents", {
+      method: "POST",
+      body: JSON.stringify({
+        handle: draft.handle.trim(),
+        vendor: draft.vendor,
+        mode: draft.mode,
+      }),
+    });
+    state.registrationDraft = {
+      handle: "",
+      vendor: draft.vendor,
+      mode: draft.mode,
+    };
+    toast(`Registered ${draft.handle.trim()}`, "info");
+  } catch (e) {
+    // The route's own 400s land here — it owns the rules and this reports them
+    // verbatim rather than paraphrasing a second copy.
+    state.registrationError = e.message;
+  }
+
+  await fetchRegistrations();
+  renderSidebar();
+}
+
+/**
+ * Remove one handle's record.
+ *
+ * ⚠️ FORGETTING IS NOT TIGHTENING. The handle falls back to whatever the
+ * start-time default resolves to, which may be looser than the record removed.
+ */
+async function forgetRegistration(handle) {
+  if (!confirm(forgetConfirmText(handle))) return;
+
+  try {
+    await api("/api/agents/forget", {
+      method: "POST",
+      body: JSON.stringify({ handle }),
+    });
+    toast(`Forgot ${handle}`, "warn");
+  } catch (e) {
+    toast(`Not forgotten: ${e.message}`, "warn");
+  }
+
+  await fetchRegistrations();
+  renderSidebar();
+}
+
+/**
+ * The Registered card: one row per stored pair, plus the form that writes one.
+ *
+ * 🛑 THE FORM IS ADMIN-ONLY, AND SO IS Forget. `POST /api/agents` and
+ * `/forget` are both `admin`, so rendering either below that tier offers a
+ * control the route answers with a 403.
+ *
+ * 🛑 THE TIER COMES FROM `/api/whoami`, NEVER FROM A MISSING `mode` KEY. An
+ * empty list has no `mode` on any row, which would read as non-admin and hide
+ * the form exactly when the operator has nothing registered yet.
+ */
+function registrationSection() {
+  const rows = registrationRows(state.registrations, state.capabilities);
+  const notice = registrationNotice(state.capabilities);
+  const admin = state.capabilities.includes("admin");
+
+  return h("div", { className: "sidebar__section" }, [
+    h("div", { className: "sidebar__heading" }, ["Registered"]),
+    notice === null
+      ? null
+      : h("div", { className: "sidebar__empty" }, [notice]),
+    ...(rows.length === 0
+      ? // 🛑 SAYS it is empty, for the same reason as the claims panel: a
+        // blank card and a failed fetch look identical.
+        [h("div", { className: "sidebar__empty" }, [registrationsPanelEmpty()])]
+      : rows.map((r) =>
+          h("div", { className: "registration" }, [
+            h("div", { className: "registration__head" }, [
+              h("span", { className: "registration__handle" }, [r.handle]),
+              h("span", { className: "registration__vendor" }, [r.vendor]),
+            ]),
+            // The mode label is the helper's, never built here — a second copy
+            // is free to drift from the one carrying the "say what host
+            // grants" rule and its test.
+            h(
+              "div",
+              {
+                className: `registration__mode${r.storedMode === "host" ? " is-loose" : ""}`,
+              },
+              [r.mode],
+            ),
+            r.canForget
+              ? h(
+                  "button",
+                  {
+                    className: "registration__forget",
+                    type: "button",
+                    onclick: () => void forgetRegistration(r.handle),
+                  },
+                  ["Forget"],
+                )
+              : null,
+          ]),
+        )),
+    ...(admin ? [registrationForm()] : []),
+  ]);
+}
+
+/**
+ * The register form.
+ *
+ * ⚠️ EVERY FIELD WRITES BACK TO `state.registrationDraft` ON INPUT.
+ * `renderSidebar()` rebuilds this on any peer status change, so a value held
+ * only in the DOM is wiped mid-typing by the next wake.
+ */
+function registrationForm() {
+  const draft = state.registrationDraft;
+  const handleInput = h("input", {
+    className: "registration__input",
+    type: "text",
+    placeholder: "handle",
+    value: draft.handle,
+    "aria-label": "Handle to register",
+    oninput: (e) => {
+      draft.handle = e.target.value;
+    },
+  });
+
+  // 🛑 BUILT FROM THE SERVED LIST. A literal here keeps offering a vendor the
+  // day an adapter leaves `REGISTRY`, and the only symptom is a start that
+  // throws.
+  const vendorSelect = h(
+    "select",
+    {
+      className: "registration__select",
+      "aria-label": "Vendor",
+      onchange: (e) => {
+        draft.vendor = e.target.value;
+      },
+    },
+    state.vendors.map((v) =>
+      h("option", { value: v, selected: v === draft.vendor || null }, [v]),
+    ),
+  );
+
+  if (draft.vendor === "" && state.vendors.length > 0) {
+    draft.vendor = state.vendors[0];
+    vendorSelect.value = draft.vendor;
+  }
+
+  // 🛑 `docker` IS FIRST AND IS THE DEFAULT. The tighter of the two, so a
+  // mis-click registers a contained agent rather than one with host access.
+  const modeSelect = h(
+    "select",
+    {
+      className: "registration__select",
+      "aria-label": "Sandbox mode",
+      onchange: (e) => {
+        draft.mode = e.target.value;
+      },
+    },
+    ["docker", "host"].map((m) =>
+      h("option", { value: m, selected: m === draft.mode || null }, [m]),
+    ),
+  );
+
+  return h("div", { className: "registration-form" }, [
+    handleInput,
+    vendorSelect,
+    modeSelect,
+    h(
+      "button",
+      {
+        className: "registration-form__submit",
+        type: "button",
+        onclick: () => void submitRegistration(),
+      },
+      ["Register"],
+    ),
+    state.registrationError === null
+      ? null
+      : h("div", { className: "registration-form__error" }, [
+          state.registrationError,
+        ]),
+  ]);
 }
 
 // ── Approvals ────────────────────────────────────────────────────────────
@@ -2581,6 +2846,7 @@ async function boot() {
   // everything refresh() does.
   await fetchClaims();
   await fetchLiveAgents();
+  await fetchRegistrations();
 
   renderSidebar();
   renderPaneHeader();
