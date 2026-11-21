@@ -177,34 +177,49 @@ test("🛑 --binary has NO static default, so the vendor's value is reachable", 
 });
 
 /**
- * 🛑 THE CONTROL FOR THE GUARD ABOVE, BECAUSE A WRAPPED ENTRY IS THE FAILURE
- * MODE IT WAS JUST FIXED FOR. `--driver` wraps today and its `(default:` sits
- * on the SECOND line, so `helpEntryFor` finding it proves the reader follows a
- * wrap. A one-line read returns the first line alone and this goes red.
+ * 🛑 THE CONTROL FOR THE READER, AGAINST A FIXTURE RATHER THAN THE LIVE HELP.
+ *
+ * ⚠️ MY FIRST CUT OF THIS DROVE `--driver` AND HALF OF IT WAS VACUOUS. That
+ * entry does wrap, but its `(default:` is on the FIRST line, so the
+ * `(default:` assertion passed for a one-line reader too. Only the
+ * `includes("\n")` assertion discriminated, which proves "more than one line
+ * came back" and NOT "the half below the fold was read". claude1 caught the
+ * vacuity on PR 364; the live-help version also made the control depend on how
+ * commander happens to wrap this week.
+ *
+ * The fixture puts the sought token where it can ONLY be reached by following
+ * the wrap, so the control is non-vacuous by construction.
  */
-test("⚠️ control — the entry reader follows a WRAPPED option's second line", () => {
-  const help = execFileSync(
-    process.execPath,
-    [
-      "--import",
-      "tsx",
-      new URL("../../src/index.ts", import.meta.url).pathname,
-      "supervise",
-      "--help",
-    ],
-    { encoding: "utf8" },
-  );
+const WRAPPED_HELP_FIXTURE = [
+  "Options:",
+  "  --model <model>                model for the supervised child",
+  "  --binary <path>                a description long enough that its",
+  '                                 (default: "claude") landed down here',
+  "  --cwd <dir>                    working directory for the child",
+  "  -h, --help                     display help for command",
+].join("\n");
 
-  const entry = helpEntryFor(help, "--driver <name>");
+test("⚠️ control — the reader follows a wrap to text ONLY on the second line", () => {
+  const entry = helpEntryFor(WRAPPED_HELP_FIXTURE, "--binary <path>");
 
-  assert.ok(
-    entry.includes("\n"),
-    "--driver no longer wraps, so this control no longer exercises a wrap",
-  );
+  // Present on line 2 of the entry and nowhere else in the fixture, so a
+  // one-line reader cannot find it.
   assert.match(
     entry,
-    /\(default:/,
-    "the wrapped half of --driver's description was not read",
+    /\(default: "claude"\)/,
+    "the half below the fold was not read, so the guard would green on the defect",
+  );
+
+  // The guard's own predicate, run over the same fixture: it must say NO here.
+  assert.ok(
+    /\(default:/.test(entry),
+    "the guard's predicate failed to fire on a wrapped default",
+  );
+
+  // And it must NOT bleed into the next option's entry.
+  assert.ok(
+    !entry.includes("--cwd"),
+    "the entry reader ran past the next option",
   );
 });
 
