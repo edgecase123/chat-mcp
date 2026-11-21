@@ -253,6 +253,18 @@ export function runTurnRelay(io: TurnRelayIo): void {
       // 🛑 A DEATH BEATS THE QUEUE, AND RETURNS. Draining into a relay that is
       // exiting would start a turn whose output nobody will read.
       if (!sawTurnEnd) {
+        // 🛑 THE DROP NAMES ITSELF, same house rule as the unframed path: a
+        // dropped prompt that names itself beats a silent hang. The queue
+        // lives in the supervisor's process and cannot see this one exit.
+        if (waiting.length > 0) {
+          const plural = waiting.length === 1 ? "" : "s";
+
+          relay.errorOutput?.write(
+            `turn-relay: the turn died, so ${waiting.length} queued ` +
+              `prompt${plural} was discarded unanswered\n`,
+          );
+        }
+
         relay.exit(code);
 
         return;

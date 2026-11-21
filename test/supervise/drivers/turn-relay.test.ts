@@ -504,3 +504,28 @@ test("🛑 a queued prompt is NOT started when the running turn dies", () => {
   assert.equal(h.turns.length, 1, "a turn was started into a dying relay");
   assert.deepEqual(h.exits, [1]);
 });
+
+/**
+ * 🛑 THE DROP NAMES ITSELF. The unframed path already refuses loudly, on the
+ * same house rule: a dropped prompt that names itself beats a silent hang. A
+ * death discarding a queued prompt is the same loss with no line to find it
+ * by. claude2 on PR 385.
+ */
+test("🛑 a queued prompt discarded by a death is NAMED on stderr", () => {
+  const h = harness();
+
+  h.input.write(frameTurn("first") + frameTurn("second"));
+  h.turns[0].exit(1);
+
+  assert.match(h.errors(), /1 queued prompt/);
+});
+
+test("🔴 control — a death with NOTHING queued says nothing about a drop", () => {
+  const h = harness();
+
+  h.send("only");
+  h.turns[0].exit(1);
+
+  assert.equal(h.exits.length, 1, "the death itself was not propagated");
+  assert.doesNotMatch(h.errors(), /queued prompt/);
+});
