@@ -73,19 +73,31 @@ function replay() {
  * line splitter silently dropped, would make every assertion below vacuous by
  * delivering nothing at all.
  */
-test("the fixture is a 16-event stream and every event carries the session id", () => {
+test("the fixture is 16 events, all carrying the session id, only the result carrying usage", () => {
   const lines = STREAM.trim().split("\n");
 
   assert.equal(lines.length, 16, "the captured turn is 16 events");
 
-  for (const [i, line] of lines.entries()) {
-    const event = JSON.parse(line) as Record<string, unknown>;
+  const events = lines.map(
+    (line) => JSON.parse(line) as Record<string, unknown>,
+  );
+
+  for (const [i, event] of events.entries()) {
     assert.equal(
       event.session_id,
       SESSION_ID,
       `event ${i} (${String(event.type)}) must carry the id`,
     );
   }
+
+  // Which event carries `usage` is a PREMISE of the absence test below, whose
+  // delivery floor reads the turn end. A fixture that moved the payload onto a
+  // non-terminal event would leave that floor asserting the wrong arrival.
+  assert.deepEqual(
+    events.filter((e) => e.usage !== undefined).map((e) => String(e.type)),
+    ["result"],
+    "the result event is the only event carrying usage",
+  );
 });
 
 test("🛑 a 16-event turn reports the session ONCE and the turn end ONCE", async () => {
@@ -99,10 +111,15 @@ test("🛑 a 16-event turn reports the session ONCE and the turn end ONCE", asyn
 });
 
 /**
- * 🔴 #219's SHAPE, ON REAL DATA. `cursorSpawn` declares `reportsUsage: false`,
- * and the fixture's result event carries a populated `usage` object — so this
- * is the one case where a router that "helpfully" forwarded it would be caught
- * against the declaration rather than against a hand-made payload.
+ * 🔴 #219's SHAPE, ON REAL DATA. The fixture's result event carries a populated
+ * `usage` object, so a router that "helpfully" forwarded it is caught here
+ * against a real payload rather than a hand-made one.
+ *
+ * 🛑 THE CLAIM IS AN ABSENCE, SO IT NEEDS ITS OWN DELIVERY FLOOR. Test 1 guards
+ * the FIXTURE and test 2 self-protects by asserting a non-empty value, but a
+ * stream that never reached the router would satisfy `usage === []` on its own.
+ * claude1 measured that on PR 350: deleting the write below left this test
+ * green. The declaration itself is pinned by `cursor-vendor.test.ts`, not here.
  */
 test("🔴 the real result event's usage object reaches no subscriber", async () => {
   const r = replay();
@@ -110,6 +127,10 @@ test("🔴 the real result event's usage object reaches no subscriber", async ()
   r.proc.stdout.write(STREAM);
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(cursorSpawn.reportsUsage, false);
+  // The floor. `turnEnd` fires on the result event, which is the ONLY event
+  // carrying `usage` — so this says the usage-bearing event was delivered
+  // before the next line says its payload went nowhere.
+  assert.equal(r.ends(), 1, "the usage-bearing result event was delivered");
+
   assert.deepEqual(r.usage, [], "token counts are not a RateLimitSnapshot");
 });
