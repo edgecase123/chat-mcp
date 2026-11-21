@@ -5,6 +5,7 @@ import {
   CONTAINER_GH_TOKEN_ENV,
   effectiveImage,
 } from "./drivers/containerized.js";
+import { installCpusFor, installMemoryFor } from "./installResources.js";
 import type { ContainerPlan } from "./container.js";
 import type { VendorSpawn } from "./vendor.js";
 
@@ -46,5 +47,10 @@ export function buildConfirmPlan(
     // how the banner and the spawn come to describe different files.
     memory: override?.memory ?? null,
     cpus: override?.cpus ?? null,
+    // 🛑 THE SAME FUNCTIONS THE INSTALL ARGV READS, not a second copy of the
+    // floor. Two literals that happen to agree is how the banner came to say
+    // `512m` about a container that ran with `1g`.
+    installMemory: installMemoryFor(override),
+    installCpus: installCpusFor(override),
   };
 }

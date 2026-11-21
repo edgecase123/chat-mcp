@@ -25,6 +25,8 @@ test("the confirm banner names the image the container will run", () => {
     image: "chat-mcp-agent:local",
     memory: null,
     cpus: null,
+    installMemory: null,
+    installCpus: null,
   });
 
   assert.match(

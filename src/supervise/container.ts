@@ -39,6 +39,19 @@ export interface ContainerPlan {
    */
   readonly memory: string | null;
   readonly cpus: string | null;
+
+  /**
+   * What the DEPENDENCY-INSTALL container runs under, which is not always what
+   * the agent container runs under.
+   *
+   * 🛑 A CAP BELOW #346's FLOOR IS RAISED FOR THAT CONTAINER. A banner that
+   * printed the handle's own number and stopped understated the peak — `512m`
+   * on the banner, `--memory 1g` on a container that actually ran. A number
+   * reads as more authoritative than an omission, so that is worse than the
+   * silence it replaced.
+   */
+  readonly installMemory: string | null;
+  readonly installCpus: string | null;
 }
 
 interface ContainerState {
@@ -280,6 +293,22 @@ export function markConfirmed(handle: string): void {
 /** What an absent cap reads as, so the uncapped case is said out loud. */
 const NO_LIMIT = "no limit";
 
+/**
+ * One cap as the operator reads it, naming the install container only when it
+ * differs.
+ *
+ * 🛑 THE SUFFIX IS CONDITIONAL AND THE OMISSION IS NOT. An absent cap still
+ * prints `no limit`, because docker reports no limit either way. The install
+ * suffix is dropped only when the two values are EQUAL, so nothing is hidden
+ * by its absence.
+ */
+function capLine(agent: string | null, install: string | null): string {
+  if (agent === null) return NO_LIMIT;
+  if (install === null || install === agent) return agent;
+
+  return `${agent} (dependency install: ${install})`;
+}
+
 export function describePlan(plan: ContainerPlan): string {
   return [
     "This will run the agent inside a Docker container:",
@@ -288,7 +317,7 @@ export function describePlan(plan: ContainerPlan): string {
     `  binary: ${plan.binary}`,
     `  network: ${plan.networkMode}`,
     `  image: ${plan.image}`,
-    `  memory: ${plan.memory ?? NO_LIMIT}`,
-    `  cpus: ${plan.cpus ?? NO_LIMIT}`,
+    `  memory: ${capLine(plan.memory, plan.installMemory)}`,
+    `  cpus: ${capLine(plan.cpus, plan.installCpus)}`,
   ].join("\n");
 }

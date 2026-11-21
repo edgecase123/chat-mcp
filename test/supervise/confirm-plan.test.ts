@@ -18,6 +18,8 @@ const { setGhToken, clearGhToken } =
   await import("../../src/supervise/auth.js");
 const { CONTAINER_GH_TOKEN_ENV } =
   await import("../../src/supervise/drivers/containerized.js");
+const { installResourceArgs } =
+  await import("../../src/supervise/installResources.js");
 
 import type { VendorSpawn } from "../../src/supervise/vendor.js";
 
@@ -168,4 +170,83 @@ test("memory on its own leaves cpus reported as absent", () => {
 
   assert.match(banner, /memory: 512m/);
   assert.match(banner, /cpus: no limit/);
+});
+
+/* --------------------------------------------------------------------------
+ * The install container's floor on the banner.
+ *
+ * 🔴 THE BANNER UNDERSTATED THE PEAK BY 2x. #346 raises a cap below the floor
+ * for the dependency-install container, so an operator who wrote `512m` was
+ * told `512m` and a container ran with `1g`. A number reads as more
+ * authoritative than an omission, so this is worse than the silence it
+ * replaced. Found by claude2 on PR 349.
+ * ----------------------------------------------------------------------- */
+
+test("a cap BELOW the install floor is named as raised, not printed bare", () => {
+  const handle = `cp-floor-${process.pid}`;
+  writeOverride(handle, { memory: "512m", cpus: "0.5" });
+
+  const banner = describePlan(buildConfirmPlan(vendor, handle));
+
+  assert.match(banner, /memory: 512m \(dependency install: 1g\)/);
+  assert.match(banner, /cpus: 0\.5 \(dependency install: 1\)/);
+});
+
+/**
+ * 🔴 THE CONTROL. Without it, an implementation that always appended the
+ * floor would pass the test above while telling an operator their `4g` agent
+ * installs under `1g`.
+ */
+test("a cap ABOVE the install floor is printed bare, with no raise named", () => {
+  const handle = `cp-nofloor-${process.pid}`;
+  writeOverride(handle, { memory: "4g", cpus: "2" });
+
+  const banner = describePlan(buildConfirmPlan(vendor, handle));
+
+  assert.match(banner, /memory: 4g$/m);
+  assert.match(banner, /cpus: 2$/m);
+  assert.doesNotMatch(banner, /dependency install/);
+});
+
+/**
+ * ⚠️ ONE RAISED AND ONE NOT IS THE REALISTIC FILE, and it is the case an
+ * implementation that decides per-banner rather than per-key gets wrong.
+ */
+test("memory above the floor and cpus below it names the raise on cpus only", () => {
+  const handle = `cp-mixed-${process.pid}`;
+  writeOverride(handle, { memory: "4g", cpus: "0.5" });
+
+  const banner = describePlan(buildConfirmPlan(vendor, handle));
+
+  assert.match(banner, /memory: 4g$/m);
+  assert.match(banner, /cpus: 0\.5 \(dependency install: 1\)/);
+});
+
+test("no override names no raise, because an absent cap emits no install flag", () => {
+  const banner = describePlan(
+    buildConfirmPlan(vendor, `cp-floor-none-${process.pid}`),
+  );
+
+  assert.match(banner, /memory: no limit/);
+  assert.doesNotMatch(banner, /dependency install/);
+});
+
+/**
+ * 🛑 THE TWO ROUTES ARE PINNED TOGETHER, NOT MERELY COINCIDING. The banner and
+ * the install argv must read ONE floor. Two literals that happen to agree is
+ * how this diverged in the first place — #346 shipped the floor and #349
+ * shipped the banner, an hour apart, and nothing compared them.
+ */
+test("the banner's install values are exactly what the install argv carries", () => {
+  const handle = `cp-pinned-${process.pid}`;
+  writeOverride(handle, { memory: "512m", cpus: "0.5" });
+
+  const plan = buildConfirmPlan(vendor, handle);
+
+  assert.deepEqual(installResourceArgs({ memory: "512m", cpus: "0.5" }), [
+    "--memory",
+    plan.installMemory,
+    "--cpus",
+    plan.installCpus,
+  ]);
 });
