@@ -1964,7 +1964,16 @@ const MODE_LABELS = {
   host: "host — FULL HOST ACCESS",
 };
 
-/** What a withheld `mode` reads as. */
+/**
+ * What a withheld `mode` reads as.
+ *
+ * 🛑 `undefined` IS THE ONLY WAY TO REACH THIS, so the label cannot be shown
+ * to someone who already holds admin. `readRegistrations` THROWS on an
+ * unrecognised mode rather than passing it through, which is pinned by
+ * "an unrecognised mode is refused, never read as host" in
+ * `test/supervise/registrations.test.ts`. Raised by claude2 on PR 375 as a
+ * conflation; it is not reachable while that guard holds.
+ */
 const MODE_WITHHELD = "(needs admin)";
 
 /** The modes a draft may name. Matches `MODES` in `registrations.ts`. */
