@@ -5,9 +5,16 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env.CHAT_MCP_HOME = mkdtempSync(
-  join(tmpdir(), "chat-mcp-per-vendor-gate-"),
-);
+/**
+ * 🛑 THE PREFIX IS SHORT ON PURPOSE — `chat-mcp-per-vendor-gate-` did not fit.
+ *
+ * The supervisor binds a unix socket at `<CHAT_MCP_HOME>/sock/<handle>`, and
+ * `sun_path` caps that at 104 bytes on macOS. Under the old prefix the path
+ * measured 104 with a four-digit pid and 105 with a five-digit one, so this
+ * file bound a socket or threw `EINVAL` depending on which pid the kernel
+ * happened to hand the test runner.
+ */
+process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-pvg-"));
 
 const { migrate } = await import("../../src/storage/db.js");
 const { startSupervisor } = await import("../../src/supervise/index.js");
@@ -16,6 +23,8 @@ const { claudeSpawn } = await import("../../src/adapters/claude-spawn.js");
 const { cursorSpawn } = await import("../../src/adapters/cursor-spawn.js");
 import { supervisorOptions } from "../support/supervisor-options.js";
 import { confirmHandle } from "../support/confirm-plan.js";
+
+import type { SpawnOptions } from "../../src/supervise/child.js";
 
 /**
  * 🛑 THE OTHER REFUSAL SITE. `dockerRunPlan` refuses at SPAWN time and
@@ -65,38 +74,74 @@ test("🛑 the credential is refused at START, before the confirmation gate", as
   );
 });
 
+/** Every `SpawnOptions` the supervisor handed a driver, in call order. */
+function recordingChild(seen: SpawnOptions[]) {
+  return (opts: SpawnOptions) => {
+    seen.push(opts);
+
+    return {
+      reportsUsage: false,
+      reportsContext: false,
+      send: () => undefined,
+      onTurnEnd: () => undefined,
+      onContext: () => undefined,
+      onUsage: () => undefined,
+      onDenial: () => undefined,
+      onSession: (cb: (id: string) => void) => cb("sess-1"),
+      onEvent: () => undefined,
+      onStderr: () => undefined,
+      onExit: () => undefined,
+      kill: () => undefined,
+    };
+  };
+}
+
 /**
  * The paired control. A start-time check that refused every vendor outright
  * would pass the test above and break the vendor that works today.
+ *
+ * 🛑 IT ASSERTED NOTHING FOR ITS ENTIRE GREEN LIFE, and the spawn seam is what
+ * fixes that. It was `assert.rejects` whose predicate ran
+ * `doesNotMatch(/CURSOR_API_KEY on file/)` and then `return true`, so EVERY
+ * error satisfied it. Being green only ever meant "something threw", and the
+ * something was a missing Cursor image. Once that image existed the start
+ * SUCCEEDED, no rejection came, and the spec went red — on a commit that had
+ * changed neither the check nor the test.
+ *
+ * 🛑 AND IT WAS STARTING A REAL CONTAINER INSIDE `npm test`. The passing path
+ * took 5.9 seconds of `docker run`, which is why a contended daemon could flip
+ * it either way. A fake child leaves the credential check as the only thing
+ * under test, and the unit lane no longer needs a daemon.
  */
 test("a confirmed Cursor handle with its own key gets past the credential check", async () => {
   const db = new DatabaseSync(":memory:");
   migrate(db);
 
   const handle = `pvg-${process.pid}-confirmed`;
+  const seen: SpawnOptions[] = [];
 
   setVendorToken(claudeSpawn, "sk-ant-oat-x");
   setVendorToken(cursorSpawn, "key_cursor-x");
   confirmHandle(handle, cursorSpawn);
 
-  // It still fails — nothing builds the Cursor image yet (#317 unit 3) — but
-  // the failure must no longer be about the credential.
-  await assert.rejects(
-    () =>
-      startSupervisor(
-        supervisorOptions({
-          handle,
-          db,
-          vendor: cursorSpawn,
-          extraDirs: [process.cwd()],
-          driver: "docker-cursor",
-          reply: false,
-          log: () => undefined,
-        }),
-      ),
-    (err: Error) => {
-      assert.doesNotMatch(err.message, /CURSOR_API_KEY on file/);
-      return true;
-    },
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      vendor: cursorSpawn,
+      extraDirs: [process.cwd()],
+      driver: "docker-cursor",
+      reply: false,
+      spawnChild: recordingChild(seen),
+      log: () => undefined,
+    }),
   );
+
+  try {
+    // Reaching the spawn IS the claim: the credential check sits in front of
+    // it, so one recorded spawn means the Cursor key satisfied that check.
+    assert.equal(seen.length, 1);
+  } finally {
+    await sup.stop();
+  }
 });
