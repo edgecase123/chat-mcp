@@ -26,6 +26,8 @@ export function buildConfirmPlan(
     (k) => `/mnt/${k}`,
   );
 
+  const override = resolveOverrideFor(handle);
+
   // Listed only when one is on file, because that is exactly when
   // `dockerRunPlan` passes it. Naming a credential the container will not
   // receive is the misleading-operator class #136 was about.
@@ -39,6 +41,10 @@ export function buildConfirmPlan(
     // 🛑 THE EFFECTIVE IMAGE, NEVER `vendor.image`. The agent container, the
     // install container and the inspect guard all resolve it here too, so
     // they cannot disagree about which image is in play.
-    image: effectiveImage(vendor, resolveOverrideFor(handle)),
+    image: effectiveImage(vendor, override),
+    // 🛑 READ OFF THE SAME RESOLVED OVERRIDE AS THE IMAGE. Resolving twice is
+    // how the banner and the spawn come to describe different files.
+    memory: override?.memory ?? null,
+    cpus: override?.cpus ?? null,
   };
 }

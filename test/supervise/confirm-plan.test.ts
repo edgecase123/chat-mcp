@@ -110,3 +110,62 @@ test("the GitHub token env var IS named when one is on file", () => {
     clearGhToken();
   }
 });
+
+/* --------------------------------------------------------------------------
+ * `memory` and `cpus` on the banner.
+ *
+ * 🔴 THE BANNER UNDERSTATED THE SANDBOX. It named the image, the mounts, the
+ * credentials and the network, so an operator reading it had every reason to
+ * think it described the container — while the two keys that decide how much
+ * of the host the agent may consume were absent.
+ * ----------------------------------------------------------------------- */
+
+test("an override's memory and cpus reach the plan", () => {
+  const handle = `cp-caps-${process.pid}`;
+  writeOverride(handle, { memory: "512m", cpus: "1.5" });
+
+  const plan = buildConfirmPlan(vendor, handle);
+
+  assert.equal(plan.memory, "512m");
+  assert.equal(plan.cpus, "1.5");
+});
+
+test("the rendered banner names the override's memory and cpus", () => {
+  const handle = `cp-caps-banner-${process.pid}`;
+  writeOverride(handle, { memory: "512m", cpus: "1.5" });
+
+  const banner = describePlan(buildConfirmPlan(vendor, handle));
+
+  assert.match(banner, /memory: 512m/);
+  assert.match(banner, /cpus: 1\.5/);
+});
+
+/**
+ * 🔴 THE CONTROL THAT MATTERS MORE THAN THE CASE ABOVE. An absent key means
+ * the container runs with NO limit, and docker reports nothing — so a banner
+ * that simply omits the line lets an operator read silence as a cap. It must
+ * say the uncapped thing out loud.
+ */
+test("with no override the banner says both caps are absent, rather than omitting them", () => {
+  const banner = describePlan(
+    buildConfirmPlan(vendor, `cp-caps-none-${process.pid}`),
+  );
+
+  assert.match(banner, /memory: no limit/);
+  assert.match(banner, /cpus: no limit/);
+});
+
+/**
+ * ⚠️ ONE CAP WITHOUT THE OTHER IS THE REALISTIC FILE. Asserting only the
+ * both-set and both-absent cases lets an implementation that reads one key
+ * and copies it to the other pass.
+ */
+test("memory on its own leaves cpus reported as absent", () => {
+  const handle = `cp-caps-half-${process.pid}`;
+  writeOverride(handle, { memory: "512m" });
+
+  const banner = describePlan(buildConfirmPlan(vendor, handle));
+
+  assert.match(banner, /memory: 512m/);
+  assert.match(banner, /cpus: no limit/);
+});

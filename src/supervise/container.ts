@@ -26,6 +26,19 @@ export interface ContainerPlan {
    * image would start, as PID 1 beside three credentials.
    */
   readonly image: string;
+
+  /**
+   * The caps the container will run under, or `null` for no cap at all.
+   *
+   * 🛑 `null` IS PRINTED, NOT OMITTED. An absent key means docker imposes no
+   * limit and reports none, so a banner that simply dropped the line would let
+   * an operator read silence as a cap.
+   *
+   * 🛑 REQUIRED, LIKE `image`. An optional field would let a future caller
+   * build a plan that silently went back to describing nothing.
+   */
+  readonly memory: string | null;
+  readonly cpus: string | null;
 }
 
 interface ContainerState {
@@ -264,6 +277,9 @@ export function markConfirmed(handle: string): void {
   });
 }
 
+/** What an absent cap reads as, so the uncapped case is said out loud. */
+const NO_LIMIT = "no limit";
+
 export function describePlan(plan: ContainerPlan): string {
   return [
     "This will run the agent inside a Docker container:",
@@ -272,5 +288,7 @@ export function describePlan(plan: ContainerPlan): string {
     `  binary: ${plan.binary}`,
     `  network: ${plan.networkMode}`,
     `  image: ${plan.image}`,
+    `  memory: ${plan.memory ?? NO_LIMIT}`,
+    `  cpus: ${plan.cpus ?? NO_LIMIT}`,
   ].join("\n");
 }

@@ -79,10 +79,14 @@ test("the printed plan names mounts, env var NAMES only, binary, network and ima
     binary: "claude",
     networkMode: "bridge (default, full outbound)",
     image: "chat-mcp-agent:local",
+    memory: "512m",
+    cpus: "1.5",
   });
   assert.match(plan, /chat-mcp-agent:local/);
   assert.match(plan, /\/work/);
   assert.match(plan, /CLAUDE_CODE_OAUTH_TOKEN/);
+  assert.match(plan, /memory: 512m/);
+  assert.match(plan, /cpus: 1\.5/);
   assert.doesNotMatch(
     plan,
     /sk-ant/,

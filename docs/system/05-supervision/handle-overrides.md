@@ -284,7 +284,7 @@ the assert, which is also what refuses the empty string rather than silently
 omitting the flag. Found by claude2 on PR 346, one function away from the
 install-path fix above.
 
-## The consent banner names the image. It still omits `memory` and `cpus`.
+## The consent banner names the image and both caps
 
 **`describePlan` builds its `mounts:` line from `readMounts()` and its
 `env vars` line from the vendor plus `GH_TOKEN`.**
@@ -305,13 +305,15 @@ would let a future caller build a plan with no image and print a banner that
 silently went back to describing nothing. A required field makes that a
 typecheck failure, and adding it turned exactly one existing caller red.
 
-⚠️ **`memory` and `cpus` are still missing from the banner**, so it
-UNDERSTATES the sandbox. They narrow what the agent may consume rather than
-replacing what it runs, which is why `image` went first. Tracked on #222.
+🛑 **AN ABSENT CAP PRINTS `no limit`, IT DOES NOT DROP THE LINE.** Docker
+imposes no limit and reports none, so an omitted line let an operator read
+silence as a cap. `memory` and `cpus` are REQUIRED on `ContainerPlan` for the
+same reason `image` is — optional fields let a future caller go back to
+describing nothing, and making them required turned exactly two callers red.
 
 ```
 image            NAMED. the effective one, override included.
-memory / cpus    still omitted — the banner UNDERSTATES the limits
+memory / cpus    NAMED, and `no limit` when no override sets them
 env / readOnlyMounts   not wired yet; they reach no spawn today
 ```
 
