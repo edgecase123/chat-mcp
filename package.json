@@ -19,7 +19,7 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/stamp-build.mjs",
     "typecheck": "tsc -p tsconfig.test.json",
     "dev": "tsx src/index.ts",
     "clean": "rm -rf dist",
