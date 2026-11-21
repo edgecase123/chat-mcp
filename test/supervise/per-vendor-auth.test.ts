@@ -225,3 +225,25 @@ test("🔴 an unknown --vendor is refused, naming the vendors that exist", () =>
   // 🛑 REFUSED BEFORE THE SECRET IS READ, so nothing was written at all.
   assert.equal(existsSync(join(home, "secrets.env")), false);
 });
+
+/**
+ * #368 on the path the incident actually took. `auth.test.ts` proves the
+ * whitespace guard through `setToken` and `setGhToken`; this is the third
+ * caller, and it is the one that stored a real mis-pasted Cursor key twice in
+ * one morning.
+ *
+ * 🛑 THE VENDOR IS `cursorSpawn` ON PURPOSE. A Claude-shaped fixture would
+ * pass whichever setter the guard sat behind, because `claudeSpawn`'s own
+ * fields collide — raised on #317.
+ */
+test("🔴 a mis-pasted Cursor key with an interior space is refused, not stored", () => {
+  setVendorToken(cursorSpawn, "key_cursor-good");
+
+  assert.throws(
+    () => setVendorToken(cursorSpawn, "key_cursor head"),
+    /whitespace/,
+  );
+
+  // The refusal must not have cost the operator the credential they had.
+  assert.equal(readVendorToken(cursorSpawn), "key_cursor-good");
+});
