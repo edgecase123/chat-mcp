@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
 import type { RouteContext } from "../../../src/cli/web/server.js";
+import type { Capability } from "../../../src/cli/web/credential.js";
 
 // 🛑 BEFORE any import that resolves a state path. `registrations.ts` reads
 // `agents.json` out of the state dir, so an import above this line would pin
@@ -16,7 +17,8 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "cm-api-agents-"));
 const { migrate } = await import("../../../src/storage/db.js");
 const dao = await import("../../../src/storage/dao.js");
 const { route } = await import("../../../src/cli/web/server.js");
-const { COOKIE_NAME } = await import("../../../src/cli/web/credential.js");
+const { COOKIE_NAME, ALL_CAPABILITIES } =
+  await import("../../../src/cli/web/credential.js");
 const { readRegistrations, registerAgent } =
   await import("../../../src/supervise/registrations.js");
 
@@ -38,7 +40,9 @@ interface Harness {
   readonly origin: string;
 }
 
-async function harness(): Promise<Harness> {
+async function harness(
+  capabilities: readonly Capability[] = ALL_CAPABILITIES,
+): Promise<Harness> {
   const db = new DatabaseSync(":memory:");
   migrate(db);
 
@@ -48,7 +52,7 @@ async function harness(): Promise<Harness> {
     sseClients: new Set(),
     port: 0,
     token: TOKEN,
-    capabilities: ["read", "write", "admin"],
+    capabilities,
   };
   const server = createServer((req, res) => {
     void route(req, res, ctx);
@@ -206,4 +210,42 @@ test("🛑 forgetting a handle that has no record is not an error and creates no
   const res = await post(h, "/api/agents/forget", { handle: "never-existed" });
 
   assert.equal(res.status, 200);
+});
+
+/**
+ * 🛑 `mode` IS THE FIELD THAT SAYS WHETHER AN AGENT RUNS CONTAINED, so the
+ * lowest tier must not read it — #367.
+ *
+ * ⚠️ THE ROUTE STAYS `read` AND THAT IS DELIBERATE. `/api/agents/live` already
+ * returns the handle list at `read`, so hiding the whole list would protect one
+ * field by withholding something already public.
+ */
+test("🛑 a non-admin caller gets handle and vendor but NOT mode", async (t) => {
+  const h = await harness(["read"]);
+  t.after(() => close(h));
+
+  registerAgent("contained", { vendor: "cursor", mode: "docker" });
+
+  const agents = (await get(h)).agents as Record<string, unknown>;
+
+  assert.deepEqual(
+    agents.contained,
+    { vendor: "cursor" },
+    "mode says whether this agent has full host access",
+  );
+});
+
+/** The positive control: the filter is the capability, not a dropped field. */
+test("an admin caller still receives mode", async (t) => {
+  const h = await harness();
+  t.after(() => close(h));
+
+  registerAgent("visible-to-admin", { vendor: "claude", mode: "host" });
+
+  const agents = (await get(h)).agents as Record<string, unknown>;
+
+  assert.deepEqual(agents["visible-to-admin"], {
+    vendor: "claude",
+    mode: "host",
+  });
 });

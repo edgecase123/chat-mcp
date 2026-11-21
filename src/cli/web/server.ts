@@ -498,7 +498,7 @@ export async function route(
   if (path === "/api/agents/stop" && req.method === "POST")
     return handleStopAgents(req, res, ctx);
   if (path === "/api/agents" && req.method === "GET")
-    return handleRegistrations(res);
+    return handleRegistrations(res, ctx);
   if (path === "/api/agents" && req.method === "POST")
     return handleRegisterAgent(req, res);
   if (path === "/api/agents/forget" && req.method === "POST")
@@ -528,9 +528,31 @@ export async function route(
  * 🛑 NOT `/api/agents/live`, WHICH IS THE SOCKET REGISTER. A handle can be
  * connected without being registered and registered without being connected,
  * so the two surfaces answer different questions and neither substitutes.
+ *
+ * 🛑 `mode` IS WITHHELD FROM A CALLER WITHOUT `admin`. It says whether that
+ * agent runs contained, so the lowest tier would otherwise read a map of which
+ * agents have full host access. The route itself stays `read`, because
+ * `/api/agents/live` already returns the handle list at that tier.
+ *
+ * ⚠️ FILTERED HERE AND NOT IN `readRegistrations`. The spawn path reads the
+ * same store and needs `mode`.
  */
-function handleRegistrations(res: ServerResponse): void {
-  respondJson(res, readRegistrations());
+function handleRegistrations(res: ServerResponse, ctx: RouteContext): void {
+  const config = readRegistrations();
+
+  if (ctx.capabilities.includes("admin")) {
+    respondJson(res, config);
+    return;
+  }
+
+  const agents = Object.fromEntries(
+    Object.entries(config.agents).map(([handle, { vendor }]) => [
+      handle,
+      { vendor },
+    ]),
+  );
+
+  respondJson(res, { agents });
 }
 
 /**

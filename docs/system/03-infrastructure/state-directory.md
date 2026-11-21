@@ -84,9 +84,22 @@ pairs without the operator opening the file:
 
 | route                     | tier    | does                           |
 | ------------------------- | ------- | ------------------------------ |
-| `GET /api/agents`         | `read`  | every stored pair              |
+| `GET /api/agents`         | `read`  | every stored pair, see below   |
 | `POST /api/agents`        | `admin` | create or replace one handle's |
 | `POST /api/agents/forget` | `admin` | remove one handle's            |
+
+🛑 **`GET /api/agents` WITHHOLDS `mode` FROM A CALLER WITHOUT `admin`.** The
+handle and `vendor` are returned at `read`; `mode` is not, because it says
+whether that agent runs contained and the lowest tier would otherwise read a
+map of which agents have full host access.
+
+⚠️ **THE ROUTE STAYS `read` RATHER THAN MOVING TO `admin`, and that was lee's
+ruling on #367.** `/api/agents/live` already returns the handle list at `read`,
+so moving this route would have protected one field by withholding a list that
+is already reachable.
+
+⚠️ **THE FILTER IS IN THE HANDLER, NOT IN `readRegistrations`.** The spawn path
+reads the same store and needs `mode`.
 
 🛑 **`/api/agents` IS NOT `/api/agents/live`.** `/live` is the socket register —
 who is connected right now. This one is what the operator configured. A handle
