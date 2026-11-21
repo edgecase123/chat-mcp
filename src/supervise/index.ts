@@ -285,15 +285,15 @@ export async function startSupervisor(
   }
 
   if (isContainerSpawn) {
-    const { readToken } = await import("./auth.js");
+    const { readVendorToken, missingVendorTokenMessage } =
+      await import("./auth.js");
     const { confirmVerdict, describeChanges } = await import("./container.js");
     const { buildConfirmPlan } = await import("./confirmPlan.js");
 
-    if (!readToken()) {
-      throw new Error(
-        "no Claude OAuth token on file; run `claude setup-token` on the host, then " +
-          "`pbpaste | chat-mcp auth set-token` (stdin, never argv)",
-      );
+    // Refused at START, for the same reason the override is: a throw at spawn
+    // time leaves the handle with no agent and no remedy.
+    if (!readVendorToken(opts.vendor)) {
+      throw new Error(missingVendorTokenMessage(opts.vendor));
     }
     // 🛑 COMPARED, NOT LATCHED. A per-handle boolean meant an override
     // written AFTER the first approval was shown to nobody, ever — the

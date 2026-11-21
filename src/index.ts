@@ -429,13 +429,21 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       },
     );
 
+  /** Declared out of line so the `.action` signature fits one line. */
+  type AuthOpts = { vendor: string };
+
   program
     .command("auth <action> [token]")
     .description(
-      "Manage the shared credentials for containerized agents: set-token, set-gh-token, clear-gh-token",
+      "Manage the per-vendor credentials for containerized agents: set-token, set-gh-token, clear-gh-token",
     )
-    .action(async (action: string, token?: string) => {
-      const { setToken, setGhToken, clearGhToken } =
+    .option(
+      "--vendor <name>",
+      "which agent CLI the token belongs to (set-token only)",
+      "claude",
+    )
+    .action(async (action: string, token: string | undefined, o: AuthOpts) => {
+      const { setVendorToken, setGhToken, clearGhToken } =
         await import("./supervise/auth.js");
 
       /**
@@ -468,13 +476,19 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       };
 
       if (action === "set-token") {
+        // 🛑 RESOLVED BEFORE THE SECRET IS READ, so a typo in `--vendor` does
+        // not cost the operator a second trip to a dashboard. `spawnFor`
+        // throws naming every vendor this build has. #347.
+        const { spawnFor } = await import("./adapters/index.js");
+        const vendor = spawnFor(o.vendor);
+
         const value = await readSecretFromStdin(
-          "`pbpaste | chat-mcp auth set-token`",
+          `\`pbpaste | chat-mcp auth set-token --vendor ${o.vendor}\``,
         );
 
         try {
-          setToken(value);
-          console.log("token stored (chmod 600)");
+          setVendorToken(vendor, value);
+          console.log(`token stored as ${vendor.authEnvVar} (chmod 600)`);
         } catch (err) {
           console.error(
             `chat-mcp: ${err instanceof Error ? err.message : String(err)}`,
