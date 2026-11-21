@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -185,4 +193,79 @@ test("the file is written owner-only, like every other state file", () => {
   if (process.platform !== "win32") {
     assert.equal(statSync(registrationsPath()).mode & 0o777, 0o600);
   }
+});
+
+/**
+ * 🛑 STAGE AND RENAME, BECAUSE THIS READER THROWS. Raised by claude2 on PR 360.
+ *
+ * `auth.ts`'s own docblock gives the reason for `secrets.env`: a
+ * truncate-in-place that dies mid-write leaves a plausible-looking partial.
+ * Here it is worse. `readRegistrations` refuses a malformed document, so one
+ * torn write stops EVERY handle rather than the one being written.
+ *
+ * 🛑 THE CONTROL IS A READ-ONLY LIVE FILE, NOT AN ABSENT TEMP FILE. Asserting
+ * no `.tmp` survives passes just as well when nothing was ever staged.
+ * `writeFileSync` on a 0400 file raises EACCES; `renameSync` over one succeeds,
+ * because replacing a directory entry needs the DIRECTORY's write bit and not
+ * the file's. So this goes red on a truncate-in-place writer and green on a
+ * staged one.
+ */
+test("🛑 the write is STAGED, so a torn write cannot take every handle down with it", (t) => {
+  if (process.platform === "win32" || process.getuid?.() === 0) {
+    t.skip("file modes are not enforceable here");
+    return;
+  }
+
+  writeFileSync(registrationsPath(), JSON.stringify({ agents: {} }));
+  chmodSync(registrationsPath(), 0o400);
+
+  registerAgent("staged", { vendor: "claude", mode: "docker" });
+
+  assert.deepEqual(registrationFor("staged"), {
+    vendor: "claude",
+    mode: "docker",
+  });
+});
+
+test("and no staging file survives the write", () => {
+  const leftovers = readdirSync(process.env.CHAT_MCP_HOME!).filter((f) =>
+    f.startsWith("agents.json."),
+  );
+
+  assert.deepEqual(leftovers, []);
+});
+
+/**
+ * 🛑 A WRITER THAT CREATES WHAT IT WAS ASKED TO REMOVE. Raised by claude2 on
+ * PR 360, and `overrideStore.ts`'s header states the principle: a module that
+ * creates the file it is about to read cannot tell "nothing configured" from
+ * "the operator's file is missing".
+ */
+test("🛑 unregistering a handle that was never registered creates NOTHING", () => {
+  process.env.CHAT_MCP_HOME = mkdtempSync(
+    join(tmpdir(), "chat-mcp-regs-cold-"),
+  );
+
+  unregisterAgent("nobody");
+
+  assert.equal(existsSync(registrationsPath()), false);
+  assert.equal(registrationFor("nobody"), null);
+});
+
+test("and nor does unregistering an absent handle from a file that DOES exist rewrite it", () => {
+  registerAgent("keeper", { vendor: "cursor", mode: "host" });
+  const before = readFileSync(registrationsPath(), "utf8");
+  // 🛑 THE INODE IS THE DISCRIMINATOR, NOT THE BYTES. A rewrite reproduces
+  // identical bytes, so a content comparison passes either way. A staged write
+  // renames a NEW file over this path, which changes the inode.
+  const inode = statSync(registrationsPath()).ino;
+
+  unregisterAgent("nobody");
+
+  assert.equal(readFileSync(registrationsPath(), "utf8"), before);
+  assert.equal(statSync(registrationsPath()).ino, inode);
+  assert.deepEqual(registrationFor("keeper"), {
+    vendor: "cursor",
+    mode: "host",
+  });
 });

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import {
   ensureStateDir,
@@ -177,23 +177,46 @@ export function registerAgent(
 
   const agents = { ...readRegistrations().agents, [handle]: record };
 
-  ensureStateDir();
-  writePrivateFileSync(
-    registrationsPath(),
-    `${JSON.stringify({ agents }, null, 2)}\n`,
-  );
+  writeRegistrations(agents);
 
   return record;
 }
 
-/** Forget a handle's registration entirely. Its siblings are untouched. */
+/**
+ * Forget a handle's registration. Its siblings are untouched.
+ *
+ * 🛑 A HANDLE WITH NO RECORD WRITES NOTHING, AND THAT INCLUDES NOT CREATING
+ * THE FILE. `overrideStore.ts`'s header states the principle: a module that
+ * creates the file it is about to read can no longer tell "nothing configured"
+ * from "the operator's file is missing". Raised by claude2 on PR 360.
+ */
 export function unregisterAgent(handle: string): void {
-  const agents = { ...readRegistrations().agents };
-  delete agents[handle];
+  const { agents } = readRegistrations();
 
+  if (!(handle in agents)) return;
+
+  const remaining = { ...agents };
+  delete remaining[handle];
+
+  writeRegistrations(remaining);
+}
+
+/**
+ * 🛑 STAGED AND RENAMED, NEVER TRUNCATED IN PLACE.
+ *
+ * `auth.ts`'s `writeSecrets` gives the reason for `secrets.env`: a write that
+ * dies partway leaves a plausible-looking partial. Here it is worse, because
+ * `readRegistrations` REFUSES a malformed document — so one torn write takes
+ * every handle down, not just the one being written. `renameSync` is atomic
+ * within a filesystem and carries the staging file's `0600` across, so the
+ * live path is never briefly wider.
+ */
+function writeRegistrations(agents: Record<string, AgentRegistration>): void {
   ensureStateDir();
-  writePrivateFileSync(
-    registrationsPath(),
-    `${JSON.stringify({ agents }, null, 2)}\n`,
-  );
+
+  const path = registrationsPath();
+  const staging = `${path}.${process.pid}.tmp`;
+
+  writePrivateFileSync(staging, `${JSON.stringify({ agents }, null, 2)}\n`);
+  renameSync(staging, path);
 }
