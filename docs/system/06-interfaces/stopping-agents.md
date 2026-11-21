@@ -31,6 +31,10 @@ agents.pid = 41   never refreshed   ->  not consulted at all
   that tidied up would race a supervisor binding at that moment.
 - **`boundAt` is the SUPERVISOR's age, not the child's.** A restart respawns
   the child without rebinding the socket.
+- **`boundAt` is `null` when the socket's mtime cannot be read**, and the page
+  renders "bound time unknown". It is NEVER substituted with the current time:
+  an unreadable socket read as one bound this second, which is the opposite of
+  the signal a caller needs (#373).
 
 ## The request
 

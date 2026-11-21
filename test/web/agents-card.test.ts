@@ -60,9 +60,12 @@ test("the age is labelled bound, because it is the socket's age and not the chil
 });
 
 /**
- * `boundAtOf` fails open, so a stat it cannot read becomes `Date.now()`. A
- * zero or negative delta must not render as "-1m", which reads as a bug in
- * the page rather than a missing stat.
+ * Clock skew between the socket's filesystem and this page can put the mtime
+ * in the future. A zero or negative delta must not render as "-1m", which
+ * reads as a bug in the page rather than as skew.
+ *
+ * 🛑 AN UNREADABLE STAT IS A DIFFERENT CASE and arrives as null, not as now —
+ * see the test below and `boundAtOf` (#373).
  */
 test("a clock that runs backwards reads as a moment ago, not a negative age", () => {
   const future = agentRow(live({ boundAt: NOW + 5000 }), { nowMs: NOW });
