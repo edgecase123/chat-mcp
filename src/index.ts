@@ -667,16 +667,41 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       // just been told to start. Keyed on the mode, a future alias is covered
       // the day it is added to `ALIASES`.
       if (selection.mode === "docker") {
-        const { prepareAgentImage, isConfirmed, markConfirmed, describePlan } =
-          await import("./supervise/container.js");
+        const {
+          prepareAgentImage,
+          confirmVerdict,
+          markConfirmed,
+          describePlan,
+          describeChanges,
+        } = await import("./supervise/container.js");
         const { buildConfirmPlan } = await import("./supervise/confirmPlan.js");
         const { execSync } = await import("node:child_process");
 
         // 🛑 CONSENT BEFORE THE BUILD. The build is minutes of docker, and
         // spending it before asking leaves an operator who answers "n" having
         // paid for an image they refused.
-        if (!isConfirmed(handle)) {
-          console.log(describePlan(buildConfirmPlan(vendor, handle)));
+        const plan = buildConfirmPlan(vendor, handle);
+        const verdict = confirmVerdict(handle, plan);
+
+        if (verdict.kind !== "confirmed") {
+          // 🛑 THE RE-PROMPT NAMES WHAT CHANGED. "the plan changed, approve
+          // it again" makes the operator diff two banners by eye, and the
+          // field that matters is the one they are least likely to spot.
+          if (verdict.kind === "changed") {
+            console.log(
+              `the container plan for "${handle}" changed since you approved it:`,
+            );
+            console.log(describeChanges(verdict.changes));
+            console.log("");
+          }
+          if (verdict.kind === "legacy") {
+            console.log(
+              `"${handle}" was approved before the plan was recorded, so there ` +
+                "is nothing to compare it against. Approving it again records it.",
+            );
+          }
+
+          console.log(describePlan(plan));
 
           // 🛑 REFUSES RATHER THAN READING EOF AS "no". `rl.question` resolves
           // to `''` with no terminal attached, which failed the `y` test and
@@ -702,7 +727,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
             console.log("aborted");
             return;
           }
-          markConfirmed(handle);
+          markConfirmed(handle, plan);
         }
 
         prepareAgentImage(() =>
