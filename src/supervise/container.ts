@@ -322,9 +322,13 @@ export function prepareAgentImage(
   // present. What this skip removes is paying for a build before that refusal,
   // not the refusal.
   if (image !== IMAGE_TAG) {
+    // 🛑 "NOT THE IMAGE THIS PROJECT BUILDS", NOT "not this project's image".
+    // `CURSOR_IMAGE_TAG` is declared in this very file, so a Cursor handle with
+    // no override at all would have been told its own image was somebody
+    // else's. Raised by claude2 reviewing this change.
     logLine(
-      `"${image}" is not this project's image, so ${IMAGE_TAG} is not built ` +
-        "for this handle",
+      `"${image}" is not the image this project builds (${IMAGE_TAG}), so ` +
+        "no image was built for this handle",
     );
     return;
   }
