@@ -232,10 +232,14 @@ test("no override names no raise, because an absent cap emits no install flag", 
 });
 
 /**
- * 🛑 THE TWO ROUTES ARE PINNED TOGETHER, NOT MERELY COINCIDING. The banner and
- * the install argv must read ONE floor. Two literals that happen to agree is
- * how this diverged in the first place — #346 shipped the floor and #349
- * shipped the banner, an hour apart, and nothing compared them.
+ * ⚠️ THIS PROVES THE TWO ROUTES AGREE ON THE VALUE. It does NOT prove they
+ * read one source, and an earlier version of this comment claimed it did.
+ * A re-duplicated `"1g"` agrees by construction, so this catches a floor that
+ * DRIFTS and not one that is COPIED. claude2 measured that on PR 349: a second
+ * copy inside `confirmPlan.ts` survived all 15 tests and typecheck.
+ *
+ * 🛑 THE SOURCING IS PINNED IN `confirm-plan-floor-sourcing.test.ts`, which
+ * replaces the exported function and fails if the banner stops calling it.
  */
 test("the banner's install values are exactly what the install argv carries", () => {
   const handle = `cp-pinned-${process.pid}`;
@@ -249,4 +253,47 @@ test("the banner's install values are exactly what the install argv carries", ()
     "--cpus",
     plan.installCpus,
   ]);
+});
+
+/**
+ * 🛑 A COMMENT CLAIMING "UNREACHABLE" IS NOT A GUARD. `capLine` returns early
+ * on a null agent cap, which would discard a non-null install cap without a
+ * word — the exact silent-drop this whole slice exists to stop. Both values
+ * come off one override today, so it throws instead of being commented about.
+ * Raised by claude2 on PR 349.
+ */
+test("🛑 an install cap with no agent cap throws rather than being dropped", () => {
+  assert.throws(
+    () =>
+      describePlan({
+        mountPaths: ["/work"],
+        envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+        binary: "claude",
+        networkMode: "bridge",
+        image: "chat-mcp-agent:local",
+        memory: null,
+        cpus: null,
+        installMemory: "1g",
+        installCpus: null,
+      }),
+    /cannot be described/,
+  );
+});
+
+/** ⚠️ CONTROL — both null is the ordinary uncapped case and must not throw. */
+test("⚠️ control — no caps at all describes as no limit, without throwing", () => {
+  const banner = describePlan({
+    mountPaths: ["/work"],
+    envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+    binary: "claude",
+    networkMode: "bridge",
+    image: "chat-mcp-agent:local",
+    memory: null,
+    cpus: null,
+    installMemory: null,
+    installCpus: null,
+  });
+
+  assert.match(banner, /memory: no limit/);
+  assert.match(banner, /cpus: no limit/);
 });

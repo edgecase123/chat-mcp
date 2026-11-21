@@ -303,6 +303,17 @@ const NO_LIMIT = "no limit";
  * by its absence.
  */
 function capLine(agent: string | null, install: string | null): string {
+  // 🛑 THROWS RATHER THAN DROPPING THE INSTALL VALUE. Unreachable today —
+  // both come off one `override` — but the `agent === null` early return
+  // would silently discard a non-null install cap, which is the shape this
+  // function exists to stop. Raised by claude2 on PR 349.
+  if (agent === null && install !== null) {
+    throw new Error(
+      `an install cap of "${install}" with no agent cap cannot be described; ` +
+        "the banner would drop it silently",
+    );
+  }
+
   if (agent === null) return NO_LIMIT;
   if (install === null || install === agent) return agent;
 
