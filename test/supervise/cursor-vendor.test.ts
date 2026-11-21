@@ -56,11 +56,19 @@ test("🛑 cursor-agent is spawned by ABSOLUTE path, because it is not on PATH",
   assert.equal(cursorSpawn.binary, CURSOR_HOST_BINARY);
 });
 
-test("🛑 the container binary path sits under the container HOME it declares", () => {
-  assert.ok(
-    CURSOR_CONTAINER_BINARY.startsWith(`${CURSOR_CONTAINER_HOME}/`),
-    "the bus resolves its state dir from HOME; a binary outside it means the two disagree",
-  );
+/**
+ * 🛑 THIS TEST USED TO ASSERT `CURSOR_CONTAINER_BINARY` SAT UNDER
+ * `CURSOR_CONTAINER_HOME`, AND IT PASSED ON A PATH TO NOTHING.
+ *
+ * Two constants compared to each other, wrong together: the binary constant
+ * said `/root/.local/bin/cursor-agent`, the image has no such directory, and
+ * the coupling it claimed — that the bus state dir and the CLI share a parent
+ * — is not one the image has. The binary's real home is the Dockerfile, and
+ * `container-binary.test.ts` reads it from there.
+ *
+ * What is left here is the part that was always true and is still load-bearing.
+ */
+test("🛑 cursor declares the container HOME the bus resolves its state dir from", () => {
   assert.equal(cursorSpawn.containerHome, CURSOR_CONTAINER_HOME);
 });
 

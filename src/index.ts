@@ -622,7 +622,13 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       "Run a supervisor that owns the agent CLI and feeds it arriving messages (chat-mcp#33)",
     )
     .option("--model <model>", "model for the supervised child")
-    .option("--binary <path>", "path to the agent CLI", "claude")
+    // 🛑 NO DEFAULT, FOR THE SAME REASON `--driver` HAS NONE. A static
+    // `"claude"` here was forwarded on every invocation, so
+    // `opts.binary ?? vendor.containerBinary` never reached the vendor's value
+    // from the command line — `--driver docker-cursor` exec'd `claude` inside
+    // the Cursor image and exited 127. Omitting it lets each vendor's own path
+    // win in both sandbox modes.
+    .option("--binary <path>", "path to the agent CLI")
     // 🛑 NO DEFAULT HERE. `--container` must be able to tell "the caller
     // never named a driver" from "the caller explicitly asked for the host
     // driver" — a static default of 'claude' erases that distinction, so

@@ -23,7 +23,8 @@ about itself before it can be spawned.
 
 |                          | Claude Code            | Cursor                                    |
 | ------------------------ | ---------------------- | ----------------------------------------- |
-| binary                   | `claude`, on `PATH`    | `cursor-agent`, **absolute path only**    |
+| binary, on the host      | `claude`, on `PATH`    | `cursor-agent`, **absolute path only**    |
+| binary, in the container | `claude`, on `PATH`    | `/usr/local/bin/cursor-agent`             |
 | installed by             | npm                    | `curl https://cursor.com/install \| bash` |
 | one process serves       | many turns             | **one turn**                              |
 | turn ends on             | `{"type":"result"}`    | `{"type":"result"}`                       |
@@ -137,10 +138,19 @@ is not.
 containerized Cursor spawn still fails on a missing image rather than silently
 running the Claude one.
 
-🛑 **`VendorSpawn.binary` is one string for both sandbox modes**, and the host
-path wins today. The host's `cursor-agent` lives under the user's home; the
-image's cannot. Reconciling those two is the container work's first job, not an
-assumption it may make.
+🛑 **`VendorSpawn` carries TWO binaries, because a container is a different
+filesystem.** `binary` is the host path and `containerBinary` is the one the
+image installs. Both are REQUIRED, so a new vendor cannot inherit the host path
+by omission.
+
+⚠️ **This used to be ONE field, and a containerized Cursor agent had never
+started.** The host path lives under the operator's home, which does not exist
+in the image, so the container exec'd it and exited 127. That reads as a dead
+agent rather than a missing CLI, which is why 2352 passing tests never saw it.
+
+🛑 **`--binary` has NO default, and that is the second half of the same fix.** A
+static `"claude"` on the option was forwarded on every invocation, so the
+vendor's own value was unreachable from the command line whatever the mode.
 
 ## One credential per vendor, never one for all of them
 

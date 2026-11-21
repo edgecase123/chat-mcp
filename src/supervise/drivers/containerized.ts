@@ -767,7 +767,13 @@ export function dockerRunPlan(
     effectiveImage(vendor, opts.containerOverride),
   );
 
-  const cli = [opts.binary ?? vendor.binary, ...vendor.argsFor(opts, "docker")];
+  // 🛑 `containerBinary`, BECAUSE THIS ARGV RUNS IN THE IMAGE'S FILESYSTEM.
+  // `vendor.binary` is the host path, and execing it here gave Cursor exit 127
+  // on every containerized start it ever had.
+  const cli = [
+    opts.binary ?? vendor.containerBinary,
+    ...vendor.argsFor(opts, "docker"),
+  ];
 
   // 🛑 ONE PUSH, SO THE TWO BRANCHES CANNOT DIVERGE AGAIN. Only a granted
   // spawn used to need a shell at all, so an install added to that branch

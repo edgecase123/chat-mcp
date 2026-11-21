@@ -56,7 +56,11 @@ export function buildConfirmPlan(
       ...ghEnvVar,
       ...Object.keys(override?.env ?? {}),
     ],
-    binary: vendor.binary,
+    // 🛑 THE CONTAINER BINARY, NEVER `vendor.binary`. Both callers gate on the
+    // docker mode, so this banner only ever describes a container — and a
+    // banner naming the host path asks the operator to approve a file that is
+    // not in the image.
+    binary: vendor.containerBinary,
     networkMode: NETWORK_MODE,
     // 🛑 THE EFFECTIVE IMAGE, NEVER `vendor.image`. The agent container, the
     // install container and the inspect guard all resolve it here too, so
