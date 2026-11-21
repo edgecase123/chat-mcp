@@ -56,6 +56,18 @@ export function unframeTurn(line: string): string | null {
     : null;
 }
 
+/** One turn's spawn request: the prompt, and the session it continues. */
+export interface TurnRequest {
+  readonly prompt: string;
+  /**
+   * ⚠️ UNDEFINED ON THE FIRST TURN OF A FRESH AGENT, AND THAT IS NOT THE ONLY
+   * CASE. A relay started by a RESTART carries the id it was asked to resume,
+   * so turn one of that relay continues a session rather than starting one —
+   * the same fallback `host.ts` records for the host path.
+   */
+  readonly resumeSessionId?: string;
+}
+
 export interface TurnRelayIo {
   /** The container's own stdin, carrying framed prompts from the supervisor. */
   readonly input: Readable;
@@ -72,7 +84,12 @@ export interface TurnRelayIo {
    * once. Sharing the function makes that unrepresentable. claude2 on PR 384.
    */
   readonly routeEvent: VendorSpawn["routeEvent"];
-  spawnTurn(prompt: string): ChildProcessWithoutNullStreams;
+  /**
+   * The id a RESTART was asked to resume, if any. Turn one has no event to
+   * read an id from, so this is the only place it can come from.
+   */
+  readonly initialSessionId?: string;
+  spawnTurn(turn: TurnRequest): ChildProcessWithoutNullStreams;
   /** Ends the relay, and with it the container. */
   exit(code: number | null): void;
 }
@@ -87,6 +104,31 @@ function takeLines(buffered: string): { lines: string[]; rest: string } {
 
 export function runTurnRelay(io: TurnRelayIo): void {
   let pending = "";
+
+  /**
+   * 🛑 ACROSS TURNS, NOT PER TURN, AND THE RELAY IS THE ONLY PARTY THAT CAN
+   * HOLD IT. Each turn is its own process and its exit happens inside the
+   * container, so the supervisor never sees a turn boundary to carry an id
+   * over. Without this every turn is a fresh session and the agent forgets the
+   * task between turns while still looking busy.
+   */
+  let sessionId = io.initialSessionId;
+
+  /**
+   * 🛑 ONE TURN AT A TIME, AND THE QUEUE THAT USUALLY ENFORCES THAT IS IN
+   * ANOTHER PROCESS. Two framed prompts arriving in one chunk used to start two
+   * children: their stdout interleaved into corrupt JSON on the one stream the
+   * supervisor parses, and — the quieter half — the second got no resume id, so
+   * the agent forgot the task.
+   *
+   * ⚠️ UNREACHABLE THROUGH THE SUPERVISOR TODAY, CHECKED NOT ASSUMED.
+   * `index.ts` holds the only `child.send` call site and `turn-queue.ts`
+   * dispatches only from `idle`. This guard exists because the contract between
+   * those two files and this process is unstated on both sides, and because
+   * serialising is also what makes `sessionId` single-writer. claude2 on PR 385.
+   */
+  const waiting: string[] = [];
+  let inTurn = false;
 
   io.input.setEncoding("utf8");
   io.input.on("data", (chunk: string) => {
@@ -113,12 +155,23 @@ export function runTurnRelay(io: TurnRelayIo): void {
         return;
       }
 
-      startTurn(io, prompt);
+      offer(prompt);
     }
   });
 
+  function offer(prompt: string): void {
+    if (inTurn) {
+      waiting.push(prompt);
+
+      return;
+    }
+
+    startTurn(io, prompt);
+  }
+
   function startTurn(relay: TurnRelayIo, prompt: string): void {
-    const child = relay.spawnTurn(prompt);
+    inTurn = true;
+    const child = relay.spawnTurn({ prompt, resumeSessionId: sessionId });
     let sawTurnEnd = false;
     let tail = "";
 
@@ -144,7 +197,12 @@ export function runTurnRelay(io: TurnRelayIo): void {
         usage: () => undefined,
         context: () => undefined,
         denial: () => undefined,
-        session: () => undefined,
+        // 🔴 ONLY EVER ASSIGNED, NEVER CLEARED. The router calls this only
+        // when an event carries a string id, so a turn whose events omit the
+        // field leaves the held id alone instead of dropping the session.
+        session: (id: string) => {
+          sessionId = id;
+        },
       });
     };
 
@@ -191,7 +249,32 @@ export function runTurnRelay(io: TurnRelayIo): void {
       // `cursor-agent` without `--trust` exits 1 having emitted nothing.
       // Reporting that as a turn end would advance the supervisor's queue past
       // a prompt that was never answered, so it propagates as a death.
-      if (!sawTurnEnd) relay.exit(code);
+      //
+      // 🛑 A DEATH BEATS THE QUEUE, AND RETURNS. Draining into a relay that is
+      // exiting would start a turn whose output nobody will read.
+      if (!sawTurnEnd) {
+        // 🛑 THE DROP NAMES ITSELF, same house rule as the unframed path: a
+        // dropped prompt that names itself beats a silent hang. The queue
+        // lives in the supervisor's process and cannot see this one exit.
+        if (waiting.length > 0) {
+          const plural = waiting.length === 1 ? "" : "s";
+
+          relay.errorOutput?.write(
+            `turn-relay: the turn died, so ${waiting.length} queued ` +
+              `prompt${plural} was discarded unanswered\n`,
+          );
+        }
+
+        relay.exit(code);
+
+        return;
+      }
+
+      inTurn = false;
+
+      const next = waiting.shift();
+
+      if (next !== undefined) startTurn(relay, next);
     });
   }
 }

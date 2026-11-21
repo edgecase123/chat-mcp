@@ -75,18 +75,24 @@ function fakeTurn(): FakeTurn {
   return turn;
 }
 
+interface TurnRequest {
+  readonly prompt: string;
+  readonly resumeSessionId?: string;
+}
+
 interface Harness {
   readonly input: PassThrough;
   readonly written: () => string;
   readonly errors: () => string;
   readonly turns: FakeTurn[];
   readonly prompts: string[];
+  readonly requests: TurnRequest[];
   readonly exits: (number | null)[];
   /** Feed one already-framed prompt, as the supervisor would. */
   send(prompt: string): void;
 }
 
-function harness(): Harness {
+function harness(initialSessionId?: string): Harness {
   const input = new PassThrough();
   const output = new PassThrough();
   let seen = "";
@@ -102,6 +108,7 @@ function harness(): Harness {
 
   const turns: FakeTurn[] = [];
   const prompts: string[] = [];
+  const requests: TurnRequest[] = [];
   const exits: (number | null)[] = [];
 
   runTurnRelay({
@@ -112,8 +119,10 @@ function harness(): Harness {
     // relay and the supervisor cannot disagree about a turn end, and a fake
     // router would be exactly the second opinion this is meant to exclude.
     routeEvent: routeCursorEvent,
-    spawnTurn: (prompt: string) => {
-      prompts.push(prompt);
+    initialSessionId,
+    spawnTurn: (request: TurnRequest) => {
+      requests.push(request);
+      prompts.push(request.prompt);
       const turn = fakeTurn();
       turns.push(turn);
 
@@ -128,6 +137,7 @@ function harness(): Harness {
     errors: () => errors,
     turns,
     prompts,
+    requests,
     exits,
     send: (prompt: string) => input.write(frameTurn(prompt)),
   };
@@ -350,4 +360,172 @@ test("🛑 a turn that fails to SPAWN exits the relay instead of throwing", () =
 
   assert.deepEqual(h.exits, [1]);
   assert.match(h.errors(), /failed to start/);
+});
+
+/**
+ * 🛑 WITHOUT A RESUME ID EVERY TURN IS A FRESH SESSION, so the agent forgets
+ * the task between turns while looking like it is working. The relay is the
+ * only party that can carry the id: the per-turn exits happen inside the
+ * container, so the supervisor never sees them.
+ */
+test("🛑 turn two resumes the session turn one reported", () => {
+  const h = harness();
+
+  h.send("first");
+  h.turns[0].say(
+    JSON.stringify({ type: "system", subtype: "init", session_id: "s-1" }),
+  );
+  h.turns[0].say(JSON.stringify({ type: "result", session_id: "s-1" }));
+  h.turns[0].exit(0);
+
+  h.send("second");
+
+  assert.equal(h.requests[0].resumeSessionId, undefined);
+  assert.equal(h.requests[1].resumeSessionId, "s-1");
+});
+
+/**
+ * ⚠️ THE FALLBACK IS NOT DEAD CODE, for the reason `host.ts` records: on turn
+ * one no event has arrived, so the only id available is the one a RESTART was
+ * asked to resume. Dropping it there is how a restarted agent loses its task.
+ */
+test("🛑 turn ONE resumes the id a restart was given", () => {
+  const h = harness("s-restored");
+
+  h.send("first");
+
+  assert.equal(h.requests[0].resumeSessionId, "s-restored");
+});
+
+test("the LAST id a turn reports wins", () => {
+  const h = harness();
+
+  h.send("first");
+  h.turns[0].say(JSON.stringify({ type: "system", session_id: "s-1" }));
+  h.turns[0].say(JSON.stringify({ type: "result", session_id: "s-2" }));
+  h.turns[0].exit(0);
+
+  h.send("second");
+
+  assert.equal(h.requests[1].resumeSessionId, "s-2");
+});
+
+/**
+ * 🔴 CONTROL — a turn that reports NO id must not CLEAR the one already held.
+ * Overwriting with undefined would silently drop the session on any turn whose
+ * events omit the field.
+ */
+test("🔴 control — a turn reporting no id leaves the previous one in place", () => {
+  const h = harness();
+
+  h.send("first");
+  h.turns[0].say(JSON.stringify({ type: "result", session_id: "s-1" }));
+  h.turns[0].exit(0);
+
+  h.send("second");
+  h.turns[1].say(JSON.stringify({ type: "result" }));
+  h.turns[1].exit(0);
+
+  h.send("third");
+
+  assert.equal(h.requests[2].resumeSessionId, "s-1");
+});
+
+/**
+ * 🛑 TWO FRAMED PROMPTS IN ONE CHUNK USED TO START TWO TURNS AT ONCE, and both
+ * symptoms are bad. The loud one is that their stdout interleaves into corrupt
+ * JSON on the one stream the supervisor parses. The QUIET one is that turn two
+ * gets `resume: undefined`, so the agent forgets the task — the exact bug this
+ * relay exists to prevent, reappearing by another door.
+ *
+ * ⚠️ NOT REACHABLE THROUGH THE SUPERVISOR TODAY, and that is checked rather
+ * than assumed: `index.ts` holds the only `child.send` call site tree-wide and
+ * `TurnQueue.dispatch` sends only from `idle`. The guard is here because
+ * the relay is a separate PROCESS from the queue that protects it, so the
+ * contract is unstated on both sides. claude2 on PR 385.
+ */
+test("🛑 two framed prompts in ONE chunk start ONE turn, not two", () => {
+  const h = harness();
+
+  h.input.write(frameTurn("first") + frameTurn("second"));
+
+  assert.equal(h.turns.length, 1);
+  assert.deepEqual(h.prompts, ["first"]);
+});
+
+test("🛑 the queued prompt starts when the running turn exits", () => {
+  const h = harness();
+
+  h.input.write(frameTurn("first") + frameTurn("second"));
+  h.turns[0].say(JSON.stringify({ type: "result", session_id: "s-1" }));
+  h.turns[0].exit(0);
+
+  assert.equal(h.turns.length, 2);
+  assert.equal(h.prompts[1], "second");
+});
+
+/**
+ * 🛑 THE QUIET HALF OF THE SAME BUG. Serialising is what makes `sessionId`
+ * single-writer, so the queued turn resumes rather than starting fresh.
+ */
+test("🛑 a queued prompt resumes the session the turn before it reported", () => {
+  const h = harness();
+
+  h.input.write(frameTurn("first") + frameTurn("second"));
+  h.turns[0].say(JSON.stringify({ type: "result", session_id: "s-1" }));
+  h.turns[0].exit(0);
+
+  assert.equal(h.requests[1].resumeSessionId, "s-1");
+});
+
+/**
+ * 🔴 CONTROL — queueing must not DELAY a prompt that arrives while idle. A
+ * guard that queued unconditionally would pass every test above and never
+ * start turn one.
+ */
+test("🔴 control — a prompt arriving while idle starts immediately", () => {
+  const h = harness();
+
+  h.send("only");
+
+  assert.equal(h.turns.length, 1);
+});
+
+/**
+ * 🛑 A DEATH BEATS THE QUEUE. If the running turn exits with no turn end the
+ * relay is gone, so a queued prompt must not be started into a dying relay.
+ */
+test("🛑 a queued prompt is NOT started when the running turn dies", () => {
+  const h = harness();
+
+  h.input.write(frameTurn("first") + frameTurn("second"));
+  h.turns[0].exit(1);
+
+  assert.equal(h.turns.length, 1, "a turn was started into a dying relay");
+  assert.deepEqual(h.exits, [1]);
+});
+
+/**
+ * 🛑 THE DROP NAMES ITSELF. The unframed path already refuses loudly, on the
+ * same house rule: a dropped prompt that names itself beats a silent hang. A
+ * death discarding a queued prompt is the same loss with no line to find it
+ * by. claude2 on PR 385.
+ */
+test("🛑 a queued prompt discarded by a death is NAMED on stderr", () => {
+  const h = harness();
+
+  h.input.write(frameTurn("first") + frameTurn("second"));
+  h.turns[0].exit(1);
+
+  assert.match(h.errors(), /1 queued prompt/);
+});
+
+test("🔴 control — a death with NOTHING queued says nothing about a drop", () => {
+  const h = harness();
+
+  h.send("only");
+  h.turns[0].exit(1);
+
+  assert.equal(h.exits.length, 1, "the death itself was not propagated");
+  assert.doesNotMatch(h.errors(), /queued prompt/);
 });
