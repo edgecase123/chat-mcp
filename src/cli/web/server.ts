@@ -706,12 +706,23 @@ function containerPlanFor(handle: string): PlanLookup {
     };
   }
 
+  let spawn;
+
   try {
-    return { plan: buildConfirmPlan(spawnFor(record.vendor), handle) };
+    spawn = spawnFor(record.vendor);
   } catch (e) {
-    // `spawnFor` is the only throw reachable here and it names the vendor.
+    // The only throw inside this try, and it names the vendor the operator
+    // typed. That is what makes 409 the right answer.
     return { error: (e as Error).message, status: 409 };
   }
+
+  // 🛑 OUTSIDE THE try, AND THAT IS THE WHOLE POINT. `buildConfirmPlan` reads
+  // the override store, and `resolveOverrideFor` THROWS on a malformed
+  // `overrides/<handle>.json` or a named profile that is not on disk. Caught
+  // above, a file fault on this machine would answer 409 — a refusal ABOUT THE
+  // HANDLE — and send the operator to inspect a registration that is fine.
+  // Found by claude2 on PR 376.
+  return { plan: buildConfirmPlan(spawn, handle) };
 }
 
 function isRefusal(lookup: PlanLookup): lookup is PlanRefusal {

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -70,8 +70,17 @@ async function harness(
     token: TOKEN,
     capabilities,
   };
+  // 🛑 THE PRODUCTION CATCH-ALL, MIRRORED FROM `server.ts`'s `createServer`.
+  // Without it a throw out of `route` is an unhandled rejection rather than
+  // the 500 a browser actually receives, so "this stays a 500" would be
+  // untestable here — which is the gap the file-fault test below closes.
   const server = createServer((req, res) => {
-    void route(req, res, ctx);
+    void route(req, res, ctx).catch((err: unknown) => {
+      if (res.headersSent) return;
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: (err as Error).message }));
+    });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
@@ -198,6 +207,36 @@ test("🛑 one unspawnable row 409s the PLAN route and does NOT take the list do
   const agents = ((await list.json()) as { agents: Record<string, unknown> })
     .agents;
   assert.ok(handle in agents, "the bad row still has to be listed");
+});
+
+test("🛑 a MALFORMED override file stays a 500; it is not a 409 about the handle", async (t) => {
+  const h = await harness();
+  t.after(() => close(h));
+
+  const handle = uniqueHandle("broken-override");
+  registerAgent(handle, { vendor: SPAWNABLE, mode: "docker" });
+
+  // `resolveOverrideFor` throws on this, and `buildConfirmPlan` calls it.
+  const dir = join(process.env.CHAT_MCP_HOME!, "overrides");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${handle}.json`), "{ not json");
+
+  const res = await getPlan(h, handle);
+
+  // 🛑 THE `notEqual` IS THE LOAD-BEARING HALF. A 409 is the card's "this
+  // handle cannot have a plan", so a file fault on the operator's own machine
+  // would send them to inspect a registration that is perfectly fine.
+  assert.notEqual(
+    res.status,
+    409,
+    "a fault in a file on this machine must not read as a refusal about the handle",
+  );
+  assert.equal(res.status, 500);
+  assert.match(
+    ((await res.json()) as { error: string }).error,
+    new RegExp(`overrides.${handle}\\.json`),
+    "the 500 has to name the file that is broken",
+  );
 });
 
 test("an unregistered handle is a 404, never a plan built from a default", async (t) => {
