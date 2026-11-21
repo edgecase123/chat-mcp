@@ -1391,8 +1391,9 @@ export function agentRow(agent, { nowMs = Date.now() } = {}) {
     // a second copy of the three-layer default in the browser.
     gate: agent.child?.context_gate ?? null,
     gateSource: agent.child?.context_gate_source ?? null,
-    // ⚠️ "bound", NEVER "uptime". `boundAtOf` fails open to now, and a clock
-    // that disagrees would otherwise render a negative age.
+    // ⚠️ "bound", NEVER "uptime". The clamp is for clock skew between the
+    // socket's mtime and this page, which would otherwise render "-1m".
+    // An unreadable stat is NOT that case — it arrives as null (#373).
     bound: known
       ? `bound ${ageLabel(Math.max(0, nowMs - boundAt))}`
       : "bound time unknown",

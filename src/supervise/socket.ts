@@ -318,13 +318,17 @@ export interface LiveSupervisor {
   readonly socketPath: string;
 
   /**
-   * When the socket file was created, as epoch milliseconds.
+   * When the socket file was created, as epoch milliseconds, or `null` when
+   * its mtime could not be read.
+   *
+   * 🛑 NULL MEANS UNKNOWN, NEVER NEW. Consumers must branch on it rather than
+   * substitute a default; `agentRow` renders "bound time unknown" (#373).
    *
    * ⚠️ THIS IS THE SUPERVISOR'S AGE, NOT THE CHILD'S. A restart respawns the
    * child without rebinding the socket, so a long age here says nothing about
    * how long the current agent session has been running.
    */
-  readonly boundAt: number;
+  readonly boundAt: number | null;
 }
 
 /**
@@ -371,17 +375,24 @@ export async function listLiveSupervisors(): Promise<LiveSupervisor[]> {
 }
 
 /**
- * The socket file's own mtime, or now when it cannot be read.
+ * The socket file's own mtime, or `null` when it cannot be read.
+ *
+ * 🛑 NULL RATHER THAN `Date.now()`. A caller that cannot stat the file knows
+ * something is wrong, and answering `now` discards exactly that — an
+ * unreadable socket rendered as one bound this second (#373).
  *
  * ⚠️ `mtime` RATHER THAN `birthtime`, which is zero on some filesystems. A
  * socket file is written once at `listen()` and never again, so its mtime is
  * its creation time.
+ *
+ * Exported only so a test can reach the catch. `listLiveSupervisors` calls it
+ * for paths that just answered a probe, and those can always be statted.
  */
-function boundAtOf(path: string): number {
+export function boundAtOf(path: string): number | null {
   try {
     return statSync(path).mtimeMs;
   } catch {
-    return Date.now();
+    return null;
   }
 }
 

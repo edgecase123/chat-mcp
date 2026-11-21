@@ -1,13 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  existsSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // Point CHAT_MCP_HOME at a scratch dir BEFORE importing anything that reads it.
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-live-"));
 
-const { WakeListener, listLiveSupervisors } =
+const { WakeListener, listLiveSupervisors, boundAtOf } =
   await import("../../src/supervise/socket.js");
 const { socketDir, socketPathFor, ensureSocketDir } =
   await import("../../src/util/paths.js");
@@ -77,7 +83,9 @@ test("each live supervisor carries when its socket was bound", async () => {
   try {
     const [s] = await listLiveSupervisors();
 
-    assert.equal(typeof s.boundAt, "number");
+    // A socket that just answered a probe can always be statted, so a live
+    // supervisor's bind time is never the unknown `null` (#373).
+    assert.ok(s.boundAt !== null, "a live supervisor has a known bind time");
     // Filesystem timestamps round down to the second on some filesystems, so
     // allow a second of slack below the moment the bind started.
     assert.ok(
@@ -109,4 +117,34 @@ test("a `.DS_Store` in the socket directory is skipped, not thrown on", async ()
   } finally {
     await l.close();
   }
+});
+
+/**
+ * #373 — the bind time FAILS OPEN, and that is the whole defect.
+ *
+ * 🛑 NO INTEGRATION TEST CAN REACH THIS. `listLiveSupervisors` only calls
+ * `boundAtOf` for a path that just answered a probe, and a socket that answers
+ * is a socket that can be statted. That is why `boundAtOf` is exported.
+ */
+test("a socket whose file cannot be statted has an UNKNOWN bind time, not a new one", () => {
+  const missing = socketPathFor("never-bound");
+
+  assert.equal(existsSync(missing), false, "the fixture must not exist");
+  assert.equal(boundAtOf(missing), null);
+});
+
+// The positive control. Without it the test above passes against a `boundAtOf`
+// that returns null for everything, which would blank the age on every row.
+test("a socket file that CAN be statted still reports its own mtime", () => {
+  ensureSocketDir();
+  const present = socketPathFor("statted");
+  writeFileSync(present, "");
+
+  const bound = boundAtOf(present);
+
+  assert.equal(typeof bound, "number");
+  assert.ok(
+    bound !== null && Math.abs(bound - statSync(present).mtimeMs) < 1,
+    `boundAtOf returned ${bound}, not the file's own mtime`,
+  );
 });
