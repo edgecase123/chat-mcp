@@ -501,10 +501,30 @@ function capLine(agent: string | null, install: string | null): string {
   return `${agent} (dependency install: ${install})`;
 }
 
+/**
+ * 🛑 ONE PER LINE AND QUOTED, FOR THE SAME REASON `asList` USES
+ * `JSON.stringify`. `", "` separated the mounts and is legal inside a mount
+ * key, so `["/work/a, b"]` and `["/work/a", "b"]` printed the same sentence
+ * and an operator could not tell which grant they were approving. A newline
+ * is legal in a path too, so the line break alone is not enough — the quotes
+ * are what make each entry's end visible. Mount keys are unvalidated BY
+ * DESIGN, see `mounts.ts`.
+ *
+ * ⚠️ `envVarNames` STAYS JOINED. `ENV_NAME` in `overrides.ts` is
+ * `/^[A-Z][A-Z0-9_]*$/`, so a name cannot contain a comma or a space and the
+ * one-line form is unambiguous there.
+ */
+function mountLines(mountPaths: readonly string[]): string[] {
+  return [
+    "  mounts:",
+    ...mountPaths.map((path) => `    ${JSON.stringify(path)}`),
+  ];
+}
+
 export function describePlan(plan: ContainerPlan): string {
   return [
     "This will run the agent inside a Docker container:",
-    `  mounts: ${plan.mountPaths.join(", ")}`,
+    ...mountLines(plan.mountPaths),
     `  env vars (names only): ${plan.envVarNames.join(", ")}`,
     `  binary: ${plan.binary}`,
     `  network: ${plan.networkMode}`,

@@ -297,3 +297,77 @@ test("⚠️ control — no caps at all describes as no limit, without throwing"
   assert.match(banner, /memory: no limit/);
   assert.match(banner, /cpus: no limit/);
 });
+
+function planWithMounts(mountPaths: readonly string[]) {
+  return {
+    mountPaths,
+    envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+    binary: "claude",
+    networkMode: "bridge",
+    image: "chat-mcp-agent:local",
+    memory: null,
+    cpus: null,
+    installMemory: null,
+    installCpus: null,
+  };
+}
+
+/**
+ * 🔴 #353. `", "` separated the mounts AND is legal inside a directory name,
+ * so one mount and two mounts rendered as the same sentence. `checkedMountPath`
+ * refuses the project root and symlinks, never a comma or a space, so the
+ * ambiguous name reaches the operator.
+ *
+ * ⚠️ A BARE COMMA IS NOT ENOUGH, because the separator carries a space too.
+ * The collision needs the comma AND the space inside the one name.
+ */
+test("🔴 one mount and two mounts do not describe identically", () => {
+  const one = describePlan(planWithMounts(["/work/a, b"]));
+  const two = describePlan(planWithMounts(["/work/a", "b"]));
+
+  assert.notEqual(
+    one,
+    two,
+    "an operator cannot consent to a grant they cannot tell apart from another",
+  );
+});
+
+/** The shape lee ruled on: one mount per line, so no separator is overloaded. */
+test("the banner prints one mount per line", () => {
+  const banner = describePlan(planWithMounts(["/work", "/mnt/notify"]));
+  const mounts = banner
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line === '"/work"' || line === '"/mnt/notify"');
+
+  assert.deepEqual(mounts, ['"/work"', '"/mnt/notify"']);
+});
+
+/**
+ * ⚠️ POSITIVE CONTROL. Without this, dropping every mount but the first would
+ * pass both tests above.
+ */
+test("⚠️ control — every mount still reaches the banner", () => {
+  const banner = describePlan(planWithMounts(["/work", "/mnt/notify", "/x"]));
+
+  for (const path of ["/work", "/mnt/notify", "/x"]) {
+    assert.ok(banner.includes(path), `the banner dropped ${path}`);
+  }
+});
+
+/**
+ * 🛑 THE LINE BREAK ALONE IS NOT ENOUGH, which is why each entry is quoted. A
+ * newline is legal in a path, so an unquoted one-per-line form reproduces the
+ * comma's collision exactly. This pins the claim the docblock makes.
+ *
+ * ⚠️ THE NAME CARRIES THE INDENT TOO. A bare `"\n"` is defeated by the four
+ * spaces each entry is printed with, so a test using one would pass without
+ * the quoting and prove nothing. Dropping `JSON.stringify` was measured to
+ * turn THIS case red.
+ */
+test("🛑 a mount name that forges a line break does not collide with two mounts", () => {
+  const one = describePlan(planWithMounts(["/work/a\n    b"]));
+  const two = describePlan(planWithMounts(["/work/a", "b"]));
+
+  assert.notEqual(one, two);
+});

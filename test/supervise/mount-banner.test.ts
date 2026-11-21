@@ -83,7 +83,7 @@ test("a fresh container spawn prepends the mount banner to the FIRST prompt only
     });
     assert.match(
       sent[0] ?? "",
-      /Mounted directories:.*local-context -> \/mnt\/local-context/s,
+      /Mounted directories:.*"local-context" -> \/mnt\/local-context/s,
     );
 
     children[0]?.finishTurn();
@@ -147,7 +147,7 @@ test("the docker-claude driver gets the mount banner even without an explicit co
     assert.equal(sent.length, 1, "the prompt must actually have been sent");
     assert.match(
       sent[0] ?? "",
-      /Mounted directories:.*local-context -> \/mnt\/local-context/s,
+      /Mounted directories:.*"local-context" -> \/mnt\/local-context/s,
     );
   } finally {
     await sup.stop();
@@ -181,6 +181,69 @@ test("a non-container (bare host) spawn never gets a mount banner", async () => 
     assert.equal(sent.length, 1, "the prompt must actually have been sent");
     assert.match(sent[0] ?? "", /hi/);
     assert.doesNotMatch(sent[0] ?? "", /Mounted directories:/);
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🔴 #353's SECOND SURFACE, found by claude2 on PR 357. `registerMount`
+ * validates the DIRECTORY and never the KEY, so a key carrying `", "` made one
+ * mount read as two and told the agent it had a directory it does not.
+ *
+ * ⚠️ THE READER IS THE AGENT, NOT THE OPERATOR. No two distinct key sets ever
+ * rendered identically here, because the entry embeds the key twice around a
+ * fixed ` -> `. This misinformed the child; it never corrupted consent.
+ */
+test("🔴 a mount key containing a comma and a space stays ONE entry of two", async () => {
+  const db = new DatabaseSync(":memory:");
+  migrate(db);
+  const handle = `mb-comma-${process.pid}`;
+  setToken("sk-ant-oat-x");
+
+  // 🛑 TWO MOUNTS, NOT ONE. With one, the line count cannot fail: the old
+  // joined format put everything on a single line, and that line contained
+  // `" -> /mnt/"` too. The assertion whose MESSAGE explains the defect has to
+  // be the one that goes red. Caught by claude2 on PR 357.
+  const extra = mkdtempSync(join(tmpdir(), "chat-mcp-mb-comma-"));
+  const extra2 = mkdtempSync(join(tmpdir(), "chat-mcp-mb-comma2-"));
+  registerMount(handle, "data, backup", extra);
+  registerMount(handle, "memory", extra2);
+  confirmHandle(handle);
+
+  const sent: string[] = [];
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: DIRS,
+      container: true,
+      log: () => undefined,
+      spawnChild: () => fakeChild(sent),
+    }),
+  );
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 1,
+      to: handle,
+      from: "lee",
+      ts: Date.now(),
+      body: "hi",
+    });
+
+    const banner = sent[0] ?? "";
+    const entryLines = banner
+      .split("\n")
+      .filter((line) => line.includes(" -> /mnt/"));
+
+    assert.equal(
+      entryLines.length,
+      2,
+      `two mounts must print as two lines, got:\n${banner}`,
+    );
+    assert.match(banner, /"data, backup" -> \/mnt\/data, backup/);
+    assert.match(banner, /"memory" -> \/mnt\/memory/);
   } finally {
     await sup.stop();
   }

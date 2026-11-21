@@ -336,13 +336,25 @@ export async function startSupervisor(
     if (!needsMountBanner) return "";
     needsMountBanner = false;
 
+    // 🛑 ONE PER LINE, KEY QUOTED, for the reason `describePlan` is. A mount
+    // key is unvalidated by design, so `", "` inside one made a single entry
+    // read as two and told the agent it had a directory it does not.
+    //
+    // ⚠️ NOT AN EXACT COLLISION, unlike the consent banner's. The entry embeds
+    // the key twice around a fixed ` -> `, so no two distinct key sets render
+    // identically — measured by exhaustive search over adversarial keys. This
+    // misinforms the child; it never corrupted an operator's consent.
+    //
+    // Rejected: sharing a formatter with `describePlan`. That one quotes a
+    // whole path and this one quotes only the left half of an arrow, so the
+    // common part is a two-space indent and extracting it helps nobody.
     const entries = Object.entries(mountsFor(opts.handle)).map(
-      ([key]) => `${key} -> ${containerPathFor(key)}`,
+      ([key]) => `  ${JSON.stringify(key)} -> ${containerPathFor(key)}`,
     );
 
     return entries.length === 0
       ? ""
-      : `Mounted directories: ${entries.join(", ")}.\n\n`;
+      : `Mounted directories:\n${entries.join("\n")}\n\n`;
   };
 
   const childCwd = resolveCwd(opts.cwd, dirs);

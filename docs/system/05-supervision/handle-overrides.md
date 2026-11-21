@@ -312,6 +312,40 @@ install-path fix above.
 **`describePlan` builds its `mounts:` line from `readMounts()` and its
 `env vars` line from the vendor plus `GH_TOKEN`.**
 
+🛑 **MOUNTS PRINT ONE PER LINE, EACH ONE QUOTED.** The old `", "` join was
+ambiguous, because a mount key may contain a comma and a space — so
+`["/work/a, b"]` and `["/work/a", "b"]` printed the same sentence and an
+operator could not tell which grant they were approving. A newline is legal in
+a path too, so the line break alone is not enough and the quotes are what mark
+each entry's end. This is the banner half of the same defect `asList` fixed on
+the fingerprint side, where the reasoning is written up in full.
+
+```
+This will run the agent inside a Docker container:
+  mounts:
+    "/work"
+    "/mnt/notify"
+  env vars (names only): CLAUDE_CODE_OAUTH_TOKEN
+```
+
+⚠️ **`env vars` stays on one line.** `ENV_NAME` is `/^[A-Z][A-Z0-9_]*$/`, so a
+name cannot contain a comma or a space and the joined form is unambiguous.
+
+🛑 **THE AGENT'S OWN MOUNT BANNER HAD THE SAME JOIN**, in
+`mountBannerPrefix` (`supervise/index.ts`). It now prints one entry per line
+with the KEY quoted:
+
+```
+Mounted directories:
+  "local-context" -> /mnt/local-context
+  "data, backup" -> /mnt/data, backup
+```
+
+⚠️ **That one was never an exact collision**, unlike the consent banner's. The
+entry embeds the key twice around a fixed `->`, so no two distinct key sets
+rendered identically — measured by exhaustive search. It misinformed the child
+about its own filesystem; it never corrupted an operator's consent.
+
 ✅ **`image:` is now on the banner, and it is the EFFECTIVE image.** The line
 is resolved through `effectiveImage`, the same function the agent container,
 the install container and the inspect guard read — so the banner cannot name
