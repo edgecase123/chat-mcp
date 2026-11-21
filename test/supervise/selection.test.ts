@@ -107,27 +107,48 @@ test("an unregistered handle resolves exactly as the flag-only path did", () => 
 });
 
 /**
- * 🛑 A MALFORMED FILE MUST THROW, NOT FALL BACK TO THE DEFAULT PAIR.
+ * 🛑 AN UNREADABLE FILE MUST THROW, NOT FALL BACK TO THE DEFAULT PAIR.
  *
  * `try { registrationFor() } catch { return resolveDriver() }` is the obvious
- * implementation and it is the dangerous one: a stray comma would start every
+ * implementation and it is the dangerous one: one bad byte would start every
  * handle uncontained on `claude` while the operator's file says otherwise, and
- * nothing would say so. `readRegistrations` escalates on purpose — this test
- * pins that the escalation survives composition.
+ * nothing would say so. `readRegistrations` escalates on purpose — these cases
+ * pin that the escalation survives composition.
+ *
+ * 🛑 BOTH REFUSAL PATHS ARE COVERED, BECAUSE THEY ARE DIFFERENT GUARDS. A
+ * stray comma dies in the `JSON.parse` wrapper at `registrations.ts:119`; a
+ * mode outside `host | docker` dies in `parseRecord` at `:88`. An earlier cut
+ * of this test named the comma and exercised only the second, so the claim
+ * was true and this test was not what proved it. Raised by claude2 on PR 362.
+ *
+ * ⚠️ THE REGEX ANCHORS ON THE REFUSAL PREFIX, NOT ON A WORD IN THE DETAIL.
+ * `/mode/` greened on any error whose message happened to contain "mode".
  */
-test("a malformed agents.json throws rather than falling back to the default pair", () => {
-  const broken = mkdtempSync(join(tmpdir(), "chat-mcp-selection-broken-"));
-  writeFileSync(
-    join(broken, "agents.json"),
+for (const [label, bytes] of [
+  ["a stray comma", '{"agents":{"x":{"vendor":"cursor","mode":"host"},}}'],
+  [
+    "a mode outside host|docker",
     '{"agents":{"x":{"vendor":"cursor","mode":"nope"}}}',
-  );
+  ],
+  [
+    "a key this file refuses",
+    '{"agents":{"x":{"vendor":"cursor","mode":"host","profile":"p"}}}',
+  ],
+] as const) {
+  test(`${label} in agents.json throws rather than falling back to the default pair`, () => {
+    const broken = mkdtempSync(join(tmpdir(), "chat-mcp-selection-broken-"));
+    writeFileSync(join(broken, "agents.json"), bytes);
 
-  const prior = process.env.CHAT_MCP_HOME;
-  process.env.CHAT_MCP_HOME = broken;
+    const prior = process.env.CHAT_MCP_HOME;
+    process.env.CHAT_MCP_HOME = broken;
 
-  try {
-    assert.throws(() => selectionFor("x", {}), /mode/);
-  } finally {
-    process.env.CHAT_MCP_HOME = prior;
-  }
-});
+    try {
+      assert.throws(
+        () => selectionFor("x", {}),
+        /refusing .*agents\.json|cannot read .*agents\.json/,
+      );
+    } finally {
+      process.env.CHAT_MCP_HOME = prior;
+    }
+  });
+}
