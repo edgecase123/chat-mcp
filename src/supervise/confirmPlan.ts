@@ -35,8 +35,27 @@ export function buildConfirmPlan(
   const ghEnvVar = hasGhToken() ? [CONTAINER_GH_TOKEN_ENV] : [];
 
   return {
-    mountPaths: ["/work", ...extra],
-    envVarNames: [vendor.authEnvVar, ...ghEnvVar],
+    // 🛑 THE OVERRIDE'S MOUNTS BELONG HERE, OR THE SPAWN GRANTS A DIRECTORY
+    // THE OPERATOR WAS NEVER SHOWN. `readMounts()` covers the `/mnt/<key>`
+    // registrations only; `readOnlyMounts` is a second source and reaches the
+    // same container.
+    //
+    // ⚠️ THE CONTAINER PATH, NOT THE DECLARED ONE. `dockerRunPlan` emits
+    // `/work/<entry>`, so a banner printing the bare relative string would
+    // describe a destination the container does not have.
+    mountPaths: [
+      "/work",
+      ...extra,
+      ...(override?.readOnlyMounts ?? []).map((entry) => `/work/${entry}`),
+    ],
+    // 🛑 NAMES ONLY, AND THE OVERRIDE'S NAMES COUNT. `assertEnv` refuses every
+    // reserved credential, so nothing here can collide with the two above —
+    // and an operator reads this line to learn what the container is handed.
+    envVarNames: [
+      vendor.authEnvVar,
+      ...ghEnvVar,
+      ...Object.keys(override?.env ?? {}),
+    ],
     binary: vendor.binary,
     networkMode: NETWORK_MODE,
     // 🛑 THE EFFECTIVE IMAGE, NEVER `vendor.image`. The agent container, the

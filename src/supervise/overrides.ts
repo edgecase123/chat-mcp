@@ -320,6 +320,28 @@ export function assertCpus(value: unknown): string {
 }
 
 /**
+ * The `env` and `readOnlyMounts` checks, reachable from the consumer that puts
+ * them in an argv.
+ *
+ * 🛑 THE SAME ARGUMENT AS `assertImageRef`, AND IT BITES HARDEST ON `env`.
+ * `dockerRunPlan` takes `SpawnOptions.containerOverride` directly, so a caller
+ * that never went through `resolveOverrideFor` reaches the `-e NAME` slot with
+ * no check — and `docker run -e NAME` copies this process's own value, so an
+ * unchecked name re-declaring a credential decides which token the agent
+ * receives.
+ *
+ * ⚠️ THEY WRAP THE STORE'S CHECKERS rather than re-reading the rules, so the
+ * store cannot accept what the consumer refuses.
+ */
+export function assertEnv(value: unknown): Record<string, string> {
+  return checkEnv(value);
+}
+
+export function assertReadOnlyMounts(value: unknown): string[] {
+  return checkReadOnlyMounts(value);
+}
+
+/**
  * A profile name, which is deliberately narrower than a filename.
  *
  * 🛑 THE NAME BECOMES A PATH SEGMENT. Refusing the dot and the slash outright

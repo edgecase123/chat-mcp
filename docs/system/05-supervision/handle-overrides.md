@@ -199,15 +199,35 @@ back to. Raised by claude2 reviewing PR 337.
 the handle with no agent and no remedy short of restarting the supervisor. The
 cost is that editing a file mid-session needs a supervisor restart.
 
-### What is wired, and what is not
+### What is wired
 
-| key              | wired          | why not                                                    |
-| ---------------- | -------------- | ---------------------------------------------------------- |
-| `memory`         | ✅ `--memory`  | both containers — the install one has a floor, see below   |
-| `cpus`           | ✅ `--cpus`    | both containers — the install one has a floor, see below   |
-| `image`          | ✅ the operand |                                                            |
-| `env`            | ❌             | the operator's consent banner must show it too — see below |
-| `readOnlyMounts` | ❌             | same banner, and it must route through `checkedMountPath`  |
+**All five keys reach a spawn, and all five are named on the consent banner.**
+
+| key              | wired             | how                                                      |
+| ---------------- | ----------------- | -------------------------------------------------------- |
+| `memory`         | ✅ `--memory`     | both containers — the install one has a floor, see below |
+| `cpus`           | ✅ `--cpus`       | both containers — the install one has a floor, see below |
+| `image`          | ✅ the operand    |                                                          |
+| `env`            | ✅ `-e NAME`      | by name only; the value goes in the docker client's env  |
+| `readOnlyMounts` | ✅ `-v host:…:ro` | through the same loop as `SpawnOptions.readOnlyPaths`    |
+
+🛑 **`env` IS PUSHED BY NAME, NEVER `NAME=value`.** An argv entry is readable
+through `ps` for the life of the container, which `AGENTS.md` forbids in those
+words. `dockerRunPlan` spreads the override's values into the environment it
+hands the docker client, and docker copies them in — the same mechanism the
+three credentials already use.
+
+🛑 **`readOnlyMounts` ADDS NO SECOND EMITTER.** Its entries are concatenated
+onto `opts.readOnlyPaths` and emitted by that one loop, so they get the same
+`checkedMountPath` containment check and the same `node_modules` collision
+refusal. A second emitter is how one of the two lists comes to miss a guard the
+other one has.
+
+⚠️ **One spec per destination.** The loop dedupes on the resolved container
+path, because docker refuses a duplicate destination and names neither mount.
+That cannot drop a distinct mount: `checkedMountPath` derives the destination
+from the declared string and refuses any symlink, so one destination always
+resolves to one host path.
 
 🛑 **`image` HAS THREE READERS AND ONE RESOLVER.** `effectiveImage(vendor,
 opts)` in `drivers/containerized.ts` is the only place the choice is made.
@@ -315,15 +335,24 @@ same reason `image` is — optional fields let a future caller go back to
 describing nothing, and making them required turned exactly two callers red.
 
 ```
-image            NAMED. the effective one, override included.
-memory / cpus    NAMED, and `no limit` when no override sets them
-env / readOnlyMounts   not wired yet; they reach no spawn today
+image              NAMED. the effective one, override included.
+memory / cpus      NAMED, and `no limit` when no override sets them
+env vars           NAMED. the override's names join the credentials'.
+mounts             NAMED. `/work/<entry>` per readOnlyMounts entry.
 ```
 
-⚠️ **`isConfirmed` latches per handle, so the banner is shown on the FIRST
-start only.** An override written after that first start is shown to nobody at
-any time. That is why `env` and `readOnlyMounts` are not wired ahead of the
-banner.
+🛑 **THE BANNER PRINTS THE CONTAINER PATH, NOT THE DECLARED STRING.** An
+override naming `docs` reaches the container at `/work/docs`, so that is what
+the operator reads. A banner printing the bare relative path would describe a
+destination the container does not have.
+
+⚠️ **The env line is names only, and that is deliberate.** An operator reads it
+to learn what the container is handed, not to read back a secret.
+
+✅ **A change to either key re-prompts, with no extra wiring.** `mountPaths`
+and `envVarNames` were already `ContainerPlan` fields that `diffPlans` reads,
+so an override edited after the first approval fails the fingerprint check and
+the operator is told which line moved.
 
 ## Related docs
 
