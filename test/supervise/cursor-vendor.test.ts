@@ -173,6 +173,35 @@ test("🛑 a session id on a NON-terminal event is routed, and does not end the 
   assert.deepEqual(r.calls, ["session:sess-9"]);
 });
 
+/**
+ * 🛑 THE MEASURED CASE, AND IT IS THE FIRST LINE OF A REAL STREAM. Copied from
+ * a live cursor-agent 2026.11.19-f005e9d run: the init event carries the
+ * session id before the prompt is even echoed back.
+ *
+ * ⚠️ THIS IS WHY THE ROUTING CANNOT BE TERMINAL-ONLY. A turn that crashes
+ * after init would otherwise lose its id, and the grant stops being resumable
+ * with nothing saying so. An earlier docblock claimed the id arrived only on
+ * the result event; the live run says otherwise.
+ */
+test("🛑 the INIT event's session id is routed, measured against a live run", () => {
+  const r = recorder();
+
+  routeCursorEvent(
+    {
+      type: "system",
+      subtype: "init",
+      apiKeySource: "login",
+      cwd: "/work",
+      session_id: "2fb62aea-5657-4e6d-a70c-07d35e831a27",
+      model: "Auto",
+      permissionMode: "default",
+    },
+    r.on,
+  );
+
+  assert.deepEqual(r.calls, ["session:2fb62aea-5657-4e6d-a70c-07d35e831a27"]);
+});
+
 test("🔴 the usage and context sinks are NEVER called, matching both declarations", () => {
   // 🛑 #219 IS THE FAILURE THIS GUARDS. Declaring `reportsUsage: true` while
   // the router never calls the sink tells the operator a reading is coming and
@@ -183,18 +212,27 @@ test("🔴 the usage and context sinks are NEVER called, matching both declarati
 
   const r = recorder();
 
-  // The real shapes measured on #317: token counts on the result event, and
-  // no window total anywhere.
+  // 🛑 THE FIELD NAMES ARE CURSOR'S OWN, COPIED FROM A LIVE RUN of
+  // cursor-agent 2026.11.19-f005e9d. An earlier cut of this payload used
+  // Claude Code's snake_case names and called them measured — they are
+  // camelCase, there is no window total, and `reasoningTokens` has no Claude
+  // equivalent. Nothing failed, because the point of the test is that the sink
+  // stays SILENT, and a payload the router ignores is silent either way.
+  //
+  // ⚠️ WHICH IS WHY A WRONG SHAPE HERE IS WORTH CORRECTING RATHER THAN
+  // SHRUGGING AT. The next person to wire `reportsUsage` reads this payload as
+  // the contract.
   routeCursorEvent(
     {
       type: "result",
+      subtype: "success",
       session_id: "s",
       usage: {
-        input_tokens: 10,
-        output_tokens: 20,
-        cache_read_input_tokens: 0,
-        cache_creation_input_tokens: 0,
-        total_tokens: 30,
+        inputTokens: 13918,
+        outputTokens: 57,
+        cacheReadTokens: 3968,
+        cacheWriteTokens: 0,
+        reasoningTokens: 56,
       },
     },
     r.on,

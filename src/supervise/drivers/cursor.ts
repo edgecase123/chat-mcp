@@ -97,13 +97,16 @@ export function routeCursorEvent(
     session?(id: string): void;
   },
 ): void {
-  // 🛑 ANY EVENT THAT CARRIES ONE, NOT THE TERMINAL EVENT ONLY. On #317 the id
-  // was observed on the result event, so a resumable grant is in practice
-  // known once the first turn has finished — but that is an OBSERVATION of one
-  // CLI build and this routing does not depend on it. Narrowing to
-  // `type === "result"` would drop the id from a build that emits it earlier,
-  // and the only symptom is a grant that silently stops being resumable.
-  // Pinned by the non-terminal case in `cursor-vendor.test.ts`.
+  // 🛑 THE ID ARRIVES ON THE INIT EVENT, WHICH IS THE FIRST LINE OF THE
+  // STREAM. Measured against cursor-agent 2026.11.19-f005e9d:
+  // `{"type":"system","subtype":"init",...,"session_id":"..."}` precedes the
+  // prompt echo, and every later event repeats the same id.
+  //
+  // 🛑 SO A RESUMABLE GRANT IS KNOWN BEFORE THE FIRST TURN ENDS, and
+  // narrowing this to `type === "result"` would defer it by a whole turn —
+  // losing the id entirely for a turn that crashes. An earlier cut of this
+  // comment claimed the opposite and no test could tell. Pinned by the
+  // non-terminal case in `cursor-vendor.test.ts`.
   const id = event.session_id;
 
   if (typeof id === "string" && on.session) on.session(id);
