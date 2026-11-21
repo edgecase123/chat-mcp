@@ -6,6 +6,7 @@ import {
   dockerfileText,
   stageDirectives,
   stageLineage,
+  vendorStagesIn,
 } from "./dockerfile-stages.js";
 
 /**
@@ -150,4 +151,75 @@ test("⚠️ the repo's Dockerfile resolves for every vendor in AGENT_VENDORS", 
       `${vendor}: resolved only ${directives.length} directives, which is too few to be the whole image`,
     );
   }
+});
+
+/**
+ * 🛑 THE CONTROL FOR `stageLineage`'s REWRITE. It used to rebuild the lineage by
+ * testing each stage's directives for membership in the flattened STRING set,
+ * so one directive shared between siblings named a stage the build never
+ * visited. `WORKDIR /app` in both vendor stages is all it took.
+ *
+ * ⚠️ IT FAILED SAFE, WHICH IS WHY IT WAS A 🟡 AND NOT A 🔴 — over-reporting made
+ * the two lineages look identical, so the control went RED. Raised by claude1.
+ */
+const SHARED_DIRECTIVE = [
+  "ARG AGENT_VENDOR=claude",
+  "FROM node:22-slim AS base",
+  "RUN in-base",
+  "FROM base AS cli-claude",
+  "WORKDIR /app",
+  "RUN in-claude",
+  "FROM base AS cli-cursor",
+  "WORKDIR /app",
+  "RUN in-cursor",
+  "FROM cli-${AGENT_VENDOR} AS final",
+  "RUN in-final",
+].join("\n");
+
+test("🛑 a directive duplicated across sibling stages does not put the unreached one in the lineage", () => {
+  assert.deepEqual(stageLineage(SHARED_DIRECTIVE, "claude"), [
+    "base",
+    "cli-claude",
+    "final",
+  ]);
+  assert.deepEqual(stageLineage(SHARED_DIRECTIVE, "cursor"), [
+    "base",
+    "cli-cursor",
+    "final",
+  ]);
+});
+
+test("⚠️ control — the duplicated directive really is in both stages, so the fixture tests what it claims", () => {
+  assert.equal(
+    [...SHARED_DIRECTIVE.matchAll(/^WORKDIR \/app$/gm)].length,
+    2,
+    "the fixture must contain the same directive twice, or it proves nothing",
+  );
+  assert.equal(
+    stageDirectives(SHARED_DIRECTIVE, "claude").filter(
+      (d) => d === "WORKDIR /app",
+    ).length,
+    1,
+    "only the reached copy may appear in the flattened lineage",
+  );
+});
+
+/**
+ * 🛑 ZERO VENDOR STAGES MUST THROW. Three suites loop over `AGENT_VENDORS`, so a
+ * parse that found nothing would emit no tests at all and every one of them
+ * would report green.
+ */
+test("🛑 a Dockerfile with no cli-<vendor> stage throws, rather than yielding an empty vendor list", () => {
+  assert.throws(
+    () => vendorStagesIn("FROM node:22-slim AS base\nRUN one"),
+    /no `AS cli-<vendor>` stage/,
+  );
+});
+
+test("⚠️ control — the same parse finds both vendors in the repo's own Dockerfile", () => {
+  assert.deepEqual([...vendorStagesIn(dockerfileText())].sort(), [
+    "claude",
+    "cursor",
+  ]);
+  assert.deepEqual([...AGENT_VENDORS].sort(), ["claude", "cursor"]);
 });

@@ -25,21 +25,48 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-/**
- * Every vendor the image can be built for.
- *
- * 🛑 EVERY ORDERING ASSERTION RUNS ONCE PER ENTRY. A vendor added here with no
- * matching `cli-<vendor>` stage fails loudly in `stageDirectives`, which is the
- * intended direction — the alternative is a vendor nothing asserts on.
- */
-export const AGENT_VENDORS = ["claude", "cursor"] as const;
+export type AgentVendor = string;
 
-export type AgentVendor = (typeof AGENT_VENDORS)[number];
+/**
+ * Every vendor the image can be built for, READ OUT OF THE DOCKERFILE.
+ *
+ * 🛑 DERIVED, NEVER LISTED, AND THE DIRECTION THAT MATTERS IS THE QUIET ONE. A
+ * hardcoded list here was a THIRD copy of the vendor set, beside
+ * `vendorsWithSpawn()` and the `cli-*` stages. Adding a vendor to the PRODUCT
+ * and forgetting this file left all three Dockerfile suites silently skipping
+ * it — a guard going quiet rather than loud. Raised by claude1 on PR 361.
+ *
+ * `dockerfile-vendor-stages.test.ts` asserts this derived set equals
+ * `vendorsWithSpawn()`, which closes the other direction: a stage named for a
+ * vendor the build cannot spawn.
+ *
+ * 🛑 THROWS ON AN EMPTY RESULT. Every per-vendor assertion in three suites is a
+ * `for` loop over this array, so a parse that found nothing would emit ZERO
+ * tests and report green.
+ */
+export function vendorStagesIn(dockerfile: string): string[] {
+  const names = [
+    ...dockerfile.matchAll(/^FROM\s+\S+\s+AS\s+cli-(\S+)\s*$/gim),
+  ].map((m) => m[1]!.toLowerCase());
+
+  if (names.length === 0) {
+    throw new Error(
+      "Dockerfile declares no `AS cli-<vendor>` stage, so every per-vendor " +
+        "assertion would run zero times and the suites would report green.",
+    );
+  }
+
+  return names;
+}
 
 /** The repo's own Dockerfile, read from the working directory the suite runs in. */
 export function dockerfileText(): string {
   return readFileSync(join(process.cwd(), "Dockerfile"), "utf8");
 }
+
+/** The repo's vendors, derived once at import. See `vendorStagesIn`. */
+export const AGENT_VENDORS: readonly string[] =
+  vendorStagesIn(dockerfileText());
 
 /**
  * 🛑 COMMENTS STRIPPED FIRST, AND THAT IS NOT TIDYING. The comment above each
@@ -106,10 +133,7 @@ function parseStages(dockerfile: string): Stage[] {
  * what it could resolve is a suite that asserts over three directives and
  * passes.
  */
-export function stageDirectives(
-  dockerfile: string,
-  vendor: AgentVendor,
-): string[] {
+function lineageOf(dockerfile: string, vendor: AgentVendor): Stage[] {
   const stages = parseStages(dockerfile);
   const last = stages.at(-1);
 
@@ -162,22 +186,35 @@ export function stageDirectives(
     current = next;
   }
 
-  return lineage.flatMap((stage) => stage.directives);
+  return lineage;
+}
+
+export function stageDirectives(
+  dockerfile: string,
+  vendor: AgentVendor,
+): string[] {
+  return lineageOf(dockerfile, vendor).flatMap((stage) => stage.directives);
 }
 
 /**
  * The stage names the build for `vendor` passes through, ancestor first.
  * Exposed so a test can assert the lineage DIFFERS between vendors — without
  * that, every per-vendor assertion could be running twice over one image.
+ *
+ * 🛑 THE NAMES COME FROM THE WALK, NOT FROM MATCHING ITS RESULT. An earlier cut
+ * rebuilt the lineage by testing each stage's directives for membership in the
+ * flattened STRING set, so two sibling stages sharing one identical directive —
+ * a `WORKDIR`, a `USER`, any repeated `RUN` — put the UNREACHED stage in the
+ * reported lineage. This function IS the control for "are the two per-vendor
+ * assertions running over two different images", so a control that re-derives
+ * by string match is one duplicate line from naming a stage it never visited.
+ * Raised by claude1 on PR 361.
  */
 export function stageLineage(
   dockerfile: string,
   vendor: AgentVendor,
 ): string[] {
-  const stages = parseStages(dockerfile);
-  const reached = new Set(stageDirectives(dockerfile, vendor));
-
-  return stages
-    .filter((stage) => stage.directives.some((d) => reached.has(d)))
-    .map((stage) => stage.name ?? "(unnamed)");
+  return lineageOf(dockerfile, vendor).map(
+    (stage) => stage.name ?? "(unnamed)",
+  );
 }

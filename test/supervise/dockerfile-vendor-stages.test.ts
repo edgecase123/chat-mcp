@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { vendorsWithSpawn } from "../../src/adapters/index.js";
 import {
   AGENT_VENDORS,
   dockerfileText,
@@ -72,10 +73,43 @@ test("🛑 the final stage's base interpolates AGENT_VENDOR, so the two lineages
  * while shipping a 175 MB Cursor bundle inside the claude image and handing
  * each vendor's adapter a binary it must not use.
  */
-const VENDOR_CLI = {
+const VENDOR_CLI: Record<string, RegExp> = {
   claude: /npm\s+install\s+-g\s+@anthropic-ai\/claude-code\b/,
   cursor: /agent-cli-package\.tar\.gz/,
-} as const;
+};
+
+/**
+ * 🛑 THE DOCKERFILE'S VENDOR STAGES ARE THE PRODUCT'S SPAWNABLE VENDORS, AND
+ * THE EQUALITY IS WHAT CLOSES THE QUIET DIRECTION. `AGENT_VENDORS` is derived
+ * from the `cli-*` stages, so a stage added here is asserted on automatically —
+ * but a vendor added to `src/adapters/index.ts` with no stage would simply not
+ * be mentioned, and three suites would go on reporting green for two images
+ * while the product had three.
+ *
+ * 🛑 `vendorsWithSpawn()` IS THE RIGHT SIDE TO COMPARE, because `VendorSpawn`
+ * declares an `image` unconditionally. Every vendor this build can spawn names
+ * a container image, so every one of them needs a stage that builds it.
+ */
+test("🛑 the Dockerfile's vendor stages are exactly the vendors this build can spawn", () => {
+  assert.deepEqual(
+    [...AGENT_VENDORS].sort(),
+    [...vendorsWithSpawn()].sort(),
+    "the Dockerfile's `cli-*` stages and `vendorsWithSpawn()` disagree; one of the two lists gained a vendor the other did not",
+  );
+});
+
+/**
+ * ⚠️ AND EVERY VENDOR NEEDS AN ENTRY IN `VENDOR_CLI` ABOVE, or the exclusivity
+ * test below would match `undefined` and pass vacuously for the new vendor.
+ */
+test("⚠️ control — every vendor has a CLI pattern, so the exclusivity test cannot pass vacuously", () => {
+  for (const vendor of AGENT_VENDORS) {
+    assert.ok(
+      VENDOR_CLI[vendor] instanceof RegExp,
+      `no VENDOR_CLI pattern for "${vendor}"; add one or its image is asserted on by nothing`,
+    );
+  }
+});
 
 for (const vendor of AGENT_VENDORS) {
   test(`🛑 [${vendor}] the build installs its OWN CLI and NOT the other vendor's`, () => {
@@ -83,7 +117,7 @@ for (const vendor of AGENT_VENDORS) {
 
     assert.match(
       directives,
-      VENDOR_CLI[vendor],
+      VENDOR_CLI[vendor]!,
       `the ${vendor} image installs no ${vendor} CLI`,
     );
 
@@ -92,7 +126,7 @@ for (const vendor of AGENT_VENDORS) {
 
       assert.doesNotMatch(
         directives,
-        VENDOR_CLI[other],
+        VENDOR_CLI[other]!,
         `the ${vendor} image also installs the ${other} CLI; the vendor stages are not exclusive`,
       );
     }
