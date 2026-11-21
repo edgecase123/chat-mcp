@@ -1,6 +1,17 @@
-# chat-mcp agent image — node, git, the gh CLI and the claude CLI (#129, #214).
+# chat-mcp agent image — node, git, the gh CLI and one agent CLI (#129, #214, #317).
 # No docker-in-docker: privileged ops go through #133's host broker.
-FROM node:22-slim
+#
+# 🛑 TWO IMAGES, ONE TARGET, SELECTED BY A BUILD ARG. `--build-arg
+# AGENT_VENDOR=cursor` swaps the vendor CLI and nothing else. There is no
+# `--target claude` / `--target cursor`, and that is not a style choice: the
+# shared tail below ends in `chown -R agent:agent /root`, which exists because a
+# root-run `npm` repopulates `/root/.npm` AFTER the useradd chown (#242, 4 cold
+# starts, 4 EACCES failures, 0 agents started). A per-vendor TARGET would have
+# to sit either below that chown — re-breaking #242 — or above it, duplicating
+# the 44-line tail. A dynamic `FROM` keeps one copy of both.
+ARG AGENT_VENDOR=claude
+
+FROM node:22-slim AS base
 
 # 🛑 ca-certificates IS NOT OPTIONAL AND IS NOT ABOUT gh. The line below once
 # installed `git` alone with --no-install-recommends, which is exactly what
@@ -9,6 +20,10 @@ FROM node:22-slim
 # the container failed with "server certificate verification failed. CAfile:
 # none" — before any credential was involved. Measured in the running
 # chat-mcp-claude2 container on 2026-11-13 (#214).
+#
+# ⚠️ CURSOR NEEDS IT TOO, FOR THE SAME REASON. Its wrapper execs node with
+# `--use-system-ca`, so the Cursor image depends on this line exactly as `gh`
+# does. Read out of the wrapper script in the pinned tarball, 2026-11-21.
 #
 # wget is here to fetch the gh keyring in the next layer, and that fetch is
 # itself https — so it has to follow ca-certificates, not accompany it.
@@ -72,7 +87,63 @@ RUN git config --system credential."https://github.com".helper '!gh auth git-cre
 # root. Pinned by dockerfile-safe-directory.test.ts, which asserts the order.
 RUN git config --system --add safe.directory '*'
 
+# ── vendor CLI stages ───────────────────────────────────────────────────────
+# One stage per agent vendor. Exactly one is selected by `AGENT_VENDOR` in the
+# `FROM` below, so the other is never built.
+
+FROM base AS cli-claude
+
 RUN npm install -g @anthropic-ai/claude-code
+
+FROM base AS cli-cursor
+
+# 🛑 THE ARTIFACT IS PINNED, NOT THE INSTALLER. Cursor documents
+# `curl https://cursor.com/install -fsS | bash`, which is trust-on-first-use
+# for whatever that script fetches today. The script resolves to this versioned
+# tarball, so the image downloads the tarball and sha256sum -c's it — and no
+# remote shell script runs at build time. Stronger than the `gh` keyring
+# precedent above, which pins the key rather than the package.
+#
+# ⚠️ BOTH ARCHES ARE PINNED BECAUSE THERE IS NO `--platform` HERE. The image
+# follows the build host. A single-arch hash would fail every build on the
+# other architecture, so the `case` below resolves the pair together and exits
+# 1 on anything else rather than installing nothing.
+ARG CURSOR_VERSION=2026.11.19-f005e9d
+ARG CURSOR_SHA256_ARM64=5ff05be0d7c0b7754574dbcd677c35254a3ff190ed6457e71bbee0f276237e29
+ARG CURSOR_SHA256_AMD64=a25986eaf0c9330aeeec599a139711cb9f267c64562d073a72b751edf5161695
+
+# 🛑 ROOT-OWNED, AND THAT IS THE WHOLE MITIGATION. `cursor-agent` checks for
+# updates and there is no documented opt-out — all 226 CURSOR_*/AGENT_CLI_* vars
+# in the bundle were scanned, and the two update-related ones only override the
+# check URL and the reported version string. So a build-time pin describes
+# nothing unless the agent user cannot rewrite the install. /opt/cursor-agent is
+# outside every chown in the final stage, which is why it is not under /root.
+#
+# 🛑 `--no-same-owner`, SO A FUTURE TARBALL CANNOT HAND THE INSTALL TO `agent`.
+# Every entry in the pinned tarball is uid/gid 0 today, but tar extracting as
+# root honours the archive's uids by default — so a rebuild against a tarball
+# built under uid 10001 would silently undo the paragraph above.
+RUN set -eu; \
+  arch="$(dpkg --print-architecture)"; \
+  case "$arch" in \
+    arm64) cursor_arch=arm64; cursor_sha="$CURSOR_SHA256_ARM64" ;; \
+    amd64) cursor_arch=x64;   cursor_sha="$CURSOR_SHA256_AMD64" ;; \
+    *) echo "no pinned cursor-agent tarball for architecture: $arch" >&2; exit 1 ;; \
+  esac; \
+  wget -nv -O /tmp/cursor-agent.tar.gz \
+    "https://downloads.cursor.com/lab/${CURSOR_VERSION}/linux/${cursor_arch}/agent-cli-package.tar.gz"; \
+  echo "${cursor_sha}  /tmp/cursor-agent.tar.gz" | sha256sum -c -; \
+  mkdir -p /opt/cursor-agent; \
+  tar -xzf /tmp/cursor-agent.tar.gz -C /opt/cursor-agent \
+    --strip-components=1 --no-same-owner; \
+  rm /tmp/cursor-agent.tar.gz; \
+  ln -s /opt/cursor-agent/cursor-agent /usr/local/bin/cursor-agent
+
+# ── shared tail ─────────────────────────────────────────────────────────────
+# 🛑 EVERYTHING BELOW IS VENDOR-AGNOSTIC AND MUST STAY THAT WAY. A vendor-
+# specific line here is a line that only one of the two images is tested with.
+
+FROM cli-${AGENT_VENDOR} AS final
 
 # 🛑 NON-ROOT, NOT OPTIONAL. `claude --allow-dangerously-skip-permissions`
 # refuses to run as root/sudo — confirmed by actually running the image
@@ -105,6 +176,10 @@ COPY dist ./dist
 # ⚠️ IT IS THE ORDER THAT BREAKS, NOT THE CHOWN. Moving either line is enough;
 # both are chowned here so no later root-run layer can reintroduce it without
 # also moving past this point.
+#
+# ⚠️ THE VENDOR STAGE'S ROOT-RUN npm IS COVERED BY THIS TOO. `cli-claude` runs
+# `npm install -g` as root with HOME=/root, and this chown is downstream of it
+# in build order as well as in the file.
 #
 # Rejected: pointing `npm_config_cache` at a writable path. It leaves the
 # root-owned files in the image and trades a hard failure for a cold cache on
