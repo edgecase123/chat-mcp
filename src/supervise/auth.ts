@@ -130,14 +130,6 @@ function readSecret(key: string): string | null {
   return readSecrets().get(key)?.trim() ?? null;
 }
 
-export function setToken(token: string): void {
-  setSecret(CLAUDE_TOKEN_KEY, token);
-}
-
-export function readToken(): string | null {
-  return readSecret(CLAUDE_TOKEN_KEY);
-}
-
 /**
  * This vendor's own credential, keyed off the env var it is injected under.
  *
@@ -163,6 +155,25 @@ export function setVendorToken(
 }
 
 /**
+ * The Claude-specific aliases, kept because four test files seed through them.
+ *
+ * 🛑 ALIASES OF THE LIVE PATH, NOT A SECOND ONE. They had zero production
+ * callers the moment `dockerRunPlan` went per-vendor, and a helper that no
+ * longer shares the code it is testing is how a test keeps passing against a
+ * path the application abandoned. Routing them through the same `readSecret`
+ * key means there is nothing for them to diverge from. Raised by claude1 on
+ * PR 354; deleting them and reseeding those tests is a follow-up, not this
+ * security fix's business.
+ */
+export function setToken(token: string): void {
+  setSecret(CLAUDE_TOKEN_KEY, token);
+}
+
+export function readToken(): string | null {
+  return readSecret(CLAUDE_TOKEN_KEY);
+}
+
+/**
  * The refusal for a containerized spawn with no credential on file.
  *
  * 🛑 ONE BUILDER FOR BOTH REFUSAL SITES. `startSupervisor` and
@@ -170,12 +181,14 @@ export function setVendorToken(
  * copies named Claude. A second vendor made them wrong in two places at once.
  */
 export function missingVendorTokenMessage(vendor: {
+  vendor: string;
   authEnvVar: string;
   authSetupHint: string;
 }): string {
   return (
     `no ${vendor.authEnvVar} on file; ${vendor.authSetupHint}, then ` +
-    `\`pbpaste | chat-mcp auth set-token --vendor <name>\` (stdin, never argv)`
+    `\`pbpaste | chat-mcp auth set-token --vendor ${vendor.vendor}\` ` +
+    `(stdin, never argv)`
   );
 }
 

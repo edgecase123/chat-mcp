@@ -51,6 +51,15 @@ export type EventRouter = (
  * both sets, so no generic spawner has to know either.
  */
 export interface VendorSpawn {
+  /**
+   * This vendor's name, as `--vendor` and `--driver` spell it.
+   *
+   * 🛑 SO A REFUSAL CAN PRINT A RUNNABLE COMMAND. The message told the
+   * operator to run `auth set-token --vendor <name>` with the placeholder
+   * still in it, because no value here knew the name. `spawn-contract.test.ts`
+   * pins this against the registry's own `vendor`, so the two cannot drift.
+   */
+  readonly vendor: string;
   readonly binary: string;
   readonly image: string;
   /**

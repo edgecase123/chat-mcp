@@ -20,6 +20,7 @@ import { CURSOR_IMAGE_TAG } from "../supervise/container.js";
  * needed on the host too, so there is nothing for the container to drop.
  */
 export const cursorSpawn: VendorSpawn = {
+  vendor: "cursor",
   binary: CURSOR_HOST_BINARY,
   image: CURSOR_IMAGE_TAG,
   containerHome: CURSOR_CONTAINER_HOME,

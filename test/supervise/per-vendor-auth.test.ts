@@ -9,7 +9,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(
   join(tmpdir(), "chat-mcp-per-vendor-auth-"),
 );
 
-const { CLAUDE_TOKEN_KEY, readVendorToken, setVendorToken, setToken } =
+const { CLAUDE_TOKEN_KEY, readVendorToken, setVendorToken } =
   await import("../../src/supervise/auth.js");
 const { claudeSpawn } = await import("../../src/adapters/claude-spawn.js");
 const { cursorSpawn } = await import("../../src/adapters/cursor-spawn.js");
@@ -46,7 +46,7 @@ test("🛑 the Claude storage key IS the vendor's injected env var name", () => 
 });
 
 test("🔴 a Cursor container is NOT handed the Claude token", () => {
-  setToken(CLAUDE_SENTINEL);
+  setVendorToken(claudeSpawn, CLAUDE_SENTINEL);
 
   // The whole of #347: one `readToken()` fed every vendor's `authEnvVar`, so
   // `cursor-agent` received a Claude subscription credential and sent it to
@@ -54,15 +54,29 @@ test("🔴 a Cursor container is NOT handed the Claude token", () => {
   assert.throws(() => planFor(cursorSpawn), /CURSOR_API_KEY/);
 });
 
-test("the refusal names the vendor's credential and how to store it", () => {
-  setToken(CLAUDE_SENTINEL);
+/**
+ * 🛑 THE COMMAND MUST BE RUNNABLE, NOT A TEMPLATE. This asserted `/cursor/i`
+ * and greened on the word "Cursor" inside `authSetupHint`, so it would not
+ * have noticed the refusal printing a literal `--vendor <name>` placeholder.
+ * Raised by claude1 on PR 354.
+ */
+test("the refusal prints a command the operator can run unchanged", () => {
+  setVendorToken(claudeSpawn, CLAUDE_SENTINEL);
 
-  assert.throws(() => planFor(cursorSpawn), /cursor/i);
-  assert.throws(() => planFor(cursorSpawn), /auth set-token/);
+  assert.throws(() => planFor(cursorSpawn), /auth set-token --vendor cursor/);
+  assert.throws(() => planFor(cursorSpawn), /CURSOR_API_KEY/);
+  // The control: the placeholder the message used to carry must be gone.
+  assert.throws(
+    () => planFor(cursorSpawn),
+    (err: Error) => {
+      assert.doesNotMatch(err.message, /--vendor <name>/);
+      return true;
+    },
+  );
 });
 
 test("a stored Cursor key reaches the Cursor container, and nothing else does", () => {
-  setToken(CLAUDE_SENTINEL);
+  setVendorToken(claudeSpawn, CLAUDE_SENTINEL);
   setVendorToken(cursorSpawn, CURSOR_SENTINEL);
 
   const { env } = planFor(cursorSpawn);
@@ -78,7 +92,7 @@ test("a stored Cursor key reaches the Cursor container, and nothing else does", 
  * every assertion above and break the vendor that works today.
  */
 test("a Claude container still gets the Claude token, unchanged", () => {
-  setToken(CLAUDE_SENTINEL);
+  setVendorToken(claudeSpawn, CLAUDE_SENTINEL);
   setVendorToken(cursorSpawn, CURSOR_SENTINEL);
 
   const { env } = planFor(claudeSpawn);
@@ -88,7 +102,7 @@ test("a Claude container still gets the Claude token, unchanged", () => {
 });
 
 test("each vendor reads its own credential and cannot see the other's", () => {
-  setToken(CLAUDE_SENTINEL);
+  setVendorToken(claudeSpawn, CLAUDE_SENTINEL);
   setVendorToken(cursorSpawn, CURSOR_SENTINEL);
 
   assert.equal(readVendorToken(claudeSpawn), CLAUDE_SENTINEL);
@@ -101,7 +115,7 @@ test("each vendor reads its own credential and cannot see the other's", () => {
  * a failure whose symptom arrives much later than its cause.
  */
 test("storing a Cursor key leaves the Claude token on file", () => {
-  setToken(CLAUDE_SENTINEL);
+  setVendorToken(claudeSpawn, CLAUDE_SENTINEL);
   setVendorToken(cursorSpawn, CURSOR_SENTINEL);
 
   assert.equal(readVendorToken(claudeSpawn), CLAUDE_SENTINEL);

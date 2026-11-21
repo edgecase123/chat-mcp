@@ -53,6 +53,7 @@ function containerArgs(opts: SpawnOptions): string[] {
 }
 
 export const claudeSpawn: VendorSpawn = {
+  vendor: "claude",
   binary: "claude",
   image: IMAGE_TAG,
   containerHome: "/root",
