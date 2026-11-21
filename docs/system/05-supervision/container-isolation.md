@@ -132,6 +132,11 @@ credentials.
 🛑 **There is no `--network=none` on either container.** `npm ci` has to reach a
 registry, so egress is available to anything that runs.
 
+⚠️ **`buildImage` builds one tag and passes no `--build-arg`.** `Dockerfile`
+can produce either vendor's image since #317, but nothing asks it to — so
+`chat-mcp-cursor-agent:local` exists only if someone builds it by hand. See
+[vendors.md](vendors.md) § One image per vendor for the command.
+
 ## Where the install is called from, and why it matters
 
 `runDependencyInstall` is synchronous, so it blocks the supervisor's event

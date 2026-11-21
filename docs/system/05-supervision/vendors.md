@@ -104,8 +104,38 @@ Ruled by lee on 2026-11-20: _"cursor should have its own image"_.
 **The container is the security boundary, so a single image carrying both CLIs
 would put a second agent CLI inside every sandbox with no use for it.**
 
-⚠️ Nothing builds the Cursor tag yet. A containerized Cursor spawn fails on a
-missing image rather than silently running the Claude one.
+**One Dockerfile builds both, selected by a build arg.** There is no second
+Dockerfile and no `--target`:
+
+```bash
+docker build -t chat-mcp-agent:local .                              # claude
+docker build -t chat-mcp-cursor-agent:local \
+  --build-arg AGENT_VENDOR=cursor .                                 # cursor
+```
+
+```
+ARG AGENT_VENDOR=claude
+FROM node:22-slim AS base      apt, the gh CLI, git config  — vendor-agnostic
+FROM base AS cli-claude        npm install -g @anthropic-ai/claude-code
+FROM base AS cli-cursor        a pinned tarball into /opt/cursor-agent
+FROM cli-${AGENT_VENDOR}       useradd, npm ci, the chowns, USER agent
+```
+
+🛑 **A per-vendor `--target` cannot work, and the reason is #242.** The shared
+tail ends in `chown -R agent:agent /root`, which exists because a root-run `npm`
+repopulates `/root/.npm` after the `useradd` chown. A vendor target would sit
+either below that chown, re-breaking #242, or above it, duplicating the 44-line
+tail. The dynamic `FROM` keeps one copy of both.
+
+🛑 **The Cursor CLI is pinned by sha256 and installed root-owned.** It checks
+for updates with no documented opt-out, so the pin describes nothing unless
+`agent` cannot rewrite the install. `/opt/cursor-agent` is outside every path
+the shared tail chowns; `/root/.local`, where Cursor's own installer puts it,
+is not.
+
+⚠️ **Nothing passes `--build-arg` yet.** `buildImage` hardcodes one tag, so a
+containerized Cursor spawn still fails on a missing image rather than silently
+running the Claude one.
 
 🛑 **`VendorSpawn.binary` is one string for both sandbox modes**, and the host
 path wins today. The host's `cursor-agent` lives under the user's home; the
@@ -148,6 +178,9 @@ operator to the wrong place.
 2. A spawn block under `src/adapters/` declaring the three capability booleans,
    its `authEnvVar`, and the `authSetupHint` naming how to obtain that credential.
 3. An `Adapter` carrying that spawn block, registered in `src/adapters/index.ts`.
-4. Two `ALIASES` entries — the vendor name, and `docker-<vendor>`.
-5. **Re-point any negative control that asserts the vendor cannot be spawned.**
+4. A `cli-<vendor>` stage in `Dockerfile`, plus that vendor in
+   `AGENT_VENDORS` — which is what makes every Dockerfile assertion run
+   against the new image rather than only the two that already existed.
+5. Two `ALIASES` entries — the vendor name, and `docker-<vendor>`.
+6. **Re-point any negative control that asserts the vendor cannot be spawned.**
    Those tests assert a throw that stops happening the moment the vendor ships.

@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+
+import {
+  AGENT_VENDORS,
+  dockerfileText,
+  stageDirectives,
+} from "../support/dockerfile-stages.js";
 
 /**
  * #212: a containerized agent could not run ANY git command in the repo it was
@@ -18,68 +22,69 @@ import { join } from "node:path";
  * has not been deleted or reordered. They do NOT prove the built image behaves
  * — only a real `docker build` plus a `git` call inside it does that, and that
  * is recorded in the PR body, because the suite must not need a docker daemon.
+ *
+ * 🛑 ONCE PER VENDOR, OVER THAT VENDOR'S LINEAGE, AND THAT IS NOT THOROUGHNESS.
+ * #317 made the image multi-stage. An earlier cut of this file indexed the
+ * Dockerfile's LINES, and moving this instruction out of `base` into
+ * `cli-cursor` alone — leaving the default claude image with no safe.directory
+ * at all — passed 3 of 3. Measured, 2026-11-21.
  */
 
-const DOCKERFILE = readFileSync(join(process.cwd(), "Dockerfile"), "utf8");
+const DOCKERFILE = dockerfileText();
 
-/**
- * 🛑 COMMENTS STRIPPED FIRST. The comment above the real instruction names
- * every string these assertions look for, so matching the file's raw bytes
- * would pass with the instruction deleted. That exact vacuity shipped once on
- * this same Dockerfile — see `dockerfile-github-tooling.test.ts`.
- */
-const LINES = DOCKERFILE.split("\n").filter(
-  (l) => !l.trimStart().startsWith("#"),
-);
+for (const vendor of AGENT_VENDORS) {
+  /** The directives this vendor's build actually runs, in build order. */
+  const DIRECTIVES = stageDirectives(DOCKERFILE, vendor);
 
-/** `\`-continuations joined, so a directive split across lines is one string. */
-const LOGICAL = LINES.join("\n").replace(/\\\n\s*/g, " ");
+  /** Comments are already stripped and `\`-continuations already joined. */
+  const LOGICAL = DIRECTIVES.join("\n");
 
-test("🛑 the image trusts every directory for git, which is what lets an agent commit", () => {
-  assert.match(
-    LOGICAL,
-    /git\s+config\s+--system\s+(--add\s+)?safe\.directory\s+['"]?\*['"]?/,
-    "without this, every git command in /work fails: dubious ownership",
-  );
-});
+  test(`🛑 [${vendor}] the image trusts every directory for git, which is what lets an agent commit`, () => {
+    assert.match(
+      LOGICAL,
+      /git\s+config\s+--system\s+(--add\s+)?safe\.directory\s+['"]?\*['"]?/,
+      "without this, every git command in /work fails: dubious ownership",
+    );
+  });
 
-/**
- * 🛑 THE ORDERING IS THE GUARD, NOT THE PRESENCE. `git config --system` writes
- * `/etc/gitconfig`, which needs root. Placed after `USER agent` the instruction
- * is still present, still looks right in review, and the BUILD FAILS — or
- * worse, writes nothing useful. A reader reordering the Dockerfile has no other
- * signal that this line is position-dependent.
- */
-test("🛑 it is set BEFORE `USER agent`, because --system needs root", () => {
-  const safeAt = LINES.findIndex((l) => /safe\.directory/.test(l));
-  const userAt = LINES.findIndex((l) => /^\s*USER\s+agent\b/.test(l));
+  /**
+   * 🛑 THE ORDERING IS THE GUARD, NOT THE PRESENCE. `git config --system` writes
+   * `/etc/gitconfig`, which needs root. Placed after `USER agent` the instruction
+   * is still present, still looks right in review, and the BUILD FAILS — or
+   * worse, writes nothing useful. A reader reordering the Dockerfile has no other
+   * signal that this line is position-dependent.
+   */
+  test(`🛑 [${vendor}] it is set BEFORE \`USER agent\`, because --system needs root`, () => {
+    const safeAt = DIRECTIVES.findIndex((d) => /safe\.directory/.test(d));
+    const userAt = DIRECTIVES.findIndex((d) => /^\s*USER\s+agent\b/.test(d));
 
-  assert.notEqual(safeAt, -1, "no safe.directory instruction found at all");
-  assert.notEqual(
-    userAt,
-    -1,
-    "no `USER agent` line found — has the image stopped dropping root?",
-  );
-  assert.ok(
-    safeAt < userAt,
-    `safe.directory is at line ${safeAt + 1} and USER agent at ${userAt + 1}; --system cannot be written as a non-root user`,
-  );
-});
+    assert.notEqual(safeAt, -1, "no safe.directory instruction found at all");
+    assert.notEqual(
+      userAt,
+      -1,
+      "no `USER agent` line found — has the image stopped dropping root?",
+    );
+    assert.ok(
+      safeAt < userAt,
+      `safe.directory is directive ${safeAt + 1} and USER agent is ${userAt + 1}; --system cannot be written as a non-root user`,
+    );
+  });
 
-/**
- * ⚠️ CONTROL, AND IT IS NOT DECORATION. The image must still drop root. A fix
- * for #212 that ran the agent as root would make git work and silently undo the
- * thing the container is for.
- */
-test("⚠️ control — the image still drops to a non-root user", () => {
-  assert.match(
-    LOGICAL,
-    /^\s*USER\s+agent\b/m,
-    "the agent must not run as root",
-  );
-  assert.doesNotMatch(
-    LOGICAL.split("USER agent")[1] ?? "",
-    /^\s*USER\s+root\b/m,
-    "nothing may switch back to root after dropping privileges",
-  );
-});
+  /**
+   * ⚠️ CONTROL, AND IT IS NOT DECORATION. The image must still drop root. A fix
+   * for #212 that ran the agent as root would make git work and silently undo the
+   * thing the container is for.
+   */
+  test(`⚠️ [${vendor}] control — the image still drops to a non-root user`, () => {
+    assert.match(
+      LOGICAL,
+      /^\s*USER\s+agent\b/m,
+      "the agent must not run as root",
+    );
+    assert.doesNotMatch(
+      LOGICAL.split("USER agent")[1] ?? "",
+      /^\s*USER\s+root\b/m,
+      "nothing may switch back to root after dropping privileges",
+    );
+  });
+}
