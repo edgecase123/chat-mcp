@@ -665,10 +665,16 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
     )
     .action(async (handle: string, o: Record<string, string>) => {
       const { spawnFor } = await import("./adapters/index.js");
-      const { resolveDriver } = await import("./supervise/drivers/index.js");
+      const { selectionFor } = await import("./supervise/selection.js");
       // commander stores `--container` as a boolean; the bag is typed for the
       // dozen options that really are strings.
-      const selection = resolveDriver({
+      //
+      // 🛑 `selectionFor`, NOT `resolveDriver`. This is the one place the
+      // handle's stored (vendor, mode) pair can still reach `spawnFor`, and
+      // reading the file only inside `startSupervisor` would build the image
+      // for the flag-derived default while the supervisor drove the stored
+      // vendor.
+      const selection = selectionFor(handle, {
         driver: o.driver,
         container: (o as unknown as { container?: boolean }).container,
       });
