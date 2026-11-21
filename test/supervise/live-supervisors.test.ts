@@ -83,8 +83,8 @@ test("each live supervisor carries when its socket was bound", async () => {
   try {
     const [s] = await listLiveSupervisors();
 
-    // A socket that just answered a probe can always be statted, so a live
-    // supervisor's bind time is never the unknown `null` (#373).
+    // The listener is still open for the whole of this test, so nothing can
+    // unlink the socket between the probe and the stat (#373).
     assert.ok(s.boundAt !== null, "a live supervisor has a known bind time");
     // Filesystem timestamps round down to the second on some filesystems, so
     // allow a second of slack below the moment the bind started.
@@ -122,9 +122,10 @@ test("a `.DS_Store` in the socket directory is skipped, not thrown on", async ()
 /**
  * #373 — the bind time FAILS OPEN, and that is the whole defect.
  *
- * 🛑 NO INTEGRATION TEST CAN REACH THIS. `listLiveSupervisors` only calls
- * `boundAtOf` for a path that just answered a probe, and a socket that answers
- * is a socket that can be statted. That is why `boundAtOf` is exported.
+ * ⚠️ REACHABLE IN PRODUCTION, BUT NOT RELIABLY FROM A TEST.
+ * `listLiveSupervisors` awaits `isLive` before it stats, so a supervisor that
+ * unlinks inside that window hits the catch. Arranging that window is racy,
+ * so `boundAtOf` is exported and covered directly instead.
  */
 test("a socket whose file cannot be statted has an UNKNOWN bind time, not a new one", () => {
   const missing = socketPathFor("never-bound");

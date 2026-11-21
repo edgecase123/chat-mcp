@@ -385,8 +385,13 @@ export async function listLiveSupervisors(): Promise<LiveSupervisor[]> {
  * socket file is written once at `listen()` and never again, so its mtime is
  * its creation time.
  *
- * Exported only so a test can reach the catch. `listLiveSupervisors` calls it
- * for paths that just answered a probe, and those can always be statted.
+ * ⚠️ PRODUCTION CAN REACH THE CATCH. `listLiveSupervisors` awaits `isLive`
+ * before calling this, so the stat runs a later event-loop turn than the
+ * probe. A supervisor that exits and unlinks inside that window answers the
+ * probe and then cannot be statted.
+ *
+ * Exported because that window is too narrow to arrange reliably, so a unit
+ * test is the practical way to cover the catch — not the only way in.
  */
 export function boundAtOf(path: string): number | null {
   try {
