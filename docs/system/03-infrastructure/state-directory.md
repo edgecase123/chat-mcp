@@ -77,6 +77,38 @@ file at only one of them builds the image for one vendor and drives the other.
 `startSupervisor` takes only the **mode** from it — a library caller passing a
 resolved `opts.vendor` keeps that object.
 
+## Reading and writing `agents.json` over the API
+
+Three routes in `src/cli/web/server.ts`, so the web UI can show and edit the
+pairs without the operator opening the file:
+
+| route                     | tier    | does                           |
+| ------------------------- | ------- | ------------------------------ |
+| `GET /api/agents`         | `read`  | every stored pair              |
+| `POST /api/agents`        | `admin` | create or replace one handle's |
+| `POST /api/agents/forget` | `admin` | remove one handle's            |
+
+🛑 **`/api/agents` IS NOT `/api/agents/live`.** `/live` is the socket register —
+who is connected right now. This one is what the operator configured. A handle
+can be in either without being in the other.
+
+🛑 **THERE IS NO `PATCH`, AND NO HTTP `DELETE`.** `registerAgent` replaces
+rather than merges, because the half a merge would carry stale is `mode` — the
+one that decides whether the agent is contained. A `PATCH` verb would promise
+the merge the store refuses. `DELETE` is absent because no surface in this
+project uses it; `/api/agents/forget` follows `/api/agents/stop` and
+`/api/rooms/delete`.
+
+⚠️ **`GET /api/agents` IS THE ONE ADMIN ROUTE A READ CAN REACH.** Every other
+path in `ADMIN_ROUTES` answers `admin` to any method, reads included. The
+exception is written into `requiredCapability` and a test pins the
+ADMIN ∩ READ intersection to exactly this one path, because that clause lets
+`READ_ROUTES` downgrade any admin route it names.
+
+⚠️ **A bad `mode` is a `400` and writes nothing.** `parseRecord` throws
+`RegistrationInputError`, which the handler maps; anything else — a failed
+write, a full disk — stays a `500`.
+
 ## The two entries whose location will surprise you
 
 **`manifestDir()` is a SIBLING, not a child.** It resolves to

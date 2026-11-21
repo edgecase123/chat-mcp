@@ -43,6 +43,16 @@ export function mintToken(): string {
  * returned `read` for any GET, so an unclassified endpoint got the LEAST
  * restrictive level while the comment promised the most. Found by claude2
  * reviewing PR #165. The tests pin all four quadrants.
+ *
+ * ⚠️ A PATH IN ADMIN **AND** READ IS `read` ON A GET, AND THAT IS THE ONE
+ * EXCEPTION TO THE LINE ABOVE. `/api/agents` needs it: listing the registered
+ * pairs is a read, writing one is not. The exception is written here rather
+ * than arranged by reordering the three checks, so it cannot later be read as
+ * a tidy-up and undone.
+ *
+ * 🛑 READ_ROUTES CAN THEREFORE DOWNGRADE ANY ADMIN ROUTE IT NAMES, and nothing
+ * in this function stops a second one being added. A test pins the
+ * intersection to exactly `/api/agents`.
  */
 export function requiredCapability(
   method: string,
@@ -52,7 +62,8 @@ export function requiredCapability(
 
   const reading = method === "GET" || method === "HEAD";
 
-  if (ADMIN_ROUTES.has(path)) return "admin";
+  if (ADMIN_ROUTES.has(path) && !(reading && READ_ROUTES.has(path)))
+    return "admin";
   if (WRITE_ROUTES.has(path) && !reading) return "write";
   if (READ_ROUTES.has(path) && reading) return "read";
 
@@ -70,7 +81,12 @@ export function requiredCapability(
  * slower motion. The supervisor holds a `write` credential and is the thing a
  * gate kills.
  */
-const ADMIN_ROUTES: ReadonlySet<string> = new Set([
+export const ADMIN_ROUTES: ReadonlySet<string> = new Set([
+  // 🛑 ALSO IN `READ_ROUTES`, SO A GET ON IT IS `read`. The pair decides
+  // whether an agent is contained, so writing one is ranked with answering an
+  // approval rather than with a pulse.
+  "/api/agents",
+  "/api/agents/forget",
   "/api/agents/stop",
   "/api/approvals/answer",
   "/api/context-gate",
@@ -84,7 +100,10 @@ const ADMIN_ROUTES: ReadonlySet<string> = new Set([
  * ⚠️ `/api/messages` IS IN HERE AND IN THE WRITES. It is a GET and a POST, so
  * the method decides which tier applies, not the path.
  */
-const READ_ROUTES: ReadonlySet<string> = new Set([
+export const READ_ROUTES: ReadonlySet<string> = new Set([
+  // ⚠️ NOT `/api/agents/live`. That one is the socket register — who is
+  // connected now. This one is what the operator configured.
+  "/api/agents",
   "/api/agents/live",
   "/api/whoami",
   "/api/messages",

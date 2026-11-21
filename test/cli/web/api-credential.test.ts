@@ -12,7 +12,9 @@ import {
   COOKIE_NAME,
   cookieValue,
   mintToken,
+  ADMIN_ROUTES,
   CLASSIFIED_PATHS,
+  READ_ROUTES,
   requiredCapability,
   tokenMatches,
   type Capability,
@@ -388,5 +390,43 @@ test("🛑 the well-known url file is written WITHOUT the token", () => {
     writes[0]!,
     /handshakeUrl|token/,
     "the well-known file is readable from inside a container; it must carry the plain url",
+  );
+});
+
+// ── #132 slice 3 — the agents registration surface ───────────────────────
+
+/**
+ * 🛑 THE ADMIN TIER IS METHOD-BLIND EVERYWHERE ELSE, AND `/api/agents` IS THE
+ * ONE EXCEPTION. `requiredCapability` checks `ADMIN_ROUTES` before any method
+ * test, so a path in ADMIN and READ would answer `admin` to a GET. Listing the
+ * registered pairs is a read; writing one is not.
+ */
+test("🛑 GET /api/agents is read, and writing a registration is admin", () => {
+  assert.equal(requiredCapability("GET", "/api/agents"), "read");
+  assert.equal(requiredCapability("POST", "/api/agents"), "admin");
+  assert.equal(requiredCapability("POST", "/api/agents/forget"), "admin");
+});
+
+/**
+ * 🛑 THE EXCEPTION IS ENUMERATED, NOT EMERGENT. The clause that lets a GET
+ * reach `read` on an ADMIN path is `!(reading && READ_ROUTES.has(path))`, so
+ * READ_ROUTES can DOWNGRADE any admin route it names — and the docblock above
+ * `requiredCapability` promises the opposite.
+ *
+ * ⚠️ THE PROTECTION IS THIS EMPTY INTERSECTION, NOT THE `admin` FALLBACK. For
+ * an ADMIN path absent from READ the clause returns `admin` from the ADMIN
+ * line itself and the fallback never runs. claude1 asserted the fallback;
+ * claude2 corrected it on the plan review.
+ *
+ * So adding `/api/context-gate` to READ_ROUTES to let the UI display the gate
+ * would silently drop it to `read`. That goes RED here instead.
+ */
+test("🛑 exactly ONE path is in both ADMIN_ROUTES and READ_ROUTES", () => {
+  const overlap = [...ADMIN_ROUTES].filter((p) => READ_ROUTES.has(p)).sort();
+
+  assert.deepEqual(
+    overlap,
+    ["/api/agents"],
+    "a second admin route named by READ_ROUTES is downgraded to read on GET",
   );
 });
