@@ -5,15 +5,16 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  writeFileSync,
   rmSync,
   existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { buildCommit, parseBuildCommit } from "../../src/util/version.js";
 
-const REPO = new URL("../../", import.meta.url).pathname;
+const REPO = fileURLToPath(new URL("../../", import.meta.url));
 const STAMPER = join(REPO, "scripts", "stamp-build.mjs");
 
 /** The revision git itself reports, so the stamp is compared to a second source. */
@@ -43,31 +44,89 @@ test("the stamper writes the commit git reports for this tree", () => {
   }
 });
 
+/** A throwaway repo with one commit, so a dirty case can be MADE not waited for. */
+function scratchRepo(): string {
+  const dir = mkdtempSync(join(tmpdir(), "chat-mcp-repo-"));
+  const run = (...args: string[]) =>
+    execFileSync("git", args, { cwd: dir, encoding: "utf8" });
+
+  run("init", "-q");
+  run("config", "user.email", "t@example.com");
+  run("config", "user.name", "t");
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "a.ts"), "export const a = 1;\n");
+  run("add", "-A");
+  run("commit", "-qm", "one");
+
+  return dir;
+}
+
+/** Stamp `repo` into a temp file and hand back what was written. */
+function stamp(repo: string): { commit?: string; dirty?: unknown } {
+  const file = join(mkdtempSync(join(tmpdir(), "chat-mcp-out-")), "info.json");
+  execFileSync("node", [STAMPER, file, repo], { cwd: REPO, encoding: "utf8" });
+
+  return JSON.parse(readFileSync(file, "utf8")) as {
+    commit?: string;
+    dirty?: unknown;
+  };
+}
+
 /**
- * 🛑 A DIRTY TREE'S BUILD DOES NOT MATCH THE COMMIT IT NAMES. Without this a
- * comparison reads "current" for a clone whose running code differs from the
- * revision stamped on it.
+ * 🛑 THE CLEAN CASE IS THE ONE A MUTANT SURVIVES. `dirty` hardcoded false is
+ * green in any clean checkout, which is what CI always has — and a control run
+ * by EDITING this tree can never show it, because the edit dirties the tree.
+ * So the test makes both trees itself.
  */
-test("the stamper records whether the tree it built from was dirty", () => {
-  const out = mkdtempSync(join(tmpdir(), "chat-mcp-dirty-"));
-  const file = join(out, "build-info.json");
+test("the stamper reports a clean build as clean", () => {
+  const repo = scratchRepo();
 
   try {
-    execFileSync("node", [STAMPER, file], { cwd: REPO, encoding: "utf8" });
-    const written = JSON.parse(readFileSync(file, "utf8")) as {
-      dirty?: unknown;
-    };
-
-    assert.equal(typeof written.dirty, "boolean");
-
-    const porcelain = execFileSync("git", ["status", "--porcelain"], {
-      cwd: REPO,
-      encoding: "utf8",
-    }).trim();
-
-    assert.equal(written.dirty, porcelain.length > 0);
+    assert.equal(stamp(repo).dirty, false);
   } finally {
-    rmSync(out, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("the stamper reports an edited build input as dirty", () => {
+  const repo = scratchRepo();
+
+  try {
+    writeFileSync(join(repo, "src", "a.ts"), "export const a = 2;\n");
+    assert.equal(stamp(repo).dirty, true);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+/**
+ * 🛑 AN UNTRACKED FILE UNDER `src/` SHIPS IN `dist/` AND IS NOT IN THE COMMIT.
+ * `tsconfig.json` includes `src/**` by existence, not by git tracking, so
+ * `--untracked-files=no` would call this build clean. It is not.
+ */
+test("the stamper reports an untracked module under src as dirty", () => {
+  const repo = scratchRepo();
+
+  try {
+    writeFileSync(join(repo, "src", "sneaked.ts"), "export const b = 2;\n");
+    assert.equal(stamp(repo).dirty, true);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+/**
+ * ⚠️ THE FALSE POSITIVE claude1 MEASURED ON PR 383. A stray note cannot reach
+ * `dist/`, so flagging it would train an operator to ignore the flag.
+ */
+test("the stamper ignores an untracked file that cannot reach the build", () => {
+  const repo = scratchRepo();
+
+  try {
+    writeFileSync(join(repo, "notes.md"), "scratch\n");
+    assert.equal(stamp(repo).dirty, false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
   }
 });
 
