@@ -17,6 +17,8 @@ const {
   PLAN_FIELD_KEYS,
 } = await import("../../src/supervise/container.js");
 
+const { registerMount } = await import("../../src/supervise/mounts.js");
+
 import type { ContainerPlan } from "../../src/supervise/container.js";
 
 function plan(over: Partial<ContainerPlan> = {}): ContainerPlan {
@@ -129,7 +131,7 @@ test("🛑 a mount added after the confirm is named", () => {
   const changes = diffPlans(plan(), plan({ mountPaths: ["/work", "/etc"] }));
 
   assert.deepEqual(changes, [
-    { field: "mounts", from: "/work", to: "/work, /etc" },
+    { field: "mounts", from: '["/work"]', to: '["/work","/etc"]' },
   ]);
 });
 
@@ -229,4 +231,86 @@ test("describeChanges names each change on its own line", () => {
   assert.match(text, /image: a -> b/);
   assert.match(text, /mounts: \/work -> \/work, \/etc/);
   assert.equal(text.trim().split("\n").length, 2);
+});
+
+/* ==========================================================================
+ * 🔴 A JOINED STRING IS NOT A COMPARISON. Found by claude2 on PR 352.
+ * ======================================================================= */
+
+/**
+ * 🔴 THE GATE SAID `confirmed` WHILE THE CONTAINER GAINED TWO HOST
+ * DIRECTORIES. Comparing `mountPaths.join(", ")` compares one flattened
+ * string, so a mount key containing `", /mnt/"` makes two different mount
+ * sets render identically.
+ *
+ * 🛑 THE KEY IS UNVALIDATED BY DESIGN. `mounts.ts` calls it "a free-form slug
+ * the AGENT's own convention gives meaning to", and `registerMount` checks
+ * only that the directory exists and sits outside the state dir. So this
+ * needs no hand-edited state file to reach.
+ */
+test("🔴 two different mount sets that JOIN identically are not confirmed", () => {
+  const changes = diffPlans(
+    plan({ mountPaths: ["/work", "/mnt/a, /mnt/b"] }),
+    plan({ mountPaths: ["/work", "/mnt/a", "/mnt/b"] }),
+  );
+
+  assert.equal(changes.length, 1, "the swap must be reported as a change");
+  assert.equal(changes[0]!.field, "mounts");
+  assert.notEqual(
+    changes[0]!.from,
+    changes[0]!.to,
+    "a change whose from and to render the same tells the operator nothing",
+  );
+});
+
+/**
+ * ⚠️ CONTROL — the comparison did not become "always different". Two lists
+ * that are genuinely equal must still confirm, or the gate refuses every
+ * start and the test above would pass for the wrong reason.
+ */
+test("⚠️ control — an identical mount list still compares equal", () => {
+  assert.deepEqual(
+    diffPlans(
+      plan({ mountPaths: ["/work", "/mnt/a"] }),
+      plan({ mountPaths: ["/work", "/mnt/a"] }),
+    ),
+    [],
+  );
+});
+
+/**
+ * ⚠️ THE SAME HOLE THROUGH `envVarNames`. It is built from the vendor today
+ * and no operator writes it, so this is a guard against that changing rather
+ * than a reachable defect now.
+ */
+test("⚠️ two env var name lists that JOIN identically are not confirmed", () => {
+  const changes = diffPlans(
+    plan({ envVarNames: ["A, B"] }),
+    plan({ envVarNames: ["A", "B"] }),
+  );
+
+  assert.equal(changes.length, 1);
+  assert.equal(changes[0]!.field, "env vars");
+});
+
+/**
+ * 🛑 THE REACHABILITY PREMISE, PINNED SEPARATELY. The collision test above
+ * uses a hand-built plan, so on its own it cannot say whether an operator can
+ * actually produce the colliding list. `registerMount` validates the
+ * DIRECTORY and never the KEY, which is what makes this a real bypass rather
+ * than a theoretical one.
+ *
+ * ⚠️ IF KEY VALIDATION IS EVER ADDED, this test is the one that should fail
+ * first — and only then is the joined comparison safe again.
+ */
+test("🛑 registerMount accepts a key containing the separator the diff used", () => {
+  const handle = `collide-${process.pid}`;
+  const dir = mkdtempSync(join(tmpdir(), "chat-mcp-collide-"));
+
+  const mounts = registerMount(handle, "a, /mnt/b", dir);
+
+  assert.ok(
+    Object.keys(mounts).includes("a, /mnt/b"),
+    "the key is stored verbatim, so the joined form was operator-reachable",
+  );
 });

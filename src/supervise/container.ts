@@ -332,8 +332,22 @@ interface PlanField {
   readonly read: (plan: Partial<ContainerPlan>) => string;
 }
 
+/**
+ * 🔴 `JSON.stringify`, NOT `join`. A joined string is not a comparison: a
+ * mount key containing `", /mnt/"` made `["/work", "/mnt/a, /mnt/b"]` and
+ * `["/work", "/mnt/a", "/mnt/b"]` render identically, and the gate reported
+ * `confirmed` while the container gained two host directories nobody
+ * approved. Mount keys are unvalidated BY DESIGN — see `mounts.ts`.
+ *
+ * 🛑 NO SEPARATOR IS SAFE, SO THERE IS NO SEPARATOR. Picking a rarer
+ * character needs an argument about what a key cannot contain, and the key is
+ * free-form. Found by claude2 on PR 352.
+ *
+ * ⚠️ IT ALSO READS BETTER IN THE RE-PROMPT, because the quotes show the
+ * operator where one path ends and the next begins.
+ */
 function asList(value: unknown): string {
-  return Array.isArray(value) ? value.join(", ") : NOT_RECORDED;
+  return Array.isArray(value) ? JSON.stringify(value) : NOT_RECORDED;
 }
 
 function asText(value: unknown): string {
@@ -361,6 +375,10 @@ function asCap(agent: unknown, install: unknown): string {
  * 🛑 `keys` EXISTS SO THE COVERAGE CAN BE ASSERTED. A field added to
  * `ContainerPlan` that no line reads is a change the operator is never shown,
  * and nothing else in the suite can see that gap.
+ *
+ * ⚠️ THAT GUARD RESTS ON THE FIELD BEING REQUIRED. A required addition breaks
+ * the coverage test's own plan factory at `tsc` first. An OPTIONAL one would
+ * compile without touching the factory and slip through green.
  */
 const PLAN_FIELDS: readonly PlanField[] = [
   { label: "mounts", keys: ["mountPaths"], read: (p) => asList(p.mountPaths) },

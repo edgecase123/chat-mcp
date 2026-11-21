@@ -13,6 +13,11 @@ import type { VendorSpawn } from "../../src/supervise/vendor.js";
  * gate bug. Any override on file is picked up, because `buildConfirmPlan`
  * reads it.
  *
+ * ⚠️ IT DEFAULTS TO `claudeSpawn`. A Cursor gate test that forgets the second
+ * argument confirms a Claude plan, and the gate then reports `changed` on
+ * `binary` and `env vars` — which reads as a gate bug rather than a missing
+ * argument.
+ *
  * ⚠️ CALL IT AFTER WRITING THE OVERRIDE. The plan is captured when this runs,
  * which is the same ordering an operator has at the prompt.
  */
