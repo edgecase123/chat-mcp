@@ -229,14 +229,20 @@ That cannot drop a distinct mount: `checkedMountPath` derives the destination
 from the declared string and refuses any symlink, so one destination always
 resolves to one host path.
 
-🛑 **`image` HAS THREE READERS AND ONE RESOLVER.** `effectiveImage(vendor,
+🛑 **`image` HAS FOUR READERS AND ONE RESOLVER.** `effectiveImage(vendor,
 opts)` in `drivers/containerized.ts` is the only place the choice is made.
 
 ```
 dockerRunPlan                    the agent container's image operand
 dockerInstallPlan                the install container's image operand
 runDependencyInstall             what `docker image inspect` is asked about
+prepareAgentImage                WHETHER the project's own tag is built at all
 ```
+
+⚠️ **The fourth reader takes the value through `ContainerPlan.image`**, not by
+resolving the override again. `buildConfirmPlan` already resolved it for the
+banner, and `src/index.ts` hands that same field to `prepareAgentImage` — so
+the build decision and the inspect guard cannot disagree.
 
 **Honouring an override in one of the three is worse than honouring it in
 none.** The agent loads `node_modules` out of the volume the install container

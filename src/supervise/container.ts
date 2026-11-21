@@ -289,13 +289,49 @@ export function prepareAgentImage(
     run?: Runner;
     needsBuild?: (run: Runner) => boolean;
     logLine?: (line: string) => void;
+
+    /**
+     * The image this handle will actually run, from
+     * `effectiveImage(vendor, override)`.
+     *
+     * 🛑 DEFAULTS TO `IMAGE_TAG`, SO OMITTING IT MEANS "BUILD AS BEFORE". The
+     * skip below is the new behaviour and a default of `undefined` must not
+     * reach it, or every caller that omits this stops building.
+     */
+    image?: string;
   } = {},
 ): void {
   const run = opts.run ?? realExecFileSync;
   const needsBuild = opts.needsBuild ?? imageNeedsBuild;
   const logLine = opts.logLine ?? ((line: string) => console.log(line));
+  const image = opts.image ?? IMAGE_TAG;
 
   compile();
+
+  // 🛑 AFTER THE COMPILE, NEVER BEFORE IT. A handle on another image still
+  // mounts and runs THIS project's `dist`, so the compile is unconditional —
+  // lee's option B of 2026-11-16. Only the DOCKER build is skipped.
+  //
+  // 🛑 THE FRESHNESS CHECK IS SKIPPED TOO, NOT JUST THE BUILD. `imageNeedsBuild`
+  // inspects `IMAGE_TAG` and hashes this project's sources, so its verdict is
+  // about an image this handle will not run — and it is the call that decides
+  // whether minutes of docker get spent.
+  //
+  // ⚠️ IT STILL REFUSES LATER, AND THAT IS lee's RULING OF 2026-11-15.
+  // `runDependencyInstall` inspects this same value and refuses when it is not
+  // present. What this skip removes is paying for a build before that refusal,
+  // not the refusal.
+  if (image !== IMAGE_TAG) {
+    // 🛑 "NOT THE IMAGE THIS PROJECT BUILDS", NOT "not this project's image".
+    // `CURSOR_IMAGE_TAG` is declared in this very file, so a Cursor handle with
+    // no override at all would have been told its own image was somebody
+    // else's. Raised by claude2 reviewing this change.
+    logLine(
+      `"${image}" is not the image this project builds (${IMAGE_TAG}), so ` +
+        "no image was built for this handle",
+    );
+    return;
+  }
 
   if (!needsBuild(run)) return;
 

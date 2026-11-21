@@ -744,8 +744,14 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
           markConfirmed(handle, plan);
         }
 
-        prepareAgentImage(() =>
-          execSync("npm run build", { stdio: "inherit" }),
+        // 🛑 THE PLAN'S IMAGE, SO THE BUILD AND THE LATER INSPECT AGREE.
+        // `buildConfirmPlan` resolved it through `effectiveImage`, which is
+        // also what `runDependencyInstall` inspects. Passing `vendor.image`
+        // here, or resolving the override a second time, is how a handle came
+        // to pay for a full build of an image it would then be refused for.
+        prepareAgentImage(
+          () => execSync("npm run build", { stdio: "inherit" }),
+          { image: plan.image },
         );
       }
 
