@@ -14,6 +14,9 @@ import { join } from "node:path";
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-regs-"));
 
+/** A second, EMPTY state dir, for the two tests that must see no file at all. */
+const COLD_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-regs-cold-"));
+
 const {
   registerAgent,
   unregisterAgent,
@@ -21,6 +24,7 @@ const {
   registrationFor,
   registrationsPath,
 } = await import("../../src/supervise/registrations.js");
+const { stateDir } = await import("../../src/util/paths.js");
 
 /**
  * ⚠️ `null` IS THE NORMAL CASE. Every handle started from the CLI with flags
@@ -227,12 +231,22 @@ test("🛑 the write is STAGED, so a torn write cannot take every handle down wi
   });
 });
 
-test("and no staging file survives the write", () => {
-  const leftovers = readdirSync(process.env.CHAT_MCP_HOME!).filter((f) =>
+/**
+ * ⚠️ IT DOES ITS OWN WRITE, RATHER THAN READING THE ONE ABOVE.
+ *
+ * Raised by claude2 on PR 360: the test above SKIPS where file modes are not
+ * enforceable, and a leftover check that inspects the directory afterwards
+ * then passes because nothing was ever staged. Calling `registerAgent` here
+ * makes this assertion mean the same thing on every platform.
+ */
+test("and no staging file survives a write, on every platform", () => {
+  registerAgent("leftovers", { vendor: "claude", mode: "host" });
+
+  const stray = readdirSync(stateDir()).filter((f) =>
     f.startsWith("agents.json."),
   );
 
-  assert.deepEqual(leftovers, []);
+  assert.deepEqual(stray, []);
 });
 
 /**
@@ -240,11 +254,13 @@ test("and no staging file survives the write", () => {
  * PR 360, and `overrideStore.ts`'s header states the principle: a module that
  * creates the file it is about to read cannot tell "nothing configured" from
  * "the operator's file is missing".
+ *
+ * ⚠️ THE TWO TESTS BELOW RUN AGAINST A SECOND, EMPTY STATE DIR, and each one
+ * sets it ITSELF. Reassigning it once in the first test made the second depend
+ * on the first having run — order coupling claude2 flagged on PR 360.
  */
 test("🛑 unregistering a handle that was never registered creates NOTHING", () => {
-  process.env.CHAT_MCP_HOME = mkdtempSync(
-    join(tmpdir(), "chat-mcp-regs-cold-"),
-  );
+  process.env.CHAT_MCP_HOME = COLD_HOME;
 
   unregisterAgent("nobody");
 
@@ -253,6 +269,7 @@ test("🛑 unregistering a handle that was never registered creates NOTHING", ()
 });
 
 test("and nor does unregistering an absent handle from a file that DOES exist rewrite it", () => {
+  process.env.CHAT_MCP_HOME = COLD_HOME;
   registerAgent("keeper", { vendor: "cursor", mode: "host" });
   const before = readFileSync(registrationsPath(), "utf8");
   // 🛑 THE INODE IS THE DISCRIMINATOR, NOT THE BYTES. A rewrite reproduces
