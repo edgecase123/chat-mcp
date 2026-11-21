@@ -2,6 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   forgetConfirmText,
+  planApproveLabel,
+  planNeedsApproval,
+  planVerdictClass,
+  planVerdictLabel,
   loosenConfirmText,
   registrationFormError,
   registrationNotice,
@@ -228,4 +232,76 @@ test("forgetting says the handle falls back to the start-time default", () => {
 
   assert.match(text, /contained/);
   assert.match(text, /default/i);
+});
+
+// ── container plan verdicts (#132 slice 4b) ──────────────────────────────
+
+/**
+ * Every kind `ConfirmVerdict` carries, so a new one cannot be added to
+ * `container.ts` without this list going stale loudly.
+ *
+ * 🛑 THE UNKNOWN ENTRY IS NOT A `ConfirmVerdict` KIND. It stands for one added
+ * to the type and never added to the browser's label map, which is the drift
+ * these three helpers have to fail closed on.
+ */
+const VERDICTS = ["confirmed", "unseen", "legacy", "changed"] as const;
+
+test("every verdict reads as something, and only one of them reads as approved", () => {
+  for (const verdict of VERDICTS) {
+    assert.notEqual(
+      planVerdictLabel(verdict),
+      "",
+      `${verdict} renders as nothing`,
+    );
+  }
+
+  assert.match(planVerdictLabel("confirmed"), /approved/);
+  assert.equal(planNeedsApproval("confirmed"), false);
+
+  for (const verdict of ["unseen", "legacy", "changed"] as const) {
+    assert.equal(
+      planNeedsApproval(verdict),
+      true,
+      `${verdict} has to offer an approve control`,
+    );
+  }
+});
+
+test("🛑 an UNRECOGNISED verdict fails closed: it is labelled and it needs approval", () => {
+  const label = planVerdictLabel("some-kind-added-later");
+
+  assert.notEqual(label, "", "an unknown verdict must not render as silence");
+  assert.ok(
+    !/^container plan approved$/.test(label),
+    "an unknown verdict must never read as approved",
+  );
+  assert.equal(planNeedsApproval("some-kind-added-later"), true);
+  assert.match(
+    planVerdictClass("some-kind-added-later"),
+    /is-stale/,
+    "an unknown verdict is the case a reader most needs flagged",
+  );
+});
+
+test("🛑 a CHANGED plan is flagged, because an existing approval no longer covers it", () => {
+  assert.match(planVerdictLabel("changed"), /changed/i);
+  assert.match(planVerdictClass("changed"), /is-stale/);
+
+  // ⚠️ THE NON-VACUITY CONTROL. A helper returning " is-stale" for everything
+  // would satisfy the two assertions above.
+  assert.equal(planVerdictClass("confirmed"), "");
+  assert.equal(planVerdictClass("unseen"), "");
+});
+
+test("🛑 a RE-approval says so, so the operator knows which one is being re-taken", () => {
+  assert.equal(planApproveLabel("confirmed"), null);
+  assert.match(said(planApproveLabel("unseen"), "an unseen plan"), /^Approve/);
+
+  for (const verdict of ["legacy", "changed"] as const) {
+    assert.match(
+      said(planApproveLabel(verdict), verdict),
+      /^Re-approve/,
+      `${verdict} already has a recorded approval behind it`,
+    );
+  }
 });

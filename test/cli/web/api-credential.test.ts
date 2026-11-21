@@ -263,6 +263,21 @@ test("every path in READ_ROUTES resolves to read", () => {
  * The denominator is asserted, not implied — a regex that stops matching would
  * otherwise pass this with an empty list.
  */
+/**
+ * The GETs that are deliberately `admin` rather than `read`.
+ *
+ * 🛑 ENUMERATED, NOT INFERRED FROM THE VERB, which is the rule
+ * `requiredCapability` already carries: "AN UNLISTED `/api/` PATH IS `admin`
+ * FOR EVERY METHOD, READS INCLUDED." Every GET outside this list must still be
+ * `read`, so locking a read surface by dropping it into `ADMIN_ROUTES` alone
+ * is still a failure here.
+ *
+ * 🛑 A PATH JOINS THIS LIST WITH A REASON, NEVER TO MAKE THE TEST PASS.
+ * `/api/agents/plan` names mount paths, env var names and the image, which
+ * together are a map of what the container is handed — #132 slice 4b.
+ */
+const ADMIN_GETS: ReadonlySet<string> = new Set(["/api/agents/plan"]);
+
 test("🛑 EVERY api path in the dispatch table is classified, and the count is stated", () => {
   const src = readFileSync(
     new URL("../../../src/cli/web/server.ts", import.meta.url),
@@ -296,12 +311,28 @@ test("🛑 EVERY api path in the dispatch table is classified, and the count is 
     "these api routes exist but no tier names them, so they fell to the admin fallback",
   );
 
+  // 🛑 A STALE ENTRY WOULD SILENTLY WEAKEN THE LOOP BELOW. A path that left the
+  // dispatch table but stayed on this list excuses a tier nothing serves.
+  for (const path of ADMIN_GETS) {
+    assert.ok(
+      dispatched.get(path)?.has("GET"),
+      `${path} is listed as a deliberate admin GET but the table has no GET on it`,
+    );
+  }
+
   for (const [path, methods] of dispatched) {
     for (const method of methods) {
       const tier = requiredCapability(method, path);
       assert.notEqual(tier, null, `${method} ${path} must need a capability`);
       if (method === "GET" || method === "HEAD") {
-        assert.equal(tier, "read", `${method} ${path} is a read surface`);
+        const deliberate = ADMIN_GETS.has(path);
+        assert.equal(
+          tier,
+          deliberate ? "admin" : "read",
+          deliberate
+            ? `${method} ${path} is named as a deliberate admin GET`
+            : `${method} ${path} is a read surface`,
+        );
       }
     }
   }

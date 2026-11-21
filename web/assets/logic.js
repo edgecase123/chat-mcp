@@ -2110,3 +2110,69 @@ export function forgetConfirmText(handle) {
     "the mode recorded here."
   );
 }
+
+/**
+ * What a handle's container-plan verdict reads as — #132 slice 4b.
+ *
+ * 🛑 AN UNRECOGNISED VERDICT MUST NOT READ AS APPROVED. A kind added to
+ * `ConfirmVerdict` and not added here would otherwise render as nothing beside
+ * a handle that then refuses to start, and silence is the direction that reads
+ * as "fine".
+ *
+ * 🛑 `changed` IS NOT NEUTRAL. The plan moved under a recorded approval, which
+ * is the one case where an operator has already decided something and the
+ * decision no longer covers what will run.
+ */
+const PLAN_VERDICT_LABELS = {
+  confirmed: "container plan approved",
+  unseen: "container plan not approved yet",
+  legacy: "approved before the plan was recorded",
+  changed: "container plan CHANGED since it was approved",
+};
+
+const PLAN_VERDICT_UNKNOWN = "container plan state unknown";
+
+export function planVerdictLabel(verdict) {
+  return PLAN_VERDICT_LABELS[verdict] ?? PLAN_VERDICT_UNKNOWN;
+}
+
+/**
+ * Whether the row offers an approve control.
+ *
+ * 🛑 EVERYTHING THAT IS NOT `confirmed` NEEDS ONE, INCLUDING AN UNKNOWN. The
+ * list is of the one verdict that needs nothing, so a new kind arrives needing
+ * approval rather than silently start-ready.
+ */
+export function planNeedsApproval(verdict) {
+  return verdict !== "confirmed";
+}
+
+/**
+ * The approve button's words, or null when there is nothing to approve.
+ *
+ * 🛑 A RE-APPROVAL SAYS SO. "Approve" on a handle whose plan moved reads as a
+ * first approval, and which approval is being re-taken is the operator's
+ * actual question.
+ */
+export function planApproveLabel(verdict) {
+  if (!planNeedsApproval(verdict)) return null;
+
+  return verdict === "unseen" ? "Approve plan" : "Re-approve plan";
+}
+
+/**
+ * The modifier the row's plan line carries, so CSS can warn on it.
+ *
+ * ⚠️ `legacy` IS NOT WARNED ON. There is nothing to compare it against, so
+ * flagging it the same as a moved plan would spend the warning colour on the
+ * case that carries no new information.
+ */
+export function planVerdictClass(verdict) {
+  if (
+    verdict === "changed" ||
+    planVerdictLabel(verdict) === PLAN_VERDICT_UNKNOWN
+  )
+    return " is-stale";
+
+  return "";
+}

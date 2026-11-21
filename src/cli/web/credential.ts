@@ -86,7 +86,12 @@ export const ADMIN_ROUTES: ReadonlySet<string> = new Set([
   // whether an agent is contained, so writing one is ranked with answering an
   // approval rather than with a pulse.
   "/api/agents",
+  // 🛑 THE PLAN IS ADMIN-ONLY ON A GET TOO, so neither of these appears in
+  // `READ_ROUTES`. It names mount paths, env var names and the image, which
+  // together are a map of what the container is handed.
+  "/api/agents/confirm",
   "/api/agents/forget",
+  "/api/agents/plan",
   "/api/agents/stop",
   "/api/approvals/answer",
   "/api/context-gate",

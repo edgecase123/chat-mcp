@@ -1385,6 +1385,62 @@ body {
   background: var(--bg-inset);
 }
 
+/* The container plan, in place on the row (#132 slice 4b). */
+.registration__plan-toggle,
+.registration__plan-approve {
+  padding: 2px 8px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.registration__plan-toggle:hover,
+.registration__plan-approve:hover {
+  background: var(--bg-inset);
+}
+.registration__plan-toggle[disabled],
+.registration__plan-approve[disabled] {
+  cursor: default;
+  opacity: 0.6;
+}
+.registration__plan {
+  margin-top: 4px;
+}
+.registration__plan-verdict {
+  font-size: 11px;
+  color: var(--fg-muted);
+  word-break: break-word;
+}
+/* 🛑 COLOUR IS NOT THE ONLY CARRIER, same as `.is-loose`. The label itself
+   reads "CHANGED since it was approved", so WCAG 1.4.1 is answered by the
+   text and this only reinforces it. */
+.registration__plan-verdict.is-stale {
+  color: var(--danger);
+}
+/* 🛑 `pre-wrap`, NOT `pre`. The sidebar is narrow and a mount path can be
+   long, so `pre` would hide the end of the one line an operator is approving
+   behind a horizontal scroll they have no reason to look for. */
+.registration__plan-text,
+.registration__plan-changes {
+  margin: 4px 0 0;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+/* The diff, above the plan, in the warning colour the verdict line uses. */
+.registration__plan-changes {
+  color: var(--danger);
+}
+
 /* The form that writes a pair. Below the rows, so the operator reads what is
    configured before reaching the control that changes it. */
 .registration-form {

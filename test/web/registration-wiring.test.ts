@@ -197,3 +197,92 @@ test("🛑 the vendor control is fed by the served list, never a literal", () =>
     "app.js hardcodes the vendor list the server already sends",
   );
 });
+
+// ── the container plan panel (#132 slice 4b) ──────────────────────────────
+
+/**
+ * `container.ts`, so an absence test here has a POSITIVE CONTROL.
+ *
+ * 🛑 AN ABSENCE TEST NEVER FAILS BY ACCIDENT. "app.js does not format the
+ * plan" is satisfied by a phrase that exists nowhere at all, so each one below
+ * is paired with a check that the phrase is real and lives in `src/`.
+ */
+const CONTAINER_TS = readFileSync(
+  new URL("../../src/supervise/container.ts", import.meta.url),
+  "utf8",
+);
+
+test("a CONTAINED row renders the plan control, and a host row does not", () => {
+  const section = fnBody("registrationSection");
+
+  assert.match(
+    section,
+    /planControls\(/,
+    "the card never calls the plan affordance, so the panel is unreachable",
+  );
+  assert.match(
+    section,
+    /storedMode === "docker"/,
+    "the control has to be gated on the contained mode; the route 409s a host handle",
+  );
+});
+
+test("🛑 the approve POST carries the SHOWN plan, never a bare handle", () => {
+  const approve = fnBody("approvePlan");
+
+  assert.match(approve, /"\/api\/agents\/confirm"/);
+  assert.match(
+    approve,
+    /plan: shown\.plan/,
+    "a bare handle would approve a freshly built plan, not the one on screen",
+  );
+});
+
+test("🛑 the panel is RE-READ after an approve, so a 409 shows the new plan", () => {
+  const approve = fnBody("approvePlan");
+
+  const catchAt = approve.indexOf("catch");
+  const rereadAt = approve.lastIndexOf("readPlan(handle)");
+
+  assert.notEqual(catchAt, -1, "approvePlan has no catch");
+  assert.ok(
+    rereadAt > catchAt,
+    "the re-read has to follow the failure path, or a 409 leaves a stale plan on screen",
+  );
+});
+
+test("🛑 the panel renders the SERVER's plan text and formats nothing itself", () => {
+  const panel = fnBody("planPanel");
+
+  assert.match(
+    panel,
+    /plan\.planText/,
+    "the panel has to render the text `describePlan` produced",
+  );
+  assert.match(panel, /planVerdictLabel\(/);
+  assert.match(panel, /planVerdictClass\(/);
+
+  // The phrases `describePlan` and `capLine` own. A copy of either in the
+  // browser would be free to drift from the banner the terminal prints.
+  for (const phrase of ["env vars (names only)", "no limit"]) {
+    assert.ok(
+      CONTAINER_TS.includes(phrase),
+      `POSITIVE CONTROL FAILED: "${phrase}" is not in container.ts, so its absence from app.js proves nothing`,
+    );
+    assert.ok(
+      !APP_CODE.includes(phrase),
+      `app.js formats "${phrase}" itself, which is a second copy of describePlan`,
+    );
+  }
+});
+
+test("a request in flight disables that row's controls and no other row's", () => {
+  const controls = fnBody("planControls");
+
+  assert.match(controls, /state\.planBusy === handle/);
+  assert.match(
+    controls,
+    /disabled: busy/,
+    "the toggle stays clickable during its own fetch otherwise",
+  );
+});
