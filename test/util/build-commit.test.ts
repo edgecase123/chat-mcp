@@ -55,6 +55,10 @@ function scratchRepo(): string {
   run("config", "user.name", "t");
   mkdirSync(join(dir, "src"));
   writeFileSync(join(dir, "src", "a.ts"), "export const a = 1;\n");
+  writeFileSync(
+    join(dir, "tsconfig.json"),
+    JSON.stringify({ include: ["src/**/*"] }, null, 2) + "\n",
+  );
   run("add", "-A");
   run("commit", "-qm", "one");
 
@@ -208,4 +212,37 @@ test("buildCommit reads the stamp that is actually beside it", () => {
  */
 test("buildCommit ignores the tree's HEAD when no stamp was written", () => {
   assert.notEqual(buildCommit(), headCommit());
+});
+
+/**
+ * 🛑 THE DRIFT claude1 FLAGGED ON PR 383. A hand-written path list stops
+ * counting a source root the day one is added, and nothing says so.
+ */
+test("a source root added to tsconfig starts counting toward dirty", () => {
+  const repo = scratchRepo();
+
+  try {
+    writeFileSync(
+      join(repo, "tsconfig.json"),
+      JSON.stringify({ include: ["src/**/*", "lib/**/*"] }, null, 2) + "\n",
+    );
+    execFileSync("git", ["add", "-A"], { cwd: repo, encoding: "utf8" });
+    execFileSync("git", ["commit", "-qm", "two"], {
+      cwd: repo,
+      encoding: "utf8",
+    });
+
+    assert.equal(stamp(repo).dirty, false, "the new root is not dirty yet");
+
+    mkdirSync(join(repo, "lib"));
+    writeFileSync(join(repo, "lib", "c.ts"), "export const c = 3;\n");
+
+    assert.equal(
+      stamp(repo).dirty,
+      true,
+      "a file under the new root was ignored",
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });

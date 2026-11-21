@@ -4,7 +4,7 @@
 // Argv: [outPath] [repoDir] — both exist so a test can stamp a tree it made.
 
 import { execFileSync } from "node:child_process";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,18 +13,43 @@ const out = process.argv[2] ?? join(SELF, "dist", "build-info.json");
 const repo = process.argv[3] ?? SELF;
 
 /**
- * 🛑 SCOPED TO WHAT `tsc` COMPILES, AND UNTRACKED FILES COUNT.
- * `tsconfig.json` includes `src/**` by whether the file EXISTS, not by whether
- * git tracks it, so an untracked module under `src/` ships in `dist/` and is
- * absent from the commit. `--untracked-files=no` would call that build clean.
- * Paths outside this list cannot reach `dist/`, so a stray note does not count.
+ * 🛑 DERIVED FROM `tsconfig.json`, NEVER TYPED. A hand-written path list is a
+ * second copy of `include` that drifts the day a root is added, and the drift
+ * is silent: a new source root would simply stop counting toward `dirty`.
+ *
+ * 🛑 UNTRACKED FILES COUNT, so `--untracked-files=no` is wrong here. `include`
+ * matches by whether a file EXISTS, not by whether git tracks it, so an
+ * untracked module under a source root ships in `dist/` and is absent from the
+ * commit. Paths outside these roots cannot reach `dist/`, so a stray note does
+ * not count.
+ *
+ * ⚠️ IT FAILS SAFE AND NO TEST COVERS THAT, BECAUSE NOTHING CAN REACH IT.
+ * An include-less or unparseable `tsconfig.json` falls back to the whole tree.
+ * Every way of producing one also makes git call `tsconfig.json` modified —
+ * even `chmod 000`, since git reports a file it cannot hash as changed — and
+ * `tsconfig.json` is itself a build input. So the fallback cannot change the
+ * answer, and a test asserting it was green against a fallback failing OPEN.
  */
-const BUILD_INPUTS = [
-  "src",
-  "tsconfig.json",
-  "package.json",
-  "package-lock.json",
-];
+const ALWAYS = ["package.json", "package-lock.json", "tsconfig.json"];
+
+function buildInputs() {
+  try {
+    const include = JSON.parse(
+      readFileSync(join(repo, "tsconfig.json"), "utf8"),
+    ).include;
+
+    if (!Array.isArray(include) || include.length === 0) return [];
+
+    // "src/**/*" is the whole `src` tree to git, which takes paths not globs.
+    const roots = new Set(
+      include.map((glob) => String(glob).split("/")[0]).filter(Boolean),
+    );
+
+    return [...roots, ...ALWAYS];
+  } catch {
+    return [];
+  }
+}
 
 function git(args) {
   return execFileSync("git", args, {
@@ -48,7 +73,7 @@ try {
 // only the commit would call it current while the code differs.
 let dirty;
 try {
-  dirty = git(["status", "--porcelain", "--", ...BUILD_INPUTS]).length > 0;
+  dirty = git(["status", "--porcelain", "--", ...buildInputs()]).length > 0;
 } catch {
   dirty = true;
 }
