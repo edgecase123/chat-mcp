@@ -56,6 +56,18 @@ export function unframeTurn(line: string): string | null {
     : null;
 }
 
+/** One turn's spawn request: the prompt, and the session it continues. */
+export interface TurnRequest {
+  readonly prompt: string;
+  /**
+   * ⚠️ UNDEFINED ON THE FIRST TURN OF A FRESH AGENT, AND THAT IS NOT THE ONLY
+   * CASE. A relay started by a RESTART carries the id it was asked to resume,
+   * so turn one of that relay continues a session rather than starting one —
+   * the same fallback `host.ts` records for the host path.
+   */
+  readonly resumeSessionId?: string;
+}
+
 export interface TurnRelayIo {
   /** The container's own stdin, carrying framed prompts from the supervisor. */
   readonly input: Readable;
@@ -72,7 +84,12 @@ export interface TurnRelayIo {
    * once. Sharing the function makes that unrepresentable. claude2 on PR 384.
    */
   readonly routeEvent: VendorSpawn["routeEvent"];
-  spawnTurn(prompt: string): ChildProcessWithoutNullStreams;
+  /**
+   * The id a RESTART was asked to resume, if any. Turn one has no event to
+   * read an id from, so this is the only place it can come from.
+   */
+  readonly initialSessionId?: string;
+  spawnTurn(turn: TurnRequest): ChildProcessWithoutNullStreams;
   /** Ends the relay, and with it the container. */
   exit(code: number | null): void;
 }
@@ -87,6 +104,15 @@ function takeLines(buffered: string): { lines: string[]; rest: string } {
 
 export function runTurnRelay(io: TurnRelayIo): void {
   let pending = "";
+
+  /**
+   * 🛑 ACROSS TURNS, NOT PER TURN, AND THE RELAY IS THE ONLY PARTY THAT CAN
+   * HOLD IT. Each turn is its own process and its exit happens inside the
+   * container, so the supervisor never sees a turn boundary to carry an id
+   * over. Without this every turn is a fresh session and the agent forgets the
+   * task between turns while still looking busy.
+   */
+  let sessionId = io.initialSessionId;
 
   io.input.setEncoding("utf8");
   io.input.on("data", (chunk: string) => {
@@ -118,7 +144,7 @@ export function runTurnRelay(io: TurnRelayIo): void {
   });
 
   function startTurn(relay: TurnRelayIo, prompt: string): void {
-    const child = relay.spawnTurn(prompt);
+    const child = relay.spawnTurn({ prompt, resumeSessionId: sessionId });
     let sawTurnEnd = false;
     let tail = "";
 
@@ -144,7 +170,12 @@ export function runTurnRelay(io: TurnRelayIo): void {
         usage: () => undefined,
         context: () => undefined,
         denial: () => undefined,
-        session: () => undefined,
+        // 🔴 ONLY EVER ASSIGNED, NEVER CLEARED. The router calls this only
+        // when an event carries a string id, so a turn whose events omit the
+        // field leaves the held id alone instead of dropping the session.
+        session: (id: string) => {
+          sessionId = id;
+        },
       });
     };
 

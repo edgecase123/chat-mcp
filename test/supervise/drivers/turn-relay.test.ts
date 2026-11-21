@@ -75,18 +75,24 @@ function fakeTurn(): FakeTurn {
   return turn;
 }
 
+interface TurnRequest {
+  readonly prompt: string;
+  readonly resumeSessionId?: string;
+}
+
 interface Harness {
   readonly input: PassThrough;
   readonly written: () => string;
   readonly errors: () => string;
   readonly turns: FakeTurn[];
   readonly prompts: string[];
+  readonly requests: TurnRequest[];
   readonly exits: (number | null)[];
   /** Feed one already-framed prompt, as the supervisor would. */
   send(prompt: string): void;
 }
 
-function harness(): Harness {
+function harness(initialSessionId?: string): Harness {
   const input = new PassThrough();
   const output = new PassThrough();
   let seen = "";
@@ -102,6 +108,7 @@ function harness(): Harness {
 
   const turns: FakeTurn[] = [];
   const prompts: string[] = [];
+  const requests: TurnRequest[] = [];
   const exits: (number | null)[] = [];
 
   runTurnRelay({
@@ -112,8 +119,10 @@ function harness(): Harness {
     // relay and the supervisor cannot disagree about a turn end, and a fake
     // router would be exactly the second opinion this is meant to exclude.
     routeEvent: routeCursorEvent,
-    spawnTurn: (prompt: string) => {
-      prompts.push(prompt);
+    initialSessionId,
+    spawnTurn: (request: TurnRequest) => {
+      requests.push(request);
+      prompts.push(request.prompt);
       const turn = fakeTurn();
       turns.push(turn);
 
@@ -128,6 +137,7 @@ function harness(): Harness {
     errors: () => errors,
     turns,
     prompts,
+    requests,
     exits,
     send: (prompt: string) => input.write(frameTurn(prompt)),
   };
@@ -350,4 +360,73 @@ test("🛑 a turn that fails to SPAWN exits the relay instead of throwing", () =
 
   assert.deepEqual(h.exits, [1]);
   assert.match(h.errors(), /failed to start/);
+});
+
+/**
+ * 🛑 WITHOUT A RESUME ID EVERY TURN IS A FRESH SESSION, so the agent forgets
+ * the task between turns while looking like it is working. The relay is the
+ * only party that can carry the id: the per-turn exits happen inside the
+ * container, so the supervisor never sees them.
+ */
+test("🛑 turn two resumes the session turn one reported", () => {
+  const h = harness();
+
+  h.send("first");
+  h.turns[0].say(
+    JSON.stringify({ type: "system", subtype: "init", session_id: "s-1" }),
+  );
+  h.turns[0].say(JSON.stringify({ type: "result", session_id: "s-1" }));
+  h.turns[0].exit(0);
+
+  h.send("second");
+
+  assert.equal(h.requests[0].resumeSessionId, undefined);
+  assert.equal(h.requests[1].resumeSessionId, "s-1");
+});
+
+/**
+ * ⚠️ THE FALLBACK IS NOT DEAD CODE, for the reason `host.ts` records: on turn
+ * one no event has arrived, so the only id available is the one a RESTART was
+ * asked to resume. Dropping it there is how a restarted agent loses its task.
+ */
+test("🛑 turn ONE resumes the id a restart was given", () => {
+  const h = harness("s-restored");
+
+  h.send("first");
+
+  assert.equal(h.requests[0].resumeSessionId, "s-restored");
+});
+
+test("the LAST id a turn reports wins", () => {
+  const h = harness();
+
+  h.send("first");
+  h.turns[0].say(JSON.stringify({ type: "system", session_id: "s-1" }));
+  h.turns[0].say(JSON.stringify({ type: "result", session_id: "s-2" }));
+  h.turns[0].exit(0);
+
+  h.send("second");
+
+  assert.equal(h.requests[1].resumeSessionId, "s-2");
+});
+
+/**
+ * 🔴 CONTROL — a turn that reports NO id must not CLEAR the one already held.
+ * Overwriting with undefined would silently drop the session on any turn whose
+ * events omit the field.
+ */
+test("🔴 control — a turn reporting no id leaves the previous one in place", () => {
+  const h = harness();
+
+  h.send("first");
+  h.turns[0].say(JSON.stringify({ type: "result", session_id: "s-1" }));
+  h.turns[0].exit(0);
+
+  h.send("second");
+  h.turns[1].say(JSON.stringify({ type: "result" }));
+  h.turns[1].exit(0);
+
+  h.send("third");
+
+  assert.equal(h.requests[2].resumeSessionId, "s-1");
 });
