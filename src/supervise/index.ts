@@ -1,7 +1,7 @@
 import type { AgentChild, SpawnOptions } from "./child.js";
 import { assertDeclaresCapabilities } from "./child.js";
 import type { VendorSpawn } from "./vendor.js";
-import { resolveDriver } from "./drivers/index.js";
+import { selectionFor } from "./selection.js";
 import { spawnOnHost } from "./drivers/host.js";
 import {
   spawnContainerized,
@@ -237,7 +237,11 @@ export async function startSupervisor(
   await refuseIfSupervisorLive(opts.handle);
 
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
-  const selection = resolveDriver({
+  // 🛑 ONLY THE MODE IS TAKEN FROM HERE. `opts.vendor` arrives already
+  // resolved to a `VendorSpawn` by the caller that imports `adapters/`, so a
+  // library caller naming a vendor object keeps it; `agents.json` supplies the
+  // mode this handle was registered with when no flag tightened it.
+  const selection = selectionFor(opts.handle, {
     driver: opts.driver,
     container: opts.container,
   });

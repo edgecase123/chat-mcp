@@ -52,6 +52,31 @@ importing anything that resolves a path.
 | `aliases.sh` | `src/index.ts` (`aliases` command) | A source-able shell alias block |
 | `run/*.pid`, `logs/*.log` | `scripts/lib/procctl.sh` | Written by the operator scripts, not by the CLI |
 
+## `agents.json` vs the command line — which wins
+
+`selectionFor` (`src/supervise/selection.ts`) composes the stored pair with
+whatever the operator named on the command line. Precedence is **per axis**,
+because `--container` says nothing about which CLI to drive:
+
+| axis     | the flag wins when            | otherwise     |
+| -------- | ----------------------------- | ------------- |
+| `vendor` | `--driver <name>` was given   | `agents.json` |
+| `mode`   | the flags resolve to `docker` | `agents.json` |
+
+🛑 **A FLAG MAY TIGHTEN THE MODE AND MAY NEVER LOOSEN IT.** `resolveDriver`
+returns `host` both for `--driver claude`, which names that mode, and for a
+bare invocation that names nothing — the two are indistinguishable downstream.
+Treating that `host` as an override would start an **uncontained** agent for a
+handle whose `agents.json` says `docker`, with the file and the web UI both
+still saying contained.
+
+**Both spawn call sites read it, and that is deliberate.** `src/index.ts` needs
+the pair to pick the `VendorSpawn` and to decide whether the container consent
+gate runs; `startSupervisor` needs it again for the spawn itself. Reading the
+file at only one of them builds the image for one vendor and drives the other.
+`startSupervisor` takes only the **mode** from it — a library caller passing a
+resolved `opts.vendor` keeps that object.
+
 ## The two entries whose location will surprise you
 
 **`manifestDir()` is a SIBLING, not a child.** It resolves to
