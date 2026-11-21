@@ -18,6 +18,8 @@ const { setGhToken, clearGhToken } =
   await import("../../src/supervise/auth.js");
 const { CONTAINER_GH_TOKEN_ENV } =
   await import("../../src/supervise/drivers/containerized.js");
+const { installResourceArgs } =
+  await import("../../src/supervise/installResources.js");
 
 import type { VendorSpawn } from "../../src/supervise/vendor.js";
 
@@ -109,4 +111,189 @@ test("the GitHub token env var IS named when one is on file", () => {
   } finally {
     clearGhToken();
   }
+});
+
+/* --------------------------------------------------------------------------
+ * `memory` and `cpus` on the banner.
+ *
+ * 🔴 THE BANNER UNDERSTATED THE SANDBOX. It named the image, the mounts, the
+ * credentials and the network, so an operator reading it had every reason to
+ * think it described the container — while the two keys that decide how much
+ * of the host the agent may consume were absent.
+ * ----------------------------------------------------------------------- */
+
+test("an override's memory and cpus reach the plan", () => {
+  const handle = `cp-caps-${process.pid}`;
+  writeOverride(handle, { memory: "512m", cpus: "1.5" });
+
+  const plan = buildConfirmPlan(vendor, handle);
+
+  assert.equal(plan.memory, "512m");
+  assert.equal(plan.cpus, "1.5");
+});
+
+test("the rendered banner names the override's memory and cpus", () => {
+  const handle = `cp-caps-banner-${process.pid}`;
+  writeOverride(handle, { memory: "512m", cpus: "1.5" });
+
+  const banner = describePlan(buildConfirmPlan(vendor, handle));
+
+  assert.match(banner, /memory: 512m/);
+  assert.match(banner, /cpus: 1\.5/);
+});
+
+/**
+ * 🔴 THE CONTROL THAT MATTERS MORE THAN THE CASE ABOVE. An absent key means
+ * the container runs with NO limit, and docker reports nothing — so a banner
+ * that simply omits the line lets an operator read silence as a cap. It must
+ * say the uncapped thing out loud.
+ */
+test("with no override the banner says both caps are absent, rather than omitting them", () => {
+  const banner = describePlan(
+    buildConfirmPlan(vendor, `cp-caps-none-${process.pid}`),
+  );
+
+  assert.match(banner, /memory: no limit/);
+  assert.match(banner, /cpus: no limit/);
+});
+
+/**
+ * ⚠️ ONE CAP WITHOUT THE OTHER IS THE REALISTIC FILE. Asserting only the
+ * both-set and both-absent cases lets an implementation that reads one key
+ * and copies it to the other pass.
+ */
+test("memory on its own leaves cpus reported as absent", () => {
+  const handle = `cp-caps-half-${process.pid}`;
+  writeOverride(handle, { memory: "512m" });
+
+  const banner = describePlan(buildConfirmPlan(vendor, handle));
+
+  assert.match(banner, /memory: 512m/);
+  assert.match(banner, /cpus: no limit/);
+});
+
+/* --------------------------------------------------------------------------
+ * The install container's floor on the banner.
+ *
+ * 🔴 THE BANNER UNDERSTATED THE PEAK BY 2x. #346 raises a cap below the floor
+ * for the dependency-install container, so an operator who wrote `512m` was
+ * told `512m` and a container ran with `1g`. A number reads as more
+ * authoritative than an omission, so this is worse than the silence it
+ * replaced. Found by claude2 on PR 349.
+ * ----------------------------------------------------------------------- */
+
+test("a cap BELOW the install floor is named as raised, not printed bare", () => {
+  const handle = `cp-floor-${process.pid}`;
+  writeOverride(handle, { memory: "512m", cpus: "0.5" });
+
+  const banner = describePlan(buildConfirmPlan(vendor, handle));
+
+  assert.match(banner, /memory: 512m \(dependency install: 1g\)/);
+  assert.match(banner, /cpus: 0\.5 \(dependency install: 1\)/);
+});
+
+/**
+ * 🔴 THE CONTROL. Without it, an implementation that always appended the
+ * floor would pass the test above while telling an operator their `4g` agent
+ * installs under `1g`.
+ */
+test("a cap ABOVE the install floor is printed bare, with no raise named", () => {
+  const handle = `cp-nofloor-${process.pid}`;
+  writeOverride(handle, { memory: "4g", cpus: "2" });
+
+  const banner = describePlan(buildConfirmPlan(vendor, handle));
+
+  assert.match(banner, /memory: 4g$/m);
+  assert.match(banner, /cpus: 2$/m);
+  assert.doesNotMatch(banner, /dependency install/);
+});
+
+/**
+ * ⚠️ ONE RAISED AND ONE NOT IS THE REALISTIC FILE, and it is the case an
+ * implementation that decides per-banner rather than per-key gets wrong.
+ */
+test("memory above the floor and cpus below it names the raise on cpus only", () => {
+  const handle = `cp-mixed-${process.pid}`;
+  writeOverride(handle, { memory: "4g", cpus: "0.5" });
+
+  const banner = describePlan(buildConfirmPlan(vendor, handle));
+
+  assert.match(banner, /memory: 4g$/m);
+  assert.match(banner, /cpus: 0\.5 \(dependency install: 1\)/);
+});
+
+test("no override names no raise, because an absent cap emits no install flag", () => {
+  const banner = describePlan(
+    buildConfirmPlan(vendor, `cp-floor-none-${process.pid}`),
+  );
+
+  assert.match(banner, /memory: no limit/);
+  assert.doesNotMatch(banner, /dependency install/);
+});
+
+/**
+ * ⚠️ THIS PROVES THE TWO ROUTES AGREE ON THE VALUE. It does NOT prove they
+ * read one source, and an earlier version of this comment claimed it did.
+ * A re-duplicated `"1g"` agrees by construction, so this catches a floor that
+ * DRIFTS and not one that is COPIED. claude2 measured that on PR 349: a second
+ * copy inside `confirmPlan.ts` survived all 15 tests and typecheck.
+ *
+ * 🛑 THE SOURCING IS PINNED IN `confirm-plan-floor-sourcing.test.ts`, which
+ * replaces the exported function and fails if the banner stops calling it.
+ */
+test("the banner's install values are exactly what the install argv carries", () => {
+  const handle = `cp-pinned-${process.pid}`;
+  writeOverride(handle, { memory: "512m", cpus: "0.5" });
+
+  const plan = buildConfirmPlan(vendor, handle);
+
+  assert.deepEqual(installResourceArgs({ memory: "512m", cpus: "0.5" }), [
+    "--memory",
+    plan.installMemory,
+    "--cpus",
+    plan.installCpus,
+  ]);
+});
+
+/**
+ * 🛑 A COMMENT CLAIMING "UNREACHABLE" IS NOT A GUARD. `capLine` returns early
+ * on a null agent cap, which would discard a non-null install cap without a
+ * word — the exact silent-drop this whole slice exists to stop. Both values
+ * come off one override today, so it throws instead of being commented about.
+ * Raised by claude2 on PR 349.
+ */
+test("🛑 an install cap with no agent cap throws rather than being dropped", () => {
+  assert.throws(
+    () =>
+      describePlan({
+        mountPaths: ["/work"],
+        envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+        binary: "claude",
+        networkMode: "bridge",
+        image: "chat-mcp-agent:local",
+        memory: null,
+        cpus: null,
+        installMemory: "1g",
+        installCpus: null,
+      }),
+    /cannot be described/,
+  );
+});
+
+/** ⚠️ CONTROL — both null is the ordinary uncapped case and must not throw. */
+test("⚠️ control — no caps at all describes as no limit, without throwing", () => {
+  const banner = describePlan({
+    mountPaths: ["/work"],
+    envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+    binary: "claude",
+    networkMode: "bridge",
+    image: "chat-mcp-agent:local",
+    memory: null,
+    cpus: null,
+    installMemory: null,
+    installCpus: null,
+  });
+
+  assert.match(banner, /memory: no limit/);
+  assert.match(banner, /cpus: no limit/);
 });

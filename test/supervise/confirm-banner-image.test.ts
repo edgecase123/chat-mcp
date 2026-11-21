@@ -23,6 +23,10 @@ test("the confirm banner names the image the container will run", () => {
     binary: "claude",
     networkMode: "bridge",
     image: "chat-mcp-agent:local",
+    memory: null,
+    cpus: null,
+    installMemory: null,
+    installCpus: null,
   });
 
   assert.match(

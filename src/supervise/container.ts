@@ -41,6 +41,32 @@ export interface ContainerPlan {
    * image would start, as PID 1 beside three credentials.
    */
   readonly image: string;
+
+  /**
+   * The caps the container will run under, or `null` for no cap at all.
+   *
+   * 🛑 `null` IS PRINTED, NOT OMITTED. An absent key means docker imposes no
+   * limit and reports none, so a banner that simply dropped the line would let
+   * an operator read silence as a cap.
+   *
+   * 🛑 REQUIRED, LIKE `image`. An optional field would let a future caller
+   * build a plan that silently went back to describing nothing.
+   */
+  readonly memory: string | null;
+  readonly cpus: string | null;
+
+  /**
+   * What the DEPENDENCY-INSTALL container runs under, which is not always what
+   * the agent container runs under.
+   *
+   * 🛑 A CAP BELOW #346's FLOOR IS RAISED FOR THAT CONTAINER. A banner that
+   * printed the handle's own number and stopped understated the peak — `512m`
+   * on the banner, `--memory 1g` on a container that actually ran. A number
+   * reads as more authoritative than an omission, so that is worse than the
+   * silence it replaced.
+   */
+  readonly installMemory: string | null;
+  readonly installCpus: string | null;
 }
 
 interface ContainerState {
@@ -279,6 +305,36 @@ export function markConfirmed(handle: string): void {
   });
 }
 
+/** What an absent cap reads as, so the uncapped case is said out loud. */
+const NO_LIMIT = "no limit";
+
+/**
+ * One cap as the operator reads it, naming the install container only when it
+ * differs.
+ *
+ * 🛑 THE SUFFIX IS CONDITIONAL AND THE OMISSION IS NOT. An absent cap still
+ * prints `no limit`, because docker reports no limit either way. The install
+ * suffix is dropped only when the two values are EQUAL, so nothing is hidden
+ * by its absence.
+ */
+function capLine(agent: string | null, install: string | null): string {
+  // 🛑 THROWS RATHER THAN DROPPING THE INSTALL VALUE. Unreachable today —
+  // both come off one `override` — but the `agent === null` early return
+  // would silently discard a non-null install cap, which is the shape this
+  // function exists to stop. Raised by claude2 on PR 349.
+  if (agent === null && install !== null) {
+    throw new Error(
+      `an install cap of "${install}" with no agent cap cannot be described; ` +
+        "the banner would drop it silently",
+    );
+  }
+
+  if (agent === null) return NO_LIMIT;
+  if (install === null || install === agent) return agent;
+
+  return `${agent} (dependency install: ${install})`;
+}
+
 export function describePlan(plan: ContainerPlan): string {
   return [
     "This will run the agent inside a Docker container:",
@@ -287,5 +343,7 @@ export function describePlan(plan: ContainerPlan): string {
     `  binary: ${plan.binary}`,
     `  network: ${plan.networkMode}`,
     `  image: ${plan.image}`,
+    `  memory: ${capLine(plan.memory, plan.installMemory)}`,
+    `  cpus: ${capLine(plan.cpus, plan.installCpus)}`,
   ].join("\n");
 }

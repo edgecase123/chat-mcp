@@ -35,48 +35,69 @@ export function memoryToBytes(value: string): number {
 }
 
 /**
+ * The install container's effective `memory`, floored, or `null` when the
+ * handle set none.
+ *
+ * 🛑 ONE SOURCE FOR THE FLOOR, BECAUSE TWO CONSUMERS READ IT. The install
+ * argv and the consent banner must agree about what the install container
+ * runs under. They diverged once already: the floor shipped on #346 and the
+ * banner line on #349, an hour apart, and nothing compared them — so the
+ * banner said `512m` while a container took `1g`.
+ *
+ * ⚠️ AN ABSENT KEY STAYS ABSENT, RATHER THAN BECOMING THE FLOOR. The floor
+ * raises a cap somebody asked for; it does not impose one on an install that
+ * was never capped.
+ */
+export function installMemoryFor(
+  override: ContainerOverride | null | undefined,
+): string | null {
+  const value = override?.memory;
+
+  if (value === undefined) return null;
+
+  // 🛑 CHECKED HERE, BECAUSE THE STORE IS NOT THE ONLY ROUTE IN. An
+  // unparseable value compares FALSE against the floor rather than below it,
+  // so trusting it would skip the floor instead of raising to it — the
+  // fails-open direction.
+  const checked = assertMemory(value);
+
+  return memoryToBytes(checked) < memoryToBytes(INSTALL_MEMORY_FLOOR)
+    ? INSTALL_MEMORY_FLOOR
+    : checked;
+}
+
+/** The install container's effective `cpus`, floored. See `installMemoryFor`. */
+export function installCpusFor(
+  override: ContainerOverride | null | undefined,
+): string | null {
+  const value = override?.cpus;
+
+  if (value === undefined) return null;
+
+  const checked = assertCpus(value);
+
+  return Number(checked) < Number(INSTALL_CPUS_FLOOR)
+    ? INSTALL_CPUS_FLOOR
+    : checked;
+}
+
+/**
  * The install container's `--memory` / `--cpus` flags, floored.
  *
  * 🛑 THE CALLER MUST PUSH THESE BEFORE THE IMAGE OPERAND. `docker run` hands
  * everything after the image name to the container, so a flag pushed after it
  * reaches `sh` as an unknown argument and the container runs UNCAPPED with no
  * error for the operator to find.
- *
- * ⚠️ AN ABSENT KEY EMITS NO FLAG, RATHER THAN THE FLOOR. The floor raises a
- * cap somebody asked for; it does not impose one on an install that was never
- * capped.
  */
 export function installResourceArgs(
   override: ContainerOverride | null | undefined,
 ): string[] {
   const args: string[] = [];
-  const { memory, cpus } = override ?? {};
+  const memory = installMemoryFor(override);
+  const cpus = installCpusFor(override);
 
-  // 🛑 CHECKED HERE, BECAUSE THE STORE IS NOT THE ONLY ROUTE IN. An
-  // unparseable value compares FALSE against the floor rather than below it,
-  // so trusting it would skip the floor instead of raising to it — the
-  // fails-open direction. `effectiveImage` re-checks its own value four lines
-  // below for the same reason.
-  if (memory !== undefined) {
-    const checked = assertMemory(memory);
-    const floored =
-      memoryToBytes(checked) < memoryToBytes(INSTALL_MEMORY_FLOOR)
-        ? INSTALL_MEMORY_FLOOR
-        : checked;
-
-    args.push("--memory", floored);
-  }
-
-  if (cpus !== undefined) {
-    const checked = assertCpus(cpus);
-
-    args.push(
-      "--cpus",
-      Number(checked) < Number(INSTALL_CPUS_FLOOR)
-        ? INSTALL_CPUS_FLOOR
-        : checked,
-    );
-  }
+  if (memory !== null) args.push("--memory", memory);
+  if (cpus !== null) args.push("--cpus", cpus);
 
   return args;
 }
