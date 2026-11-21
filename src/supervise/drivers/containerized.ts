@@ -5,7 +5,8 @@ import {
 } from "node:child_process";
 import type { AgentChild, BusEndpoint, SpawnOptions } from "../child.js";
 import type { VendorSpawn } from "../vendor.js";
-import { wireAgentChild } from "./wiring.js";
+import { assertDeclaresProcessLifetime, wireAgentChild } from "./wiring.js";
+import { frameTurn } from "./turn-relay.js";
 import { mountsFor, containerPathFor } from "../mounts.js";
 import {
   GH_TOKEN_KEY,
@@ -35,6 +36,24 @@ const posixDirname = posix.dirname;
 import { realpathSync } from "node:fs";
 
 export const CONTAINER_PROJECT_DIR = "/work";
+
+/**
+ * This project's own tree inside the image, which is the image's `WORKDIR`.
+ *
+ * 🛑 THE RELAY IS ORDINARY PROJECT CODE, NOT A NEW RUNTIME. `Dockerfile` copies
+ * `dist/` here for every vendor's image, so the container's command can be a
+ * module from this repo with no extra install step.
+ */
+export const CONTAINER_CHAT_MCP_DIR = "/opt/chat-mcp";
+
+/**
+ * The container-side command for a per-turn vendor.
+ *
+ * ⚠️ ASSERTED AGAINST THE Dockerfile's OWN `WORKDIR` by `containerized.test.ts`,
+ * because a path that drifts from the image produces a container that starts,
+ * finds no such file, and answers nothing — the #380 symptom with a new cause.
+ */
+export const CONTAINER_RELAY_ENTRY = `${CONTAINER_CHAT_MCP_DIR}/dist/relay/bin.js`;
 
 /**
  * The project-relative directory the container owns rather than reads from the
@@ -630,6 +649,13 @@ export function dockerRunPlan(
   // under whatever name the vendor declared, so a Cursor container received a
   // Claude subscription token as `CURSOR_API_KEY` — and `cursor-agent` sent it
   // to Cursor as its own key. #347.
+  // 🛑 DECLARED, NEVER INFERRED, AND THE CONTAINER PATH NEEDS IT AS MUCH AS THE
+  // HOST ONE. An absent field is falsy, which reads as a long-lived process —
+  // so the command below would be the CLI, the prompt would arrive unframed,
+  // and the container would hang on an EOF nobody sends. `spawnOnHost` has
+  // always asserted this; this path had no guard at all.
+  assertDeclaresProcessLifetime(vendor);
+
   const token = readVendorToken(vendor);
   // Optional, unlike the agent credential. Most handles need no GitHub access,
   // and one that does not must still be able to start.
@@ -798,9 +824,16 @@ export function dockerRunPlan(
   // 🛑 `containerBinary`, BECAUSE THIS ARGV RUNS IN THE IMAGE'S FILESYSTEM.
   // `vendor.binary` is the host path, and execing it here gave Cursor exit 127
   // on every containerized start it ever had.
+  // 🛑 NO `--resume` IN A PER-TURN VENDOR'S OWN ARGV. This argv is built once
+  // and reused for every turn, so a baked-in id would be passed again on turn
+  // two beside the one the relay holds. The relay receives the starting id as
+  // its own flag and appends the vendor's resume flags per turn instead.
   const cli = [
     opts.binary ?? vendor.containerBinary,
-    ...vendor.argsFor(opts, "docker"),
+    ...vendor.argsFor(
+      vendor.processPerTurn ? { ...opts, resumeSessionId: undefined } : opts,
+      "docker",
+    ),
   ];
 
   // 🛑 ONE PUSH, SO THE TWO BRANCHES CANNOT DIVERGE AGAIN. Only a granted
@@ -835,7 +868,23 @@ export function dockerRunPlan(
   // of packages in the same process tree as the bus token, `GH_TOKEN` and the
   // Claude OAuth token. `runDependencyInstall` does it first, in a container
   // handed none of them.
-  args.push("sh", "-c", prelude(steps), "sh", ...cli);
+  // 🛑 THE RELAY IS THE COMMAND FOR A PER-TURN VENDOR, AND THAT IS #380's FIX.
+  // `cursor-agent -p` reads stdin to EOF and the supervisor's stdin is never
+  // closed, so run directly it blocked forever and emitted nothing. The relay
+  // keeps the container alive and gives each turn its own process and EOF.
+  const command = vendor.processPerTurn
+    ? [
+        "node",
+        CONTAINER_RELAY_ENTRY,
+        "--vendor",
+        vendor.vendor,
+        ...(opts.resumeSessionId ? ["--resume", opts.resumeSessionId] : []),
+        "--",
+        ...cli,
+      ]
+    : cli;
+
+  args.push("sh", "-c", prelude(steps), "sh", ...command);
 
   return { args, env };
 }
@@ -985,8 +1034,17 @@ export function spawnContainerized(
   const graceSeconds =
     opts.shutdownGraceSeconds ?? DEFAULT_SHUTDOWN_GRACE_SECONDS;
 
-  return wireAgentChild(child, vendor, {
-    stop: dockerStopFor(name, graceSeconds),
-    teardown: dockerTeardownFor(name, graceSeconds),
-  });
+  return wireAgentChild(
+    child,
+    // 🛑 FRAMING IS CONTAINER-SPECIFIC, SO IT IS APPLIED HERE RATHER THAN IN
+    // THE VENDOR. `encodeInput` also feeds the HOST per-turn path, which writes
+    // straight to the CLI's own stdin and must stay raw. Inside a container the
+    // reader is the relay, and a raw multi-line prompt there is
+    // indistinguishable from two prompts.
+    vendor.processPerTurn ? { ...vendor, encodeInput: frameTurn } : vendor,
+    {
+      stop: dockerStopFor(name, graceSeconds),
+      teardown: dockerTeardownFor(name, graceSeconds),
+    },
+  );
 }

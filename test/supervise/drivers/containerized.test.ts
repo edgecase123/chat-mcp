@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn as realSpawn, spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 
 process.env.CHAT_MCP_HOME = mkdtempSync(
   join(tmpdir(), "chat-mcp-docker-driver-"),
@@ -37,6 +38,7 @@ const {
   CONTAINER_GH_TOKEN_ENV,
   CONTAINER_PROJECT_DIR,
   CONTAINER_MCP_CONFIG_ENV,
+  CONTAINER_RELAY_ENTRY,
   containerPathFor,
   containerMcpConfigPath,
   containerBusUrl,
@@ -2713,4 +2715,199 @@ test("🚨 an override image that bypassed the store is still refused by both pl
       `the install plan accepted ${JSON.stringify(bad)} as an image`,
     );
   }
+});
+
+/**
+ * 🛑 #380 SLICE 3. A per-turn CLI reads stdin to EOF and the supervisor never
+ * closes it, so a containerized Cursor agent blocked forever and emitted
+ * nothing. The container's command is therefore the relay, not the CLI — and
+ * the relay is the only party that can give each turn its own EOF.
+ */
+test("🛑 a PER-TURN vendor's container command is the RELAY, not the CLI", () => {
+  setVendorToken(cursorSpawn, "key-x");
+
+  const { args } = dockerRunPlan(cursorSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+
+  const relayAt = args.indexOf(CONTAINER_RELAY_ENTRY);
+
+  assert.ok(relayAt > 0, `the relay is not the command: ${args.join(" ")}`);
+  assert.equal(args[relayAt - 1], "node");
+  assert.deepEqual(args.slice(relayAt + 1, relayAt + 3), [
+    "--vendor",
+    "cursor",
+  ]);
+  // The CLI still runs, but as the relay's own argument after the separator.
+  assert.ok(args.slice(relayAt).includes("--"));
+  assert.ok(args.includes(cursorSpawn.containerBinary));
+});
+
+test("🔴 control — a LONG-LIVED vendor's command is still the CLI itself", () => {
+  setToken("sk-ant-oat-x");
+
+  const args = dockerArgsFor({
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+
+  assert.ok(
+    !args.includes(CONTAINER_RELAY_ENTRY),
+    `claude was wrapped in the relay it does not need: ${args.join(" ")}`,
+  );
+});
+
+/**
+ * 🛑 THE STALE-ID TRAP. A `--resume` baked into the CLI argv would be passed
+ * on EVERY turn, so turn two would carry both the id the host knew at start
+ * and the one the relay holds. The relay owns the flag; the host owns only
+ * the id it starts with.
+ */
+test("🛑 the resume id goes to the RELAY, and the CLI argv carries no --resume", () => {
+  setVendorToken(cursorSpawn, "key-x");
+
+  const { args } = dockerRunPlan(cursorSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+    resumeSessionId: "SESS-RESTART",
+  });
+
+  const relayAt = args.indexOf(CONTAINER_RELAY_ENTRY);
+  const separatorAt = args.indexOf("--", relayAt);
+  const relayFlags = args.slice(relayAt + 1, separatorAt);
+  const cli = args.slice(separatorAt + 1);
+
+  assert.deepEqual(relayFlags, [
+    "--vendor",
+    "cursor",
+    "--resume",
+    "SESS-RESTART",
+  ]);
+  assert.ok(
+    !cli.includes("--resume"),
+    `the CLI argv carries a resume the relay will override: ${cli.join(" ")}`,
+  );
+});
+
+test("🛑 a vendor that never declared a process lifetime is REFUSED, not guessed", () => {
+  const undeclared = {
+    ...cursorSpawn,
+    processPerTurn: undefined as unknown as boolean,
+  };
+
+  setVendorToken(cursorSpawn, "key-x");
+
+  assert.throws(
+    () =>
+      dockerRunPlan(undeclared, {
+        cwd: PROJECT_DIR,
+        supervisorHandle: "claude1",
+      }),
+    /processPerTurn/,
+  );
+});
+
+/**
+ * 🛑 THE PATH IS IN TWO FILES, SO IT IS ASSERTED AGAINST THE IMAGE ITSELF. A
+ * constant that drifts from the Dockerfile's WORKDIR produces a container
+ * that starts, finds no such file and answers nothing — the #380 symptom with
+ * a different cause.
+ */
+test("🛑 the relay entry path is under the image's own WORKDIR", () => {
+  const dockerfile = readFileSync(
+    new URL("../../../Dockerfile", import.meta.url),
+    "utf8",
+  );
+  const workdir = /^WORKDIR (\/opt\/\S+)$/m.exec(dockerfile)?.[1];
+
+  assert.ok(workdir, "the Dockerfile has no /opt WORKDIR to anchor on");
+  assert.ok(
+    CONTAINER_RELAY_ENTRY.startsWith(`${workdir}/dist/`),
+    `${CONTAINER_RELAY_ENTRY} is not under ${workdir}/dist`,
+  );
+});
+
+/**
+ * A `docker run` stand-in that records what the supervisor writes to it.
+ *
+ * 🛑 NOT `mockDocker`'s STAND-IN, WHICH IS A REAL IDLE PROCESS. What this test
+ * asserts is the BYTES `send()` produces, and a real child's stdin is write-only
+ * from here.
+ */
+function mockDockerCapturingStdin(t: TestContext): { written: () => string } {
+  let written = "";
+  const stdout = new EventEmitter() as EventEmitter & {
+    setEncoding: (e: string) => void;
+  };
+  stdout.setEncoding = () => undefined;
+  const stderr = new EventEmitter() as EventEmitter & {
+    setEncoding: (e: string) => void;
+  };
+  stderr.setEncoding = () => undefined;
+
+  t.mock.module("node:child_process", {
+    namedExports: {
+      spawn: () =>
+        ({
+          stdout,
+          stderr,
+          stdin: {
+            write: (chunk: string) => {
+              written += chunk;
+
+              return true;
+            },
+            end: () => undefined,
+          },
+          on: () => undefined,
+        }) as unknown as ReturnType<typeof realSpawn>,
+      execFileSync: () => Buffer.from(""),
+    },
+  });
+
+  return { written: () => written };
+}
+
+/**
+ * 🛑 THE CONTAINER'S READER IS THE RELAY, NOT THE CLI. `cursorEncodeInput` is
+ * the identity function, so a raw multi-line prompt reaching the relay is
+ * indistinguishable from two prompts — and the second half would run as its
+ * own turn, silently.
+ */
+test("🛑 send() FRAMES the prompt for a per-turn vendor", async (t) => {
+  setVendorToken(cursorSpawn, "key-x");
+  const { written } = mockDockerCapturingStdin(t);
+
+  // 🛑 THROUGH THE SHARED HELPER, NOT A NEW TEMPLATE-LITERAL IMPORT.
+  // `typecheck-config.test.ts` pins the count of those because each one types
+  // as `any`, and this helper is the one site that carries the cast.
+  const { spawnContainerized } = await freshContainerized();
+  const { frameTurn } =
+    await import("../../../src/supervise/drivers/turn-relay.js");
+
+  const agent = spawnContainerized(cursorSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+
+  agent.send("line one\nline two");
+
+  assert.equal(written(), frameTurn("line one\nline two"));
+});
+
+test("🔴 control — a LONG-LIVED vendor's send() is still RAW", async (t) => {
+  setToken("sk-ant-oat-x");
+  const { written } = mockDockerCapturingStdin(t);
+
+  const { spawnContainerized } = await freshContainerized();
+
+  const agent = spawnContainerized(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+
+  agent.send("line one\n");
+
+  assert.equal(written(), claudeSpawn.encodeInput("line one\n"));
 });
