@@ -546,6 +546,20 @@ for a child that never ran.
 `cursor-agent mcp enable` needs none, measured, so least privilege applies. A
 test asserts the absence, so a later change cannot widen it silently.
 
+🛑 **EVERY SPAWNED CHILD NEEDS A TOKEN ON FILE, AND THAT INCLUDES CLAUDE.**
+Ruled by lee 2026-11-22: _"If it's a spawn agents it needs to have it, the
+terminal agents are already authorized manually by me."_ A terminal `claude`
+the operator authorised by hand is not spawned by the supervisor and never
+reaches `spawnOnHost`.
+
+⚠️ **THIS TIGHTENS SOMETHING THAT WORKED, DELIBERATELY.** On macOS the keychain
+holds a `Claude Code-credentials` item, so a spawned host `claude` child
+authenticated AMBIENTLY from the operator's own login and needed nothing on
+file. It is now refused until `chat-mcp auth set-token --vendor claude` has
+run. **The reason is that an unattended child leaning on an interactive login
+fails exactly the way #396 failed when that login expires — a clean start and
+silence.** A token on file is a credential the supervisor owns.
+
 🛑 **"A REAL KEY IS ON FILE" IS NOT EVIDENCE THE CHILD HAS ONE.** The host
 acceptance script's first check passed throughout the window this bug was open.
 On file is not in the child's environment, which is why the test asserts the
