@@ -5,11 +5,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
+  statSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ChildGrant } from "../../../src/supervise/grant.js";
 import {
   deliverHostGrantFile,
@@ -236,4 +239,170 @@ test("🔴 a vendor declaring FILE with no path resolver THROWS", () => {
       ),
     /says-file-provides-nothing/,
   );
+});
+
+/**
+ * 🛑 `wx` GUARDS THE FILE AND NOT THE DIRECTORY ABOVE IT, AND THAT GAP IS REAL.
+ *
+ * `O_CREAT|O_EXCL` refuses to follow a symlink planted AT `mcp.json`. It does
+ * nothing about `.cursor` itself being a symlink: `mkdirSync({recursive:true})`
+ * sees the resolved directory already exists and no-ops, then `wx` succeeds,
+ * and the config lands in the symlink's TARGET.
+ *
+ * Measured before the fix: a `.cursor -> /tmp/elsewhere` symlink put the file
+ * at `/tmp/elsewhere/mcp.json`. A supervised project that ships such a symlink
+ * is the delivery vector, and `.gitignore` in THIS repo protects no other one.
+ *
+ * ⚠️ THE CONTENT IS PINNED, SO THIS IS NOT AN ARBITRARY-EXECUTION HOLE. It is
+ * a write outside the directory the operator named, which the writer's own
+ * docblock promises never happens.
+ */
+test("🔴 a SYMLINKED .cursor directory is refused, not followed", () => {
+  withTempCwd((cwd) => {
+    const elsewhere = mkdtempSync(join(tmpdir(), "chat-mcp-elsewhere-"));
+
+    try {
+      symlinkSync(elsewhere, join(cwd, ".cursor"));
+
+      assert.throws(
+        () => deliverHostGrantFile(spawnFor("cursor"), grantIn(cwd), cwd),
+        /symlink|outside/i,
+      );
+
+      assert.ok(
+        !existsSync(join(elsewhere, "mcp.json")),
+        "the writer followed the symlink and wrote outside the project directory",
+      );
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * 🛑 THE CWD ITSELF MAY BE A SYMLINK, AND THAT IS LEGITIMATE. macOS `/tmp` is
+ * one. Refusing it would break every supervised project under a symlinked
+ * path, so containment is judged on REAL paths rather than by banning them.
+ */
+test("🔴 control — a symlinked CWD is allowed, and the file lands inside it", () => {
+  withTempCwd((real) => {
+    const link = join(mkdtempSync(join(tmpdir(), "chat-mcp-link-")), "proj");
+
+    try {
+      symlinkSync(real, link);
+
+      const path = deliverHostGrantFile(
+        spawnFor("cursor"),
+        grantIn(link),
+        link,
+      );
+
+      assert.ok(existsSync(path));
+      assert.equal(
+        realpathSync(path),
+        join(realpathSync(real), ".cursor", "mcp.json"),
+      );
+    } finally {
+      rmSync(dirname(link), { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * 🛑 DISCRIMINATES THE `lstat` HALF OF THE GUARD FROM THE `realContains` HALF.
+ * Dropping `realContains` killed none of the 22 tests, because every case
+ * above has `.cursor` itself as the symlink — which `lstat` alone catches.
+ *
+ * A vendor may resolve a DEEPER path, and then an INTERMEDIATE component can
+ * be the link while the final directory is a real one. `lstat` on the final
+ * directory says nothing about it; only comparing real paths does.
+ */
+test("🔴 an intermediate symlinked component is refused, not just the last one", () => {
+  withTempCwd((cwd) => {
+    const elsewhere = mkdtempSync(join(tmpdir(), "chat-mcp-elsewhere-"));
+
+    try {
+      mkdirSync(join(elsewhere, "inner"), { recursive: true });
+      symlinkSync(elsewhere, join(cwd, "link"));
+
+      const nested = {
+        vendor: "nests-its-config",
+        hostGrantDelivery: "file" as const,
+        hostGrantConfigPath: (dir: string) =>
+          join(dir, "link", "inner", "mcp.json"),
+      };
+
+      assert.throws(
+        () => deliverHostGrantFile(nested, grantIn(cwd), cwd),
+        /symlink|outside/i,
+      );
+
+      assert.ok(
+        !existsSync(join(elsewhere, "inner", "mcp.json")),
+        "the writer escaped through an intermediate symlink",
+      );
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * 🛑 DISCRIMINATES THE `realContains` HALF FROM THE `lstat` HALF. Dropping
+ * `lstat` also killed none of the 22, because `realContains` catches a link
+ * that LEAVES the project.
+ *
+ * A `.cursor` symlink pointing back INSIDE the project satisfies
+ * `realContains` and is still refused. A supervised project that can choose
+ * where its own config file really lands is deciding something the supervisor
+ * is supposed to decide, and "contained" is a weaker promise than "the path we
+ * named".
+ */
+test("🔴 a .cursor symlink pointing INSIDE the project is still refused", () => {
+  withTempCwd((cwd) => {
+    mkdirSync(join(cwd, "decoy"), { recursive: true });
+    symlinkSync(join(cwd, "decoy"), join(cwd, ".cursor"));
+
+    assert.throws(
+      () => deliverHostGrantFile(spawnFor("cursor"), grantIn(cwd), cwd),
+      /symlink|outside/i,
+    );
+
+    assert.ok(
+      !existsSync(join(cwd, "decoy", "mcp.json")),
+      "a contained symlink was followed; containment is not the same as the named path",
+    );
+  });
+});
+
+/**
+ * 🛑 0600, MATCHING THE STATE-DIR WRITER. This file holds no secret, so the
+ * mode is consistency rather than confidentiality — but it lands in a project
+ * directory that may not ignore it, and it names this host's absolute paths.
+ */
+test("🔴 the written file is 0600, not umask-default", () => {
+  withTempCwd((cwd) => {
+    const path = deliverHostGrantFile(spawnFor("cursor"), grantIn(cwd), cwd);
+
+    assert.equal(statSync(path).mode & 0o777, 0o600);
+  });
+});
+
+/**
+ * 🛑 THE HANDLE IS VALIDATED HERE, NOT BORROWED FROM A CALLER. It reaches the
+ * written file's argv. It is already safe in production because `buildGrant`
+ * validates every handle before a grant exists, but that is an indirect
+ * coupling through a function this vendor does not otherwise need.
+ */
+test("🔴 a malformed handle is refused before anything is written", () => {
+  withTempCwd((cwd) => {
+    const bad = { ...grantIn(cwd), handle: "../../etc/passwd" };
+
+    assert.throws(() => deliverHostGrantFile(spawnFor("cursor"), bad, cwd));
+
+    assert.ok(
+      !existsSync(join(cwd, ".cursor")),
+      "a malformed handle got as far as creating the directory",
+    );
+  });
 });

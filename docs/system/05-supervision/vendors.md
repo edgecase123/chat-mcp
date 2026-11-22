@@ -187,7 +187,31 @@ cannot race past it.
 **The bound is enforced as tests, not as a comment.** The written file declares
 exactly one server named `chat`, and its `command` is this process's own
 interpreter running this build's own entry point — so the file cannot name a
-path the supervisor is not already running.
+path the supervisor is not already running. The handle is validated here rather
+than borrowed from the state-dir writer's call path, and the file is 0600.
+
+🛑 **A SUPERVISED PROJECT IS NOT TRUSTED INPUT, AND `wx` ALONE DOES NOT MAKE IT
+SAFE.** `O_CREAT|O_EXCL` refuses to follow a symlink planted at `mcp.json`, and
+does nothing about `.cursor` itself being one: `mkdirSync({recursive:true})`
+no-ops on the resolved directory, `wx` succeeds, and the config lands in the
+link's TARGET. Measured — `.cursor -> /tmp/elsewhere` put the file at
+`/tmp/elsewhere/mcp.json`.
+
+**So the writer refuses a symlinked config directory, using `realContains` from
+`containment.ts`** — the same `realpathSync` discipline the manifest script
+path uses, and for the same reason: `resolve` is lexical and cannot see a
+symlink.
+
+| `<cwd>/.cursor` is…                     | result  |
+| --------------------------------------- | ------- |
+| absent                                  | created |
+| a real directory                        | used    |
+| a symlink OUT of the project            | refused |
+| a symlink back INSIDE it                | refused |
+| reached through an intermediate symlink | refused |
+
+⚠️ **A symlinked CWD is legitimate and stays allowed.** macOS `/tmp` is one.
+Containment is judged on real paths rather than by banning them.
 
 🛑 **THE CWD FALLBACK IS `process.cwd()`, SO A SUPERVISOR WITH NO EXPLICIT
 `cwd` WRITES INTO ITS OWN DIRECTORY.** That is correct — the child runs there

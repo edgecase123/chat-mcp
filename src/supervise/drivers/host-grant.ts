@@ -1,8 +1,23 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import type { ChildGrant } from "../grant.js";
 import type { VendorSpawn } from "../vendor.js";
+import { realContains } from "../containment.js";
+import { assertHandle } from "../../util/naming.js";
+import { writePrivateFileSync } from "../../util/paths.js";
 import { chatMcpServerConfig } from "./chat-mcp-server.js";
+
+/**
+ * The three fields a file-delivered host grant actually reads.
+ *
+ * ⚠️ `Pick` REACHES `hostGrantConfigPath` DIRECTLY, with no intersection. An
+ * earlier cut restated the field in an `&` clause, which only repeated what
+ * `VendorSpawn` already declares optional — and did so twice.
+ */
+type HostGrantFileVendor = Pick<
+  VendorSpawn,
+  "vendor" | "hostGrantDelivery" | "hostGrantConfigPath"
+>;
 
 /**
  * Where a `"file"`-delivered host grant is written, resolved against the
@@ -20,9 +35,7 @@ import { chatMcpServerConfig } from "./chat-mcp-server.js";
  * claude1's 🔵 on PR 387.
  */
 export function hostGrantConfigPathFor(
-  vendor: Pick<VendorSpawn, "vendor" | "hostGrantDelivery"> & {
-    hostGrantConfigPath?: (cwd: string) => string;
-  },
+  vendor: HostGrantFileVendor,
   cwd: string,
 ): string {
   if (!vendor.hostGrantConfigPath) {
@@ -70,9 +83,7 @@ export function hostGrantConfigPathFor(
  * reach reads as protection and is not any.
  */
 export function deliverHostGrantFile(
-  vendor: Pick<VendorSpawn, "vendor" | "hostGrantDelivery"> & {
-    hostGrantConfigPath?: (cwd: string) => string;
-  },
+  vendor: HostGrantFileVendor,
   grant: ChildGrant,
   cwd: string,
 ): string {
@@ -86,6 +97,14 @@ export function deliverHostGrantFile(
     );
   }
 
+  // 🛑 ASSERTED HERE, NOT BORROWED. `grant.handle` reaches the written file,
+  // and today it is already validated because `buildGrant` calls
+  // `writeClaudeMcpConfig` -> `mcpConfigPathFor` -> `assertHandle` for EVERY
+  // vendor first. That coupling is indirect: a change that stops writing the
+  // state-dir config for a file-delivered vendor would take the validation
+  // with it and nothing here would notice.
+  assertHandle(grant.handle);
+
   const path = hostGrantConfigPathFor(vendor, cwd);
 
   if (existsSync(path)) {
@@ -96,18 +115,64 @@ export function deliverHostGrantFile(
     );
   }
 
+  assertDirIsNotASymlinkEscape(cwd, path, vendor.vendor);
+
   mkdirSync(dirname(path), { recursive: true });
 
   // 🛑 `wx`, SO THE REFUSAL ABOVE CANNOT BE RACED. The existsSync is the
   // readable error; this is the one that actually holds when two supervisors
   // reach the same project directory at once.
-  writeFileSync(
+  //
+  // ⚠️ `writePrivateFileSync` FOR 0600, MATCHING THE STATE-DIR WRITER. This
+  // file holds no secret, but it lands in a project directory that may not
+  // ignore it, and it names this host's absolute paths.
+  writePrivateFileSync(
     path,
     `${JSON.stringify(chatMcpServerConfig(grant.handle), null, 2)}\n`,
-    { flag: "wx" },
+    "wx",
   );
 
   return path;
+}
+
+/**
+ * Refuse to write through a symlinked directory out of the project tree.
+ *
+ * 🛑 `wx` GUARDS THE FILE AND NOT THE DIRECTORY ABOVE IT. `O_CREAT|O_EXCL`
+ * refuses to follow a symlink planted AT `mcp.json`, and does nothing about
+ * `.cursor` itself being one: `mkdirSync({recursive:true})` sees the resolved
+ * directory already exists and no-ops, then `wx` succeeds, and the config
+ * lands in the symlink's TARGET. Measured — a `.cursor -> /tmp/elsewhere` link
+ * put the file at `/tmp/elsewhere/mcp.json`.
+ *
+ * 🛑 A SUPERVISED PROJECT IS NOT TRUSTED INPUT. It can ship such a symlink in
+ * its own tree, and this repo's `.gitignore` protects no other repository.
+ *
+ * ⚠️ A SYMLINKED CWD IS LEGITIMATE AND STAYS ALLOWED. macOS `/tmp` is one, so
+ * containment is judged on REAL paths rather than by banning them —
+ * `realContains` is the same helper `containment.ts` uses for a manifest
+ * script path, and for the same reason: `resolve` is LEXICAL and cannot see a
+ * symlink.
+ */
+function assertDirIsNotASymlinkEscape(
+  cwd: string,
+  path: string,
+  vendor: string,
+): void {
+  const dir = dirname(path);
+
+  // An absent directory is about to be created inside the project, so there is
+  // nothing to resolve and nothing to escape through.
+  if (!existsSync(dir)) return;
+
+  if (lstatSync(dir).isSymbolicLink() || !realContains(cwd, dir)) {
+    throw new Error(
+      `refusing to write "${vendor}"'s host grant through ${dir}: it is a symlink, or it ` +
+        `resolves outside ${cwd}. The config would land in the link's target rather than ` +
+        `in the supervised project, and a project directory is not trusted input. Remove ` +
+        `the link, or run this handle UNGRANTED.`,
+    );
+  }
 }
 
 /** `.cursor/mcp.json` under a project directory, which is what Cursor reads. */
