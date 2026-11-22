@@ -12,6 +12,18 @@
       <header class="topbar">
         <div class="topbar__brand">chat-mcp</div>
         <div class="topbar__handle" id="my-handle"></div>
+        <!-- #397 — the ONE control that opens configuration. Settings used to
+           be attached to status cards in the sidebar, which is a panel that
+           says what is true now and rebuilds on every peer event. -->
+        <button
+          id="settings-open"
+          class="topbar__settings"
+          type="button"
+          aria-label="Settings"
+          title="Settings"
+        >
+          <span class="settings-icon" aria-hidden="true"></span>
+        </button>
         <button
           id="theme-toggle"
           class="topbar__theme"
@@ -143,6 +155,35 @@
         </form>
       </main>
     </div>
+    <!-- #397 — a native <dialog>, so the focus trap, the backdrop and Esc are
+       the platform's rather than this file's. There was no modal here to copy
+       that behaviour from.
+
+       Outside #app on purpose: showModal() promotes it to the top layer, and
+       nesting it under a grid shell only invites a stacking-context bug.
+
+       The tab strip and the panels are BUILT FROM A LIST in logic.js. Adding a
+       third tab is one entry there — see settings-tabs.test.ts. -->
+    <dialog id="settings" class="settings" aria-labelledby="settings-title">
+      <header class="settings__head">
+        <h2 class="settings__title" id="settings-title">Settings</h2>
+        <button
+          type="button"
+          id="settings-close"
+          class="settings__close"
+          aria-label="Close settings"
+        >
+          ✕
+        </button>
+      </header>
+      <div
+        class="settings__tabs"
+        id="settings-tabs"
+        role="tablist"
+        aria-label="Settings sections"
+      ></div>
+      <div class="settings__panels" id="settings-panels"></div>
+    </dialog>
     <div id="loading" class="loading">Loading…</div>
     <script src="/assets/app.js" type="module"></script>
   </body>
