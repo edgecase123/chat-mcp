@@ -7,6 +7,14 @@ import { join } from "node:path";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { ChildGrant } from "../../../src/supervise/grant.js";
 
+// 🛑 BEFORE any import that resolves a state path, per AGENTS.md. The approval
+// path reads the vendor's token to REDACT it from a failure message, and
+// `auth.ts` resolves the state dir — which the node runner refuses when it is
+// the operator's live `~/.chat-mcp`. Every import below is therefore dynamic.
+process.env.CHAT_MCP_HOME = mkdtempSync(
+  join(tmpdir(), "chat-mcp-approve-home-"),
+);
+
 /**
  * 🛑 WRITING THE CONFIG IS NOT WIRING THE BUS, AND #348 SHIPPED BELIEVING IT
  * WAS.
@@ -115,7 +123,12 @@ test("🛑 spawnOnHost APPROVES cursor's bus server, so a granted host child has
         if (refuse) {
           throw Object.assign(new Error("Command failed"), {
             status: 1,
-            stderr: "unknown MCP server 'chat'",
+
+            // 🛑 THE CREDENTIAL IS IN THE STDERR ON PURPOSE. A CLI whose auth
+            // diagnostics echo a key is the case the redaction exists for, and
+            // a stderr without one cannot tell a working redaction from an
+            // absent secret.
+            stderr: `unknown MCP server 'chat' (auth ${SECRET})`,
           });
         }
 
@@ -127,6 +140,13 @@ test("🛑 spawnOnHost APPROVES cursor's bus server, so a granted host child has
   const { spawnOnHost } =
     await import("../../../src/supervise/drivers/host.js");
   const { cursorSpawn, claudeSpawn } = await vendors();
+  const { setVendorToken } = await import("../../../src/supervise/auth.js");
+
+  // 🛑 A REAL-SHAPED CREDENTIAL ON FILE, SO THE REFUSAL BELOW HAS ONE TO LEAK.
+  // Without this the redaction assertion passes for the wrong reason: there is
+  // simply nothing to find. `CHAT_MCP_HOME` is a temp dir, set at the top.
+  const SECRET = "key_live_0123456789abcdefSECRET";
+  setVendorToken(cursorSpawn, SECRET);
 
   const granted = mkdtempSync(join(tmpdir(), "chat-mcp-approve-granted-"));
   const ungranted = mkdtempSync(join(tmpdir(), "chat-mcp-approve-ungranted-"));
@@ -207,6 +227,13 @@ test("🛑 spawnOnHost APPROVES cursor's bus server, so a granted host child has
         assert.match(err.message, /no bus tools/);
         assert.match(err.message, /unknown MCP server 'chat'/);
 
+        // 🛑 THE CREDENTIAL IS GONE AND THE DIAGNOSIS IS NOT. This message
+        // reaches logs and chat, so a vendor echoing a key would publish it.
+        // Redacting the whole stderr instead would be a different bug: the
+        // operator would lose the only line saying why the approval failed.
+        assert.doesNotMatch(err.message, new RegExp(SECRET));
+        assert.match(err.message, /«redacted»/);
+
         return true;
       },
     );
@@ -243,7 +270,11 @@ test("🛑 a FILE-delivered vendor with no approval subcommand is approved nothi
   try {
     assert.equal(
       approveHostGrantServer(
-        { vendor: "needs-no-approval", binary: "/nonexistent/binary" },
+        {
+          vendor: "needs-no-approval",
+          binary: "/nonexistent/binary",
+          authEnvVar: "NEEDS_NO_APPROVAL_TOKEN",
+        },
         cwd,
       ),
       undefined,

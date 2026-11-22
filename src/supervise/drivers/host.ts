@@ -32,11 +32,9 @@ export function spawnOnHost(
 
     deliverHostGrantFile(vendor, opts.grant, cwd);
 
-    // 🛑 SEEN IS NOT LOADED, AND THE WRITE ONLY BUYS SEEN. `cursor-agent`
-    // reports `chat: not loaded (needs approval)` for a config it has just
-    // read, so without this the granted child has no `send` and #348's
-    // silence returns with an extra file in the project. Measured on the
-    // live binary, not inferred.
+    // 🛑 SEEN IS NOT LOADED, AND THE WRITE ONLY BUYS SEEN. Without this the
+    // granted child has no `send`, and #348's silence returns with an extra
+    // file in the project.
     //
     // ⚠️ THE SAME `cwd` AS THE WRITE AND AS `spawn` BELOW. The approval is
     // recorded per project directory, so a second expression of "where the

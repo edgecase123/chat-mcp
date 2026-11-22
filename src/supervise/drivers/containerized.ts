@@ -34,6 +34,7 @@ import { posix } from "node:path";
 /** `dirname` with the CONTAINER's separator, never the host's. */
 const posixDirname = posix.dirname;
 import { realpathSync } from "node:fs";
+import { CHAT_MCP_SERVER_ID } from "./chat-mcp-server.js";
 
 export const CONTAINER_PROJECT_DIR = "/work";
 
@@ -144,7 +145,11 @@ export function containerBusUrl(hostUrl: string): string {
 export function buildContainerMcpConfig(bus: BusEndpoint): string {
   const config = {
     mcpServers: {
-      chat: {
+      // 🛑 THE SHARED CONSTANT, BECAUSE THE HOST SIDE APPROVES THIS KEY BY
+      // NAME. `cursor-agent mcp enable <id>` takes it, and an id no config
+      // declares is not an error any child reports — it simply has no tools.
+      // This was a second hardcoded "chat" until claude2's reviewer found it.
+      [CHAT_MCP_SERVER_ID]: {
         type: "http",
         url: containerBusUrl(bus.url),
         headers: { Authorization: `Bearer ${bus.token}` },
