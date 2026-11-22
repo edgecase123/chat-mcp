@@ -164,6 +164,9 @@ const state = {
   // ⚠️ THIS KEY IS ALSO AN INPUT OF THE SECTION IT PROTECTS, so typing itself
   // triggers the rebuild. Recorded on #399.
   registrationDraft: { handle: "", vendor: "", mode: "docker" },
+  // Bumped when something OTHER than typing has to rebuild the register form.
+  // The draft is not signed, so this is the only way to ask.
+  registrationEpoch: 0,
   registrationError: null,
   // #132 slice 4b — one handle's container plan, as `/api/agents/plan`
   // returned it. Keyed by handle so re-reading one row cannot blank another's.
@@ -1855,6 +1858,10 @@ async function submitRegistration() {
       vendor: draft.vendor,
       mode: draft.mode,
     };
+    // 🛑 THE CLEAR IS INVISIBLE WITHOUT THIS. Re-storing an IDENTICAL pair
+    // leaves `registrations` byte-identical, so nothing else would mark the
+    // form due and the submitted handle would stay in the input.
+    state.registrationEpoch++;
     toast(`Registered ${draft.handle.trim()}`, "info");
   } catch (e) {
     // The route's own 400s land here — it owns the rules and this reports them

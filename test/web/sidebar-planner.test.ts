@@ -81,7 +81,7 @@ test("a peers-only change rebuilds peers and NOTHING else", () => {
 test("a change a section DOES own rebuilds that section", () => {
   assert.deepEqual(
     plan((s) => {
-      s.registrationDraft = { handle: "half-typed" };
+      s.registrationError = "handle is already registered";
     }),
     ["registration"],
   );
@@ -322,4 +322,42 @@ test("an open (...) menu is an input of peers AND rooms", () => {
   });
 
   assert.deepEqual(due, ["peers", "rooms"]);
+});
+
+/**
+ * 🛑 THE HEADLINE CASE OF #399, AND SLICES 1 AND 2 DID NOT FIX IT.
+ * `registrationDraft` was an input of the section it exists to protect, so
+ * typing was itself what triggered the rebuild that swaps the <input> out.
+ */
+test("typing into the register form rebuilds nothing", () => {
+  const due = plan((s) => {
+    s.registrationDraft = { handle: "cla", vendor: "cursor", mode: "docker" };
+  });
+
+  assert.deepEqual(due, []);
+});
+
+/**
+ * 🛑 WHY AN EXPLICIT EPOCH AND NOT JUST DROPPING THE DRAFT. On success
+ * `submitRegistration` clears the draft, and the input only empties because the
+ * section rebuilds. Re-submitting an IDENTICAL pair changes `registrations` by
+ * zero bytes, so without this the cleared handle would stay on screen.
+ */
+test("a bumped epoch rebuilds registration even when nothing else moved", () => {
+  const due = plan((s) => {
+    s.registrationEpoch = 1;
+  });
+
+  assert.deepEqual(due, ["registration"]);
+});
+
+/** The epoch is useless if the clear path does not bump it. */
+test("submitRegistration bumps the epoch where it clears the draft", () => {
+  const fn = APP_CODE.slice(
+    APP_CODE.indexOf("async function submitRegistration("),
+  ).split("\n}")[0];
+
+  assert.notEqual(fn.length, 0, "submitRegistration not found");
+  assert.match(fn, /state\.registrationDraft = \{/, "no draft clear — vacuous");
+  assert.match(fn, /state\.registrationEpoch\s*\+\+|registrationEpoch \+= 1/);
 });
