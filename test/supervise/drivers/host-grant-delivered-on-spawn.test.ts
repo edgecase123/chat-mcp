@@ -65,7 +65,7 @@ function fakeChild(): ChildProcessWithoutNullStreams {
 test("🛑 spawnOnHost DELIVERS the grant file for cursor, and only when granted", async (t: TestContext) => {
   const cwds: (string | undefined)[] = [];
 
-  const approvals: string[] = [];
+  const approvals: { command: string; cwd?: string }[] = [];
 
   t.mock.module("node:child_process", {
     namedExports: {
@@ -80,8 +80,12 @@ test("🛑 spawnOnHost DELIVERS the grant file for cursor, and only when granted
       // catch in `approveHostGrantServer` read the vendor token, and the
       // `CHAT_MCP_HOME` guard threw a message about state dirs. Green here
       // depended on a binary this test never meant to run.
-      execFileSync: (command: string) => {
-        approvals.push(command);
+      execFileSync: (
+        command: string,
+        _args: string[],
+        opts: { cwd?: string },
+      ) => {
+        approvals.push({ command, cwd: opts?.cwd });
 
         return "";
       },
@@ -136,13 +140,16 @@ test("🛑 spawnOnHost DELIVERS the grant file for cursor, and only when granted
     // immediately. The mock recorded zero calls and corrected it.
     assert.deepEqual(cwds, [], "a per-turn vendor spawned at wiring time");
 
-    // 🛑 ONE APPROVAL, FOR THE GRANTED CHILD ONLY. Without this the mock could
-    // go uncalled and the test would still be green, which is how the real
-    // `execFileSync` stayed in the path unnoticed.
+    // 🛑 ONE APPROVAL, IN THE GRANTED CHILD'S OWN DIRECTORY.
+    // Recording the command alone proved only "exactly one": a mutant that
+    // approved the UNGRANTED child INSTEAD of the granted one still pushed a
+    // single entry naming the same binary, and stayed green. The approval is
+    // recorded per project directory, so the `cwd` is the half that says which
+    // child got a bus. claude1 on PR 394.
     assert.deepEqual(
       approvals,
-      [cursorSpawn.binary],
-      "the bus server was approved for the wrong set of children",
+      [{ command: cursorSpawn.binary, cwd: granted }],
+      "the bus server was approved for the wrong child, or in the wrong directory",
     );
   } finally {
     rmSync(granted, { recursive: true, force: true });
