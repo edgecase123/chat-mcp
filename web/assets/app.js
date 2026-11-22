@@ -131,9 +131,11 @@ const state = {
   // GLOBAL_GATE_KEY for the footer. At most one at a time.
   //
   // 🛑 IT LIVES HERE AND NOT IN THE DOM. A peer event no longer reaches the
-  // agents section (#399), but `nowMinute` is one of its inputs, so every
-  // minute roll rebuilds every row — an open editor held only as a class is
-  // wiped mid-edit, on a schedule.
+  // agents section (#399), but `nowMinute` is one of its inputs, so the first
+  // render after a minute rolls rebuilds every row. An open editor held only
+  // as a class is wiped mid-edit by that render.
+  //
+  // ⚠️ NOT A TIMER. Nothing polls, so a quiet bus never interrupts an edit.
   gateEditing: null,
   // #135 slice 4c — { gate, source } for the GLOBAL default, from /api/whoami.
   // Not derivable from the rows: a peer reports the global only while it has
