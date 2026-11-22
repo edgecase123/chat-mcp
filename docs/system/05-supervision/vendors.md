@@ -552,13 +552,32 @@ terminal agents are already authorized manually by me."_ A terminal `claude`
 the operator authorised by hand is not spawned by the supervisor and never
 reaches `spawnOnHost`.
 
-⚠️ **THIS TIGHTENS SOMETHING THAT WORKED, DELIBERATELY.** On macOS the keychain
-holds a `Claude Code-credentials` item, so a spawned host `claude` child
-authenticated AMBIENTLY from the operator's own login and needed nothing on
-file. It is now refused until `chat-mcp auth set-token --vendor claude` has
-run. **The reason is that an unattended child leaning on an interactive login
-fails exactly the way #396 failed when that login expires — a clean start and
-silence.** A token on file is a credential the supervisor owns.
+⚠️ **THIS PROBABLY TIGHTENS SOMETHING THAT WORKED, AND lee KEPT IT ANYWAY.**
+
+```
+MEASURED   on macOS a keychain item named `Claude Code-credentials` exists
+INFERRED   that a spawned host `claude` child reads it, and so needed
+           nothing on file
+UNMEASURED that the child actually reads it. Proving it costs a model turn.
+```
+
+🛑 **THE RULING HOLDS EITHER WAY, WHICH IS WHY THE INFERENCE IS NOT LOAD-BEARING.**
+A credential the supervisor cannot see is one it cannot report on, so an
+unattended child leaning on an interactive login fails exactly the way #396
+failed once that login expires — a clean start and silence. **A token on file is
+a credential the supervisor owns.**
+
+⚠️ **DO NOT READ "needed nothing on file" AS AN ESTABLISHED BASELINE.** A later
+reader wanting to relax this rule would be reasoning from the inference above,
+not from a measurement.
+
+**The remedy is TWO commands for claude, and the doc said one.** The refusal
+prints the second; the first is the vendor's own `authSetupHint`:
+
+```bash
+claude setup-token
+pbpaste | chat-mcp auth set-token --vendor claude
+```
 
 🛑 **"A REAL KEY IS ON FILE" IS NOT EVIDENCE THE CHILD HAS ONE.** The host
 acceptance script's first check passed throughout the window this bug was open.
