@@ -8,12 +8,7 @@ import type { VendorSpawn } from "../vendor.js";
 import { assertDeclaresProcessLifetime, wireAgentChild } from "./wiring.js";
 import { frameTurn } from "./turn-relay.js";
 import { mountsFor, containerPathFor } from "../mounts.js";
-import {
-  GH_TOKEN_KEY,
-  missingVendorTokenMessage,
-  readGhToken,
-  readVendorToken,
-} from "../auth.js";
+import { GH_TOKEN_KEY, readGhToken, requireVendorToken } from "../auth.js";
 import {
   assertProjectDirOutsideState,
   checkedMountPath,
@@ -693,13 +688,10 @@ export function dockerRunPlan(
   // under whatever name the vendor declared, so a Cursor container received a
   // Claude subscription token as `CURSOR_API_KEY` — and `cursor-agent` sent it
   // to Cursor as its own key. #347.
-  const token = readVendorToken(vendor);
+  const token = requireVendorToken(vendor);
   // Optional, unlike the agent credential. Most handles need no GitHub access,
   // and one that does not must still be able to start.
   const ghToken = readGhToken();
-  if (!token) {
-    throw new Error(missingVendorTokenMessage(vendor));
-  }
 
   const { supervisorHandle, projectDir } = containerTarget(opts);
 
