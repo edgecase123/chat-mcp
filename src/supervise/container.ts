@@ -1,6 +1,12 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { execFileSync as realExecFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -29,6 +35,31 @@ export const CURSOR_IMAGE_TAG = "chat-mcp-cursor-agent:local";
 export interface ContainerPlan {
   readonly mountPaths: readonly string[];
   readonly envVarNames: readonly string[];
+
+  /**
+   * A digest over the override's env VALUES, never the values themselves.
+   *
+   * 🛑 THE GATE STORED NAMES ONLY, SO A ROTATED VALUE WAS INVISIBLE. An
+   * operator approved `MY_VAR`; somebody changed what `MY_VAR` held; the plan
+   * was byte-identical and the container ran a value nobody had approved. The
+   * operator approved a NAME and believed they had approved its contents
+   * (#356). lee ruled it: *"Yes it should. Security first."*
+   *
+   * 🛑 REQUIRED, LIKE `image`. An optional field would compile without
+   * touching the diff's coverage test and slip through green — and an absent
+   * one reads as `(not recorded)`, which is CHANGED, which is the direction
+   * that re-prompts rather than the one that blesses.
+   *
+   * ⚠️ NOT IN THE BANNER AND NOT IN THE RE-PROMPT. `describePlan` omits it
+   * and `diffPlans` redacts it to `(not shown)`.
+   *
+   * ⚠️ `GET /api/agents/plan` DOES RETURN IT, because the confirm echoes the
+   * whole plan back and the server re-derives the comparison from it. That is
+   * why the digest is an HMAC under a per-install key rather than a bare hash:
+   * what reaches the dashboard is not invertible. Replacing the echo with a
+   * server-held token is the better fix and is not this ticket.
+   */
+  readonly envValuesDigest: string;
   readonly binary: string;
   readonly networkMode: string;
 
@@ -439,10 +470,125 @@ export type ConfirmVerdict =
 /** What a field the stored plan never carried reads as. */
 const NOT_RECORDED = "(not recorded)";
 
+/** What a redacted field reads as in a re-prompt. */
+const NOT_SHOWN = "(not shown)";
+
+/**
+ * What a usable `env-digest-key` file holds, and nothing else will do.
+ *
+ * 🛑 THE SHAPE IS THE WHOLE GUARD, BECAUSE A LENGTH CHECK IS NOT ENOUGH.
+ * `Buffer.from(x, "hex")` stops at the first byte it cannot read and returns
+ * what it already had, so 64 good characters followed by junk still decodes to
+ * a full 32 bytes and a file of pure junk decodes to NONE. `createHmac` takes a
+ * zero-length key without complaint, which leaves the digest a function of its
+ * input alone — the install-independent value this key exists to prevent.
+ */
+const ENV_DIGEST_KEY_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * The per-install key the env digest is taken under.
+ *
+ * 🛑 WITHOUT IT THE DIGEST IS A GUESSABLE FUNCTION OF A SECRET. The names
+ * ship in the same object, and the serialisation is public, so an unsalted hash
+ * leaves only the VALUES to search — and `"1"`, `"true"` or a short enum falls
+ * to an offline sweep in milliseconds. `/api/agents/plan` echoes the whole plan
+ * to the dashboard, so the digest leaves the host process whether or not the
+ * re-prompt prints it.
+ *
+ * ⚠️ IT DOES NOTHING AGAINST SOMEBODY WHO CAN WRITE THIS DIRECTORY. They can
+ * rewrite the stored plan outright, which was already unauthenticated. The key
+ * answers one threat only: a reader of the dashboard's HTTP responses who
+ * cannot read these files.
+ *
+ * ⚠️ LOSING IT RE-PROMPTS EVERY HANDLE ONCE, and that is the safe direction.
+ * It is never rotated, because rotating it would do that on purpose.
+ *
+ * ⚠️ SO A MALFORMED FILE IS REPLACED RATHER THAN REFUSED. `writePrivateFileSync`
+ * is not atomic, so an interrupted first write leaves a partial key, and a
+ * throw there would brick every container spawn over one lost byte.
+ */
+function envDigestKey(): Buffer {
+  const path = join(stateDir(), "env-digest-key");
+
+  if (existsSync(path)) {
+    const stored = readFileSync(path, "utf8").trim();
+
+    if (ENV_DIGEST_KEY_HEX.test(stored)) return Buffer.from(stored, "hex");
+
+    // ⚠️ SAID OUT LOUD, BECAUSE THE SYMPTOM IS A MASS RE-PROMPT. Every handle
+    // re-prompts once after this, and an operator with no stated cause reads
+    // that as the gate malfunctioning rather than as a damaged file.
+    console.error(
+      `env digest key at ${path} is not 64 hex characters — minting a new one, which re-prompts every handle once`,
+    );
+  }
+
+  const key = randomBytes(32).toString("hex");
+  ensureStateDir();
+
+  // 🛑 CHECKED OUTSIDE THE BRANCH ABOVE, BECAUSE `existsSync` FOLLOWS THE LINK.
+  // A DANGLING link reads as absent and reaches this write just the same.
+  //
+  // ⚠️ REFUSED RATHER THAN REGENERATED, UNLIKE A MALFORMED FILE. Nothing here
+  // ever writes a link, so one is deliberate rather than damage, and
+  // `writeFileSync` plus `chmodSync` would both land on its TARGET — an
+  // arbitrary file overwritten with hex and chmodded 0600.
+  if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    throw new Error(
+      `refusing to write the env digest key through ${path}: it is a symlink, so ` +
+        `the key would land in the link's target and overwrite whatever is there. ` +
+        `Remove the link.`,
+    );
+  }
+
+  writePrivateFileSync(path, key);
+
+  return Buffer.from(key, "hex");
+}
+
+/**
+ * One digest over an override's env values (#356).
+ *
+ * 🛑 THE NAME IS HASHED WITH ITS VALUE, SO A SWAP IS A CHANGE. Hashing the
+ * values alone makes `{A:"1",B:"2"}` and `{A:"2",B:"1"}` identical, and that is
+ * two credentials handed to the wrong variables with the gate silent.
+ *
+ * 🛑 SORTED, SO KEY ORDER IS NOT A CHANGE. An override file rewritten with
+ * its keys reordered would otherwise re-prompt for nothing, and a gate that
+ * cries wolf is one an operator learns to click through.
+ *
+ * ⚠️ NO OVERRIDE AT ALL IS A REAL DIGEST, not an empty string. An empty
+ * string would be indistinguishable from a field that was never recorded.
+ */
+export function envValuesDigest(
+  env: Readonly<Record<string, string>> | undefined,
+): string {
+  const entries = Object.entries(env ?? {}).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+
+  return createHmac("sha256", envDigestKey())
+    .update(JSON.stringify(entries))
+    .digest("hex");
+}
+
 interface PlanField {
   readonly label: string;
   readonly keys: readonly (keyof ContainerPlan)[];
   readonly read: (plan: Partial<ContainerPlan>) => string;
+
+  /**
+   * Compare on this field, but never PRINT what it holds (#356).
+   *
+   * 🛑 `read` SERVES TWO MASTERS AND ONE OF THEM IS A DISCLOSURE SURFACE.
+   * `diffPlans` compares its output and `describeChanges` prints it, so a
+   * field whose value is a function of a secret cannot use the same string for
+   * both. The operator needs the CATEGORY that moved, not the bytes.
+   *
+   * ⚠️ `(not recorded)` IS STILL SHOWN. It discloses nothing and it is the
+   * one thing a reader of a legacy re-prompt actually needs to know.
+   */
+  readonly secret?: true;
 }
 
 /**
@@ -479,6 +625,17 @@ function asCap(agent: unknown, install: unknown): string {
 }
 
 /**
+ * What a secret field prints in a re-prompt.
+ *
+ * ⚠️ `(not recorded)` SURVIVES REDACTION. It is not derived from the secret,
+ * and it is the difference between "this moved" and "this was never stored" —
+ * which is the only part of a legacy re-prompt an operator can act on.
+ */
+function redact(value: string): string {
+  return value === NOT_RECORDED ? NOT_RECORDED : NOT_SHOWN;
+}
+
+/**
  * The banner's lines, and which plan fields each one reads.
  *
  * 🛑 ONE LINE PER OPERATOR DECISION, NOT ONE PER FIELD. `installMemory` is
@@ -499,6 +656,17 @@ const PLAN_FIELDS: readonly PlanField[] = [
     label: "env vars",
     keys: ["envVarNames"],
     read: (p) => asList(p.envVarNames),
+  },
+  // 🛑 ITS OWN LINE, THOUGH A NAME ADDED MOVES BOTH. The docblock above
+  // asks for one line per operator DECISION, and adding a name is one decision
+  // that now reports two changes. That noise is the deliberate trade: folding
+  // the digest into the names line means one `read` string has to be both the
+  // comparison and the printed text, and this one cannot be printed.
+  {
+    label: "env var values",
+    keys: ["envValuesDigest"],
+    read: (p) => asText(p.envValuesDigest),
+    secret: true,
   },
   { label: "binary", keys: ["binary"], read: (p) => asText(p.binary) },
   {
@@ -542,7 +710,13 @@ export function diffPlans(
     const from = field.read(before);
     const to = field.read(after);
 
-    if (from !== to) changes.push({ field: field.label, from, to });
+    if (from === to) continue;
+
+    changes.push({
+      field: field.label,
+      from: field.secret ? redact(from) : from,
+      to: field.secret ? redact(to) : to,
+    });
   }
 
   return changes;

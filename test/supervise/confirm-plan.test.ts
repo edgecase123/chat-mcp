@@ -12,7 +12,18 @@ process.env.CHAT_MCP_HOME = mkdtempSync(
 const { overridePathFor, overridesDir } =
   await import("../../src/util/paths.js");
 const { buildConfirmPlan } = await import("../../src/supervise/confirmPlan.js");
-const { describePlan } = await import("../../src/supervise/container.js");
+const { describePlan, envValuesDigest } =
+  await import("../../src/supervise/container.js");
+/**
+ * #356 — a digest over the override env values. These fixtures carry no
+ * override, so the field only has to be PRESENT and stable.
+ *
+ * 🛑 FROM THE DYNAMIC IMPORT, NEVER A STATIC ONE. A static import of
+ * `container.js` is hoisted above the `CHAT_MCP_HOME` assignment, so it would
+ * resolve the real `~/.chat-mcp` and this file would write to it.
+ */
+const NO_ENV_DIGEST = envValuesDigest(undefined);
+
 const { registerMount } = await import("../../src/supervise/mounts.js");
 const { setGhToken, clearGhToken } =
   await import("../../src/supervise/auth.js");
@@ -268,6 +279,7 @@ test("🛑 an install cap with no agent cap throws rather than being dropped", (
       describePlan({
         mountPaths: ["/work"],
         envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+        envValuesDigest: NO_ENV_DIGEST,
         binary: "claude",
         networkMode: "bridge",
         image: "chat-mcp-agent:local",
@@ -285,6 +297,7 @@ test("⚠️ control — no caps at all describes as no limit, without throwing"
   const banner = describePlan({
     mountPaths: ["/work"],
     envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+    envValuesDigest: NO_ENV_DIGEST,
     binary: "claude",
     networkMode: "bridge",
     image: "chat-mcp-agent:local",
@@ -302,6 +315,7 @@ function planWithMounts(mountPaths: readonly string[]) {
   return {
     mountPaths,
     envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+    envValuesDigest: NO_ENV_DIGEST,
     binary: "claude",
     networkMode: "bridge",
     image: "chat-mcp-agent:local",

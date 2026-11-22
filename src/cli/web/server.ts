@@ -848,6 +848,11 @@ async function handleConfirmAgentPlan(
 }
 
 function respondJson(res: ServerResponse, body: unknown, status = 200): void {
+  // 🛑 NONE OF THESE ARE CACHEABLE. The plan response carries the mount map,
+  // the env var names and the values digest, and a 200 with no freshness
+  // header is one a heuristic cache may put on disk. Two routes already set
+  // this by hand; setting it here covers the ones that forgot.
+  res.setHeader("Cache-Control", "no-store");
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
