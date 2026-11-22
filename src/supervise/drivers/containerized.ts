@@ -641,6 +641,33 @@ export function runDependencyInstall(
   }
 }
 
+/**
+ * Refuse an explicit CLI path that was meant for the HOST filesystem.
+ *
+ * 🛑 ONE FIELD, TWO FILESYSTEMS, AND THE SYMPTOM NAMES NEITHER.
+ * `SpawnOptions.binary` is a single string, so an operator who passes a host
+ * path and asks for a container got that path exec'd inside Linux: exit 127,
+ * reported by the supervisor as a dead agent rather than as a missing CLI.
+ * lee ruled "refuse on both" for this and #368, 2026-11-21.
+ *
+ * ⚠️ THE REMEDY IS THE VENDOR'S `containerBinary`, so the message carries it.
+ * A refusal that does not say what WOULD have run leaves the operator guessing
+ * at a path inside an image they cannot see.
+ */
+export function assertBinaryOverrideIsContainerSafe(
+  vendor: Pick<VendorSpawn, "vendor" | "containerBinary">,
+  binary: string | undefined,
+): void {
+  if (binary === undefined) return;
+
+  throw new Error(
+    `--binary names a path on THIS machine, and a containerized spawn runs in the image's ` +
+      `filesystem, so "${binary}" would exit 127 inside the container and report as a dead ` +
+      `agent. Vendor "${vendor.vendor}" already runs "${vendor.containerBinary}" there. ` +
+      `Drop --binary for a container, or use it with a host driver.`,
+  );
+}
+
 export function dockerRunPlan(
   vendor: VendorSpawn,
   opts: SpawnOptions,
@@ -651,6 +678,11 @@ export function dockerRunPlan(
   // and the container would hang on an EOF nobody sends. `spawnOnHost` has
   // always asserted this; this path had no guard at all.
   assertDeclaresProcessLifetime(vendor);
+
+  // 🛑 BEFORE ANYTHING ELSE IN THE PLAN, BECAUSE THE PLAN IS PURE AND THIS IS
+  // THE OPERATOR'S OWN MISTAKE. A refusal here reaches them before a token is
+  // read or a container is removed.
+  assertBinaryOverrideIsContainerSafe(vendor, opts.binary);
 
   // 🛑 THIS VENDOR'S OWN CREDENTIAL. One shared `readToken()` was injected
   // under whatever name the vendor declared, so a Cursor container received a
@@ -829,7 +861,10 @@ export function dockerRunPlan(
   // two beside the one the relay holds. The relay receives the starting id as
   // its own flag and appends the vendor's resume flags per turn instead.
   const cli = [
-    opts.binary ?? vendor.containerBinary,
+    // 🛑 NO `??` HERE ANY MORE. `assertBinaryOverrideIsContainerSafe` has
+    // already refused an explicit path, so a fallback would be a second
+    // answer to a question with one answer.
+    vendor.containerBinary,
     ...vendor.argsFor(
       vendor.processPerTurn ? { ...opts, resumeSessionId: undefined } : opts,
       "docker",

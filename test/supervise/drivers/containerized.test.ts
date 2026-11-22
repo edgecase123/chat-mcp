@@ -2911,3 +2911,68 @@ test("🔴 control — a LONG-LIVED vendor's send() is still RAW", async (t) => 
 
   assert.equal(written(), claudeSpawn.encodeInput("line one\n"));
 });
+
+/**
+ * 🛑 #365, RULED BY lee: *"refuse on both"*. `SpawnOptions.binary` is one
+ * string for two filesystems. An operator naming a host path and asking for a
+ * container got that host path exec'd inside Linux, exit 127 — reported as a
+ * dead agent rather than as their own flag naming a file the image lacks.
+ */
+test("🛑 an explicit binary with the DOCKER path is REFUSED, naming the image's own CLI", () => {
+  setVendorToken(cursorSpawn, "key-x");
+
+  assert.throws(
+    () =>
+      dockerRunPlan(cursorSpawn, {
+        cwd: PROJECT_DIR,
+        supervisorHandle: "claude1",
+        binary: "/Users/me/.local/bin/cursor-agent",
+      }),
+    (err: Error) => {
+      assert.match(err.message, /cursor/);
+      assert.match(err.message, /\/Users\/me\/\.local\/bin\/cursor-agent/);
+      // The remedy, not just the refusal: the operator needs the value that
+      // WOULD have run, or they cannot tell what to pass instead.
+      assert.match(err.message, new RegExp(cursorSpawn.containerBinary));
+
+      return true;
+    },
+  );
+});
+
+test("🔴 control — with NO explicit binary the plan runs the image's own CLI", () => {
+  setVendorToken(cursorSpawn, "key-x");
+
+  const { args } = dockerRunPlan(cursorSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+
+  assert.ok(
+    args.includes(cursorSpawn.containerBinary),
+    `the container's own CLI is not in the argv: ${args.join(" ")}`,
+  );
+});
+
+/**
+ * 🔴 CONTROL — the refusal is CONTAINER-ONLY, asserted where the host driver
+ * actually spawns: `host-binary-override.test.ts`.
+ *
+ * 🛑 THE SOURCE-GREP VERSION OF THIS TEST WAS VACUOUS AND IS DELETED. It
+ * pinned the string `turnOpts.binary ?? vendor.binary` in `host.ts`. claude2
+ * broke the live `spawn()` call while leaving that string in a comment above
+ * it, and all 2514 tests stayed green — the override could have been deleted
+ * from the driver with nothing going red. A grep over source cannot see
+ * behaviour. claude2 on PR 388.
+ */
+test("🔴 control — the container refusal is not reachable from the host driver", () => {
+  const source = readFileSync(
+    new URL("../../../src/supervise/drivers/host.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.ok(
+    !source.includes("assertBinaryOverrideIsContainerSafe"),
+    "the host driver now carries the container-only refusal",
+  );
+});
