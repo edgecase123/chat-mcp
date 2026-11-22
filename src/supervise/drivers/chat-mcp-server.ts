@@ -74,25 +74,6 @@ function resolveLoader(): string {
 }
 
 /**
- * The MCP server block that points a child at THIS build of the bus.
- *
- * 🛑 ONE BUILDER FOR EVERY VENDOR, BECAUSE THE SERVER IS NOT A VENDOR'S
- * BUSINESS. It used to be inlined in `writeClaudeMcpConfig`, which meant a
- * second CLI wired to the bus had to either import the Claude driver or
- * restate the block — and a restated one drifts without failing anything.
- *
- * 🛑 THE CHILD GETS A HANDLE OF ITS OWN. `inbox` marks messages read, so a
- * child sharing the supervisor's handle silently consumes the deliveries meant
- * for it. See chat-mcp#35.
- *
- * ⚠️ THE COMMAND IS THIS PROCESS'S OWN INTERPRETER AND THIS BUILD'S OWN ENTRY
- * POINT, never a fresh `npx` fetch. A child on a different build of the bus
- * than the process delivering to it is the drift chat-mcp#382 is about. It is
- * also lee's security bound of 2026-11-21: this file is written into the
- * agent's project directory, so the command it names is an execution surface
- * and must be one this build already runs.
- */
-/**
  * The key this project's MCP server block is written under, and therefore the
  * identifier a CLI's own approval subcommand takes.
  *
