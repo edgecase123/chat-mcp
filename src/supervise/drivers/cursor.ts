@@ -78,17 +78,23 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
  * his ruling of 2026-11-21, which named the native fast model — the account's
  * plan cannot run it.
  *
- * 🛑 `"auto"` IS NOT THE SAME AS OMITTING THE FLAG, AND THAT IS WHY THIS
- * CONSTANT EXISTS. With no `--model` the CLI falls back to its OWN stored
- * default, which here is Composer 2.5 Fast. Measured against the live binary
- * with argv built by `cursorArgs()`:
+ * 🛑 OMITTING `--model` DOES NOT MEAN `auto`. It means WHATEVER MODEL WAS LAST
+ * SELECTED ON THIS HOST. `cursor-agent --model X` PERSISTS X into
+ * `~/.cursor/cli-config.json`, and it persists it even when the turn FAILS — so
+ * one operator trying a model their plan rejects leaves every later unattended
+ * agent on it. Measured against the live binary, argv built by `cursorArgs()`,
+ * reading the stored value between runs:
  *
- * | `--model`           | exit | result                                      |
- * |---------------------|------|---------------------------------------------|
- * | `composer-2.5-fast` | 1    | `Model unavailable on Free`                 |
- * | none                | 1    | the same error, so the fallback is Composer |
- * | `grok-4.7-low`      | 1    | the same, though the error names Grok       |
- * | `auto`              | 0    | 7 events, `result success`                  |
+ * | stored before | `--model`           | exit | stored after   |
+ * |---------------|---------------------|------|----------------|
+ * | `auto`        | `composer-2.5-fast` | 1    | `composer-2.5` |
+ * | `composer-2.5`| none                | 1    | `composer-2.5` |
+ * | `composer-2.5`| `auto`              | 0    | `auto`         |
+ *
+ * ⚠️ THE SECOND ROW IS WHY A NO-FLAG RUN IS NOT REPRODUCIBLE. It inherits the
+ * row above it. An earlier measurement of mine read that inheritance as "the
+ * CLI's default is Composer" — it was my own previous command. claude1's
+ * counter-measurement on #371 is what exposed it.
  *
  * ⚠️ PINNING ANY MODEL BUYS NO CONTEXT GAUGE. A denominator needs the window
  * size, and `--list-models` names one only in the ids that carry it:

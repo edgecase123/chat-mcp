@@ -55,27 +55,35 @@ for a vendor that reports no window shows `n/a` instead of a blank that could
 equally mean "not yet". The three states and the suffix join are in
 [context-gate.md](context-gate.md).
 
-## Cursor is PINNED to `auto`, and omitting the flag is not the same thing
+## Cursor is PINNED to `auto`, because no flag means "whatever was last used"
 
 lee's ruling, 2026-11-22: _"keep it on auto for now."_ It supersedes his ruling
 of the 21st, which named the native fast model — the account's plan cannot run
 it. `CURSOR_DEFAULT_MODEL` in `src/supervise/drivers/cursor.ts` is `auto`, and
 `cursorArgs` passes `--model` on every spawn. A caller's own `opts.model` wins.
 
-🛑 **OMITTING `--model` IS NOT `auto`.** The CLI falls back to its OWN stored
-default, which on the measured host is Composer 2.5 Fast. Measured 2026-11-22
-against the live binary with argv built by `cursorArgs()`:
+🛑 **THE PIN IS LOAD-BEARING, AND NOT BECAUSE THE CLI HAS A BAD DEFAULT.**
+`cursor-agent --model X` **persists** X into `~/.cursor/cli-config.json`, and it
+persists it even when the turn FAILS. A run with no flag inherits that stored
+value. So one operator trying a model their plan rejects leaves every later
+unattended agent on it, and nothing in this repo records that it happened.
 
-| `--model`           | exit | result                                            |
-| ------------------- | ---- | ------------------------------------------------- |
-| `composer-2.5-fast` | 1    | `ActionRequiredError: Model unavailable on Free`  |
-| none                | 1    | the same error, so the fallback is Composer       |
-| `grok-4.7-low`      | 1    | the same, though the error names Grok as included |
-| `auto`              | 0    | 7 events, `result success`, usage reported        |
+Measured 2026-11-22 against the live binary, argv built by `cursorArgs()`,
+reading the stored value between runs:
 
-**So before this pin, no supervised Cursor turn could complete on a Free plan**
-— and the test guarding the old behaviour asserted `--model` was ABSENT, which
-was green throughout.
+| stored before  | `--model`           | exit | stored after   |
+| -------------- | ------------------- | ---- | -------------- |
+| `auto`         | `composer-2.5-fast` | 1    | `composer-2.5` |
+| `composer-2.5` | none                | 1    | `composer-2.5` |
+| `composer-2.5` | `auto`              | 0    | `auto`         |
+
+⚠️ **A NO-FLAG RUN IS THEREFORE NOT REPRODUCIBLE**, and two agents measured it
+to opposite conclusions within four minutes on #371. The one who ran no flag
+after a successful `auto` saw it pass; the one who ran it after a rejected
+Composer saw it fail. Neither reading was about the CLI's default.
+
+⚠️ **ONLY `auto` IS PROVEN TO RUN ON A FREE PLAN.** `grok-4.7-low` is rejected
+too, though the error names Grok as included.
 
 ⚠️ **A PIN BUYS NO CONTEXT GAUGE.** A percentage needs the window size, and
 `--list-models` names one only in the ids that carry it:
