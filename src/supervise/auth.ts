@@ -187,11 +187,15 @@ export function readToken(): string | null {
 }
 
 /**
- * The refusal for a containerized spawn with no credential on file.
+ * The refusal for a spawn with no credential on file.
  *
- * 🛑 ONE BUILDER FOR BOTH REFUSAL SITES. `startSupervisor` and
+ * 🛑 ONE BUILDER FOR EVERY REFUSAL SITE. `startSupervisor` and
  * `dockerRunPlan` each carried their own copy of this sentence, and both
  * copies named Claude. A second vendor made them wrong in two places at once.
+ *
+ * ⚠️ PREFER `requireVendorToken` BELOW. This export exists for a caller that
+ * needs the sentence without the read — there is one, `startSupervisor`'s
+ * pre-check, and it discards the value.
  */
 export function missingVendorTokenMessage(vendor: {
   vendor: string;
@@ -203,6 +207,34 @@ export function missingVendorTokenMessage(vendor: {
     `\`pbpaste | chat-mcp auth set-token --vendor ${vendor.vendor}\` ` +
     `(stdin, never argv)`
   );
+}
+
+/**
+ * This vendor's credential, or a throw naming how to obtain it.
+ *
+ * 🛑 ONE READ-AND-REFUSE FOR EVERY DRIVER. The host and the container paths
+ * had byte-identical copies of it, and `startSupervisor` a third variant. The
+ * two DELIVERY mechanisms genuinely differ — docker names the var on its argv,
+ * a host spawn builds an `env` object — but deciding whether a child may start
+ * at all is one decision, and it was the host copy's absence that let #396
+ * ship a child with no key.
+ *
+ * ⚠️ IT RETURNS A `string`, NOT `string | null`, WHICH IS THE POINT. A caller
+ * holding the narrowed type cannot forget the guard, so the next driver gets it
+ * by construction rather than by remembering.
+ */
+export function requireVendorToken(vendor: {
+  vendor: string;
+  authEnvVar: string;
+  authSetupHint: string;
+}): string {
+  const token = readVendorToken(vendor);
+
+  if (!token) {
+    throw new Error(missingVendorTokenMessage(vendor));
+  }
+
+  return token;
 }
 
 export function setGhToken(token: string): void {

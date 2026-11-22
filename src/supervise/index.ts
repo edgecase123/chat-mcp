@@ -294,16 +294,15 @@ export async function startSupervisor(
   }
 
   if (isContainerSpawn) {
-    const { readVendorToken, missingVendorTokenMessage } =
-      await import("./auth.js");
+    const { requireVendorToken } = await import("./auth.js");
     const { confirmVerdict, describeChanges } = await import("./container.js");
     const { buildConfirmPlan } = await import("./confirmPlan.js");
 
     // Refused at START, for the same reason the override is: a throw at spawn
     // time leaves the handle with no agent and no remedy.
-    if (!readVendorToken(opts.vendor)) {
-      throw new Error(missingVendorTokenMessage(opts.vendor));
-    }
+    // The value is discarded: the driver reads it again when it builds the
+    // plan. This is the early refusal, not the injection.
+    requireVendorToken(opts.vendor);
     // 🛑 COMPARED, NOT LATCHED. A per-handle boolean meant an override
     // written AFTER the first approval was shown to nobody, ever — the
     // banner described a container and a different one ran.

@@ -8,7 +8,7 @@ import {
 } from "./wiring.js";
 import { wirePerTurnChild } from "./per-turn.js";
 import { approveHostGrantServer, deliverHostGrantFile } from "./host-grant.js";
-import { missingVendorTokenMessage, readVendorToken } from "../auth.js";
+import { requireVendorToken } from "../auth.js";
 
 /** Spawn a vendor's CLI as a bare host process. */
 export function spawnOnHost(
@@ -35,11 +35,7 @@ export function spawnOnHost(
   // ⚠️ BEFORE THE GRANT BLOCK, NOT AFTER. A refusal that came later would
   // leave `.cursor/mcp.json` in the operator's project directory for a child
   // that never ran.
-  const token = readVendorToken(vendor);
-
-  if (!token) {
-    throw new Error(missingVendorTokenMessage(vendor));
-  }
+  const token = requireVendorToken(vendor);
 
   // 🛑 THE DELIVERY ITSELF, FOR A CLI WITH NO CONFIG-PATH FLAG. The guard
   // above only refuses `"none"`; `"file"` passes it by not being that, so
