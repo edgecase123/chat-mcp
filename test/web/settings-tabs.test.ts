@@ -54,30 +54,93 @@ test("a known tab id is kept", () => {
 /**
  * 🛑 lee's RULING, ASSERTED: adding a third tab is ONE list entry and NO CSS.
  *
- * The failure this guards is a strip that only lays out at two — a `width: 50%`
- * or an `:nth-child(2)` rule reads fine today and silently breaks the third
- * tab, which is exactly when nobody is looking at this file.
+ * The failure this guards is a strip that only lays out at two — a
+ * `repeat(2, 1fr)` or an `:nth-child(2)` reads fine today and silently breaks
+ * the third tab, which is exactly when nobody is looking at this file.
+ *
+ * ⚠️ EVERY BLOCK, INCLUDING INSIDE `@media`. claude2 measured two holes in the
+ * first version of this test on PR 401: `repeat(2, 1fr)` passed it, and a rule
+ * in a `@media` after `.settings__placeholder` sat outside its regex entirely.
+ * Collecting blocks by brace-matching from each selector occurrence reaches
+ * both. Neither hole was live — the CSS was read.
  */
+function tabBlocks(css: string): { selector: string; body: string }[] {
+  const out: { selector: string; body: string }[] = [];
+
+  for (let i = css.indexOf(".settings__tab"); i !== -1;) {
+    const open = css.indexOf("{", i);
+
+    if (open === -1) break;
+
+    // Back up to the start of the selector, so a grouped or nested one is
+    // reported whole rather than from the middle.
+    const prev = Math.max(
+      css.lastIndexOf("}", i),
+      css.lastIndexOf("{", i),
+      css.lastIndexOf("*/", i),
+    );
+    const selector = css.slice(prev + 1, open).trim();
+
+    let depth = 1;
+    let j = open + 1;
+
+    while (j < css.length && depth > 0) {
+      if (css[j] === "{") depth++;
+      else if (css[j] === "}") depth--;
+      j++;
+    }
+
+    out.push({ selector, body: css.slice(open, j) });
+    i = css.indexOf(".settings__tab", j);
+  }
+
+  return out;
+}
+
 test("the tab strip's CSS is keyed to no tab count and no tab id", () => {
   const css = readFileSync(
     new URL("../../web/assets/style.css", import.meta.url),
     "utf8",
   );
 
-  const strip = css.match(/\.settings__tabs[\s\S]*?(?=\n\.(?!settings__tab))/);
+  const blocks = tabBlocks(css);
 
-  assert.notEqual(strip, null, ".settings__tabs has no CSS block");
+  // The matcher's own non-vacuity control. A regex that found nothing would
+  // make every assertion below pass over an empty set.
+  assert.ok(blocks.length >= 2, `only ${blocks.length} .settings__tab blocks`);
 
-  const block = strip![0];
+  for (const { selector, body } of blocks) {
+    const where = `${selector} {…}`;
 
-  assert.doesNotMatch(block, /nth-child/, "a positional rule pins the count");
-  assert.doesNotMatch(block, /\b(?:50|33|25)%/, "a share-of-two width");
+    // 🛑 SELECTOR AND BODY TOGETHER. `nth-child` lives in the SELECTOR, so a
+    // body-only check read `{ display: none }` and passed. claude2's @media
+    // hole SURVIVED my first fix for exactly that reason, and only running the
+    // mutant again said so.
+    const rule = `${selector} ${body}`;
 
-  for (const t of SETTINGS_TABS) {
     assert.doesNotMatch(
-      block,
-      new RegExp(`\\.settings__tab--${t.id}\\b`),
-      `CSS names the "${t.id}" tab, so a new tab needs a new rule`,
+      rule,
+      /nth-child|nth-of-type|:(?:first|last|only)-(?:child|of-type)/,
+      `${where} is positional`,
     );
+    assert.doesNotMatch(
+      rule,
+      /\brepeat\s*\(/,
+      `${where} repeats a track count`,
+    );
+    assert.doesNotMatch(
+      rule,
+      /grid-template-columns/,
+      `${where} fixes columns`,
+    );
+    assert.doesNotMatch(rule, /\b(?:50|33|25|20)%/, `${where} is a share of N`);
+
+    for (const t of SETTINGS_TABS) {
+      assert.doesNotMatch(
+        selector,
+        new RegExp(`--${t.id}\\b`),
+        `CSS names the "${t.id}" tab, so a new tab needs a new rule`,
+      );
+    }
   }
 });
