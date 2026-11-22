@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -192,5 +192,75 @@ test("🛑 control — omitting image and vendor still builds the claude image",
     buildArgs(r).length,
     1,
     "omitting both fields stopped building, so every existing caller broke",
+  );
+});
+
+/**
+ * 🛑 THE LEGACY FOLD, WHICH IS LOAD-BEARING AND WAS PROTECTED BY NOTHING.
+ *
+ * `builtHash` was one string describing the claude image. Every install on
+ * disk has one. Reading the new map without folding it in makes that image
+ * read as never built, so the FIRST start after this change pays for a full
+ * docker build it does not need — silently, and on every machine at once.
+ *
+ * ⚠️ RAISED BY claude2 reviewing PR 390: they measured that the fold WORKS and
+ * said plainly that they could not show a test PROTECTS it. This is that test.
+ */
+test("🔴 a pre-existing single builtHash still counts as the claude image being built", () => {
+  const present = () => Buffer.from("");
+  const statePath = join(process.env.CHAT_MCP_HOME as string, "container.json");
+
+  // Build once so the hash on disk is the CURRENT one, then rewrite the file
+  // in the shape every existing install actually has.
+  rmSync(statePath, { force: true });
+  buildImage(present, { image: IMAGE_TAG, vendor: "claude" });
+
+  const built = (
+    JSON.parse(readFileSync(statePath, "utf8")) as {
+      builtHashes: Record<string, string>;
+    }
+  ).builtHashes[IMAGE_TAG];
+
+  assert.ok(built, "the build recorded no hash, so this test proves nothing");
+
+  writeFileSync(
+    statePath,
+    `${JSON.stringify({ builtHash: built, confirmed: {} }, null, 2)}\n`,
+  );
+
+  assert.equal(
+    imageNeedsBuild(present, IMAGE_TAG),
+    false,
+    "an existing install reads as never built, so it pays for a docker build it does not need",
+  );
+});
+
+/**
+ * 🛑 THE CONTROL THAT KEEPS THE FOLD HONEST. A fold that answered "fresh" for
+ * every image would pass the test above and re-open the leak the per-image map
+ * exists to close.
+ */
+test("🛑 control — the legacy hash is folded in for the CLAUDE image only", () => {
+  const present = () => Buffer.from("");
+  const statePath = join(process.env.CHAT_MCP_HOME as string, "container.json");
+
+  rmSync(statePath, { force: true });
+  buildImage(present, { image: IMAGE_TAG, vendor: "claude" });
+
+  const built = (
+    JSON.parse(readFileSync(statePath, "utf8")) as {
+      builtHashes: Record<string, string>;
+    }
+  ).builtHashes[IMAGE_TAG];
+
+  writeFileSync(
+    statePath,
+    `${JSON.stringify({ builtHash: built, confirmed: {} }, null, 2)}\n`,
+  );
+
+  assert.equal(
+    imageNeedsBuild(present, CURSOR_IMAGE_TAG),
+    true,
+    "the legacy claude hash was folded in for the cursor image too, so it is never built",
   );
 });
