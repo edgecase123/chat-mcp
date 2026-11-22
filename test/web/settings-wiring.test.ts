@@ -86,6 +86,36 @@ test("the strip is built by mapping the list, not written out tab by tab", () =>
 });
 
 /**
+ * 🛑 THE OPENER MUST RENDER, AND RENDER FIRST.
+ *
+ * Found by claude2 on PR 401: with `renderSettings(null)` deleted from this
+ * handler, all ten tests here stayed GREEN and the modal opened with no tab
+ * strip and no panel. Every other test proves the renderer is CORRECT and none
+ * proved it was CALLED — the exact trap this file's own header warns about.
+ *
+ * Order is asserted too. Rendering after `showModal()` shows an empty dialog
+ * first, which is a flash of the broken state rather than the broken state.
+ */
+test("the opener renders the modal BEFORE it shows it", () => {
+  const m = APP_CODE.match(
+    /el\.settingsOpen\.addEventListener\([\s\S]*?\n\}\);/,
+  );
+
+  assert.notEqual(m, null, "no click handler on el.settingsOpen");
+
+  const handler = m![0];
+  const rendered = handler.indexOf("renderSettings(");
+  const shown = handler.indexOf("showModal()");
+
+  assert.notEqual(rendered, -1, "the opener never calls renderSettings()");
+  assert.notEqual(shown, -1, "the opener never calls showModal()");
+  assert.ok(
+    rendered < shown,
+    "showModal() runs before renderSettings(), so the dialog opens empty",
+  );
+});
+
+/**
  * 🛑 THE PLATFORM OWNS THE FOCUS TRAP. A class toggle gives a box that looks
  * modal and lets Tab walk out of it into the page behind.
  */
