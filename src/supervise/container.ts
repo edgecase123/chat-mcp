@@ -508,6 +508,13 @@ function envDigestKey(): Buffer {
     const stored = readFileSync(path, "utf8").trim();
 
     if (ENV_DIGEST_KEY_HEX.test(stored)) return Buffer.from(stored, "hex");
+
+    // ⚠️ SAID OUT LOUD, BECAUSE THE SYMPTOM IS A MASS RE-PROMPT. Every handle
+    // re-prompts once after this, and an operator with no stated cause reads
+    // that as the gate malfunctioning rather than as a damaged file.
+    console.error(
+      `env digest key at ${path} is not 64 hex characters — minting a new one, which re-prompts every handle once`,
+    );
   }
 
   const key = randomBytes(32).toString("hex");

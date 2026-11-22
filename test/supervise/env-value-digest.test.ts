@@ -395,37 +395,69 @@ test("🛑 buildConfirmPlan digests the override it was GIVEN, not the file", as
 test("🛑 a key file that is not 64 hex characters is regenerated", () => {
   const keyPath = join(process.env.CHAT_MCP_HOME!, "env-digest-key");
 
-  const digestUnder = (content: string): string => {
-    writeFileSync(keyPath, content);
-    const digest = envValuesDigest({ MY_VAR: SECRET });
+  const warnings: string[] = [];
+  const realError = console.error;
 
-    assert.match(
-      readFileSync(keyPath, "utf8").trim(),
-      /^[0-9a-f]{64}$/,
-      `the key file still holds ${JSON.stringify(content)}`,
+  // ⚠️ RESTORED IN A `finally`, because a throw while the stub is installed
+  // would otherwise swallow every later test's output in this file.
+  console.error = (line: string) => void warnings.push(line);
+
+  try {
+    const digestUnder = (content: string): string => {
+      warnings.length = 0;
+      writeFileSync(keyPath, content);
+      const digest = envValuesDigest({ MY_VAR: SECRET });
+
+      assert.match(
+        readFileSync(keyPath, "utf8").trim(),
+        /^[0-9a-f]{64}$/,
+        `the key file still holds ${JSON.stringify(content)}`,
+      );
+
+      // ⚠️ SILENTLY REGENERATING READS AS THE GATE MALFUNCTIONING. Every handle
+      // re-prompts once afterwards, so the cause has to be stated.
+      assert.equal(
+        warnings.filter((w) => w.includes("env digest key")).length,
+        1,
+        `the regeneration was not announced for ${JSON.stringify(content)}`,
+      );
+
+      return digest;
+    };
+
+    // Empty, undecodable, odd-length, and one character short all decode to
+    // fewer than 32 bytes, the first two to none at all.
+    //
+    // 🛑 THE LAST SHAPE IS THE ONE A LENGTH CHECK ALONE WOULD ACCEPT. 64 good
+    // characters then junk decodes to a full 32 bytes, so the key would be
+    // trusted while the file is plainly damaged.
+    const digests = [
+      "",
+      "zz",
+      "abc",
+      "a".repeat(63),
+      "0".repeat(64) + "zz",
+    ].map(digestUnder);
+
+    // 🛑 THE PROPERTY, NOT THE BYTES. Under a zero-byte key the digest depends
+    // on the input alone, so two different corrupt files would yield the SAME
+    // digest for the same input. Five distinct digests is five distinct keys.
+    assert.equal(
+      new Set(digests).size,
+      digests.length,
+      "two corrupt key files produced the same digest, so neither was keyed",
     );
 
-    return digest;
-  };
+    // ⚠️ THE CONTROL FOR THE WARNING, in this test because it needs this stub:
+    // a valid key regenerates nothing and must therefore say nothing.
+    warnings.length = 0;
+    writeFileSync(keyPath, "ab".repeat(32));
+    envValuesDigest({ MY_VAR: SECRET });
 
-  // Empty, undecodable, odd-length, and one character short all decode to
-  // fewer than 32 bytes, the first two to none at all.
-  //
-  // 🛑 THE LAST SHAPE IS THE ONE A LENGTH CHECK ALONE WOULD ACCEPT. 64 good
-  // characters then junk decodes to a full 32 bytes, so the key would be
-  // trusted while the file is plainly damaged.
-  const digests = ["", "zz", "abc", "a".repeat(63), "0".repeat(64) + "zz"].map(
-    digestUnder,
-  );
-
-  // 🛑 THE PROPERTY, NOT THE BYTES. Under a zero-byte key the digest depends on
-  // the input only, so two different corrupt files would yield the SAME digest
-  // for the same input. Four distinct digests is four distinct keys.
-  assert.equal(
-    new Set(digests).size,
-    digests.length,
-    "two corrupt key files produced the same digest, so neither was keyed",
-  );
+    assert.deepEqual(warnings, [], "a valid key file produced a warning");
+  } finally {
+    console.error = realError;
+  }
 });
 
 /**
