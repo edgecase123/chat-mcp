@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { migrate } from "../../src/storage/db.js";
 import * as dao from "../../src/storage/dao.js";
+import { isProcessAlive } from "../../src/util/process.js";
 import { deadPid } from "../support/dead-pid.js";
 
 /**
@@ -135,12 +136,12 @@ test("🚨 every live harness passes ephemeral: true", () => {
 test("🚨 an online handle is held back, not pruned", () => {
   const dead = deadPid();
   assert.equal(
-    dao.isProcessAlive(dead),
+    isProcessAlive(dead),
     false,
     "the fixture pid must really be dead",
   );
   assert.equal(
-    dao.isProcessAlive(process.pid),
+    isProcessAlive(process.pid),
     true,
     "and this process must really be live",
   );
@@ -174,7 +175,7 @@ test("🚨 an online handle is held back, not pruned", () => {
 test("🚨 a fully dead set is entirely prunable", () => {
   const dead = deadPid();
   assert.equal(
-    dao.isProcessAlive(dead),
+    isProcessAlive(dead),
     false,
     "the fixture pid must really be dead",
   );

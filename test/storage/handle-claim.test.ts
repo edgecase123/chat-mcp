@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import * as dao from "../../src/storage/dao.js";
-import { HandleClaimedError, isProcessAlive } from "../../src/storage/dao.js";
+import { HandleClaimedError } from "../../src/storage/dao.js";
+import { isProcessAlive } from "../../src/util/process.js";
 import { migrate } from "../../src/storage/db.js";
 
 /**

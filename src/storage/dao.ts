@@ -13,6 +13,7 @@ import type { ClaimRow } from "../claims/lifecycle.js";
 // A value import, not a type: `searchMessages` has to tell a room target from
 // a peer target at runtime. `naming.ts` imports nothing, so this cannot cycle.
 import { isRoomName } from "../util/naming.js";
+import { isProcessAlive } from "../util/process.js";
 
 export type AgentStatus =
   "idle" | "thinking" | "tool" | "blocked" | "error" | "offline";
@@ -103,24 +104,6 @@ function coerceStatus(raw: string | null): AgentStatus | null {
 function coerceKind(raw: string | null): MessageKind {
   if (raw === "dispatch" || raw === "alert") return raw;
   return "chat";
-}
-
-/**
- * Whether a pid names a running process.
- *
- * EPERM means it exists and belongs to another user, which is still alive.
- * ⚠️ Pid numbers are REUSED, so a long-dead incumbent can read as live. That
- * is why claiming a handle has a `force` escape hatch.
- */
-export function isProcessAlive(pid: number | null): boolean {
-  if (pid == null) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e: unknown) {
-    const err = e as NodeJS.ErrnoException;
-    return err.code === "EPERM";
-  }
 }
 
 function hydrate(row: AgentRow): Agent {
