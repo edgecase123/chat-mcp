@@ -7,6 +7,14 @@ import { join } from "node:path";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { ChildGrant } from "../../../src/supervise/grant.js";
 
+// 🛑 BEFORE any import that resolves a state path, per AGENTS.md. `spawnOnHost`
+// reads the vendor token on every spawn since #396, and `auth.ts` resolves the
+// state dir — which the node runner refuses when it is the operator's live
+// `~/.chat-mcp`.
+process.env.CHAT_MCP_HOME = mkdtempSync(
+  join(tmpdir(), "chat-mcp-spawn-delivered-home-"),
+);
+
 /**
  * 🛑 THE WRITER BEING CORRECT IS NOT THE WRITER BEING CALLED.
  *
@@ -99,6 +107,13 @@ test("🛑 spawnOnHost DELIVERS the grant file for cursor, and only when granted
   const { spawnOnHost } =
     await import("../../../src/supervise/drivers/host.js");
   const { cursorSpawn } = await import("../../../src/adapters/cursor-spawn.js");
+
+  const { setVendorToken } = await import("../../../src/supervise/auth.js");
+
+  // 🛑 A TOKEN ON FILE, BECAUSE AN UNAUTHENTICATED CHILD IS NOW REFUSED AT
+  // SPAWN. #396. Without it the granted spawn throws before the writer runs,
+  // and the missing config reads as the delivery call having been removed.
+  setVendorToken(cursorSpawn, "cursor-token-for-the-delivery-spawns");
 
   const granted = mkdtempSync(join(tmpdir(), "chat-mcp-spawn-granted-"));
   const ungranted = mkdtempSync(join(tmpdir(), "chat-mcp-spawn-ungranted-"));

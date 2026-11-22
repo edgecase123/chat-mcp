@@ -148,6 +148,12 @@ test("🛑 spawnOnHost APPROVES cursor's bus server, so a granted host child has
   const SECRET = "key_live_0123456789abcdefSECRET";
   setVendorToken(cursorSpawn, SECRET);
 
+  // 🛑 CLAUDE NEEDS ONE TOO, BECAUSE `spawnOnHost` NOW REFUSES AN
+  // UNAUTHENTICATED CHILD OF ANY VENDOR. #396: a host child was never handed
+  // its key, started clean and lost the prompt. The claude spawn below is this
+  // file's delivery-branch control, so it has to get as far as spawning.
+  setVendorToken(claudeSpawn, "claude-token-for-the-delivery-control");
+
   const granted = mkdtempSync(join(tmpdir(), "chat-mcp-approve-granted-"));
   const ungranted = mkdtempSync(join(tmpdir(), "chat-mcp-approve-ungranted-"));
   const claude = mkdtempSync(join(tmpdir(), "chat-mcp-approve-claude-"));
