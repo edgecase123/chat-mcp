@@ -2955,21 +2955,22 @@ test("🔴 control — with NO explicit binary the plan runs the image's own CLI
 });
 
 /**
- * 🔴 CONTROL — the refusal is CONTAINER-ONLY. `--binary` is the supported way
- * to run a CLI from an unusual path on the HOST, and #365 is about one field
- * naming two filesystems, not about the field being wrong.
+ * 🔴 CONTROL — the refusal is CONTAINER-ONLY, asserted where the host driver
+ * actually spawns: `host-binary-override.test.ts`.
  *
- * 🛑 READ OFF `host.ts` ITSELF, because a hand-written copy of the `??` here
- * would keep passing while the driver changed underneath it. Asserting on a
- * real host spawn would exec a CLI this suite must not run.
+ * 🛑 THE SOURCE-GREP VERSION OF THIS TEST WAS VACUOUS AND IS DELETED. It
+ * pinned the string `turnOpts.binary ?? vendor.binary` in `host.ts`. claude2
+ * broke the live `spawn()` call while leaving that string in a comment above
+ * it, and all 2514 tests stayed green — the override could have been deleted
+ * from the driver with nothing going red. A grep over source cannot see
+ * behaviour. claude2 on PR 388.
  */
-test("🔴 control — the HOST driver still honours an explicit binary, and carries no container refusal", () => {
+test("🔴 control — the container refusal is not reachable from the host driver", () => {
   const source = readFileSync(
     new URL("../../../src/supervise/drivers/host.ts", import.meta.url),
     "utf8",
   );
 
-  assert.match(source, /turnOpts\.binary \?\? vendor\.binary/);
   assert.ok(
     !source.includes("assertBinaryOverrideIsContainerSafe"),
     "the host driver now carries the container-only refusal",
