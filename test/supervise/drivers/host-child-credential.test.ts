@@ -1,10 +1,11 @@
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildGrant } from "../../../src/supervise/grant.js";
 
 // 🛑 BEFORE any import that resolves a state path, per AGENTS.md. The token is
 // read from the secrets file under the state dir, which the node runner
@@ -45,6 +46,22 @@ process.env.CHAT_MCP_HOME = mkdtempSync(
  * import defeats `t.mock.module` before it runs. PR 394 lost a CI run to
  * exactly that.
  */
+/**
+ * 🛑 `configPath` POINTS INSIDE THE GIVEN CWD, NOT AT A FIXED `/tmp` NAME. A
+ * mutant that made the writer land `grant.configPath` left a real file at a
+ * shared path, and the NEXT run then failed on it — a passing suite that
+ * depended on run order.
+ */
+function grantIn(cwd: string): ChildGrant {
+  return {
+    handle: "h-child",
+    configPath: join(cwd, "state-dir-path-cursor-never-reads.json"),
+    allowed: [],
+    available: [],
+    extraDirs: [],
+  };
+}
+
 function fakeChild(): ChildProcessWithoutNullStreams {
   const stream = () => {
     const s = new EventEmitter() as EventEmitter & {
@@ -101,10 +118,31 @@ test("🛑 the host child is handed its own credential, and no child starts with
   // 16657 that an unauthenticated child must refuse to START, rather than
   // start, take the prompt and exit 1 — the prompt is lost either way, and
   // only the refusal names the cause.
+  //
+  // 🛑 WITH A GRANT, BECAUSE AN UNGRANTED CHILD CANNOT REACH THE ORDERING THIS
+  // PINS. Measured: moving the token check BELOW the grant block left an
+  // ungranted-only version of this test GREEN, since the block it has to beat
+  // never ran. The actor that reaches it is a FILE-delivered vendor carrying a
+  // grant and no credential.
+  const refused = mkdtempSync(join(tmpdir(), "chat-mcp-cred-refused-"));
+
   assert.throws(
-    () => spawnOnHost(cursorSpawn, { cwd: process.env.CHAT_MCP_HOME }),
+    () =>
+      spawnOnHost(cursorSpawn, {
+        cwd: refused,
+        grant: grantIn(refused),
+      }),
     /no CURSOR_API_KEY on file/,
     "a cursor child with no token on file was allowed to start",
+  );
+
+  // 🛑 AND IT LEFT NOTHING BEHIND. A refusal that came after the writer would
+  // plant `.cursor/mcp.json` in the operator's own project directory for a
+  // child that never ran — litter #348 already refuses to create for an
+  // ungranted child.
+  assert.ok(
+    !existsSync(join(refused, ".cursor")),
+    "a refused child left a grant config in the operator's project directory",
   );
 
   // 🛑 NOT CURSOR-SPECIFIC. The defect was found on cursor, but the missing
@@ -156,16 +194,9 @@ test("🛑 the host child is handed its own credential, and no child starts with
 
   setVendorToken(cursorSpawn, "cursor-token-for-the-child");
 
-  spawnOnHost(cursorSpawn, {
-    cwd: process.env.CHAT_MCP_HOME,
-    grant: {
-      handle: "h-child",
-      configPath: join(process.env.CHAT_MCP_HOME!, "never-read.json"),
-      allowed: [],
-      available: [],
-      extraDirs: [],
-    },
-  });
+  const granted = mkdtempSync(join(tmpdir(), "chat-mcp-cred-granted-"));
+
+  spawnOnHost(cursorSpawn, { cwd: granted, grant: grantIn(granted) });
 
   // 🛑 THE APPROVAL EXEC IS DECIDED, NOT OVERLOOKED. lee's 16654 permits the
   // token in a child's `env`; `cursor-agent mcp enable` needs no credential,
