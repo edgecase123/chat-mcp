@@ -21,6 +21,7 @@ const { markConfirmed } = await import("../../src/supervise/container.js");
 
 import type { ContainerPlan } from "../../src/supervise/container.js";
 import { deadPid } from "../support/dead-pid.js";
+import { isProcessAlive } from "../../src/util/process.js";
 
 /**
  * #377 — `container.json` was a read-modify-write with no lock.
@@ -304,6 +305,43 @@ test("⚠️ a throw while serialising releases the lock", () => {
   // And the next writer is not blocked by the wreckage.
   markConfirmed("after-the-throw", plan());
   assert.ok(onDisk().confirmed?.["after-the-throw"]);
+});
+
+/**
+ * 🛑 A HOLDER WHOSE LOCK HAS BEEN ROBBED MUST NOT UNLINK ON ITS WAY OUT.
+ *
+ * Breaking a dead holder's lock is not conditional on the file's content, so a
+ * slow process can move a lock that a live one has already replaced. If the
+ * robbed holder then releases blindly, it deletes the ROBBER's live lock and a
+ * third writer walks in beside it.
+ *
+ * ⚠️ THE ROBBERY IS STAGED FROM INSIDE THE CRITICAL SECTION, via `toJSON`.
+ * `JSON.stringify` calls it while the lock is held, which is the only seam
+ * into that window that does not require adding one to the production code.
+ */
+test("🛑 a robbed holder does not delete the lock that replaced its own", () => {
+  const robber = 1; // init. Alive on every platform this runs on.
+
+  assert.equal(isProcessAlive(robber), true, "pid 1 reads as dead");
+
+  const robbing = plan({
+    binary: {
+      toJSON: () => {
+        writeFileSync(LOCK, `${robber}\n`);
+        return "claude";
+      },
+    } as unknown as string,
+  });
+
+  markConfirmed("robbed-holder", robbing);
+
+  assert.equal(
+    readFileSync(LOCK, "utf8").trim(),
+    String(robber),
+    "the robbed holder deleted or overwrote the robber's lock",
+  );
+
+  rmSync(LOCK, { force: true });
 });
 
 /**

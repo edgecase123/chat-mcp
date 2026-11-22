@@ -214,21 +214,41 @@ function sleepSync(ms: number): void {
  * defect this lock exists to fix.
  */
 function lockHolderIsAlive(path: string): boolean {
+  const pid = lockHolderPid(path);
+
+  // ⚠️ `null` IS "COULD NOT TELL", AND IT READS AS ALIVE. A lock file that
+  // vanished, is unreadable, or holds no pid yet must never read as dead.
+  if (pid === null) return true;
+
+  return isProcessAlive(pid);
+}
+
+/** The pid named inside a lock file, or `null` if it does not name one. */
+function lockHolderPid(path: string): number | null {
   let raw: string;
 
   try {
     raw = readFileSync(path, "utf8").trim();
   } catch {
-    // Vanished or unreadable between the failed create and this read. The
-    // caller retries, so claiming it is alive costs one poll interval.
-    return true;
+    return null;
   }
 
   const pid = Number.parseInt(raw, 10);
 
-  if (!Number.isInteger(pid) || pid <= 0) return true;
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
 
-  return isProcessAlive(pid);
+/**
+ * Drop the lock, but only while it is still OURS.
+ *
+ * 🛑 AN UNCONDITIONAL `rmSync` HERE DELETES A ROBBER'S LIVE LOCK. Breaking a
+ * dead holder's lock is not conditional on content, so a slow process can move
+ * a lock that has already been replaced by a live one. The robbed holder then
+ * reaches this line and, unlinking blindly, lets a THIRD writer in beside the
+ * robber.
+ */
+function releaseContainerLock(path: string): void {
+  if (lockHolderPid(path) === process.pid) rmSync(path, { force: true });
 }
 
 /**
@@ -285,6 +305,21 @@ function acquireContainerLock(): string {
  *
  * Staged and renamed as well as locked, because the lock orders writers in
  * THIS codebase and a reader needs no lock at all once every write is atomic.
+ *
+ * 🛑 ONE WINDOW IS LEFT OPEN ON PURPOSE, AND IT IS NARROWER THAN WHAT IT
+ * REPLACES. Breaking a dead holder's lock cannot be made conditional on the
+ * file's CONTENT with these primitives: there is no atomic "unlink only if it
+ * still says what I read". So two processes that both find the same dead holder
+ * can still end up inside this section together, and one of their writes is
+ * lost. Measured both ways — with `rmSync` and with an atomic `renameSync` —
+ * and the rename closes nothing, because it is atomic on the PATH and not on
+ * the object at it. claude1 and claude2 each reproduced it independently on
+ * PR 410.
+ *
+ * ⚠️ WHAT IS FIXED IS THE COMMON CASE, which is every write where no stale
+ * lock is in play. Before this, ANY two overlapping writers lost one change.
+ * A closing fix needs a real advisory lock, and the only one available here is
+ * a SQLite transaction — which would pull the database into this file.
  */
 function updateContainerState(
   mutate: (state: ContainerState) => ContainerState,
@@ -306,7 +341,7 @@ function updateContainerState(
     // lock nor a staging file behind. After a successful rename the staging
     // path is already gone, so the first call is a no-op.
     rmSync(staging, { force: true });
-    rmSync(lock, { force: true });
+    releaseContainerLock(lock);
   }
 }
 
