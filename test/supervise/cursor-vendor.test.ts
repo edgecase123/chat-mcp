@@ -128,34 +128,32 @@ test("cursorArgs passes resume only when asked", () => {
 });
 
 /**
- * #371, lee's ruling of 2026-11-21: a supervised cursor agent runs the native
- * fast model rather than `auto`.
+ * lee's ruling of 2026-11-22: *"keep it on auto for now."*
  *
- * 🛑 THE DEFAULT IS WHAT CHANGED, NOT THE FLAG. The flag was already passed
- * when a caller named a model, so the previous test passed on a build that
- * still ran every unattended agent on `auto`.
+ * 🛑 OMITTING `--model` IS NOT `auto`, AND THAT IS THE WHOLE BUG THIS CLOSES.
+ * The CLI falls back to its own stored default, which on the measured host is
+ * Composer 2.5 Fast — a model the account's plan rejects, so the turn exits 1.
+ * The previous assertion here was `!cursorArgs().includes("--model")`, and it
+ * was GREEN on a build where no cursor turn could complete at all.
  */
-test("🛑 cursorArgs PINS a model when the caller names none", () => {
+test("🛑 cursorArgs PINS auto when the caller names no model", () => {
   const args = cursorArgs();
   const at = args.indexOf("--model");
 
-  assert.notEqual(at, -1, "no --model, so the agent runs on `auto`");
+  assert.notEqual(at, -1, "no --model, so the CLI picks its own default");
   assert.equal(args[at + 1], CURSOR_DEFAULT_MODEL);
-  assert.equal(CURSOR_DEFAULT_MODEL, "composer-2.5-fast");
+  assert.equal(CURSOR_DEFAULT_MODEL, "auto");
 });
 
 /**
  * 🛑 A CALLER'S MODEL MUST WIN, AND AN `opts.model` OF `""` MUST NOT. An empty
- * string reaches `--model` as an argument the CLI cannot resolve, which fails
- * as a dead agent rather than as a bad flag.
+ * string would reach `--model` as an argument the CLI cannot resolve, which
+ * fails as a dead agent rather than as a bad flag.
  */
 test("🛑 an explicit model overrides the pin; an empty one falls back", () => {
-  assert.equal(
-    cursorArgs({ model: "gpt-5.2" })[
-      cursorArgs({ model: "gpt-5.2" }).indexOf("--model") + 1
-    ],
-    "gpt-5.2",
-  );
+  const named = cursorArgs({ model: "gpt-5.2" });
+
+  assert.equal(named[named.indexOf("--model") + 1], "gpt-5.2");
 
   const empty = cursorArgs({ model: "" });
 

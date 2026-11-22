@@ -72,19 +72,30 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
 }
 
 /**
- * The model a supervised `cursor-agent` runs when nothing names one.
+ * The model a supervised `cursor-agent` runs when no caller names one.
  *
- * 🛑 lee's RULING OF 2026-11-21 (#371): *"pin model for cursor agent, default
- * is the native cursor fast model."* Pinning costs Cursor's own per-request
- * routing, and that was the trade he accepted.
+ * 🛑 lee's RULING OF 2026-11-22: *"keep it on auto for now."* That SUPERSEDES
+ * his ruling of 2026-11-21, which named the native fast model — the account's
+ * plan cannot run it.
  *
- * 🛑 PINNING THIS BUYS NO CONTEXT GAUGE, AND THAT WAS THE HOPE BEHIND THE
- * RULING. A denominator needs the window size, and `--list-models` names one
- * only in the ids that carry it — `Claude Opus 5 1M Thinking` does, and
- * `Composer 2.5 Fast` does not. So `cursorSpawn.reportsContext` stays `false`
- * and #371's fix is the card saying so, not this constant.
+ * 🛑 `"auto"` IS NOT THE SAME AS OMITTING THE FLAG, AND THAT IS WHY THIS
+ * CONSTANT EXISTS. With no `--model` the CLI falls back to its OWN stored
+ * default, which here is Composer 2.5 Fast. Measured against the live binary
+ * with argv built by `cursorArgs()`:
+ *
+ * | `--model`           | exit | result                                      |
+ * |---------------------|------|---------------------------------------------|
+ * | `composer-2.5-fast` | 1    | `Model unavailable on Free`                 |
+ * | none                | 1    | the same error, so the fallback is Composer |
+ * | `grok-4.7-low`      | 1    | the same, though the error names Grok       |
+ * | `auto`              | 0    | 7 events, `result success`                  |
+ *
+ * ⚠️ PINNING ANY MODEL BUYS NO CONTEXT GAUGE. A denominator needs the window
+ * size, and `--list-models` names one only in the ids that carry it:
+ * `Claude Opus 5 1M Thinking` does, `Composer 2.5 Fast` does not. So
+ * `cursorSpawn.reportsContext` stays `false`.
  */
-export const CURSOR_DEFAULT_MODEL = "composer-2.5-fast";
+export const CURSOR_DEFAULT_MODEL = "auto";
 
 export function cursorArgs(opts: SpawnOptions = {}): string[] {
   const args = [
@@ -98,8 +109,8 @@ export function cursorArgs(opts: SpawnOptions = {}): string[] {
     "--approve-mcps",
   ];
 
-  // ⚠️ ALWAYS PASSED, NEVER CONDITIONAL. Omitting the flag leaves the CLI on
-  // `auto`, which is the state lee's ruling removes.
+  // ⚠️ ALWAYS PASSED, NEVER CONDITIONAL. Omitting it is NOT `auto` — see
+  // `CURSOR_DEFAULT_MODEL`, where the exit codes are.
   args.push("--model", opts.model || CURSOR_DEFAULT_MODEL);
   if (opts.resumeSessionId) {
     args.push(...cursorResumeFlags(opts.resumeSessionId));

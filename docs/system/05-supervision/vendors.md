@@ -30,7 +30,7 @@ about itself before it can be spawned.
 | turn ends on             | `{"type":"result"}`    | `{"type":"result"}`                       |
 | reports a usage window   | yes                    | no                                        |
 | reports context fullness | yes                    | no                                        |
-| default model            | the CLI's own          | **pinned** `composer-2.5-fast`            |
+| default model            | the CLI's own          | **pinned** `auto`                         |
 | container image          | `chat-mcp-agent:local` | `chat-mcp-cursor-agent:local`             |
 | reaches the bus          | yes                    | yes                                       |
 
@@ -55,20 +55,32 @@ for a vendor that reports no window shows `n/a` instead of a blank that could
 equally mean "not yet". The three states and the suffix join are in
 [context-gate.md](context-gate.md).
 
-## Cursor runs a PINNED model, not `auto`
+## Cursor is PINNED to `auto`, and omitting the flag is not the same thing
 
-lee's ruling, 2026-11-21: _"pin model for cursor agent, default is the native
-cursor fast model."_ `CURSOR_DEFAULT_MODEL` in `src/supervise/drivers/cursor.ts`
-is `composer-2.5-fast`, and `cursorArgs` passes `--model` on every spawn. A
-caller's own `opts.model` still wins.
+lee's ruling, 2026-11-22: _"keep it on auto for now."_ It supersedes his ruling
+of the 21st, which named the native fast model — the account's plan cannot run
+it. `CURSOR_DEFAULT_MODEL` in `src/supervise/drivers/cursor.ts` is `auto`, and
+`cursorArgs` passes `--model` on every spawn. A caller's own `opts.model` wins.
 
-The cost is Cursor's per-request routing, and that was the trade.
+🛑 **OMITTING `--model` IS NOT `auto`.** The CLI falls back to its OWN stored
+default, which on the measured host is Composer 2.5 Fast. Measured 2026-11-22
+against the live binary with argv built by `cursorArgs()`:
 
-🛑 **PINNING IT BUYS NO CONTEXT GAUGE, WHICH WAS THE HOPE BEHIND THE RULING.** A
-percentage needs the window size, and `cursor-agent --list-models` names one
-only in the ids that carry it: `Claude Opus 5 1M Thinking` does,
-`Composer 2.5 Fast` does not. So `reportsContext` stays `false` and the gauge's
-fix is the `n/a` chip above, not this constant.
+| `--model`           | exit | result                                            |
+| ------------------- | ---- | ------------------------------------------------- |
+| `composer-2.5-fast` | 1    | `ActionRequiredError: Model unavailable on Free`  |
+| none                | 1    | the same error, so the fallback is Composer       |
+| `grok-4.7-low`      | 1    | the same, though the error names Grok as included |
+| `auto`              | 0    | 7 events, `result success`, usage reported        |
+
+**So before this pin, no supervised Cursor turn could complete on a Free plan**
+— and the test guarding the old behaviour asserted `--model` was ABSENT, which
+was green throughout.
+
+⚠️ **A PIN BUYS NO CONTEXT GAUGE.** A percentage needs the window size, and
+`--list-models` names one only in the ids that carry it:
+`Claude Opus 5 1M Thinking` does, `Composer 2.5 Fast` does not. So
+`reportsContext` stays `false` and the gauge's fix is the `n/a` chip above.
 
 ## How a host grant is delivered is DECLARED, never inferred
 
