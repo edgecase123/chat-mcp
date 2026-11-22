@@ -1312,13 +1312,33 @@ body {
   border-left-color: #4a9eda;
 }
 
-/* #40 — a supervisor answering on its socket right now. Shares .claim's
-   left-border shape, because both panels answer "what is going on". */
+/* #40 — a supervisor answering on its socket right now.
+
+   🛑 NO LEFT BORDER OF ITS OWN SINCE #374. It used to share .claim's border
+   shape, but the row inside it is now a .sidebar__item, whose own left border
+   goes from transparent to the accent when the row is selected. Keeping both
+   drew two bars side by side on the selected agent, and the point of #374 is
+   that an agent row looks like a peer row. .pair and .claim declare their own
+   border and are unaffected.
+
+   ⚠️ THE PADDING STAYS. .agent__actions, the gate control and .agents__sweep
+   all align on this 8px inset. */
 .agent {
   padding: 4px 8px;
-  border-left: 2px solid var(--border, #333);
   margin-bottom: 6px;
 }
+
+/* 🛑 THE NESTED ROW DROPS ITS HORIZONTAL INSET, NOT ITS BORDER. 16px is the
+   inset of a TOP-LEVEL sidebar row; inside .agent's own 8px it indents the
+   label twice and the controls beneath it no longer line up. The border is
+   what carries the selected state, so it is left alone. */
+.agent > .sidebar__item {
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+/* The childless case, which is not a peer row: a supervisor binds its socket
+   before its child's first bus touch, so there is no handle to message yet. */
 .agent__head {
   display: flex;
   align-items: center;
@@ -1326,11 +1346,6 @@ body {
 }
 .agent__handle {
   font-size: 12px;
-  word-break: break-all;
-}
-.agent__meta {
-  font-size: 11px;
-  opacity: 0.65;
   word-break: break-all;
 }
 .agent__actions {

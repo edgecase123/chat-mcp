@@ -40,6 +40,7 @@ import {
   claimRow,
   claimsPanelEmpty,
   agentRow,
+  peersMinusSupervised,
   agentsPanelEmpty,
   registrationRows,
   registrationsPanelEmpty,
@@ -497,16 +498,34 @@ function agentsSection() {
         // blank panel and a failed fetch look identical.
         [h("div", { className: "sidebar__empty" }, [agentsPanelEmpty()])]
       : agents.map((a) =>
-          h("div", { className: "agent" }, [
-            h("div", { className: "agent__head" }, [
-              h("span", { className: "agent__handle" }, [a.handle]),
-              gaugeChip(a.gauge),
-            ]),
-            h("div", { className: "agent__meta", title: a.boundTitle }, [
-              a.childHandle === null
-                ? a.bound
-                : `${a.bound} \u00b7 ${a.childHandle}`,
-            ]),
+          // 🛑 `data-supervisor` IS THE STOP TARGET AND IT IS NOT THE LABEL.
+          // The row reads as the child, because that is the handle a human
+          // messages, but `/api/agents/stop` accepts only the supervisor. The
+          // attribute keeps it in the DOM rather than in a second visible row,
+          // which is what #374 was about.
+          h("div", { className: "agent", "data-supervisor": a.handle }, [
+            // 🛑 THE SAME ROW COMPONENT AS A PEER, on lee's ruling of
+            // 2026-11-21: *"i'd like the dockerized agents to look like other
+            // agents like yourselves look in the web ui"*. The clickable row
+            // that opens a DM is the most visible half of that.
+            //
+            // ⚠️ NOT CLICKABLE WITH NO CHILD. A supervisor binds its socket
+            // before its child's first bus touch, and in that window there is
+            // no handle to message — a row targeting the supervisor would open
+            // a conversation that can never receive anything.
+            a.childHandle === null
+              ? h("div", { className: "agent__head" }, [
+                  h("span", { className: "agent__handle" }, [a.label]),
+                  gaugeChip(a.gauge),
+                ])
+              : sidebarItem({
+                  label: a.label,
+                  target: a.childHandle,
+                  online: true,
+                  active: state.currentTarget === a.childHandle,
+                  kind: "peer",
+                  gauge: a.gauge,
+                }),
             h("div", { className: "agent__actions" }, [
               stopButton("Stop", a.handle, "graceful"),
               stopButton("Stop now", a.handle, "now"),
@@ -566,9 +585,12 @@ function peersSection() {
   // Peers
   return h("div", { className: "sidebar__section" }, [
     h("div", { className: "sidebar__heading" }, ["Peers"]),
-    ...(state.peers.length === 0
+    // 🛑 THE FILTERED LIST, NOT `state.peers`. A bus whose only peer is a
+    // supervised child would otherwise fall through to the map and render a
+    // section with a heading and no rows.
+    ...(peersMinusSupervised(state.peers, state.agents).length === 0
       ? [h("div", { className: "sidebar__empty" }, ["(none online)"])]
-      : state.peers.map((p) =>
+      : peersMinusSupervised(state.peers, state.agents).map((p) =>
           sidebarItem({
             label: p.handle,
             target: p.handle,
