@@ -72,6 +72,36 @@ exited with NO turn end           a death
 turn's process and dies with it, so Cursor cannot be the test vehicle for a
 long-lived-stdio goal.
 
+## In a container, a per-turn vendor runs behind the turn relay
+
+🛑 **The supervisor's stdin and `cursor-agent`'s disagree about lifetime.** The
+supervisor writes one prompt to a long-lived stdin and never closes it;
+`cursor-agent -p` reads stdin to EOF. Wired together the agent blocks forever
+and emits nothing — #380.
+
+So a per-turn vendor's container command is not its CLI. It is the relay:
+
+```
+docker run -i  ->  node /opt/chat-mcp/dist/relay/bin.js \
+                     --vendor cursor [--resume <id>] -- <cli argv>
+```
+
+| part                | who owns it                                            |
+| ------------------- | ------------------------------------------------------ |
+| one container       | stays alive across turns, so the MCP handshake is once |
+| one process a turn  | the relay spawns the CLI and closes THAT stdin         |
+| the turn boundary   | the vendor's own `routeEvent`, never a second matcher  |
+| the session id      | the relay holds it and appends `resumeFlags` per turn  |
+| the prompt envelope | one base64 line, applied by the container driver only  |
+
+⚠️ **The framing is container-specific.** `encodeInput` also feeds the host
+per-turn path, which writes straight to the CLI, so the base64 frame is applied
+in `spawnContainerized` rather than in the vendor.
+
+🛑 **A prompt reaching the relay unframed is refused, not guessed at.** Base64
+decoding cannot fail, so an unframed line would decode to binary garbage and the
+agent would answer a prompt nobody wrote.
+
 ## Three Cursor flags that fail by producing nothing
 
 Each of these exits cleanly with zero events when omitted, which the supervisor

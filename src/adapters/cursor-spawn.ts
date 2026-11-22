@@ -8,6 +8,7 @@ import {
   cursorArgs,
   cursorEncodeInput,
   cursorRedispatchPrompt,
+  cursorResumeFlags,
   routeCursorEvent,
 } from "../supervise/drivers/cursor.js";
 import { CURSOR_IMAGE_TAG } from "../supervise/container.js";
@@ -93,6 +94,8 @@ export const cursorSpawn: VendorSpawn = {
 
   argsFor: (opts: SpawnOptions, _mode: SandboxMode): string[] =>
     cursorArgs(opts),
+
+  resumeFlags: cursorResumeFlags,
 
   /**
    * 🛑 DOCKER GETS THE PATH CURSOR READS; THE HOST STILL GETS THE GRANT'S.

@@ -34,6 +34,17 @@ import {
  *   `When using --print, --output-format=stream-json requires --verbose`
  * and that requirement appears in no `--help` text for either flag.
  */
+/**
+ * The flags that continue an existing Claude Code session.
+ *
+ * 🛑 ONE SPELLING, ASKABLE BY THE RELAY, for the reason written on
+ * `VendorSpawn.resumeFlags`. Claude Code is not per-turn today, so no relay
+ * calls this — but the contract is per-vendor, not per-vendor-that-needs-it.
+ */
+export function claudeResumeFlags(sessionId: string): readonly string[] {
+  return ["--resume", sessionId];
+}
+
 export function claudeArgs(opts: SpawnOptions = {}): string[] {
   const args = [
     "-p",
@@ -76,7 +87,9 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
   ];
 
   if (opts.model) args.push("--model", opts.model);
-  if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
+  if (opts.resumeSessionId) {
+    args.push(...claudeResumeFlags(opts.resumeSessionId));
+  }
 
   // 🛑 ALL FOUR OR NONE. `--mcp-config` ADDS to whatever the cwd already
   // configures, so without `--strict-mcp-config` the child also loads the

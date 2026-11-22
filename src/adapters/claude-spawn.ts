@@ -4,6 +4,7 @@ import type { SandboxMode, VendorSpawn } from "../supervise/vendor.js";
 import {
   claudeArgs,
   claudeEncodeInput,
+  claudeResumeFlags,
   routeClaudeEvent,
 } from "../supervise/drivers/claude.js";
 import { redispatchPrompt } from "../supervise/drivers/claude-redispatch.js";
@@ -55,7 +56,9 @@ function containerArgs(opts: SpawnOptions): string[] {
   ];
 
   if (opts.model) args.push("--model", opts.model);
-  if (opts.resumeSessionId) args.push("--resume", opts.resumeSessionId);
+  if (opts.resumeSessionId) {
+    args.push(...claudeResumeFlags(opts.resumeSessionId));
+  }
 
   return args;
 }
@@ -85,6 +88,8 @@ export const claudeSpawn: VendorSpawn = {
 
   argsFor: (opts: SpawnOptions, mode: SandboxMode): string[] =>
     mode === "docker" ? containerArgs(opts) : claudeArgs(opts),
+
+  resumeFlags: claudeResumeFlags,
 
   // Host: the grant already holds a host-side path, written at grant time.
   // Docker: a path that exists only INSIDE the container, written there by the

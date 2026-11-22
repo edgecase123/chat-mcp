@@ -88,3 +88,56 @@ test("🛑 nothing under supervise/ imports adapters/, so the dependency stays o
     [],
   );
 });
+
+/**
+ * 🛑 THE RELAY BUILDS EVERY TURN'S ARGV AFTER THE FIRST, AND IT RUNS INSIDE
+ * THE CONTAINER WITH NO SpawnOptions. A vendor that spells `--resume` inline
+ * inside `argsFor` leaves the relay nothing to append, so turn two starts a
+ * fresh session and the agent forgets the task. #380 slice 3.
+ */
+test("🛑 every vendor carrying spawn config can be ASKED for its resume flags", () => {
+  for (const vendor of vendorsWithSpawn()) {
+    const flags = spawnFor(vendor).resumeFlags("SESS-A");
+
+    assert.ok(flags.length > 0, `vendor "${vendor}" returned no resume flags`);
+    assert.ok(
+      flags.includes("SESS-A"),
+      `vendor "${vendor}" dropped the session id: ${flags.join(" ")}`,
+    );
+  }
+});
+
+test("🛑 argsFor PASSES resumeFlags, so the two spellings cannot drift", () => {
+  for (const vendor of vendorsWithSpawn()) {
+    const spawn = spawnFor(vendor);
+    const flags = [...spawn.resumeFlags("SESS-A")];
+
+    for (const mode of ["host", "docker"] as const) {
+      const args = spawn.argsFor({ resumeSessionId: "SESS-A" }, mode);
+      const run = args.findIndex((_, i) =>
+        flags.every((flag, j) => args[i + j] === flag),
+      );
+
+      assert.ok(
+        run >= 0,
+        `vendor "${vendor}" (${mode}) did not pass its own resume flags: ${args.join(" ")}`,
+      );
+    }
+  }
+});
+
+test("🔴 control — argsFor passes no resume flag when there is no session", () => {
+  for (const vendor of vendorsWithSpawn()) {
+    const spawn = spawnFor(vendor);
+    const flags = spawn.resumeFlags("SESS-A");
+
+    for (const mode of ["host", "docker"] as const) {
+      const args = spawn.argsFor({}, mode);
+
+      assert.ok(
+        !args.includes(flags[0] as string),
+        `vendor "${vendor}" (${mode}) passed ${flags[0]} with no session to resume`,
+      );
+    }
+  }
+});
