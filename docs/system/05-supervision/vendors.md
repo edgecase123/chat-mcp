@@ -193,9 +193,20 @@ bus never while reporting a clean start — #372.
 has no `/root/.cursor`, and `prelude` chains on `&&`, so a failed redirect
 means `exec "$@"` never runs and no agent starts at all.
 
-⚠️ **Still unproven: that this produces a working TURN.** The flags and the
-paths are measured; a live containerized Cursor turn needs #317's acceptance
-harness and has not been run.
+🟢 **PROVEN LIVE on 2026-11-21: a contained Cursor agent completes a turn and
+reaches the bus.** `scripts/cursor-container-acceptance.mjs` sent a prompt and
+the agent's `send` arrived, so **closing the per-turn child's stdin IS
+sufficient** for a turn to end.
+
+🟢 **AND `--resume` REACHES THE SAME SESSION.**
+`scripts/cursor-container-resume-acceptance.mjs` plants a nonce on turn one and
+asks for it back on turn two. **The nonce is never in turn two's prompt, and the
+script asserts that absence** — a fresh session cannot produce the word, so
+recall is the proof. The session store therefore survives inside the container.
+
+⚠️ **Both scripts spend real money and need `CHAT_MCP_LIVE=1`.** They are
+acceptance checks, never suite tests, so nothing in `npm test` needs docker or
+a credential.
 
 ## `--binary` is a HOST flag, and a container refuses it
 
@@ -249,9 +260,26 @@ for updates with no documented opt-out, so the pin describes nothing unless
 the shared tail chowns; `/root/.local`, where Cursor's own installer puts it,
 is not.
 
-⚠️ **Nothing passes `--build-arg` yet.** `buildImage` hardcodes one tag, so a
-containerized Cursor spawn still fails on a missing image rather than silently
-running the Claude one.
+🛑 **`prepareAgentImage` BUILDS A VENDOR'S IMAGE AND SKIPS A STRANGER'S, AND THE
+TELL IS WHETHER A VENDOR WAS NAMED.** It used to skip every tag that was not
+`IMAGE_TAG`, so a Cursor handle was told its own image was somebody else's and
+no build ever ran. The container then came up on whatever had been built by
+hand, exec'd a module the image did not contain, and exited 1 with no prompt
+sent — which reads as a dead agent rather than a missing build.
+
+⚠️ **An operator override image is STILL skipped**, which is lee's ruling of
+2026-11-15. The caller names a vendor only when the plan's image is that
+vendor's own.
+
+🛑 **THE FRESHNESS HASH IS KEYED BY IMAGE.** One `builtHash` for the whole file
+is satisfied by whichever image was built last, so building either one marked
+BOTH current and the second vendor's image was then never rebuilt again. The
+pre-existing single key is folded into the map under the Claude tag, so no
+install rebuilds once for nothing.
+
+⚠️ **`vendor` IS the `AGENT_VENDOR` value, not a second spelling of it.** The
+Dockerfile's `cli-*` stages are pinned against `vendorsWithSpawn()`, so a
+vendor's own name already selects its stage.
 
 🛑 **`VendorSpawn` carries TWO binaries, because a container is a different
 filesystem.** `binary` is the host path and `containerBinary` is the one the

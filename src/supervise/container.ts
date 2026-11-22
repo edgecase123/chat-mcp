@@ -70,7 +70,25 @@ export interface ContainerPlan {
 }
 
 interface ContainerState {
+  /**
+   * The pre-multi-image shape, which described the claude image alone.
+   *
+   * ⚠️ STILL ON DISK, SO IT IS STILL READ. `readContainerState` folds it into
+   * `builtHashes` under `IMAGE_TAG`, because dropping it would make every
+   * existing install rebuild once for nothing.
+   */
   builtHash: string | null;
+
+  /**
+   * What each IMAGE was last built from, keyed by image.
+   *
+   * 🛑 PER IMAGE, BECAUSE ONE KEY MADE THE SECOND VENDOR'S IMAGE UNBUILDABLE.
+   * A single hash is satisfied by whichever image was built last, so building
+   * one marks the other current — and the other is then never built again,
+   * silently. A contained cursor agent died on a module the image did not
+   * have, which reads as a dead agent rather than a missing build.
+   */
+  builtHashes: Record<string, string>;
 
   /**
    * The plan each handle approved, keyed by handle.
@@ -86,7 +104,11 @@ interface ContainerState {
   confirmed: Record<string, ContainerPlan | true>;
 }
 
-const EMPTY_STATE: ContainerState = { builtHash: null, confirmed: {} };
+const EMPTY_STATE: ContainerState = {
+  builtHash: null,
+  builtHashes: {},
+  confirmed: {},
+};
 
 function containerStatePath(): string {
   return join(stateDir(), "container.json");
@@ -102,8 +124,16 @@ function readContainerState(): ContainerState {
       readFileSync(path, "utf8"),
     ) as Partial<ContainerState>;
 
+    const legacy = parsed.builtHash ?? null;
+    const hashes = { ...(parsed.builtHashes ?? {}) };
+
+    // The legacy key described `IMAGE_TAG` and nothing else, so it fills that
+    // slot only when the per-image map has not already answered for it.
+    if (legacy && hashes[IMAGE_TAG] === undefined) hashes[IMAGE_TAG] = legacy;
+
     return {
-      builtHash: parsed.builtHash ?? null,
+      builtHash: legacy,
+      builtHashes: hashes,
       confirmed: parsed.confirmed ?? {},
     };
   } catch {
@@ -235,32 +265,73 @@ export function buildInputsHash(context: string = contextPath()): string {
 
 export type Runner = (cmd: string, args: readonly string[]) => Buffer;
 
-export function imageNeedsBuild(run: Runner = realExecFileSync): boolean {
+/**
+ * What one `docker build` of this project produces.
+ *
+ * 🛑 `vendor` IS THE DOCKERFILE'S `AGENT_VENDOR` VALUE, not a second spelling
+ * of it. `dockerfile-vendor-stages.test.ts` pins the `cli-*` stages against
+ * `vendorsWithSpawn()`, so a vendor's own name already selects its stage.
+ */
+export interface ImageBuild {
+  readonly image: string;
+  readonly vendor: string;
+}
+
+/**
+ * Whether `image` has to be built before a handle can run it.
+ *
+ * 🛑 IT INSPECTS THE IMAGE IT WAS ASKED ABOUT. It used to inspect `IMAGE_TAG`
+ * whatever it was asked, so a present claude image answered "fresh" for a
+ * cursor image that did not exist at all.
+ */
+export function imageNeedsBuild(
+  run: Runner = realExecFileSync,
+  image: string = IMAGE_TAG,
+): boolean {
   const state = readContainerState();
 
-  if (state.builtHash !== buildInputsHash()) return true;
+  if (state.builtHashes[image] !== buildInputsHash()) return true;
 
   try {
-    run("docker", ["image", "inspect", IMAGE_TAG]);
+    run("docker", ["image", "inspect", image]);
     return false;
   } catch {
     return true;
   }
 }
 
-export function buildImage(run: Runner = realExecFileSync): void {
+/**
+ * Build one image, defaulting to the claude one with no `--build-arg`.
+ *
+ * 🛑 THE DEFAULT PASSES NO `--build-arg`, AND THAT IS A CONTRACT. The
+ * Dockerfile's own `ARG AGENT_VENDOR=claude` is what makes a bare
+ * `docker build` still produce the claude image, and a test pins that default.
+ * Naming it here as well would put the same value in two places.
+ */
+export function buildImage(
+  run: Runner = realExecFileSync,
+  build?: ImageBuild,
+): void {
+  const image = build?.image ?? IMAGE_TAG;
+
   run("docker", [
     "build",
     "-t",
-    IMAGE_TAG,
+    image,
+    // 🛑 WITHOUT THIS THE DOCKERFILE DEFAULT WINS AND BAKES THE WRONG CLI.
+    // The command would tag a CLAUDE image with the CURSOR name, and that
+    // container starts, finds no `cursor-agent`, and exits 127.
+    ...(build ? ["--build-arg", `AGENT_VENDOR=${build.vendor}`] : []),
     "-f",
     dockerfilePath(),
     dirname(dockerfilePath()),
   ]);
 
+  const state = readContainerState();
+
   writeContainerState({
-    ...readContainerState(),
-    builtHash: buildInputsHash(),
+    ...state,
+    builtHashes: { ...state.builtHashes, [image]: buildInputsHash() },
   });
 }
 
@@ -287,7 +358,7 @@ export function prepareAgentImage(
   compile: () => void,
   opts: {
     run?: Runner;
-    needsBuild?: (run: Runner) => boolean;
+    needsBuild?: (run: Runner, image: string) => boolean;
     logLine?: (line: string) => void;
 
     /**
@@ -299,12 +370,24 @@ export function prepareAgentImage(
      * reach it, or every caller that omits this stops building.
      */
     image?: string;
+
+    /**
+     * The vendor whose image `image` is, when it is a vendor's at all.
+     *
+     * 🛑 ITS PRESENCE IS WHAT SEPARATES A VENDOR IMAGE FROM A STRANGER'S.
+     * This project can build any vendor's image and cannot build an operator
+     * override, so the skip below keys on this rather than on the tag — a
+     * check against `IMAGE_TAG` alone called the cursor image somebody
+     * else's and never built it.
+     */
+    buildVendor?: string;
   } = {},
 ): void {
   const run = opts.run ?? realExecFileSync;
   const needsBuild = opts.needsBuild ?? imageNeedsBuild;
   const logLine = opts.logLine ?? ((line: string) => console.log(line));
   const image = opts.image ?? IMAGE_TAG;
+  const vendor = opts.buildVendor;
 
   compile();
 
@@ -312,33 +395,27 @@ export function prepareAgentImage(
   // mounts and runs THIS project's `dist`, so the compile is unconditional —
   // lee's option B of 2026-11-16. Only the DOCKER build is skipped.
   //
-  // 🛑 THE FRESHNESS CHECK IS SKIPPED TOO, NOT JUST THE BUILD. `imageNeedsBuild`
-  // inspects `IMAGE_TAG` and hashes this project's sources, so its verdict is
-  // about an image this handle will not run — and it is the call that decides
-  // whether minutes of docker get spent.
+  // 🛑 THE FRESHNESS CHECK IS SKIPPED TOO, NOT JUST THE BUILD. It hashes this
+  // project's sources and inspects an image, so its verdict is about something
+  // this handle will not run — and it is the call that decides whether minutes
+  // of docker get spent.
   //
   // ⚠️ IT STILL REFUSES LATER, AND THAT IS lee's RULING OF 2026-11-15.
   // `runDependencyInstall` inspects this same value and refuses when it is not
   // present. What this skip removes is paying for a build before that refusal,
   // not the refusal.
-  if (image !== IMAGE_TAG) {
-    // 🛑 "NOT THE IMAGE THIS PROJECT BUILDS", NOT "not this project's image".
-    // `CURSOR_IMAGE_TAG` is declared in this very file, so a Cursor handle with
-    // no override at all would have been told its own image was somebody
-    // else's. Raised by claude2 reviewing this change.
+  if (image !== IMAGE_TAG && !vendor) {
     logLine(
-      `"${image}" is not the image this project builds (${IMAGE_TAG}), so ` +
+      `"${image}" is not an image this project can build, so ` +
         "no image was built for this handle",
     );
     return;
   }
 
-  if (!needsBuild(run)) return;
+  if (!needsBuild(run, image)) return;
 
-  logLine(
-    "building the chat-mcp-agent image (sources, Dockerfile or image changed)...",
-  );
-  buildImage(run);
+  logLine(`building ${image} (sources, Dockerfile or image changed)...`);
+  buildImage(run, vendor ? { image, vendor } : undefined);
 }
 
 export interface PlanChange {
