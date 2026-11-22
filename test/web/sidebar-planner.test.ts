@@ -301,3 +301,25 @@ test("renderSidebar stamps the minute before it signs", () => {
     "stamped in more than one place — one of them is not render time",
   );
 });
+
+/**
+ * 🛑 THE TWO TESTS BELOW BACK CLAIMS THAT NOW SIT IN COMMENTS IN `app.js`.
+ * A comment asserting render behaviour and nothing proving it is how the four
+ * stale justifications this slice replaced got there in the first place.
+ */
+test("storing a pair rebuilds the registration section", () => {
+  const due = plan((s) => {
+    s.registrations = { agents: { "claude-x": { vendor: "cursor" } } };
+  });
+
+  assert.deepEqual(due, ["registration"]);
+});
+
+/** `openMenuFor` is an input of BOTH peers and rooms, so it rebuilds both. */
+test("an open (...) menu is an input of peers AND rooms", () => {
+  const due = plan((s) => {
+    s.openMenuFor = "@alice";
+  });
+
+  assert.deepEqual(due, ["peers", "rooms"]);
+});
