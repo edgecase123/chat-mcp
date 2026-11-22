@@ -93,14 +93,29 @@ test("🔴 control — an UNGRANTED child is allowed whatever its vendor declare
   );
 });
 
-test("🛑 the REAL cursor vendor is refused and the REAL claude vendor is not", () => {
-  assert.throws(
-    () => assertHostGrantReachesBus(spawnFor("cursor"), GRANT),
-    /cursor/,
-  );
-  assert.doesNotThrow(() =>
-    assertHostGrantReachesBus(spawnFor("claude"), GRANT),
-  );
+/**
+ * 🛑 NO REAL VENDOR IS REFUSED ANY MORE, AND THAT IS SLICE 2 LANDING. Cursor
+ * was the only one, on `"none"`, and its host grant is now delivered by
+ * writing `.cursor/mcp.json`. The refusal is kept for the NEXT vendor, which
+ * is why the fake-vendor cases above are the ones that exercise it.
+ *
+ * ⚠️ THIS IS NOT "the guard is now unreachable". `spawnOnHost` still calls it
+ * first, and `host-grant-file.test.ts` asserts the delivery it was guarding
+ * actually lands — a declaration alone would make this test pass while the
+ * agent answered nothing.
+ */
+test("🛑 NEITHER real vendor is refused, and each declares HOW it delivers", () => {
+  for (const name of ["cursor", "claude"] as const) {
+    assert.doesNotThrow(
+      () => assertHostGrantReachesBus(spawnFor(name), GRANT),
+      `vendor "${name}" is refused a host grant`,
+    );
+    assert.notEqual(
+      spawnFor(name).hostGrantDelivery,
+      "none",
+      `vendor "${name}" passed the guard while declaring "none", which is impossible`,
+    );
+  }
 });
 
 /**
@@ -131,26 +146,34 @@ test("🛑 a vendor declaring FLAGS really does change its host argv for a grant
   assert.ok(checked > 0, 'no vendor declares hostGrantDelivery "flags"');
 });
 
-test("🛑 a vendor declaring NONE really does ignore the grant in its host argv", () => {
+/**
+ * 🛑 REPLACES THE `"none"` LOOP, WHICH SLICE 2 TOOK TO ZERO ROWS. Its own note
+ * said to retire it rather than let a `continue` loop report green over
+ * nothing, and Cursor was its only row.
+ *
+ * 🛑 THIS IS THE CROSS-CHECK THAT `"file"` IS NOT `"flags"` MISSPELLED. A
+ * file-delivered grant changes NO argv — that is the whole reason the field is
+ * a declaration and not an inference — so a vendor declaring `"file"` whose
+ * argv moves for a grant has one of the two wrong.
+ */
+test("🛑 a vendor declaring FILE leaves its host argv UNCHANGED by the grant", () => {
   let checked = 0;
 
   for (const name of vendorsWithSpawn()) {
     const spawn = spawnFor(name);
 
-    if (spawn.hostGrantDelivery !== "none") continue;
+    if (spawn.hostGrantDelivery !== "file") continue;
 
     checked += 1;
     assert.deepEqual(
       spawn.argsFor({ grant: GRANT }, "host"),
       spawn.argsFor({}, "host"),
-      `vendor "${name}" declares hostGrantDelivery "none" and its host argv names the grant anyway`,
+      `vendor "${name}" declares hostGrantDelivery "file" and its host argv moves for a grant, ` +
+        `so it is really delivering by flags`,
     );
   }
 
-  // 🛑 SAME DENOMINATOR. This one goes to ZERO the moment slice 2 moves
-  // Cursor to `"file"`, and that is the signal to retire this test rather than
-  // let it keep reporting green over nothing.
-  assert.ok(checked > 0, 'no vendor declares hostGrantDelivery "none"');
+  assert.ok(checked > 0, 'no vendor declares hostGrantDelivery "file"');
 });
 
 /**
@@ -160,9 +183,17 @@ test("🛑 a vendor declaring NONE really does ignore the grant in its host argv
  * would exec a real CLI and block on a stdin no test closes, so the allowed
  * cases are covered against the assertion above instead.
  */
-test("🛑 spawnOnHost REFUSES a granted cursor child before it spawns anything", () => {
+test("🛑 spawnOnHost REFUSES a granted child whose vendor delivers NOWHERE", () => {
+  // The two fields reached before the guard, and nothing else. A full vendor
+  // would be a fake of the thing under test.
+  const deliversNothing = {
+    vendor: "delivers-nothing",
+    hostGrantDelivery: "none",
+    processPerTurn: true,
+  } as unknown as Parameters<typeof spawnOnHost>[0];
+
   assert.throws(
-    () => spawnOnHost(spawnFor("cursor"), { grant: GRANT }),
-    /cursor/,
+    () => spawnOnHost(deliversNothing, { grant: GRANT }),
+    /delivers-nothing/,
   );
 });

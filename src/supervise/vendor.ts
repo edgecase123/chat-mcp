@@ -211,6 +211,21 @@ export interface VendorSpawn {
    * the argv, so the field cannot become a comment that disagrees with the code.
    */
   readonly hostGrantDelivery: "flags" | "file" | "none";
+
+  /**
+   * Where a `"file"`-delivered host grant is written, given the child's cwd.
+   *
+   * 🛑 REQUIRED IN PRACTICE WHENEVER `hostGrantDelivery` IS `"file"`, and
+   * optional only because this is a flat interface. `hostGrantConfigPathFor`
+   * throws when the pair disagrees, and `host-grant-file.test.ts` pins that —
+   * the type system cannot, because `tsconfig.json` includes `src/**` only, so
+   * a test fake or a JavaScript vendor omitting it compiles and runs.
+   *
+   * ⚠️ IT IS NOT `mcpConfigFor`. That one takes no cwd, so it cannot name a
+   * project-local file at all; its host arm returned the state dir, which is
+   * the location `cursor-agent` never reads (#348).
+   */
+  readonly hostGrantConfigPath?: (cwd: string) => string;
   readonly routeEvent: EventRouter;
   readonly encodeInput: (text: string) => string;
   readonly redispatchPrompt: (input: RedispatchInput) => string;

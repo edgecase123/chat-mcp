@@ -52,3 +52,7 @@ measurements/
 # ⚠️ IGNORING IS NOT DELETING. Still never `git add -A`, and `git clean -xfd`
 # still destroys them.
 /close*.md
+
+# A supervised Cursor child reads `<cwd>/.cursor/mcp.json`, and this repo is a
+# project an agent is supervised IN. See docs/system/05-supervision/vendors.md.
+.cursor/

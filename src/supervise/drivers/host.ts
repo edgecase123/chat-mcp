@@ -7,6 +7,7 @@ import {
   wireAgentChild,
 } from "./wiring.js";
 import { wirePerTurnChild } from "./per-turn.js";
+import { deliverHostGrantFile } from "./host-grant.js";
 
 /** Spawn a vendor's CLI as a bare host process. */
 export function spawnOnHost(
@@ -18,6 +19,17 @@ export function spawnOnHost(
   // whose CLI cannot be pointed at the config starts cleanly and answers
   // nothing, so there is no later point at which this is still detectable.
   assertHostGrantReachesBus(vendor, opts.grant);
+
+  // 🛑 THE DELIVERY ITSELF, FOR A CLI WITH NO CONFIG-PATH FLAG. The guard
+  // above only refuses `"none"`; `"file"` passes it by not being that, so
+  // this call is the difference between a declaration and a wired child.
+  //
+  // ⚠️ THE CWD DEFAULT IS THE CHILD'S, VIA `opts.cwd`, AND `spawn` BELOW USES
+  // THE SAME ONE. A second expression of "where the child runs" would let the
+  // file land in a directory the agent never opens.
+  if (vendor.hostGrantDelivery === "file" && opts.grant) {
+    deliverHostGrantFile(vendor, opts.grant, opts.cwd ?? process.cwd());
+  }
 
   const launch = (turnOpts: SpawnOptions): ChildProcessWithoutNullStreams =>
     spawn(turnOpts.binary ?? vendor.binary, vendor.argsFor(turnOpts, "host"), {
