@@ -57,6 +57,23 @@ test("🛑 the HOST spawn execs an explicit binary, and the vendor's own without
 
         return fakeChild();
       },
+
+      // 🛑 PRESENT BECAUSE `host-grant.ts` IMPORTS IT, AND ABSENT IT BREAKS
+      // THE IMPORT RATHER THAN A CALL. A mock's `namedExports` IS the module
+      // for everything loaded after it, so a missing name fails with
+      // "does not provide an export named 'execFileSync'" from a file this
+      // test never calls into. Measured when the host grant approval landed.
+      //
+      // 🛑 IT THROWS, SO IT DOUBLES AS A CONTROL. This test spawns CLAUDE,
+      // which delivers its grant by flags and declares no approval step — so
+      // nothing here may exec a second process. A change that approved
+      // unconditionally would reach this and say why.
+      execFileSync: (command: string, args: readonly string[]) => {
+        throw new Error(
+          `the HOST spawn exec'd a second process for a FLAGS-delivered vendor: ` +
+            `${command} ${args.join(" ")}`,
+        );
+      },
     },
   });
 

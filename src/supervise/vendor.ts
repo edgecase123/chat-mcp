@@ -241,6 +241,31 @@ export interface VendorSpawn {
    * the location `cursor-agent` never reads (#348).
    */
   readonly hostGrantConfigPath?: (cwd: string) => string;
+
+  /**
+   * The CLI subcommand that APPROVES this project's bus server, given its id.
+   *
+   * 🛑 WRITING THE CONFIG IS NOT ENOUGH FOR EVERY CLI, AND #348 SHIPPED
+   * BELIEVING IT WAS. Measured against `cursor-agent` 2026.11.19 in a cwd
+   * holding only the file this project writes:
+   *
+   *   mcp list        -> chat: not loaded (needs approval)
+   *   mcp list-tools  -> MCP server "chat" has not been approved
+   *   mcp enable chat -> chat: ready, 24 tools
+   *
+   * So the config makes the server SEEN and this makes it LOADED. A granted
+   * host child without it starts cleanly and has no `send` — #348's silence.
+   *
+   * 🛑 OMITTED MEANS "NEEDS NO APPROVAL", WHICH IS CLAUDE'S REAL ANSWER. It is
+   * not a missing declaration: a flags-delivered grant is live the moment the
+   * child starts, and running a `mcp enable` against that binary would fail on
+   * a subcommand it does not have.
+   *
+   * ⚠️ IT RETURNS ARGV AND RUNS NOTHING. The vendor names the command; the
+   * host driver owns the execution, the cwd and the refusal — the same split
+   * `hostGrantConfigPath` uses, for the same reason.
+   */
+  readonly hostGrantApproveArgs?: (serverId: string) => readonly string[];
   readonly routeEvent: EventRouter;
   readonly encodeInput: (text: string) => string;
   readonly redispatchPrompt: (input: RedispatchInput) => string;

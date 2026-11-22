@@ -7,7 +7,7 @@ import {
   wireAgentChild,
 } from "./wiring.js";
 import { wirePerTurnChild } from "./per-turn.js";
-import { deliverHostGrantFile } from "./host-grant.js";
+import { approveHostGrantServer, deliverHostGrantFile } from "./host-grant.js";
 
 /** Spawn a vendor's CLI as a bare host process. */
 export function spawnOnHost(
@@ -28,7 +28,18 @@ export function spawnOnHost(
   // THE SAME ONE. A second expression of "where the child runs" would let the
   // file land in a directory the agent never opens.
   if (vendor.hostGrantDelivery === "file" && opts.grant) {
-    deliverHostGrantFile(vendor, opts.grant, opts.cwd ?? process.cwd());
+    const cwd = opts.cwd ?? process.cwd();
+
+    deliverHostGrantFile(vendor, opts.grant, cwd);
+
+    // 🛑 SEEN IS NOT LOADED, AND THE WRITE ONLY BUYS SEEN. Without this the
+    // granted child has no `send`, and #348's silence returns with an extra
+    // file in the project.
+    //
+    // ⚠️ THE SAME `cwd` AS THE WRITE AND AS `spawn` BELOW. The approval is
+    // recorded per project directory, so a second expression of "where the
+    // child runs" would approve one directory and start the child in another.
+    approveHostGrantServer(vendor, cwd);
   }
 
   const launch = (turnOpts: SpawnOptions): ChildProcessWithoutNullStreams =>

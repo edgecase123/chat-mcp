@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -11,7 +12,8 @@ import type { VendorSpawn } from "../vendor.js";
 import { realContains } from "../containment.js";
 import { assertHandle } from "../../util/naming.js";
 import { writePrivateFileSync } from "../../util/paths.js";
-import { chatMcpServerConfig } from "./chat-mcp-server.js";
+import { CHAT_MCP_SERVER_ID, chatMcpServerConfig } from "./chat-mcp-server.js";
+import { readVendorToken } from "../auth.js";
 
 /**
  * The three fields a file-delivered host grant actually reads.
@@ -208,6 +210,89 @@ function realpathish(path: string): string {
   } catch {
     return resolve(path);
   }
+}
+
+/** The two fields the approval step reads. */
+type HostGrantApproveVendor = Pick<
+  VendorSpawn,
+  "vendor" | "binary" | "hostGrantApproveArgs" | "authEnvVar"
+>;
+
+/**
+ * Run a CLI's own approval subcommand so the config it can SEE is one it will
+ * LOAD, and return the argv that was run.
+ *
+ * 🛑 WITHOUT THIS A GRANTED CURSOR CHILD HAS ZERO BUS TOOLS. #348 shipped with
+ * the writer and without this, so its own silence survived the fix for it. The
+ * measurement is on `hostGrantApproveArgs` in `vendor.ts`.
+ *
+ * 🛑 IN THE CHILD'S CWD, BECAUSE THE APPROVAL IS PER PROJECT. Cursor records
+ * it under `~/.cursor/projects/<slug>/mcp-approvals.json`, and the slug is
+ * derived from that directory's REAL path — a run in the supervisor's own
+ * directory approves a different project and leaves the child deaf.
+ *
+ * 🛑 IT THROWS RATHER THAN WARNING. A warning leaves a child running with no
+ * `send`, which is indistinguishable from #348 and from a model that chose not
+ * to answer. The spawn is the last moment this is detectable.
+ *
+ * ⚠️ A VENDOR THAT DECLARES NO APPROVAL STEP IS A REAL ANSWER, NOT A GAP.
+ * Claude's grant arrives by flags and is live at startup; `claude` has no `mcp
+ * enable` subcommand, so approving unconditionally would break the vendor that
+ * already worked.
+ */
+export function approveHostGrantServer(
+  vendor: HostGrantApproveVendor,
+  cwd: string,
+): readonly string[] | undefined {
+  if (!vendor.hostGrantApproveArgs) return undefined;
+
+  const args = vendor.hostGrantApproveArgs(CHAT_MCP_SERVER_ID);
+
+  try {
+    execFileSync(vendor.binary, args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    // 🛑 THE CLI's OWN STDERR IS THE ACTIONABLE HALF. "Command failed" sends
+    // the operator to the spawn layer; the CLI says whether the id is unknown,
+    // the binary is missing, or the config was never read.
+    const detail = detailOf(err, readVendorToken(vendor));
+
+    throw new Error(
+      `"${vendor.vendor}"'s bus server "${CHAT_MCP_SERVER_ID}" could not be APPROVED in ${cwd}, ` +
+        `so the child would have started with no bus tools at all — it would answer nothing ` +
+        `and say nothing. Ran: ${vendor.binary} ${args.join(" ")}${detail ? `\n${detail}` : ""}`,
+    );
+  }
+
+  return args;
+}
+
+/**
+ * Whatever the failed CLI said, preferring stderr over the thrown message, with
+ * the vendor's own credential removed.
+ *
+ * 🛑 THE STDERR IS THE VENDOR'S TEXT, NOT OURS, AND IT LANDS IN A THROWN ERROR
+ * THAT REACHES LOGS AND CHAT. A CLI whose auth diagnostics echo part of a key
+ * would put it there, so the token is substituted out rather than trusted to be
+ * absent. claude2's security reviewer on PR 394.
+ *
+ * ⚠️ IT REDACTS A VALUE IT KNOWS, AND CANNOT REDACT ONE IT DOES NOT. This is a
+ * floor, not a guarantee: a CLI printing a DIFFERENT secret is still unhandled,
+ * which is why `stdio` keeps stderr piped rather than inherited.
+ */
+function detailOf(err: unknown, secret: string | null | undefined): string {
+  const e = err as { stderr?: unknown; message?: unknown };
+  const stderr = typeof e?.stderr === "string" ? e.stderr.trim() : "";
+  const text =
+    stderr || (typeof e?.message === "string" ? e.message : String(err));
+
+  // A short or empty token would match everywhere and redact the whole message.
+  if (!secret || secret.length < 8) return text;
+
+  return text.replaceAll(secret, "«redacted»");
 }
 
 /** `.cursor/mcp.json` under a project directory, which is what Cursor reads. */

@@ -74,6 +74,33 @@ function resolveLoader(): string {
 }
 
 /**
+ * The key this project's MCP server block is written under, and therefore the
+ * identifier a CLI's own approval subcommand takes.
+ *
+ * 🛑 ONE LITERAL, BECAUSE A SECOND ONE CANNOT FAIL. `cursor-agent mcp enable`
+ * takes this exact id, and `enable` against an id no config declares is not an
+ * error the child ever reports — it just starts with no bus tools. So a drifted
+ * copy reproduces #348 and every test stays green.
+ */
+export const CHAT_MCP_SERVER_ID = "chat";
+
+/**
+ * The shape `chatMcpServerConfig` returns, keyed off the constant.
+ *
+ * 🛑 THE RETURN TYPE WAS THE THIRD COPY OF THE LITERAL, one line below the
+ * constant that exists to be the only one. A type is not exempt: renaming the
+ * constant without renaming the type gives a value whose declared key and
+ * actual key disagree, and `tsc` is then the only thing that notices.
+ * claude1's 🔵 on PR 394.
+ */
+export type ChatMcpServerConfig = {
+  mcpServers: Record<
+    typeof CHAT_MCP_SERVER_ID,
+    { command: string; args: string[] }
+  >;
+};
+
+/**
  * The MCP server block that points a child at THIS build of the bus.
  *
  * 🛑 ONE BUILDER FOR EVERY VENDOR, BECAUSE THE SERVER IS NOT A VENDOR'S
@@ -95,14 +122,14 @@ function resolveLoader(): string {
 export function chatMcpServerConfig(
   handle: string,
   entry?: string,
-): { mcpServers: { chat: { command: string; args: string[] } } } {
+): ChatMcpServerConfig {
   const launch = entry
     ? { command: process.execPath, args: [entry] }
     : resolveChatMcpEntry();
 
   return {
     mcpServers: {
-      chat: {
+      [CHAT_MCP_SERVER_ID]: {
         command: launch.command,
         args: [...launch.args, "--handle", handle],
       },

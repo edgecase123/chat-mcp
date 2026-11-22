@@ -304,7 +304,14 @@ WRONG, and it was wrong when it was written here.** Measured on #348 against
 | -------------------------- | ------------------------------------------------ |
 | no `.cursor/mcp.json`      | `No MCP servers configured`                      |
 | `.cursor/mcp.json` present | the server is named, `needs approval`            |
-| plus its approval on file  | `chat: ready`, and `list-tools` returns 22 tools |
+| plus its approval on file  | `chat: ready`, and `list-tools` returns 24 tools |
+
+🛑 **THAT THIRD ROW WAS DOCUMENTED AND NEVER IMPLEMENTED, AND #348 SHIPPED IN
+THE SECOND ROW.** The table above is from slice 2; the supervisor wrote the
+config and performed no approval, so a granted host Cursor child started with
+`chat: not loaded (needs approval)` and no bus tools at all. See the approval
+section below. The row count moved from 22 tools to 24 between
+2026-11-21 and 2026-11-22 — the shim gained tools, nothing here changed.
 
 **A project-local `.cursor/mcp.json` is read, and the human's home config is
 never touched.** lee answered the question this paragraph used to leave open:
@@ -336,9 +343,48 @@ recall is the proof. The session store therefore survives inside the container.
 acceptance checks, never suite tests, so nothing in `npm test` needs docker or
 a credential.
 
-⚠️ **Still unproven: that the HOST path produces a working turn.** The file
-now lands and its content is asserted against mocks; no live host Cursor turn
-has been run. The two acceptance scripts above cover the CONTAINER only.
+## 🛑 The config makes the server SEEN. The APPROVAL makes it LOADED.
+
+🛑 **WRITING `.cursor/mcp.json` IS NOT WIRING THE BUS, AND BELIEVING IT WAS
+COST #348 A WHOLE SLICE.** Measured against `cursor-agent 2026.11.19-f005e9d`
+in a temp cwd holding only the config this project writes:
+
+| step                  | result                               |
+| --------------------- | ------------------------------------ |
+| our config written    | `chat: not loaded (needs approval)`  |
+| `mcp list-tools chat` | refused, `has not been approved`     |
+| `mcp enable chat`     | `chat: ready`, `list-tools` gives 24 |
+
+**So `spawnOnHost` runs the vendor's own approval subcommand after writing the
+file.** The vendor names it through `VendorSpawn.hostGrantApproveArgs`, and the
+driver owns the execution, the cwd and the refusal.
+
+🛑 **IT RUNS IN THE CHILD'S CWD, BECAUSE THE APPROVAL IS PER PROJECT.** Cursor
+records it at `~/.cursor/projects/<slug>/mcp-approvals.json`, and **the slug is
+built from that directory's REAL path** — a `/var/...` cwd lands under
+`private-var-...` on macOS. An approval run in the supervisor's own directory
+approves a different project and leaves the child deaf.
+
+🛑 **THE RECORD IS CURSOR'S INTERNAL SHAPE, SO WE DO NOT WRITE IT.** It is
+`["chat-<16 hex>"]`, where the suffix hashes the server's command+args. Writing
+that file directly means re-implementing a hash this project does not own, which
+is why the fix is the documented `mcp enable` subcommand.
+
+🛑 **A FAILED APPROVAL THROWS AND FAILS THE SPAWN.** A warning would leave a
+child running with no `send`, which is indistinguishable from #348's silence and
+from a model that chose not to answer. The spawn is the last moment it is
+detectable.
+
+⚠️ **A VENDOR THAT DECLARES NO APPROVAL STEP IS A REAL ANSWER.** Claude's grant
+arrives by flags and is live at startup, and `claude` has no `mcp enable`
+subcommand — approving unconditionally would break the vendor that worked.
+
+⚠️ **STILL UNPROVEN: THAT THE HOST PATH PRODUCES A WORKING TURN.** The config
+lands, the approval runs, and `mcp list` / `mcp list-tools` were measured
+directly against the live binary — but no live host Cursor TURN has completed.
+The two acceptance scripts above cover the CONTAINER only. **`mcp list` is free;
+a turn is not**, which is why the cheap half is measured and the expensive half
+is still open.
 
 ## `--binary` is a HOST flag, and a container refuses it
 

@@ -141,6 +141,20 @@ export const cursorSpawn: VendorSpawn = {
 
   hostGrantConfigPath: cursorProjectMcpConfigPath,
 
+  /**
+   * 🛑 `.cursor/mcp.json` MAKES THE SERVER SEEN; THIS MAKES IT LOADED. The
+   * measurement behind that is on `hostGrantApproveArgs` in `vendor.ts`.
+   *
+   * `enable <identifier>` is read off `cursor-agent mcp --help`: "Add an MCP
+   * server to the local approved list".
+   *
+   * ⚠️ NOT A HAND-WRITTEN APPROVALS FILE, AND THAT WAS THE FIRST DESIGN. The
+   * record is `["chat-<16 hex>"]`, whose suffix hashes the server's
+   * command+args, under a slug built from the cwd's REAL path. Both are
+   * Cursor's internals; writing them re-implements a hash we do not own.
+   */
+  hostGrantApproveArgs: (serverId: string) => ["mcp", "enable", serverId],
+
   mcpConfigFlags: (_path: string): readonly string[] => [],
 
   routeEvent: routeCursorEvent,
