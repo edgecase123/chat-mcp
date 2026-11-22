@@ -84,6 +84,7 @@ function recordingChild(children: FakeChild[]) {
       onDenial: (cb) => {
         onDenial = cb as (d: unknown) => void;
       },
+      onToolCall: () => undefined,
       onSession: (cb) => cb("sess-from-fake"),
       onEvent: () => undefined,
       onStderr: () => undefined,
@@ -531,8 +532,13 @@ test("EVERY child callback registration goes through the generation guard", () =
   // unguarded, arguing a dying child's stderr is the most useful kind. It is —
   // but a stale child keeps writing, and an unguarded line reads as the LIVE
   // child's error. `ifCurrent` reports the drop, so nothing goes silent.
+  // ⚠️ `onToolCall` JOINED FOR #392, AND IT IS GUARDED FOR THE SAME REASON AS
+  // `onContext`. A replaced child keeps emitting, and a stale child's tool
+  // call would clear the LIVE child's silent-reply warning — telling the
+  // operator a peer was answered by a turn that is already gone.
   const REQUIRED = [
     "onTurnEnd",
+    "onToolCall",
     "onSession",
     "onDenial",
     "onUsage",

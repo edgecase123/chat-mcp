@@ -144,15 +144,40 @@ still silent: the child produced prose, called no `send`, and the log read
 exactly like a delivered reply. The peer waited on an answer that existed only
 in a transcript nobody else can open. #224.
 
-`silent-reply.ts` folds each `assistant` event into one verdict per turn.
+`silent-reply.ts` folds one verdict per turn out of TWO inputs.
 
-| flag   | set by                                                |
-| ------ | ----------------------------------------------------- |
-| `owed` | the dispatched prompt carried `messageIds`            |
-| `said` | a `text` block with something other than blanks       |
-| `sent` | a `tool_use` naming `send` or `room_send` on THIS bus |
+| flag   | set by                                                         |
+| ------ | -------------------------------------------------------------- |
+| `owed` | the dispatched prompt carried `messageIds`                     |
+| `said` | a `text` block with something other than blanks, via `observe` |
+| `sent` | the DRIVER naming `send` or `room_send`, via `observeToolCall` |
 
 A warning needs all three of `owed`, `said` and `!sent`.
+
+🛑 **THE DRIVER NAMES THE TOOL; THIS FILE NEVER SNIFFS FOR ONE.** `observe`
+used to read Claude Code's `tool_use` blocks itself, one layer ABOVE the
+drivers — so it was blind to any vendor that does not use that shape. Cursor
+emits a TOP-LEVEL `tool_call` event, and `observe` returns at its first line
+for anything that is not `type: "assistant"`.
+
+**The consequence was that EVERY Cursor turn was reported as having answered
+nobody, including the ones that sent** — so a real silent reply became
+indistinguishable from a constant false alarm, and the detector was
+effectively off for one of the two vendors. #392.
+
+🛑 **A TOOL CALL THE DRIVER CANNOT NAME REPORTS `null`, AND IS LOGGED.**
+Cursor's event shape is read out of its shipped bundle rather than off a
+captured stream, so a wrong field path is possible — and the failure mode of a
+wrong path is the SILENCE this detector exists to end. `null` is not treated as
+a send and is not dropped:
+
+```
+⚠️ the agent called a tool and this driver could not read its name,
+   so a send through it would not clear the silent-reply warning
+```
+
+**That turns a guess into a signal.** Vendor event shapes are in
+`05-supervision/vendors.md`.
 
 🛑 **`owed` IS WHAT STOPS IT BEING NOISE.** "Prose and no send" describes an
 ordinary turn whenever the supervisor prompted its own child — a grant notice,

@@ -66,6 +66,10 @@ export function isOutboundChatTool(name: string): boolean {
 /**
  * Fold one child event into the turn.
  *
+ * 🛑 TEXT ONLY. Tool calls arrive through `observeToolCall`, named by the
+ * driver, because their SHAPE is a vendor's business and sniffing for one
+ * here went blind the moment a second vendor existed. #392.
+ *
  * ⚠️ ORDER CANNOT MATTER. An agent that sends before writing its closing
  * prose is the common shape, so both flags only ever move to `true`.
  */
@@ -81,18 +85,30 @@ export function observe(
   if (!Array.isArray(content)) return;
 
   for (const block of content) {
-    const b = block as { type?: unknown; text?: unknown; name?: unknown };
+    const b = block as { type?: unknown; text?: unknown };
 
     if (b.type === "text" && typeof b.text === "string" && b.text.trim()) {
       turn.said = true;
-    } else if (
-      b.type === "tool_use" &&
-      typeof b.name === "string" &&
-      isOutboundChatTool(b.name)
-    ) {
-      turn.sent = true;
     }
   }
+}
+
+/**
+ * Fold one NAMED tool call into the turn.
+ *
+ * 🛑 THE DRIVER NAMES IT; THIS FILE NEVER SNIFFS FOR IT. `observe` above used
+ * to read Claude Code's `tool_use` blocks directly, which made it blind to
+ * any vendor using another shape — Cursor emits a TOP-LEVEL `tool_call`
+ * event, so every Cursor turn that sent was reported as having answered
+ * nobody, and a real silent reply became indistinguishable. #392.
+ *
+ * ⚠️ A `null` NAME IS NOT A SEND AND IS NOT NOTHING. It means the driver saw
+ * a call and could not name it, which the supervisor logs. Treating it as a
+ * send would hide the warning; treating it as absent would hide the driver
+ * being wrong.
+ */
+export function observeToolCall(turn: TurnOutbound, name: string | null): void {
+  if (name !== null && isOutboundChatTool(name)) turn.sent = true;
 }
 
 /**

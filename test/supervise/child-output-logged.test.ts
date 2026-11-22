@@ -38,6 +38,7 @@ function harness() {
     onContext: () => undefined,
     onUsage: () => undefined,
     onDenial: () => undefined,
+    onToolCall: () => undefined,
     onSession: (cb) => cb("sess"),
     onEvent: (cb) => {
       emit = cb;

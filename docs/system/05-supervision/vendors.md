@@ -88,6 +88,39 @@ whole reason for the field.** `host-grant-reaches-bus.test.ts` pins each value
 against the argv, so a vendor declaring `"flags"` while ignoring the grant
 fails rather than silently never triggering the refusal.
 
+## A vendor reports its OWN tool calls, because the shapes are not alike
+
+`EventRouter` carries `toolCall?(name: string | null)`. The supervisor turns
+that into `turn.sent` for the silent-reply detector, and into nothing else.
+
+| vendor | a tool call arrives as                                        |
+| ------ | ------------------------------------------------------------- |
+| claude | a `tool_use` BLOCK inside an `assistant` message's `content`  |
+| cursor | a TOP-LEVEL `tool_call` event, `subtype` started or completed |
+
+🛑 **THE DETECTOR USED TO SNIFF FOR THE CLAUDE SHAPE ITSELF**, one layer above
+the drivers, so it was blind to Cursor and every Cursor turn that sent was
+reported as having answered nobody. #392.
+
+**Cursor's shape, read out of the shipped bundle at 2026.11.19-f005e9d:**
+
+```
+type:"tool_call",subtype:"started",call_id:…,tool_call:…,session_id:…
+```
+
+🛑 **THE EVENT KEYS ARE HAND-WRITTEN snake_case AND THE NESTED VALUE IS NOT.**
+The writer passes `tool_call: n.message.value.toolCall`, a raw internal object,
+so the keys under it are camelCase: `mcpToolCall`, then `toolName`.
+`mcp_tool_call` appears in that bundle twice and both are protobuf schema
+strings.
+
+⚠️ **THAT NESTING IS READ OFF A BUNDLE, NOT OFF A CAPTURED EVENT.** So an
+unreadable shape reports `null` rather than being skipped, and the supervisor
+logs it — a wrong field path would otherwise reproduce #392 exactly.
+
+⚠️ **BOTH SUBTYPES ARE EMITTED FOR ONE CALL.** `turn.sent` only moves to true,
+so this costs nothing today; a future COUNT of them would double.
+
 ## Sharing an event spelling is a coincidence, not a contract
 
 Both CLIs happen to end a turn with `{"type":"result"}`.

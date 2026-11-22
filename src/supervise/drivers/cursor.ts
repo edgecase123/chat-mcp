@@ -112,6 +112,7 @@ export function routeCursorEvent(
     context?(snapshot: ContextSnapshot): void;
     denial?(denial: Denial): void;
     session?(id: string): void;
+    toolCall?(name: string | null): void;
   },
 ): void {
   // 🛑 THE ID ARRIVES ON THE INIT EVENT, WHICH IS THE FIRST LINE OF THE
@@ -129,6 +130,48 @@ export function routeCursorEvent(
   if (typeof id === "string" && on.session) on.session(id);
 
   if (event.type === "result") on.turnEnd();
+
+  // 🛑 A TOP-LEVEL EVENT, NOT A BLOCK INSIDE AN `assistant` MESSAGE. The
+  // silent-reply detector used to read `tool_use` blocks itself and returned
+  // at its first line for anything that was not `type: "assistant"` — so
+  // every Cursor turn that sent was reported as having answered nobody, and
+  // a real silent reply became indistinguishable from the false alarm. #392.
+  if (event.type === "tool_call" && on.toolCall) {
+    on.toolCall(cursorToolName(event.tool_call));
+  }
+}
+
+/**
+ * The tool's own name out of a Cursor `tool_call` event, or `null`.
+ *
+ * 🛑 THE EVENT KEYS ARE HAND-WRITTEN snake_case AND THIS NESTED VALUE IS NOT.
+ * The writer passes `tool_call: n.message.value.toolCall` — a raw internal
+ * object — so the keys under it are camelCase. Read out of the shipped bundle
+ * at 2026.11.19-f005e9d: `mcpToolCall` appears 9 times and `toolName` 317,
+ * while `mcp_tool_call` appears twice and both are protobuf schema strings.
+ *
+ * ⚠️ READ OFF A BUNDLE, NOT OFF A CAPTURED EVENT. That is why an unreadable
+ * shape returns `null` and is reported, rather than being skipped: a wrong
+ * path here would otherwise reproduce #392 exactly.
+ */
+function cursorToolName(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const mcp = (raw as { mcpToolCall?: unknown }).mcpToolCall;
+
+  if (mcp && typeof mcp === "object") {
+    const name = (mcp as { toolName?: unknown }).toolName;
+
+    if (typeof name === "string" && name) return name;
+  }
+
+  // A non-MCP Cursor tool — a shell command, a file read. It is a real tool
+  // call with a readable kind, and it is simply not a bus tool.
+  const kind = (raw as { kind?: unknown }).kind;
+
+  if (typeof kind === "string" && kind) return kind;
+
+  return null;
 }
 
 /**

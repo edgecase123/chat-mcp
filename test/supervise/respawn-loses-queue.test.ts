@@ -83,6 +83,7 @@ function recordingChild(children: FakeChild[]) {
       onContext: () => undefined,
       onUsage: () => undefined,
       onDenial: () => undefined,
+      onToolCall: () => undefined,
       onSession: (cb) => cb("sess-from-fake"),
       onEvent: () => undefined,
       onStderr: () => undefined,
