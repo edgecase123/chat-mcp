@@ -48,6 +48,33 @@ token-count fields, and `reportsUsage` is still `false`, because the sink takes
 a `RateLimitSnapshot` — a subscription status with named windows. The two are
 easy to confuse and the confusion reproduces the bug above.
 
+## How a host grant is delivered is DECLARED, never inferred
+
+`VendorSpawn.hostGrantDelivery` is one of `"flags"`, `"file"` or `"none"`, and
+`assertHostGrantReachesBus` refuses a GRANTED host child whose vendor says
+`"none"`.
+
+| vendor | value     | why                                                         |
+| ------ | --------- | ----------------------------------------------------------- |
+| claude | `"flags"` | `claudeArgs` names `--mcp-config` and `--strict-mcp-config` |
+| cursor | `"none"`  | no flag can point `cursor-agent` at the grant's path        |
+
+🛑 **BOTH WAYS OF INFERRING THIS WERE PROPOSED AND BOTH ARE MEASURABLY
+WRONG.** They are recorded because each looks correct until measured.
+
+1. **`mcpConfigFlags` being empty does NOT mean "no route".** Cursor returns
+   `[]` from it and reaches the bus in a container through a written file. The
+   host path never calls it at all — one call site in `src/`, in
+   `containerized.ts`.
+2. **Argv identity between a granted and an ungranted child does NOT mean "no
+   route" either.** A route delivered by WRITING a config file changes no argv,
+   so the inference would refuse the very thing that works.
+
+⚠️ **A POSITIVE DECLARATION CANNOT BE SATISFIED BY ACCIDENT, and that is the
+whole reason for the field.** `host-grant-reaches-bus.test.ts` pins each value
+against the argv, so a vendor declaring `"flags"` while ignoring the grant
+fails rather than silently never triggering the refusal.
+
 ## Sharing an event spelling is a coincidence, not a contract
 
 Both CLIs happen to end a turn with `{"type":"result"}`.
@@ -127,14 +154,34 @@ live binary: `cursor-agent mcp --help` names `.cursor/mcp.json or
 empty.** `--approve-mcps` is what makes the file take effect — without it the
 server is prompted for, and a supervised child has no TTY to answer with.
 
-| mode     | where the config goes    | why                                         |
-| -------- | ------------------------ | ------------------------------------------- |
-| `docker` | `/root/.cursor/mcp.json` | the image has no operator config to clobber |
-| host     | the grant's own path     | `~/.cursor/mcp.json` is the human's file    |
+| mode     | where the config goes                | why                                                           |
+| -------- | ------------------------------------ | ------------------------------------------------------------- |
+| `docker` | `/root/.cursor/mcp.json`             | the image has no operator config to clobber                   |
+| host     | nowhere — a granted child is REFUSED | the grant's own path is a location `cursor-agent` never reads |
 
-⚠️ **A HOST Cursor child still reaches no bus, and that is still deliberate.**
-The only way to wire it is a file this project may not own. That is a separate
-decision from the container one.
+🛑 **A GRANTED HOST CURSOR CHILD IS NOW REFUSED RATHER THAN STARTED.** It
+used to start, take its prompt and answer nothing, because the config was
+written to `grant.configPath` and never named. The operator granted a
+capability and was told nothing was wrong, which is #219's shape. #348.
+
+**An UNGRANTED host Cursor child still works and is the way to use Cursor on
+the host today.** The refusal names it, so the operator is not left at a dead
+end.
+
+🛑 **THE OLD CLAIM THAT ONLY `~/.cursor/mcp.json` COULD WIRE A HOST CHILD IS
+WRONG, and it was wrong when it was written here.** Measured on #348 against
+`cursor-agent 2026.11.19-f005e9d`, with an empty-cwd control:
+
+| cwd                        | `cursor-agent mcp list`                          |
+| -------------------------- | ------------------------------------------------ |
+| no `.cursor/mcp.json`      | `No MCP servers configured`                      |
+| `.cursor/mcp.json` present | the server is named, `needs approval`            |
+| plus its approval on file  | `chat: ready`, and `list-tools` returns 22 tools |
+
+**A project-local `.cursor/mcp.json` is read, and the human's home config is
+never touched.** Wiring the host path is therefore reachable; whether this
+project may create that file in the operator's project directory is the open
+question on #348.
 
 🛑 **`VendorSpawn.containerMcpConfigPath` is REQUIRED and per-vendor.** It was
 one `${containerHome}/.chat-mcp-mcp.json` for every vendor, which works only

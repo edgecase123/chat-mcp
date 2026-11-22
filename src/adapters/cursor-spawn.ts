@@ -122,6 +122,20 @@ export const cursorSpawn: VendorSpawn = {
    * in `cursorArgs`. Without it the server is prompted for, and a supervised
    * child has no TTY to answer with.
    */
+  /**
+   * 🛑 `"none"`, AND THAT IS WHY A GRANTED HOST CURSOR CHILD IS NOW
+   * REFUSED. `mcpConfigFor` hands the host path `grant.configPath`, a location
+   * `cursor-agent` never reads, and no flag can point it there — so the file
+   * is written, never named, and the child starts and answers nothing. #348.
+   *
+   * ⚠️ THIS BECOMES `"file"`, NOT `"flags"`, WHEN THE HOST PATH IS WIRED.
+   * `cursor-agent mcp --help` names `.cursor/mcp.json or ~/.cursor/mcp.json`,
+   * and a cwd-relative `.cursor/mcp.json` IS read — measured on #348 with an
+   * empty-cwd control. Writing it changes no argv, which is exactly why this
+   * field is a declaration rather than something read off the argv.
+   */
+  hostGrantDelivery: "none",
+
   mcpConfigFlags: (_path: string): readonly string[] => [],
 
   routeEvent: routeCursorEvent,
