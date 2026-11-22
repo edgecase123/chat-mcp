@@ -119,8 +119,9 @@ const state = {
   // 🛑 NOT in `messages`. refresh() reassigns that wholesale on every wake,
   // so anything parked there vanishes the moment a peer says something.
   ephemeral: [],
-  openMenuFor: null, // sidebar target whose (...) menu is open. NOT in the DOM:
-  // renderSidebar() wipes it on every peer status change.
+  openMenuFor: null, // sidebar target whose (...) menu is open. NOT in the
+  // DOM: it is an input of BOTH peers and rooms, and a peer event still
+  // rebuilds peers (#399).
   approvals: [],
   // The project folder and home, from /api/whoami. A dropped file's path is
   // shown relative to these.
@@ -129,9 +130,12 @@ const state = {
   // #135 slice 4c — the child handle whose gate editor is open, or the literal
   // GLOBAL_GATE_KEY for the footer. At most one at a time.
   //
-  // 🛑 IT LIVES HERE AND NOT IN THE DOM, for the same reason as `openMenuFor`:
-  // renderSidebar() rebuilds every agent row on any peer status change, so an
-  // open editor held only as a class is wiped by the next wake — mid-edit.
+  // 🛑 IT LIVES HERE AND NOT IN THE DOM. A peer event no longer reaches the
+  // agents section (#399), but `nowMinute` is one of its inputs, so the first
+  // render after a minute rolls rebuilds every row. An open editor held only
+  // as a class is wiped mid-edit by that render.
+  //
+  // ⚠️ NOT A TIMER. Nothing polls, so a quiet bus never interrupts an edit.
   gateEditing: null,
   // #135 slice 4c — { gate, source } for the GLOBAL default, from /api/whoami.
   // Not derivable from the rows: a peer reports the global only while it has
@@ -153,9 +157,12 @@ const state = {
   // This browser's OWN tier, from /api/whoami. The card says what it withholds
   // rather than rendering a control the route will 403.
   capabilities: [],
-  // 🛑 IT LIVES HERE AND NOT IN THE DOM, for the same reason as `gateEditing`:
-  // renderSidebar() rebuilds the whole sidebar on any peer status change, so a
-  // half-typed handle held only in an input is wiped by the next wake.
+  // 🛑 IT LIVES HERE AND NOT IN THE DOM. A peer event no longer reaches the
+  // registration section (#399), but storing a pair does, so a half-typed
+  // handle held only in an input would not survive that rebuild.
+  //
+  // ⚠️ THIS KEY IS ALSO AN INPUT OF THE SECTION IT PROTECTS, so typing itself
+  // triggers the rebuild. Recorded on #399.
   registrationDraft: { handle: "", vendor: "", mode: "docker" },
   registrationError: null,
   // #132 slice 4b — one handle's container plan, as `/api/agents/plan`
@@ -2093,9 +2100,9 @@ function registrationSection() {
 /**
  * The register form.
  *
- * ⚠️ EVERY FIELD WRITES BACK TO `state.registrationDraft` ON INPUT.
- * `renderSidebar()` rebuilds this on any peer status change, so a value held
- * only in the DOM is wiped mid-typing by the next wake.
+ * ⚠️ EVERY FIELD WRITES BACK TO `state.registrationDraft` ON INPUT, so a
+ * rebuild restores what was typed. A peer event no longer causes one (#399);
+ * storing a pair still does.
  */
 function registrationForm() {
   const draft = state.registrationDraft;
