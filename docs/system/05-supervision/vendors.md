@@ -386,6 +386,12 @@ The two acceptance scripts above cover the CONTAINER only. **`mcp list` is free;
 a turn is not**, which is why the cheap half is measured and the expensive half
 is still open.
 
+🛑 **ONE REASON IT COULD NOT HAVE WORKED IS NOW KNOWN AND FIXED: the child was
+never handed its API key.** #396, found by the paid host run on 2026-11-22 —
+8 of 9 checks passed and the 9th was the turn. See _The HOST child gets the same
+injection_ above. **A turn is still unmeasured, so this closes a cause and not
+the question.**
+
 ## `--binary` is a HOST flag, and a container refuses it
 
 🛑 **`SpawnOptions.binary` is one string for two filesystems.** A host path
@@ -501,6 +507,49 @@ how to obtain the key.
 vendor's. A Cursor key comes from a web dashboard; a Claude token comes from
 `claude setup-token`. One refusal message naming the wrong CLI sends the
 operator to the wrong place.
+
+### The HOST child gets the same injection, and it did not for a whole slice
+
+🛑 **A HOST CHILD WAS NEVER GIVEN ITS KEY, SO EVERY TURN WAS LOST AND THE START
+LOOKED CLEAN.** `spawnOnHost` passed `cwd` and `stdio` to `spawn` and no `env`,
+so the child inherited a `process.env` the token has never been in. The store
+is a file under the state dir. #396.
+
+```
+← child stderr: Error: Authentication required. Please run 'agent login'
+                first, or set CURSOR_API_KEY environment variable.
+  child exited code=1 signal=null; 0 prompt(s) never sent
+```
+
+| path      | how the credential arrives                                      |
+| --------- | --------------------------------------------------------------- |
+| container | `-e NAME` on the `docker run` argv, value from the client's env |
+| host      | `env` on the `spawn` call, one key, the vendor's own            |
+
+🛑 **IN THE CHILD'S ENVIRONMENT, NEVER IN ARGV.** `ps` exposes an argv for the
+life of the process, which `AGENTS.md` forbids for a secret. Ruled by lee
+2026-11-22.
+
+🛑 **AND NEVER WRITTEN INTO `process.env`.** That would reach every later child
+of every vendor, which is #347 arriving by a second route.
+
+🛑 **A CHILD WITH NO TOKEN ON FILE IS REFUSED AT SPAWN, NOT ALLOWED TO START
+AND EXIT 1.** Ruled by lee 2026-11-22. The prompt is lost either way, and only
+the refusal names the cause — a clean start that answers nothing is
+indistinguishable from #348 and from a model that chose not to reply.
+
+⚠️ **THE CHECK RUNS BEFORE THE GRANT FILE IS WRITTEN.** A refusal that came
+after it would leave `.cursor/mcp.json` in the operator's own project directory
+for a child that never ran.
+
+⚠️ **THE APPROVAL EXEC IS HANDED NO CREDENTIAL, AND THAT IS A DECISION.**
+`cursor-agent mcp enable` needs none, measured, so least privilege applies. A
+test asserts the absence, so a later change cannot widen it silently.
+
+🛑 **"A REAL KEY IS ON FILE" IS NOT EVIDENCE THE CHILD HAS ONE.** The host
+acceptance script's first check passed throughout the window this bug was open.
+On file is not in the child's environment, which is why the test asserts the
+`env` that `spawn` RECEIVES.
 
 ## Adding a third vendor
 
