@@ -485,10 +485,16 @@ test("⚠️ control — a valid key file is left alone", () => {
  * ======================================================================= */
 
 /**
- * 🛑 REGENERATING INTRODUCED THE FIRST WRITE OVER A FILE THAT IS ALREADY
- * THERE, and `writeFileSync` and `chmodSync` both follow a link. So a planted
+ * 🛑 REGENERATING GAVE `envDigestKey` ITS FIRST WRITE OVER A PATH THAT ALREADY
+ * EXISTS, and `writeFileSync` and `chmodSync` both follow a link. So a planted
  * `env-digest-key -> /somewhere/else` turns the regeneration into an arbitrary
  * file overwritten with hex and chmodded 0600, at the operator's privilege.
+ *
+ * ⚠️ THE SCOPE IS THIS FUNCTION, NOT THE REPO. `notifyPeer` overwrites a
+ * notify file on every message and `webHandshakeFile` is rewritten on every
+ * `chat-mcp web` start, both through the same helper and both following a link
+ * identically. They are unchanged by this commit and share its precondition,
+ * a writer inside the 0700 state directory.
  *
  * ⚠️ MEASURED IN BOTH DIRECTIONS before it was fixed. Under the committed
  * regeneration the target read back as the new key; one commit earlier the
