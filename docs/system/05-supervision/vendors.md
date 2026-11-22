@@ -379,18 +379,22 @@ detectable.
 arrives by flags and is live at startup, and `claude` has no `mcp enable`
 subcommand — approving unconditionally would break the vendor that worked.
 
-⚠️ **STILL UNPROVEN: THAT THE HOST PATH PRODUCES A WORKING TURN.** The config
-lands, the approval runs, and `mcp list` / `mcp list-tools` were measured
-directly against the live binary — but no live host Cursor TURN has completed.
-The two acceptance scripts above cover the CONTAINER only. **`mcp list` is free;
-a turn is not**, which is why the cheap half is measured and the expensive half
-is still open.
+🟢 **PROVEN LIVE on 2026-11-22: a HOST Cursor agent completes a turn and reaches
+the bus.** `scripts/cursor-host-acceptance.mjs`, 9 of 9 checks. The last check is
+the turn itself — the child called a bus tool and the message arrived in the
+probe's inbox.
 
-🛑 **ONE REASON IT COULD NOT HAVE WORKED IS NOW KNOWN AND FIXED: the child was
-never handed its API key.** #396, found by the paid host run on 2026-11-22 —
-8 of 9 checks passed and the 9th was the turn. See _The HOST child gets the same
-injection_ above. **A turn is still unmeasured, so this closes a cause and not
-the question.**
+🛑 **#396 WAS THE REASON IT COULD NOT HAVE WORKED: the child was never handed
+its API key.** The paid host run on 2026-11-22 passed 8 of 9 and the 9th was the
+turn. PR 400 fixed it. **The 9 of 9 above is the re-run after that fix**, so the
+cause and the proof are one measurement apart.
+
+⚠️ **THE RUN SPENDS MONEY AND IS NOT IN `npm test`.** It needs `CHAT_MCP_LIVE=1`
+and a real `CURSOR_API_KEY` on file. **The free checks run FIRST and the paid
+prompt is gated behind them**, so a mis-wired child costs nothing.
+
+⚠️ **#395 CANNOT REACH THIS RUN.** The host path execs the vendor binary against
+current SOURCE through `tsx`, so no image can lag the code under test.
 
 ## `--binary` is a HOST flag, and a container refuses it
 
