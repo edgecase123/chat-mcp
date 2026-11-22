@@ -92,6 +92,17 @@ function resolveLoader(): string {
  * agent's project directory, so the command it names is an execution surface
  * and must be one this build already runs.
  */
+/**
+ * The key this project's MCP server block is written under, and therefore the
+ * identifier a CLI's own approval subcommand takes.
+ *
+ * 🛑 ONE LITERAL, BECAUSE A SECOND ONE CANNOT FAIL. `cursor-agent mcp enable`
+ * takes this exact id, and `enable` against an id no config declares is not an
+ * error the child ever reports — it just starts with no bus tools. So a drifted
+ * copy reproduces #348 and every test stays green.
+ */
+export const CHAT_MCP_SERVER_ID = "chat";
+
 export function chatMcpServerConfig(
   handle: string,
   entry?: string,
@@ -102,7 +113,7 @@ export function chatMcpServerConfig(
 
   return {
     mcpServers: {
-      chat: {
+      [CHAT_MCP_SERVER_ID]: {
         command: launch.command,
         args: [...launch.args, "--handle", handle],
       },
