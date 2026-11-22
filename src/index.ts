@@ -761,9 +761,18 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
         // also what `runDependencyInstall` inspects. Passing `vendor.image`
         // here, or resolving the override a second time, is how a handle came
         // to pay for a full build of an image it would then be refused for.
+        // 🛑 THE VENDOR IS NAMED ONLY WHEN THE PLAN RUNS THE VENDOR'S OWN
+        // IMAGE. An operator override resolves to a tag this project cannot
+        // build, and naming a vendor for it would tag a build of THIS project
+        // with somebody else's image name.
         prepareAgentImage(
           () => execSync("npm run build", { stdio: "inherit" }),
-          { image: plan.image },
+          {
+            image: plan.image,
+            ...(plan.image === vendor.image
+              ? { buildVendor: vendor.vendor }
+              : {}),
+          },
         );
       }
 
