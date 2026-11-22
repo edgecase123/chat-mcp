@@ -1,7 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AgentChild, SpawnOptions } from "../child.js";
 import type { VendorSpawn } from "../vendor.js";
-import { assertDeclaresProcessLifetime, wireAgentChild } from "./wiring.js";
+import {
+  assertDeclaresProcessLifetime,
+  assertHostGrantReachesBus,
+  wireAgentChild,
+} from "./wiring.js";
 import { wirePerTurnChild } from "./per-turn.js";
 
 /** Spawn a vendor's CLI as a bare host process. */
@@ -10,6 +14,10 @@ export function spawnOnHost(
   opts: SpawnOptions = {},
 ): AgentChild {
   assertDeclaresProcessLifetime(vendor);
+  // 🛑 BEFORE THE SPAWN, BECAUSE THE SPAWN IS THE FAILURE. A granted child
+  // whose CLI cannot be pointed at the config starts cleanly and answers
+  // nothing, so there is no later point at which this is still detectable.
+  assertHostGrantReachesBus(vendor, opts.grant);
 
   const launch = (turnOpts: SpawnOptions): ChildProcessWithoutNullStreams =>
     spawn(turnOpts.binary ?? vendor.binary, vendor.argsFor(turnOpts, "host"), {

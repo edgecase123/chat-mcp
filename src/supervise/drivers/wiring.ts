@@ -1,6 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AgentChild } from "../child.js";
 import type { VendorSpawn } from "../vendor.js";
+import type { ChildGrant } from "../grant.js";
 import { attachStreams, createEventFanout } from "./fanout.js";
 
 /**
@@ -112,4 +113,33 @@ export function assertDeclaresProcessLifetime(
         `(one process for many turns, like claude).`,
     );
   }
+}
+
+/**
+ * Refuse a HOST child that was promised a bus its CLI cannot be pointed at.
+ *
+ * 🛑 THE FAILURE THIS REPLACES IS SILENCE. A granted Cursor child starts,
+ * authenticates, takes its prompt and answers nothing — because the supervisor
+ * writes an MCP config to a path `cursor-agent` never reads and no flag can
+ * name. The operator granted a capability and was told nothing was wrong,
+ * which is #219's shape.
+ *
+ * 🛑 ONLY A GRANTED CHILD IS REFUSED. An ungranted one reaching no bus is a
+ * working configuration and #348's own documented workaround, so the message
+ * names it rather than leaving the operator with a dead end.
+ */
+export function assertHostGrantReachesBus(
+  vendor: Pick<VendorSpawn, "vendor" | "hostGrantDelivery">,
+  grant: ChildGrant | undefined,
+): void {
+  if (!grant) return;
+  if (vendor.hostGrantDelivery !== "none") return;
+
+  throw new Error(
+    `vendor "${vendor.vendor}" declares hostGrantDelivery "none", so a granted host child ` +
+      `cannot be told the bus exists: the MCP config is written and never named, and the ` +
+      `agent would start, take its prompt and answer nothing with no error anywhere. ` +
+      `Run this handle UNGRANTED to use "${vendor.vendor}" on the host today, or run it in ` +
+      `docker, where the config is written to the fixed path the CLI reads.`,
+  );
 }

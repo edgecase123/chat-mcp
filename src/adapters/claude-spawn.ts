@@ -100,6 +100,11 @@ export const claudeSpawn: VendorSpawn = {
   // 🛑 ALL OR NEITHER. `--mcp-config` ADDS to whatever the cwd already
   // configures, so without `--strict-mcp-config` the child also loads the
   // consuming project's own servers — measured on #33.
+  // 🛑 FLAGS, AND THE ARGV IS WHAT PROVES IT. `claudeArgs` names
+  // `--mcp-config` and `--strict-mcp-config` on the host path, so a granted
+  // child's argv differs from an ungranted one's.
+  hostGrantDelivery: "flags",
+
   mcpConfigFlags: (path: string): readonly string[] => [
     "--mcp-config",
     path,

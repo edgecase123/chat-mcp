@@ -191,6 +191,26 @@ export interface VendorSpawn {
    * driven by `mcpConfigFor` either way.
    */
   readonly mcpConfigFlags: (path: string) => readonly string[];
+
+  /**
+   * How a HOST child's bus grant actually reaches its CLI.
+   *
+   * 🛑 DECLARED, BECAUSE BOTH WAYS OF INFERRING IT ARE MEASURABLY WRONG.
+   * `mcpConfigFlags` being empty does not mean "no route": Cursor returns `[]`
+   * from it and reaches the bus in a container through a written file, and the
+   * host path never calls it at all — one call site, in `containerized.ts`.
+   * Nor does argv identity between a granted and an ungranted child, because a
+   * route delivered by writing a config file changes no argv either.
+   *
+   * 🛑 `"none"` IS THE ONLY VALUE THAT REFUSES, and a granted child is the
+   * only one it refuses. An ungranted child reaching no bus is a working
+   * configuration; one PROMISED a bus and given none is #219's shape.
+   *
+   * ⚠️ A POSITIVE DECLARATION CANNOT BE SATISFIED BY ACCIDENT, which an
+   * inference can. `host-grant-reaches-bus.test.ts` pins each value against
+   * the argv, so the field cannot become a comment that disagrees with the code.
+   */
+  readonly hostGrantDelivery: "flags" | "file" | "none";
   readonly routeEvent: EventRouter;
   readonly encodeInput: (text: string) => string;
   readonly redispatchPrompt: (input: RedispatchInput) => string;
