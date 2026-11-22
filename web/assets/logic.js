@@ -2177,3 +2177,27 @@ export function planVerdictClass(verdict) {
 
   return "";
 }
+
+/**
+ * #397 — the settings modal's tabs, in render order.
+ *
+ * 🛑 A LIST, NOT TWO HARDCODED BUTTONS. lee ruled two tabs now and a third
+ * later, so adding one is an entry here and nothing else. `settings-tabs.test.ts`
+ * asserts the CSS names no tab and no count.
+ */
+export const SETTINGS_TABS = [
+  { id: "agents", label: "Agents" },
+  { id: "rooms", label: "Rooms" },
+];
+
+/**
+ * Which tab the modal opens on.
+ *
+ * ⚠️ AN UNKNOWN ID FALLS BACK rather than opening nothing. The id outlives the
+ * tab whenever one is renamed, and a blank modal reads as a broken dialog.
+ */
+export function settingsTabSelection(requested, tabs = SETTINGS_TABS) {
+  const match = tabs.find((t) => t.id === requested);
+
+  return match ? match.id : tabs[0].id;
+}

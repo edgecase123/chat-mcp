@@ -73,6 +73,8 @@ import {
   nextPulses,
   dotTitle,
   PULSE_FAILSAFE_MS,
+  SETTINGS_TABS,
+  settingsTabSelection,
 } from "./logic.js";
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -186,6 +188,11 @@ const el = {
   composerInput: document.getElementById("composer-input"),
   composerSend: document.getElementById("composer-send"),
   themeToggle: document.getElementById("theme-toggle"),
+  settingsOpen: document.getElementById("settings-open"),
+  settings: document.getElementById("settings"),
+  settingsClose: document.getElementById("settings-close"),
+  settingsTabs: document.getElementById("settings-tabs"),
+  settingsPanels: document.getElementById("settings-panels"),
 };
 
 // ── Theme ────────────────────────────────────────────────────────────────
@@ -223,6 +230,51 @@ function initTheme() {
 
 el.themeToggle.addEventListener("click", () => {
   applyTheme(state.theme === "dark" ? "light" : "dark");
+});
+
+// ── Settings modal (#397) ────────────────────────────────────────────────
+
+/**
+ * 🛑 THIS RENDERS FROM `SETTINGS_TABS` AND IS NEVER CALLED BY renderSidebar().
+ * Being outside the sidebar's render path is the whole reason the modal exists:
+ * a control in there is destroyed by the next peer event, mid-use.
+ */
+function renderSettings(requested) {
+  const active = settingsTabSelection(requested);
+
+  el.settingsTabs.replaceChildren(
+    ...SETTINGS_TABS.map((tab) =>
+      h(
+        "button",
+        {
+          type: "button",
+          className: `settings__tab${tab.id === active ? " is-active" : ""}`,
+          role: "tab",
+          "aria-selected": tab.id === active ? "true" : "false",
+          "data-settings-tab": tab.id,
+          onclick: () => renderSettings(tab.id),
+        },
+        [tab.label],
+      ),
+    ),
+  );
+
+  // Slice 1 moves no controls. The panel names what is coming so the tab is
+  // not an empty box that reads as broken.
+  el.settingsPanels.replaceChildren(
+    h("p", { className: "settings__placeholder" }, [
+      `${SETTINGS_TABS.find((t) => t.id === active).label} settings move here.`,
+    ]),
+  );
+}
+
+el.settingsOpen.addEventListener("click", () => {
+  renderSettings(null);
+  el.settings.showModal();
+});
+
+el.settingsClose.addEventListener("click", () => {
+  el.settings.close();
 });
 
 // ── API ──────────────────────────────────────────────────────────────────
