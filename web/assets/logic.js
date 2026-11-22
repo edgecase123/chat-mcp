@@ -1416,6 +1416,28 @@ export function supervisedChildHandles(agents) {
 }
 
 /**
+ * Whether a supervised child is answering on the bus right now (#374).
+ *
+ * 🛑 THE AGENT ROW MUST NOT HARDCODE THIS. A running SUPERVISOR is not a
+ * connected CHILD: `cursorSpawn.processPerTurn` is true, so a Cursor handle is
+ * genuinely offline between turns while its supervisor stays up. A row that is
+ * always green is exactly what lee ruled against — a peer row's dot tells the
+ * truth, and this one has to as well.
+ *
+ * ⚠️ ABSENT READS AS OFFLINE, which is what a peers row does for a handle it
+ * cannot find. `fresh` on the child is NOT the substitute: `agentsWithoutClock`
+ * strips it from the signature, so the dot would move with nothing announcing
+ * it to the planner.
+ */
+export function childOnline(peers, childHandle) {
+  if (!Array.isArray(peers) || typeof childHandle !== "string") return false;
+
+  return peers.some(
+    (peer) => peer?.handle === childHandle && peer?.online === true,
+  );
+}
+
+/**
  * The peers list with supervised children removed (#374).
  *
  * 🛑 THE CHILD IS A REAL PEER, WHICH IS WHY IT WAS DRAWN TWICE. `listAgents`
@@ -2258,6 +2280,13 @@ export const SIDEBAR_SECTIONS = [
     // The row is a `sidebarItem` since #374, so it reads the three keys the
     // peers section already declared. Undeclared, a selection or an open (...)
     // menu on an agent row would not repaint — #404's class exactly.
+    //
+    // 🛑 `peers` IS DELIBERATELY ABSENT, AND IT IS THE ROW'S OWN DOT SOURCE.
+    // Declaring it makes any peer going online rebuild this section, and this
+    // section holds a half-typed gate percent: `gateControl`'s input keeps its
+    // value in the DOM, not in state, so a rebuild DISCARDS it. That is #399's
+    // registration defect in a second place. `paintAgentDots` updates the dot
+    // in place instead — the same out-of-band treatment #240 gave the pulse.
     inputs: [
       "agents",
       "gateDefault",

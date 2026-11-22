@@ -417,3 +417,32 @@ test("a clock-only agents change rebuilds neither agents nor peers", () => {
 
   assert.deepEqual(due, []);
 });
+
+/**
+ * 🛑 #374 — THE AGENT ROW'S DOT COMES FROM `state.peers` AND `peers` IS STILL
+ * NOT AN AGENTS INPUT. Declaring it would rebuild this section on every peer
+ * event, and it holds a half-typed gate percent that `gateControl` keeps in the
+ * DOM rather than in state — #399's registration defect in a second place.
+ * `paintAgentDots` updates the dot in place, which is why the plan stays narrow.
+ */
+test("a peer going offline rebuilds peers only, never the gate editor's section", () => {
+  const due = plan((s) => {
+    s.peers = [{ handle: "a", online: false }];
+  });
+
+  assert.deepEqual(due, ["peers"]);
+});
+
+/**
+ * ⚠️ THE PIN THAT MAKES THE SKIP SAFE. A dot that no rebuild announces must be
+ * painted out of band, and that paint has to follow the rebuild loop — called
+ * before it, a fresh section would overwrite what it just wrote.
+ */
+test("renderSidebar paints the agent dots after it rebuilds", () => {
+  const paint = APP_CODE.indexOf("paintAgentDots()");
+  const loop = APP_CODE.indexOf("SECTION_BUILDERS[key]()");
+
+  assert.notEqual(paint, -1, "nothing calls paintAgentDots");
+  assert.notEqual(loop, -1, "no rebuild loop — the pin would be vacuous");
+  assert.ok(loop < paint, "the paint must follow the rebuild it corrects");
+});

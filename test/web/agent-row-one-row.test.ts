@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   agentRow,
+  childOnline,
   peersMinusSupervised,
   supervisedChildHandles,
 } from "../../web/assets/logic.js";
@@ -135,4 +136,44 @@ test("the supervisor handle is not used as a filter key", () => {
   const peers = [{ handle: "smoke-container", online: true }];
 
   assert.deepEqual(peersMinusSupervised(peers, [live()]), peers);
+});
+
+/**
+ * 🛑 A RUNNING SUPERVISOR IS NOT A CONNECTED CHILD. `cursorSpawn` spawns one
+ * process per turn, so a Cursor handle is offline between turns while its
+ * supervisor stays up. The first cut of this row hardcoded `online: true` and
+ * rendered a permanently green dot for exactly that agent.
+ */
+test("the child's online flag is read from its own peer record", () => {
+  const peers = [
+    { handle: "claude2", online: true },
+    { handle: "smoke-container-agent", online: true },
+  ];
+
+  assert.equal(childOnline(peers, "smoke-container-agent"), true);
+});
+
+/**
+ * ⚠️ THE CONTROL, in both directions. A helper returning `true` for everything
+ * satisfies the test above, and one returning `false` for everything satisfies
+ * the offline half alone.
+ */
+test("a child that is registered but not connected reads as offline", () => {
+  const peers = [{ handle: "smoke-container-agent", online: false }];
+
+  assert.equal(childOnline(peers, "smoke-container-agent"), false);
+});
+
+/**
+ * ⚠️ ABSENT READS AS OFFLINE, NEVER AS ONLINE. The fails-open direction here
+ * is a green dot for an agent nobody can reach.
+ */
+test("an unknown or unfetched child reads as offline, never online", () => {
+  assert.equal(
+    childOnline([{ handle: "claude2", online: true }], "nobody"),
+    false,
+  );
+  assert.equal(childOnline(null, "smoke-container-agent"), false);
+  assert.equal(childOnline(undefined, "smoke-container-agent"), false);
+  assert.equal(childOnline([{ handle: "claude2", online: true }], null), false);
 });

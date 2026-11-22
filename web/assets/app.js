@@ -40,6 +40,7 @@ import {
   claimRow,
   claimsPanelEmpty,
   agentRow,
+  childOnline,
   peersMinusSupervised,
   agentsPanelEmpty,
   registrationRows,
@@ -439,7 +440,39 @@ function renderSidebar() {
   }
 
   sidebarSigs = next;
+
+  // 🛑 AFTER THE REBUILD LOOP, AND IT RUNS WHETHER OR NOT AGENTS REBUILT.
+  // That is the whole point: `peers` is not an agents input, so a child going
+  // offline moves no signature here. A rebuild paints the fresh value anyway
+  // and this is a no-op; a SKIP is the case it exists for.
+  paintAgentDots();
+
   el.sidebar.scrollTop = prevScrollTop;
+}
+
+/**
+ * Repaint each agent row's online dot from the current peer list (#374).
+ *
+ * 🛑 IN PLACE, NEVER THROUGH A REBUILD. `state.peers` changes on every
+ * `whoami`, and rebuilding the agents section would discard a half-typed gate
+ * percent — `gateControl`'s input holds its value in the DOM. #240 reached the
+ * same conclusion about the 250ms activity pulse, and this is its shape.
+ *
+ * ⚠️ SCOPED TO `.agent >`, so it cannot touch the peers section's own rows.
+ * Those carry the same `data-handle` and are rebuilt from state correctly.
+ */
+function paintAgentDots() {
+  for (const agent of state.agents ?? []) {
+    const child = agent?.child?.handle;
+    if (typeof child !== "string") continue;
+
+    const row = el.sidebar.querySelector(
+      `.agent > .sidebar__item[data-handle="${CSS.escape(child)}"]`,
+    );
+    if (row === null) continue;
+
+    row.classList.toggle("is-online", childOnline(state.peers, child));
+  }
 }
 
 /**
@@ -498,12 +531,14 @@ function agentsSection() {
         // blank panel and a failed fetch look identical.
         [h("div", { className: "sidebar__empty" }, [agentsPanelEmpty()])]
       : agents.map((a) =>
-          // 🛑 `data-supervisor` IS THE STOP TARGET AND IT IS NOT THE LABEL.
-          // The row reads as the child, because that is the handle a human
-          // messages, but `/api/agents/stop` accepts only the supervisor. The
-          // attribute keeps it in the DOM rather than in a second visible row,
-          // which is what #374 was about.
-          h("div", { className: "agent", "data-supervisor": a.handle }, [
+          // 🛑 THE SUPERVISOR HANDLE IS ON THE TOOLTIP, NOT IN A DEAD
+          // ATTRIBUTE. The row reads as the child, because that is the handle a
+          // human messages. The supervisor is still the only thing
+          // `/api/agents/stop` accepts and the only thing a terminal can kill,
+          // so an operator has to be able to find it — and a `data-` attribute
+          // nothing reads cannot tell them. #374 asked for a tooltip or an
+          // attribute; the tooltip is the one with a reader.
+          h("div", { className: "agent", title: `supervisor: ${a.handle}` }, [
             // 🛑 THE SAME ROW COMPONENT AS A PEER, on lee's ruling of
             // 2026-11-21: *"i'd like the dockerized agents to look like other
             // agents like yourselves look in the web ui"*. The clickable row
@@ -521,7 +556,9 @@ function agentsSection() {
               : sidebarItem({
                   label: a.label,
                   target: a.childHandle,
-                  online: true,
+                  // 🛑 NEVER A LITERAL `true`. A live supervisor does not mean a
+                  // connected child — a Cursor handle is offline between turns.
+                  online: childOnline(state.peers, a.childHandle),
                   active: state.currentTarget === a.childHandle,
                   kind: "peer",
                   gauge: a.gauge,
