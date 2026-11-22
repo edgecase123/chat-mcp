@@ -1,8 +1,9 @@
 ---
 title: Context Restart Gate
-updated: 2026-11-18
+updated: 2026-11-22
 covers:
   - src/storage/context-gate.ts
+  - src/cli/web/server.ts
   - web/assets/logic.js
   - web/assets/style.css
   - src/shim/context-ramp.ts
@@ -127,6 +128,45 @@ operator is about to start one.
 browser infer it from the rows. A peer reports the global only while it has no
 override of its own, so on a page where every agent is overridden the global
 appears nowhere in the rows at all.
+
+## When there is NO reading, the chip says WHICH kind of nothing
+
+A blank gauge had two causes and an operator needed opposite responses to them.
+A vendor that reports no context window will never fill it in, so waiting is
+wasted. A vendor that does report one has simply not reported yet, and that
+resolves itself.
+
+`/api/whoami` and `/api/agents/live` therefore ship `reports_context` per row,
+and `gaugeDisplay` renders three distinct states rather than one absence:
+
+| `reports_context` | reading | chip  | means                                   |
+| ----------------- | ------- | ----- | --------------------------------------- |
+| `false`           | none    | `n/a` | this CLI reports no window, ever        |
+| `true`            | none    | —     | reported by this driver, none yet       |
+| `null`            | none    | —     | handle unregistered, so vendor unknown  |
+| any               | stale   | `–`   | reporting broke; the last number is HID |
+| any               | fresh   | `NN%` | a live fill, banded against its gate    |
+
+🛑 **`n/a` AND `–` ARE DIFFERENT GLYPHS ON PURPOSE.** Both carry a null percent,
+so a shared glyph would put the two states this split exists to separate back
+under one mark.
+
+🛑 **`null` IS NOT `false`.** An unregistered handle's vendor is unknown, and
+labelling it `n/a` would be a confident claim about the one case the server
+cannot see. `reportsContextFor` in `src/adapters/index.ts` is the non-throwing
+lookup that produces the third answer — `spawnFor` throws, and `agents.json` is
+the operator-edited half that `registerAgent` deliberately does not check for
+spawnability.
+
+⚠️ **The join crosses a handle suffix.** `agents.json` is keyed by the
+SUPERVISOR's handle and every gauge row by its CHILD's. `reportsContextOf` tries
+the row's own handle first and `supervisorHandleFor` second — the direct hit
+first, because a handle a human chose ending in `-agent` looks like a child to
+that inverse.
+
+⚠️ **An operator who registers the wrong vendor mislabels the WAIT and nothing
+else.** The split sits inside the no-reading branch, so once a real reading
+arrives `reports_context` is never consulted again.
 
 ## The ramp below the gate is the WEB UI's COLOUR
 

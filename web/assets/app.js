@@ -700,6 +700,16 @@ function gaugeChip(gauge) {
   // #103 — a stale reading shows a dash, never its last number. The digits
   // are what people act on, so a greyed-out 100% would repeat the 28-day
   // incident rather than end it.
+  // 🛑 `n/a` AND NOT A SECOND DASH (#371). Stale already renders `\u2013`, so
+  // reusing it would put the two states this change exists to separate back
+  // under one glyph.
+  const text =
+    gauge?.band === "unreported"
+      ? "n/a"
+      : gauge?.percent === null
+        ? "\u2013"
+        : `${gauge?.percent}%`;
+
   return gauge?.show
     ? h(
         "span",
@@ -707,7 +717,7 @@ function gaugeChip(gauge) {
           className: `sidebar__item-gauge is-${gauge.band}`,
           title: gauge.title,
         },
-        [gauge.percent === null ? "\u2013" : `${gauge.percent}%`],
+        [text],
       )
     : null;
 }

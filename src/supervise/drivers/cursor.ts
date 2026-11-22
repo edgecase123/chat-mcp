@@ -71,6 +71,21 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
   return ["--resume", sessionId];
 }
 
+/**
+ * The model a supervised `cursor-agent` runs when nothing names one.
+ *
+ * 🛑 lee's RULING OF 2026-11-21 (#371): *"pin model for cursor agent, default
+ * is the native cursor fast model."* Pinning costs Cursor's own per-request
+ * routing, and that was the trade he accepted.
+ *
+ * 🛑 PINNING THIS BUYS NO CONTEXT GAUGE, AND THAT WAS THE HOPE BEHIND THE
+ * RULING. A denominator needs the window size, and `--list-models` names one
+ * only in the ids that carry it — `Claude Opus 5 1M Thinking` does, and
+ * `Composer 2.5 Fast` does not. So `cursorSpawn.reportsContext` stays `false`
+ * and #371's fix is the card saying so, not this constant.
+ */
+export const CURSOR_DEFAULT_MODEL = "composer-2.5-fast";
+
 export function cursorArgs(opts: SpawnOptions = {}): string[] {
   const args = [
     "-p",
@@ -83,7 +98,9 @@ export function cursorArgs(opts: SpawnOptions = {}): string[] {
     "--approve-mcps",
   ];
 
-  if (opts.model) args.push("--model", opts.model);
+  // ⚠️ ALWAYS PASSED, NEVER CONDITIONAL. Omitting the flag leaves the CLI on
+  // `auto`, which is the state lee's ruling removes.
+  args.push("--model", opts.model || CURSOR_DEFAULT_MODEL);
   if (opts.resumeSessionId) {
     args.push(...cursorResumeFlags(opts.resumeSessionId));
   }

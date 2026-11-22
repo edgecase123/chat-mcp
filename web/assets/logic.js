@@ -1079,7 +1079,7 @@ export function customStyleSubmission(markdown) {
  * lee's fractions and a copy of them here would be free to drift from the
  * ones the restart measures against.
  *
- * @param {{context_used?: number|null, context_total?: number|null, fresh?: boolean, age_ms?: number|null, context_ramp?: number[]|null}} peer
+ * @param {{context_used?: number|null, context_total?: number|null, fresh?: boolean, age_ms?: number|null, context_ramp?: number[]|null, reports_context?: boolean|null}} peer
  * @returns {{show: boolean, percent: number|null, band: string, title: string}}
  */
 /**
@@ -1125,6 +1125,22 @@ export function gaugeDisplay(peer) {
   const reported = used != null && total != null && total > 0;
 
   if (!reported) {
+    // 🛑 TWO CAUSES, AND AN OPERATOR NEEDS OPPOSITE RESPONSES TO THEM (#371).
+    // A vendor that reports no window will never fill this in, so waiting for
+    // it is wasted. A vendor that does report one has simply not reported yet,
+    // and that resolves itself. `reports_context === false` is the only value
+    // that distinguishes them — `null` means the handle has no registration,
+    // so the vendor is unknown and the older blank is the honest answer.
+    if (peer?.reports_context === false) {
+      return {
+        show: true,
+        percent: null,
+        band: "unreported",
+        title:
+          "This agent's CLI reports no context window, so no percentage is possible",
+      };
+    }
+
     return {
       show: false,
       percent: null,

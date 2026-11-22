@@ -59,3 +59,27 @@ export function spawnFor(vendor: string): VendorSpawn {
 
   return found;
 }
+
+/**
+ * Whether `vendor` reports a context window, or `null` when this build has no
+ * spawn contract for it (#371).
+ *
+ * 🛑 THREE ANSWERS, AND `null` IS NOT `false`. "This CLI reports no context
+ * window" is a fact an operator can act on; "I do not know what this is" is
+ * not, and rendering the second as the first puts a confident label on the one
+ * case we cannot see.
+ *
+ * 🛑 NON-THROWING, UNLIKE `spawnFor`, AND THAT IS THE WHOLE POINT OF A SECOND
+ * FUNCTION. `vendor` reaches here from `agents.json`, which the operator edits
+ * by hand and which `registerAgent` deliberately does NOT check for
+ * spawnability — `handleRegistrations` records that `spawnFor` is what throws,
+ * at start time. A display label asking the same question must not be able to
+ * take a whole list's response down with it. Raised by claude1 on #371, as the
+ * same shape as the `.DS_Store` 500 on PR 296.
+ */
+export function reportsContextFor(vendor: string): boolean | null {
+  return (
+    REGISTRY.find((a) => a.vendor === vendor && a.spawn)?.spawn
+      ?.reportsContext ?? null
+  );
+}

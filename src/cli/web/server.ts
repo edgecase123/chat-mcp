@@ -68,8 +68,16 @@ import {
   registerAgent,
   unregisterAgent,
   type AgentRegistration,
+  type RegistrationConfig,
 } from "../../supervise/registrations.js";
-import { spawnFor, vendorsWithSpawn } from "../../adapters/index.js";
+import {
+  reportsContextFor,
+  spawnFor,
+  vendorsWithSpawn,
+} from "../../adapters/index.js";
+// Static, because `handleWhoami` is synchronous and needs the suffix inverse
+// to look a supervised child's handle up in `agents.json` (#371).
+import { childHandleFor, supervisorHandleFor } from "../../supervise/grant.js";
 import { buildConfirmPlan } from "../../supervise/confirmPlan.js";
 import {
   confirmVerdict,
@@ -893,6 +901,58 @@ function gateFields(
   return { context_gate: gate, context_gate_source: source };
 }
 
+/**
+ * Every registration, or an empty set when the file cannot be read (#371).
+ *
+ * 🛑 A THROW HERE WOULD 500 A PAGE THAT DOES NOT DEPEND ON THIS FILE.
+ * `readRegistrations` refuses a malformed document on purpose, and the spawn
+ * path wants that refusal. The gauge LABEL is decoration by comparison, so one
+ * stray comma must not take the peer list and the Agents panel with it.
+ */
+function registrationsOrEmpty(): RegistrationConfig {
+  try {
+    return readRegistrations();
+  } catch {
+    return { agents: {} };
+  }
+}
+
+/**
+ * Whether this handle's vendor reports a context window at all (#371).
+ *
+ * `null` means unknown, and `reportsContextFor`'s header says why that is a
+ * third answer rather than a `false`.
+ *
+ * ⚠️ THE PEER LIST IS KEYED BY THE CHILD HANDLE AND `agents.json` BY THE
+ * SUPERVISOR'S. `supervisorHandleFor` is the only inverse of that suffix; a
+ * lookup on the child handle alone misses every supervised agent, and a lookup
+ * on the derived key alone misses a handle whose own name ends in `-agent`.
+ *
+ * ⚠️ AN OPERATOR WHO REGISTERS THE WRONG VENDOR MISLABELS THE WAIT, and it
+ * heals itself. A claude child under a `cursor` registration reads "n/a" until
+ * its first reading arrives, after which `reportsContext` is never consulted.
+ * Raised by claude1 on #371 and left as a note on purpose.
+ *
+ * Exported for its own test, as `approvalsSignature` is: the suffix inverse
+ * above is the whole mechanism and a payload-shape guard cannot see it.
+ */
+export function reportsContextOf(
+  config: RegistrationConfig,
+  handle: string,
+): boolean | null {
+  const owner = supervisorHandleFor(handle);
+  // 🛑 THE DIRECT HIT WINS, AND THE INVERSE IS ONLY A FALLBACK.
+  // `supervisorHandleFor`'s own header says its answer is a HINT, not an
+  // identity: a handle a human chose ending in `-agent` looks like a child to
+  // it. Taking the derived key first made such a registration unreachable —
+  // `weird-agent` resolved through `weird`, which nothing registered.
+  const stored =
+    config.agents[handle] ??
+    (owner === null ? undefined : config.agents[owner]);
+
+  return stored === undefined ? null : reportsContextFor(stored.vendor);
+}
+
 function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
   const me = dao.getAgent(ctx.db, ctx.handle);
   const peers = dao
@@ -906,6 +966,9 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
   // 15-minute window has one home. A second copy in `web/assets/logic.js`
   // would be free to drift from the one the MCP tools use.
   const now = Date.now();
+  // #371 — read ONCE per request. `registrationFor` would re-read the file per
+  // peer, and this payload is polled.
+  const registrations = registrationsOrEmpty();
 
   respondJson(res, {
     handle: ctx.handle,
@@ -930,6 +993,9 @@ function handleWhoami(res: ServerResponse, ctx: RouteContext): void {
     peers: peers.map((a) => ({
       ...a,
       ...gaugeFreshness(a.context_reported_at, now),
+      // #371 — which of the two blank-gauge causes this peer has, or null when
+      // its vendor is unknown. `gaugeDisplay` owns the wording.
+      reports_context: reportsContextOf(registrations, a.handle),
       context_ramp: contextRampFor(ctx.db, a.handle),
       // #135 unit 4 — the SET surface needs the number it is editing and the
       // layer it came from. Resolved here for the same reason as the ramp:
@@ -1545,9 +1611,9 @@ async function handleLiveAgents(
   ctx: RouteContext,
 ): Promise<void> {
   const { listLiveSupervisors } = await import("../../supervise/socket.js");
-  const { childHandleFor } = await import("../../supervise/grant.js");
   const live = await listLiveSupervisors();
   const now = Date.now();
+  const registrations = registrationsOrEmpty();
 
   respondJson(res, {
     agents: live.map((s) => {
@@ -1562,6 +1628,9 @@ async function handleLiveAgents(
             : {
                 ...child,
                 ...gaugeFreshness(child.context_reported_at, now),
+                // #371 — the same three-state field the peer rows carry, so
+                // one `gaugeDisplay` serves both row shapes.
+                reports_context: reportsContextOf(registrations, child.handle),
                 context_ramp: contextRampFor(ctx.db, child.handle),
                 // #135 slice 4c — the gate control sits on THIS row, so the
                 // number it edits and the layer it came from are resolved

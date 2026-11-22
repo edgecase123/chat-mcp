@@ -1,6 +1,6 @@
 ---
 title: Supervised Vendors
-updated: 2026-11-20
+updated: 2026-11-22
 covers:
   - src/supervise/vendor.ts
   - src/supervise/drivers/index.ts
@@ -30,8 +30,9 @@ about itself before it can be spawned.
 | turn ends on             | `{"type":"result"}`    | `{"type":"result"}`                       |
 | reports a usage window   | yes                    | no                                        |
 | reports context fullness | yes                    | no                                        |
+| default model            | the CLI's own          | **pinned** `composer-2.5-fast`            |
 | container image          | `chat-mcp-agent:local` | `chat-mcp-cursor-agent:local`             |
-| reaches the bus          | yes                    | **not yet**                               |
+| reaches the bus          | yes                    | yes                                       |
 
 ## A vendor declares its own capabilities; the wiring never infers them
 
@@ -47,6 +48,27 @@ reading _"awaiting the first reading"_ forever.
 token-count fields, and `reportsUsage` is still `false`, because the sink takes
 a `RateLimitSnapshot` — a subscription status with named windows. The two are
 easy to confuse and the confusion reproduces the bug above.
+
+**A `false` is now RENDERED, not just logged.** `reportsContextFor` in
+`src/adapters/index.ts` is the non-throwing lookup the web UI reads, so a row
+for a vendor that reports no window shows `n/a` instead of a blank that could
+equally mean "not yet". The three states and the suffix join are in
+[context-gate.md](context-gate.md).
+
+## Cursor runs a PINNED model, not `auto`
+
+lee's ruling, 2026-11-21: _"pin model for cursor agent, default is the native
+cursor fast model."_ `CURSOR_DEFAULT_MODEL` in `src/supervise/drivers/cursor.ts`
+is `composer-2.5-fast`, and `cursorArgs` passes `--model` on every spawn. A
+caller's own `opts.model` still wins.
+
+The cost is Cursor's per-request routing, and that was the trade.
+
+🛑 **PINNING IT BUYS NO CONTEXT GAUGE, WHICH WAS THE HOPE BEHIND THE RULING.** A
+percentage needs the window size, and `cursor-agent --list-models` names one
+only in the ids that carry it: `Claude Opus 5 1M Thinking` does,
+`Composer 2.5 Fast` does not. So `reportsContext` stays `false` and the gauge's
+fix is the `n/a` chip above, not this constant.
 
 ## How a host grant is delivered is DECLARED, never inferred
 

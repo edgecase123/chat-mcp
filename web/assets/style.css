@@ -1286,6 +1286,13 @@ body {
   color: var(--fg-faint);
   opacity: 0.7;
 }
+/* #371 — a vendor that reports no window. Fainter than stale, because stale is
+   a problem to chase and this is a permanent property of that CLI. */
+.sidebar__item-gauge.is-unreported {
+  color: var(--fg-faint);
+  opacity: 0.55;
+  font-style: italic;
+}
 
 /* Claims panel (#101). Who holds a shared resource, above Peers because it is
    the thing to check before starting anything. */
