@@ -6,13 +6,29 @@ import { join } from "node:path";
 
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-container-"));
 
-const { imageNeedsBuild, buildImage, confirmVerdict, describePlan, IMAGE_TAG } =
-  await import("../../src/supervise/container.js");
+const {
+  imageNeedsBuild,
+  buildImage,
+  confirmVerdict,
+  describePlan,
+  envValuesDigest,
+  IMAGE_TAG,
+} = await import("../../src/supervise/container.js");
+/**
+ * #356 — a digest over the override env values. These fixtures carry no
+ * override, so the field only has to be PRESENT and stable.
+ *
+ * 🛑 FROM THE DYNAMIC IMPORT, NEVER A STATIC ONE. A static import of
+ * `container.js` is hoisted above the `CHAT_MCP_HOME` assignment, so it would
+ * resolve the real `~/.chat-mcp` and this file would write to it.
+ */
+const NO_ENV_DIGEST = envValuesDigest(undefined);
 
 /** Any valid plan — this file's confirm assertions are about the STORE. */
 const PLAN = {
   mountPaths: ["/work"],
   envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+  envValuesDigest: NO_ENV_DIGEST,
   binary: "claude",
   networkMode: "bridge",
   image: IMAGE_TAG,
@@ -72,6 +88,7 @@ test("the printed plan names mounts, env var NAMES only, binary, network and ima
   const plan = describePlan({
     mountPaths: ["/work", "/root/.chat-mcp"],
     envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+    envValuesDigest: NO_ENV_DIGEST,
     binary: "claude",
     networkMode: "bridge (default, full outbound)",
     image: "chat-mcp-agent:local",

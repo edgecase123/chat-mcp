@@ -8,7 +8,18 @@ process.env.CHAT_MCP_HOME = mkdtempSync(
   join(tmpdir(), "chat-mcp-confirm-image-"),
 );
 
-const { describePlan } = await import("../../src/supervise/container.js");
+const { describePlan, envValuesDigest } =
+  await import("../../src/supervise/container.js");
+/**
+ * #356 — a digest over the override env values. These fixtures carry no
+ * override, so the field only has to be PRESENT and stable.
+ *
+ * 🛑 FROM THE DYNAMIC IMPORT, NEVER A STATIC ONE. A static import of
+ * `container.js` is hoisted above the `CHAT_MCP_HOME` assignment, so it would
+ * resolve the real `~/.chat-mcp` and this file would write to it.
+ */
+const NO_ENV_DIGEST = envValuesDigest(undefined);
+
 const { effectiveImage } =
   await import("../../src/supervise/drivers/containerized.js");
 
@@ -20,6 +31,7 @@ test("the confirm banner names the image the container will run", () => {
   const plan = describePlan({
     mountPaths: ["/work"],
     envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+    envValuesDigest: NO_ENV_DIGEST,
     binary: "claude",
     networkMode: "bridge",
     image: "chat-mcp-agent:local",

@@ -14,6 +14,7 @@ const {
   markConfirmed,
   diffPlans,
   describeChanges,
+  envValuesDigest,
   PLAN_FIELD_KEYS,
 } = await import("../../src/supervise/container.js");
 
@@ -25,6 +26,8 @@ function plan(over: Partial<ContainerPlan> = {}): ContainerPlan {
   return {
     mountPaths: ["/work"],
     envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
+    // #356 — no override in this factory, so one stable digest serves it.
+    envValuesDigest: envValuesDigest(undefined),
     binary: "claude",
     networkMode: "bridge",
     image: "chat-mcp-agent:local",

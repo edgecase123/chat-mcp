@@ -306,9 +306,13 @@ export async function startSupervisor(
     // 🛑 COMPARED, NOT LATCHED. A per-handle boolean meant an override
     // written AFTER the first approval was shown to nobody, ever — the
     // banner described a container and a different one ran.
+    // 🛑 THE OVERRIDE RESOLVED ABOVE, NOT A SECOND READ OF THE FILE. The value
+    // this spawn hands the container is `containerOverride`; a verdict computed
+    // from a re-read compares a different snapshot, and a write landing between
+    // the two spawns an unapproved value under a `confirmed` verdict.
     const verdict = confirmVerdict(
       opts.handle,
-      buildConfirmPlan(opts.vendor, opts.handle),
+      buildConfirmPlan(opts.vendor, opts.handle, containerOverride),
     );
 
     if (verdict.kind !== "confirmed") {

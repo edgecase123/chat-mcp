@@ -430,3 +430,33 @@ test("🛑 both paths are CLASSIFIED admin and in neither read set", () => {
     );
   }
 });
+
+/**
+ * 🛑 THE PLAN RESPONSE IS NOT CACHEABLE. It carries the mount map, the env var
+ * names and the env VALUES digest, and a 200 with no freshness header is one a
+ * heuristic cache may put on disk. Raised by my own security-scanner on PR 409.
+ *
+ * ⚠️ ASSERTED ON `respondJson`'s OUTPUT, NOT ON ONE ROUTE. Two routes already
+ * set this header by hand, which is how the ones that forgot stayed invisible,
+ * so the control below checks a SECOND route rather than trusting one.
+ */
+test("🛑 admin JSON responses are not cacheable", async () => {
+  const h = await harness();
+  try {
+    registerAgent("nostore", { vendor: SPAWNABLE, mode: "docker" });
+
+    const plan = await getPlan(h, "nostore");
+
+    assert.equal(plan.headers.get("cache-control"), "no-store");
+
+    // THE CONTROL: a different route through the same helper. A header set in
+    // one handler would satisfy the assertion above and nothing else.
+    const list = await fetch(`${h.origin}/api/agents`, {
+      headers: { Cookie: COOKIE },
+    });
+
+    assert.equal(list.headers.get("cache-control"), "no-store");
+  } finally {
+    close(h);
+  }
+});

@@ -1,11 +1,13 @@
 import { readMounts } from "./mounts.js";
 import { hasGhToken } from "./auth.js";
 import { resolveOverrideFor } from "./overrideStore.js";
+import type { ContainerOverride } from "./overrides.js";
 import {
   CONTAINER_GH_TOKEN_ENV,
   effectiveImage,
 } from "./drivers/containerized.js";
 import { installCpusFor, installMemoryFor } from "./installResources.js";
+import { envValuesDigest } from "./container.js";
 import type { ContainerPlan } from "./container.js";
 import type { VendorSpawn } from "./vendor.js";
 
@@ -22,12 +24,31 @@ const NETWORK_MODE = "bridge (default, full outbound — narrowing is #134)";
 export function buildConfirmPlan(
   vendor: VendorSpawn,
   handle: string,
+
+  /**
+   * The already-resolved override, when the caller has one.
+   *
+   * 🛑 THE GATE AND THE SPAWN MUST READ THE FILE ONCE. `startSupervisor`
+   * resolves it, then this function resolved it AGAIN — and the value the
+   * container receives is the caller's read, while the verdict was computed
+   * from ours. A write landing between the two makes an unapproved value spawn
+   * under a `confirmed` verdict. Found by my own security-scanner on PR 409.
+   *
+   * ⚠️ OPTIONAL, BECAUSE THREE CALLERS HAVE NO OVERRIDE IN HAND and reading
+   * it here is correct for them. The hazard is only a caller that reads it and
+   * then lets us read it again.
+   *
+   * 🛑 `null` AND `undefined` ARE DIFFERENT HERE. `null` is a caller saying
+   * it looked and there is no override; `undefined` is a caller that has not
+   * looked, and only that one falls through to the default read. A parameter
+   * typed `| undefined` alone would turn "I looked, there is none" into a
+   * second file read — the exact thing this argument exists to stop.
+   */
+  override: ContainerOverride | null | undefined = resolveOverrideFor(handle),
 ): ContainerPlan {
   const extra = Object.keys(readMounts().agents[handle] ?? {}).map(
     (k) => `/mnt/${k}`,
   );
-
-  const override = resolveOverrideFor(handle);
 
   // Listed only when one is on file, because that is exactly when
   // `dockerRunPlan` passes it. Naming a credential the container will not
@@ -56,6 +77,16 @@ export function buildConfirmPlan(
       ...ghEnvVar,
       ...Object.keys(override?.env ?? {}),
     ],
+    // 🛑 THE SAME RESOLVED OVERRIDE THE NAMES CAME FROM, for the reason
+    // `image` and `memory` already carry: resolving twice is how the banner and
+    // the spawn come to describe different files. The names line above says
+    // WHICH variables; this says whether what they hold has moved (#356).
+    //
+    // ⚠️ THE RESERVED CREDENTIALS ARE NOT IN HERE. `assertEnv` refuses them in
+    // an override, so the only values this can cover are the operator's own —
+    // and the two above are read from their own files at spawn time, never from
+    // a plan.
+    envValuesDigest: envValuesDigest(override?.env),
     // 🛑 THE CONTAINER BINARY, NEVER `vendor.binary`. Both callers gate on the
     // docker mode, so this banner only ever describes a container — and a
     // banner naming the host path asks the operator to approve a file that is
