@@ -194,7 +194,7 @@ test("renderSidebar reads scrollTop before mutating and restores it after", () =
 function liveState(child: Record<string, unknown> | null): State {
   const s = baseState();
   s.nowMinute = 1;
-  s.agents = [{ handle: "sup", boundAt: 1_000, child }];
+  s.agents = [{ handle: "sup", child }];
   return s;
 }
 

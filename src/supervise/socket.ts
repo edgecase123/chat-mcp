@@ -321,8 +321,14 @@ export interface LiveSupervisor {
    * When the socket file was created, as epoch milliseconds, or `null` when
    * its mtime could not be read.
    *
-   * 🛑 NULL MEANS UNKNOWN, NEVER NEW. Consumers must branch on it rather than
-   * substitute a default; `agentRow` renders "bound time unknown" (#373).
+   * 🛑 NULL MEANS UNKNOWN, NEVER NEW. A consumer must branch on it rather
+   * than substitute a default.
+   *
+   * ⚠️ NO WEB CONSUMER IS LEFT. #374 removed the `bound Nm` label this field
+   * fed, and `agents-wiring.test.ts` now FORBIDS `app.js` from reading
+   * `boundAt` at all. `/api/agents/live` still serializes it and
+   * `agents-stop-route.test.ts` still asserts its type, so retiring the field
+   * is wider than #374 was.
    *
    * ⚠️ THIS IS THE SUPERVISOR'S AGE, NOT THE CHILD'S. A restart respawns the
    * child without rebinding the socket, so a long age here says nothing about

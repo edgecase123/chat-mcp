@@ -491,3 +491,42 @@ test("🛑 every view refresh() fills, boot() fills too — an empty panel must 
     `refresh() calls these and boot() does not, so they are empty or unpainted on a fresh page load: ${missing.join(", ")}`,
   );
 });
+
+/**
+ * 🛑 #374 — TWO HANDLES, ONE ROW, AND THEY MUST NOT SWAP. The row READS as
+ * the child, because that is the handle a human messages and clicks to DM.
+ * `/api/agents/stop` accepts only the supervisor, so the supervisor rides on
+ * the wrapper's `data-supervisor` instead of a second visible row.
+ *
+ * ⚠️ WITHOUT THIS, `data-supervisor` HAS NO READER AT ALL and a future edit
+ * could put the child's handle there, or the supervisor's in the row target,
+ * with every other test in this file still green. The sibling stop assertion
+ * above cannot see it: it scans `stopButton` call sites, not the wrapper.
+ */
+test("🛑 the agent row targets the child and the wrapper carries the supervisor", () => {
+  const wrapper = APP_CODE.match(
+    /h\(\s*"div",\s*\{\s*className:\s*"agent",\s*"data-supervisor":\s*([^,}]+)/,
+  );
+
+  assert.notEqual(
+    wrapper,
+    null,
+    "no .agent wrapper with a data-supervisor attribute",
+  );
+  assert.equal(
+    wrapper![1]!.trim(),
+    "a.handle",
+    "data-supervisor must be the SUPERVISOR handle",
+  );
+
+  // THE OTHER HALF, and the test is vacuous without it: an attribute holding
+  // the supervisor proves nothing if the clickable row targets it too.
+  const row = APP_CODE.match(/sidebarItem\(\{[\s\S]*?target:\s*([^,]+),/);
+
+  assert.notEqual(row, null, "the agent row is not a sidebarItem any more");
+  assert.equal(
+    row![1]!.trim(),
+    "a.childHandle",
+    "the clickable row must target the CHILD handle",
+  );
+});

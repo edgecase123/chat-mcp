@@ -583,14 +583,20 @@ function agentsSection() {
 
 function peersSection() {
   // Peers
+  //
+  // 🛑 COMPUTED ONCE. `peersMinusSupervised` builds a Set per call, and the
+  // empty check and the map below both need the same answer — two calls is
+  // also two chances for them to disagree.
+  const peers = peersMinusSupervised(state.peers, state.agents);
+
   return h("div", { className: "sidebar__section" }, [
     h("div", { className: "sidebar__heading" }, ["Peers"]),
     // 🛑 THE FILTERED LIST, NOT `state.peers`. A bus whose only peer is a
     // supervised child would otherwise fall through to the map and render a
     // section with a heading and no rows.
-    ...(peersMinusSupervised(state.peers, state.agents).length === 0
+    ...(peers.length === 0
       ? [h("div", { className: "sidebar__empty" }, ["(none online)"])]
-      : peersMinusSupervised(state.peers, state.agents).map((p) =>
+      : peers.map((p) =>
           sidebarItem({
             label: p.handle,
             target: p.handle,

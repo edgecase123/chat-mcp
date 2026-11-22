@@ -1318,8 +1318,8 @@ body {
    shape, but the row inside it is now a .sidebar__item, whose own left border
    goes from transparent to the accent when the row is selected. Keeping both
    drew two bars side by side on the selected agent, and the point of #374 is
-   that an agent row looks like a peer row. .pair and .claim declare their own
-   border and are unaffected.
+   that an agent row looks like a peer row. .registration and .claim declare
+   their own border and are unaffected.
 
    ⚠️ THE PADDING STAYS. .agent__actions, the gate control and .agents__sweep
    all align on this 8px inset. */
