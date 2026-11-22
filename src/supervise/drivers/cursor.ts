@@ -144,34 +144,40 @@ export function routeCursorEvent(
 /**
  * The tool's own name out of a Cursor `tool_call` event, or `null`.
  *
- * 🛑 THE EVENT KEYS ARE HAND-WRITTEN snake_case AND THIS NESTED VALUE IS NOT.
- * The writer passes `tool_call: n.message.value.toolCall` — a raw internal
- * object — so the keys under it are camelCase. Read out of the shipped bundle
- * at 2026.11.19-f005e9d: `mcpToolCall` appears 9 times and `toolName` 317,
- * while `mcp_tool_call` appears twice and both are protobuf schema strings.
+ * 🛑 THE VARIANT KEY IS THE NAME, AND IT NEEDS NO KNOWLEDGE OF THE INSIDE.
+ * `tool_call` is a oneof whose variants are each `*_tool_call`; 49 distinct
+ * camelCase `*ToolCall` keys appear in the bundle at 2026.11.19-f005e9d. So
+ * exactly one such key identifies the call even when its contents surprise us.
  *
- * ⚠️ READ OFF A BUNDLE, NOT OFF A CAPTURED EVENT. That is why an unreadable
- * shape returns `null` and is reported, rather than being skipped: a wrong
- * path here would otherwise reproduce #392 exactly.
+ * 🛑 A `kind` FALLBACK WAS TRIED AND IT DEFEATED THE WHOLE GUARD. Every
+ * sampled `toolCall` object carries one, so an unrecognised shape was named
+ * `"other"` — not null, no signal — and a bus `send` under a wrong path
+ * produced the same false warning as #392 with nothing reporting it.
+ * claude1 on PR 393.
+ *
+ * ⚠️ AN MCP CALL WE CANNOT NAME REPORTS `null`, NOT ITS KEY. `mcpToolCall` is
+ * the only variant a bus `send` arrives under, so naming it `"mcpToolCall"`
+ * would assert "a tool ran and it was not a send" — the one claim this
+ * function must never make on a guess.
  */
 function cursorToolName(raw: unknown): string | null {
   if (!raw || typeof raw !== "object") return null;
 
-  const mcp = (raw as { mcpToolCall?: unknown }).mcpToolCall;
+  const variants = Object.keys(raw).filter((k) => k.endsWith("ToolCall"));
 
-  if (mcp && typeof mcp === "object") {
-    const name = (mcp as { toolName?: unknown }).toolName;
+  // Zero is an unrecognised shape. More than one is ambiguous, and picking
+  // either would be a guess about which tool actually ran.
+  if (variants.length !== 1) return null;
 
-    if (typeof name === "string" && name) return name;
+  const key = variants[0];
+
+  if (key === "mcpToolCall") {
+    const name = (raw as Record<string, { toolName?: unknown }>)[key]?.toolName;
+
+    return typeof name === "string" && name ? name : null;
   }
 
-  // A non-MCP Cursor tool — a shell command, a file read. It is a real tool
-  // call with a readable kind, and it is simply not a bus tool.
-  const kind = (raw as { kind?: unknown }).kind;
-
-  if (typeof kind === "string" && kind) return kind;
-
-  return null;
+  return key;
 }
 
 /**

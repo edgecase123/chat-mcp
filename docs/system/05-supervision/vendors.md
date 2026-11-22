@@ -110,9 +110,30 @@ type:"tool_call",subtype:"started",call_id:…,tool_call:…,session_id:…
 
 🛑 **THE EVENT KEYS ARE HAND-WRITTEN snake_case AND THE NESTED VALUE IS NOT.**
 The writer passes `tool_call: n.message.value.toolCall`, a raw internal object,
-so the keys under it are camelCase: `mcpToolCall`, then `toolName`.
-`mcp_tool_call` appears in that bundle twice and both are protobuf schema
-strings.
+so the keys under it are camelCase. `mcp_tool_call` appears in that bundle
+twice and both are protobuf schema strings.
+
+🛑 **THE CALL IS NAMED FROM ITS VARIANT KEY, NOT FROM ITS CONTENTS.**
+`tool_call` is a oneof whose variants are each `*_tool_call`, and 49 distinct
+camelCase `*ToolCall` keys appear in the bundle. Exactly one such key
+identifies the call even when the inside surprises us.
+
+| the `tool_call` object has           | the name is    |
+| ------------------------------------ | -------------- |
+| exactly one `*ToolCall` key          | that key       |
+| `mcpToolCall` with a `toolName`      | the `toolName` |
+| `mcpToolCall` with no `toolName`     | `null`         |
+| no `*ToolCall` key, or more than one | `null`         |
+
+⚠️ **A `kind` FALLBACK WAS TRIED AND IT DEFEATED THE GUARD.** Every sampled
+`toolCall` object carries a `kind`, so an unrecognised shape was named
+`"other"` — not null, no signal — and a bus `send` under a wrong path would
+have produced the same false warning as #392 with nothing reporting it.
+
+⚠️ **AN MCP CALL THAT CANNOT BE NAMED REPORTS `null`, NEVER ITS KEY.**
+`mcpToolCall` is the only variant a bus `send` arrives under, so naming it
+`"mcpToolCall"` would assert "a tool ran and it was not a send" — the one claim
+that must never rest on a guess.
 
 ⚠️ **THAT NESTING IS READ OFF A BUNDLE, NOT OFF A CAPTURED EVENT.** So an
 unreadable shape reports `null` rather than being skipped, and the supervisor

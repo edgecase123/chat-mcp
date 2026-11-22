@@ -177,3 +177,72 @@ test("🛑 EVERY vendor's router reports a tool call, and there is at least one"
 
   assert.ok(checked > 0, "no vendor has a spawn, so this test proves nothing");
 });
+
+/**
+ * 🛑 THE PAIRED CONTROL FOR THE NULL GUARD, AND IT FAILED THE FIRST CUT.
+ *
+ * A `kind` fallback named this object `"other"`, which is not null — so the
+ * guard did not fire, `isOutboundChatTool` said no, and a bus `send` under a
+ * wrong field path produced the SAME false warning as #392 with nothing
+ * reporting that the driver could not read the call.
+ *
+ * ⚠️ MY OWN FIXTURE HID IT. `{somethingNobodyPredicted:{…}}` omits `kind`, so
+ * it exercised the one shape where the guard still worked. claude1 on PR 393,
+ * and the same shape of miss as the leaf-directory fixture on PR 389.
+ */
+test("🔴 a realish tool_call with a `kind` but NO variant key reports null", () => {
+  const s = sink();
+
+  routeCursorEvent(
+    started({ toolCallId: "t1", title: "Other", kind: "other", status: "ok" }),
+    s.on,
+  );
+
+  assert.deepEqual(
+    s.names,
+    [null],
+    "a `kind` was read as the tool's name, which silences the guard",
+  );
+});
+
+/**
+ * 🛑 THE VARIANT KEY IS THE RELIABLE NAME. `tool_call` is a oneof and its
+ * variants are each `*_tool_call`; 49 distinct camelCase `*ToolCall` keys
+ * appear in the bundle at 2026.11.19-f005e9d. Naming a call from the key needs
+ * no knowledge of what is inside it.
+ */
+test("🔴 a built-in Cursor tool is named by its VARIANT KEY", () => {
+  const s = sink();
+
+  routeCursorEvent(started({ shellToolCall: { command: "ls" } }), s.on);
+
+  assert.deepEqual(s.names, ["shellToolCall"]);
+});
+
+/**
+ * 🛑 AN MCP CALL WE CANNOT NAME IS THE DANGEROUS ONE, so it reports null
+ * rather than falling back to its variant key. `mcpToolCall` is the only
+ * variant a bus `send` can arrive under — naming it `"mcpToolCall"` would say
+ * "a tool ran and it was not a send", which is the claim we cannot make.
+ */
+test("🔴 an mcpToolCall with no readable toolName reports null, not its key", () => {
+  const s = sink();
+
+  routeCursorEvent(
+    started({ mcpToolCall: { providerIdentifier: "chat" } }),
+    s.on,
+  );
+
+  assert.deepEqual(s.names, [null]);
+});
+
+test("🛑 TWO variant keys is ambiguous and reports null", () => {
+  const s = sink();
+
+  routeCursorEvent(
+    started({ shellToolCall: { command: "ls" }, readToolCall: { path: "a" } }),
+    s.on,
+  );
+
+  assert.deepEqual(s.names, [null]);
+});
