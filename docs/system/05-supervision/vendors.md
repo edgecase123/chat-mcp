@@ -197,6 +197,22 @@ means `exec "$@"` never runs and no agent starts at all.
 paths are measured; a live containerized Cursor turn needs #317's acceptance
 harness and has not been run.
 
+## `--binary` is a HOST flag, and a container refuses it
+
+🛑 **`SpawnOptions.binary` is one string for two filesystems.** A host path
+exec'd inside Linux exits 127, and the supervisor reports that as a dead agent
+rather than as a missing CLI — the operator is never told their own flag named
+the cause. lee ruled "refuse on both" for this and #368, 2026-11-21.
+
+```
+--binary <path> --driver docker-cursor   ->  REFUSED at plan time
+--binary <path> --driver cursor          ->  honoured, host filesystem
+no --binary     --driver docker-cursor   ->  vendor.containerBinary
+```
+
+⚠️ **The refusal carries the vendor's `containerBinary`**, because a path
+inside an image the operator cannot list is not guessable.
+
 ## One image per vendor
 
 Ruled by lee on 2026-11-20: _"cursor should have its own image"_.

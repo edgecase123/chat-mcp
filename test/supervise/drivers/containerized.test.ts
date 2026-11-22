@@ -2911,3 +2911,67 @@ test("🔴 control — a LONG-LIVED vendor's send() is still RAW", async (t) => 
 
   assert.equal(written(), claudeSpawn.encodeInput("line one\n"));
 });
+
+/**
+ * 🛑 #365, RULED BY lee: *"refuse on both"*. `SpawnOptions.binary` is one
+ * string for two filesystems. An operator naming a host path and asking for a
+ * container got that host path exec'd inside Linux, exit 127 — reported as a
+ * dead agent rather than as their own flag naming a file the image lacks.
+ */
+test("🛑 an explicit binary with the DOCKER path is REFUSED, naming the image's own CLI", () => {
+  setVendorToken(cursorSpawn, "key-x");
+
+  assert.throws(
+    () =>
+      dockerRunPlan(cursorSpawn, {
+        cwd: PROJECT_DIR,
+        supervisorHandle: "claude1",
+        binary: "/Users/me/.local/bin/cursor-agent",
+      }),
+    (err: Error) => {
+      assert.match(err.message, /cursor/);
+      assert.match(err.message, /\/Users\/me\/\.local\/bin\/cursor-agent/);
+      // The remedy, not just the refusal: the operator needs the value that
+      // WOULD have run, or they cannot tell what to pass instead.
+      assert.match(err.message, new RegExp(cursorSpawn.containerBinary));
+
+      return true;
+    },
+  );
+});
+
+test("🔴 control — with NO explicit binary the plan runs the image's own CLI", () => {
+  setVendorToken(cursorSpawn, "key-x");
+
+  const { args } = dockerRunPlan(cursorSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+
+  assert.ok(
+    args.includes(cursorSpawn.containerBinary),
+    `the container's own CLI is not in the argv: ${args.join(" ")}`,
+  );
+});
+
+/**
+ * 🔴 CONTROL — the refusal is CONTAINER-ONLY. `--binary` is the supported way
+ * to run a CLI from an unusual path on the HOST, and #365 is about one field
+ * naming two filesystems, not about the field being wrong.
+ *
+ * 🛑 READ OFF `host.ts` ITSELF, because a hand-written copy of the `??` here
+ * would keep passing while the driver changed underneath it. Asserting on a
+ * real host spawn would exec a CLI this suite must not run.
+ */
+test("🔴 control — the HOST driver still honours an explicit binary, and carries no container refusal", () => {
+  const source = readFileSync(
+    new URL("../../../src/supervise/drivers/host.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /turnOpts\.binary \?\? vendor\.binary/);
+  assert.ok(
+    !source.includes("assertBinaryOverrideIsContainerSafe"),
+    "the host driver now carries the container-only refusal",
+  );
+});
