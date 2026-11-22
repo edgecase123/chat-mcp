@@ -164,6 +164,9 @@ const state = {
   // ⚠️ THIS KEY IS ALSO AN INPUT OF THE SECTION IT PROTECTS, so typing itself
   // triggers the rebuild. Recorded on #399.
   registrationDraft: { handle: "", vendor: "", mode: "docker" },
+  // Bumped when something OTHER than typing has to rebuild the register form.
+  // The draft is not signed, so this is the only way to ask.
+  registrationEpoch: 0,
   registrationError: null,
   // #132 slice 4b — one handle's container plan, as `/api/agents/plan`
   // returned it. Keyed by handle so re-reading one row cannot blank another's.
@@ -1855,6 +1858,10 @@ async function submitRegistration() {
       vendor: draft.vendor,
       mode: draft.mode,
     };
+    // 🛑 THE CLEAR IS INVISIBLE WITHOUT THIS. Re-storing an IDENTICAL pair
+    // leaves `registrations` byte-identical, so nothing else would mark the
+    // form due and the submitted handle would stay in the input.
+    state.registrationEpoch++;
     toast(`Registered ${draft.handle.trim()}`, "info");
   } catch (e) {
     // The route's own 400s land here — it owns the rules and this reports them
@@ -2953,9 +2960,10 @@ function armPulseFailsafe(handle) {
 /**
  * Repaint ONE row from `state.activity`, without a render.
  *
- * 🛑 THIS MUST NOT CALL renderSidebar(). It would wipe and rebuild the whole
- * sidebar four times a second, and it would close an open (...) menu under the
- * operator's cursor every time an agent emitted a tool call.
+ * 🛑 THIS MUST NOT CALL renderSidebar(). Since #399 it would rebuild the peers
+ * section, and `openMenuFor` is state-backed so a menu would be rebuilt open
+ * rather than closed — but four section rebuilds a second is still the wrong
+ * shape for a class toggle.
  *
  * A handle with no row is normal and silent — a pulse can arrive for an agent
  * the peer list has not caught up with, or one the operator cannot see.

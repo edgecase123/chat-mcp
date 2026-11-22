@@ -2225,10 +2225,14 @@ export const SIDEBAR_SECTIONS = [
   },
   {
     key: "registration",
+    // 🛑 `registrationDraft` IS DELIBERATELY ABSENT. It is the half-typed
+    // state this section exists to protect, so signing it made typing itself
+    // rebuild the form and swap the focused <input> out. `registrationEpoch`
+    // is how the clear-on-success path asks for the rebuild instead.
     inputs: [
       "registrations",
       "vendors",
-      "registrationDraft",
+      "registrationEpoch",
       "registrationError",
       "capabilities",
       "plans",
