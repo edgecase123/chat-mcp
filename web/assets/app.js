@@ -94,6 +94,9 @@ const state = {
   // #40 — supervisors answering on their socket right now. NOT the `agents`
   // table, which records a pid nothing keeps fresh.
   agents: [],
+  // The minute `renderSidebar` last ran in. The agents section signs it so a
+  // clock-derived label keeps advancing (#399).
+  nowMinute: 0,
   rooms: [],
   discoverRooms: [],
   currentTarget: null, // e.g. "#poker" or "@alice"
@@ -390,6 +393,11 @@ const SECTION_BUILDERS = {
 let sidebarSigs = {};
 
 function renderSidebar() {
+  // 🛑 STAMPED HERE, NOT WHERE THE PAYLOAD IS FETCHED. `fetchLiveAgents` is
+  // not on a timer, so a bucket written beside it would never move on a wake
+  // that fetched nothing. The agents section declares this as an input.
+  state.nowMinute = Math.floor(Date.now() / 60_000);
+
   const next = sidebarSignatures(state);
 
   // An empty sidebar has no nodes to keep, so every section is due.

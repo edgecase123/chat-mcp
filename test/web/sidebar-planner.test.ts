@@ -182,3 +182,122 @@ test("renderSidebar reads scrollTop before mutating and restores it after", () =
   assert.ok(read < mutate, "the read must precede the first mutation");
   assert.ok(mutate < write, "the restore must follow the mutation");
 });
+
+/**
+ * 🛑 `baseState`'s child is NOT the shape `/api/agents/live` sends. The route
+ * spreads `gaugeFreshness` onto the child, so `fresh` and `age_ms` sit beside
+ * `context_used`; `gauge` is derived in the browser and never arrives. The
+ * tests below need the real shape, because the defect lives in those two keys.
+ */
+function liveState(child: Record<string, unknown> | null): State {
+  const s = baseState();
+  s.nowMinute = 1;
+  s.agents = [{ handle: "sup", boundAt: 1_000, child }];
+  return s;
+}
+
+const planFrom = (before: State, after: State) =>
+  sectionsToRebuild(sidebarSignatures(before), sidebarSignatures(after));
+
+/** A child that HAS reported, so `fresh` and `age_ms` are both populated. */
+const reported = {
+  context_used: 100,
+  context_total: 1_000,
+  context_reported_at: 500,
+  fresh: true,
+  age_ms: 1_000,
+};
+
+/**
+ * 🛑 THE FROZEN CLOCK. `agentRow` derives `bound Xm` from `Date.now()`, not
+ * from state, so a supervisor with `child: null` has a byte-stable payload and
+ * its age would read `bound 0m` forever.
+ */
+test("a childless supervisor rebuilds agents once the minute rolls", () => {
+  const after = liveState(null);
+  after.nowMinute = 2;
+
+  assert.deepEqual(planFrom(liveState(null), after), ["agents"]);
+});
+
+/**
+ * ⚠️ THE CONTROL FOR THE TEST ABOVE. A planner returning every key satisfies
+ * it perfectly, so the same fixture with nothing moved must return nothing.
+ */
+test("a childless supervisor within the same minute rebuilds nothing", () => {
+  assert.deepEqual(planFrom(liveState(null), liveState(null)), []);
+});
+
+/**
+ * 🛑 THE SKIP WAS VACUOUS IN THE OTHER DIRECTION. `age_ms` is recomputed on
+ * every request, so a signature holding it differed on every wake and the
+ * agents section rebuilt every time.
+ */
+test("age_ms moving alone rebuilds nothing", () => {
+  const after = liveState({ ...reported, age_ms: 61_000 });
+
+  assert.deepEqual(planFrom(liveState({ ...reported }), after), []);
+});
+
+/** The same, for the other clock-derived field. */
+test("fresh flipping alone rebuilds nothing", () => {
+  const after = liveState({ ...reported, fresh: false });
+
+  assert.deepEqual(planFrom(liveState({ ...reported }), after), []);
+});
+
+/**
+ * 🛑 WHY THE TWO TESTS ABOVE ARE SAFE ONLY WITH THE MINUTE BUCKET. Dropping
+ * `fresh` from the signature means nothing else announces the 15-minute flip to
+ * the stale band, so the bucket has to carry it.
+ */
+test("a stale flip rebuilds agents on the next minute roll", () => {
+  const after = liveState({ ...reported, fresh: false });
+  after.nowMinute = 2;
+
+  assert.deepEqual(planFrom(liveState({ ...reported }), after), ["agents"]);
+});
+
+/**
+ * ⚠️ THE DISCRIMINATING CONTROL FOR THE PROJECTION. Stripping the whole child,
+ * or the whole `agents` key, passes every test above. Real state inside the
+ * child must still be seen.
+ */
+test("real child state still rebuilds agents", () => {
+  assert.deepEqual(
+    planFrom(
+      liveState({ ...reported }),
+      liveState({ ...reported, context_used: 900 }),
+    ),
+    ["agents"],
+    "a gauge percent change must not be skipped",
+  );
+
+  assert.deepEqual(
+    planFrom(
+      liveState({ ...reported }),
+      liveState({ ...reported, context_reported_at: 900 }),
+    ),
+    ["agents"],
+    "a NEW report is real state, not a clock read",
+  );
+});
+
+/**
+ * 🛑 THE BUCKET MUST BE STAMPED AT RENDER TIME. `fetchLiveAgents` is not on a
+ * timer — `refresh()` runs on an SSE wake — so a bucket stamped where the
+ * payload is fetched would never tick on a wake that fetched nothing.
+ */
+test("renderSidebar stamps the minute before it signs", () => {
+  const stamp = APP_CODE.indexOf("state.nowMinute = ");
+  const sign = APP_CODE.indexOf("sidebarSignatures(state)");
+
+  assert.notEqual(stamp, -1, "no minute stamp in app.js");
+  assert.notEqual(sign, -1, "no signature call — the pin would be vacuous");
+  assert.ok(stamp < sign, "the stamp must precede the signature");
+  assert.equal(
+    APP_CODE.match(/state\.nowMinute\s*=/g)?.length,
+    1,
+    "stamped in more than one place — one of them is not render time",
+  );
+});

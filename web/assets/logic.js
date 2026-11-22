@@ -2214,7 +2214,15 @@ export function settingsTabSelection(requested, tabs = SETTINGS_TABS) {
  */
 export const SIDEBAR_SECTIONS = [
   { key: "claims", inputs: ["claims", "handle"] },
-  { key: "agents", inputs: ["agents", "gateDefault", "gateEditing"] },
+  {
+    key: "agents",
+    // `nowMinute` is a RENDER-TIME clock read, and it is in here because
+    // `agentRow` derives `bound Xm` from `Date.now()` rather than from state.
+    // Without it a supervisor whose payload never changes shows one age
+    // forever. ⚠️ TEMPORARY: #374 removes that label, and with it this input.
+    inputs: ["agents", "gateDefault", "gateEditing", "nowMinute"],
+    project: { agents: agentsWithoutClock },
+  },
   {
     key: "registration",
     inputs: [
@@ -2254,11 +2262,45 @@ function stableValue(value) {
   return JSON.stringify(value ?? null);
 }
 
-/** One signature per section, over a DEEP read of that section's inputs. */
+/**
+ * The agents payload with its two CLOCK-DERIVED fields dropped.
+ *
+ * 🛑 `/api/agents/live` spreads `gaugeFreshness(reported_at, Date.now())` onto
+ * each child, so `fresh` and `age_ms` move on every request and a signature
+ * holding them can never skip. `context_reported_at` STAYS: a new report is
+ * real state, and the minute bucket carries the 15-minute flip to stale.
+ */
+function agentsWithoutClock(agents) {
+  if (!Array.isArray(agents)) return agents;
+
+  return agents.map((agent) => {
+    const child = agent?.child;
+    if (child === null || typeof child !== "object") return agent;
+
+    const kept = { ...child };
+    delete kept.fresh;
+    delete kept.age_ms;
+
+    return { ...agent, child: kept };
+  });
+}
+
+/**
+ * One signature per section, over a DEEP read of that section's inputs.
+ *
+ * A section may declare a `project` per input, which is the only place a value
+ * is narrowed before it is signed.
+ */
 export function sidebarSignatures(state, sections = SIDEBAR_SECTIONS) {
   const out = {};
-  for (const { key, inputs } of sections) {
-    out[key] = inputs.map((k) => `${k}=${stableValue(state[k])}`).join("&");
+  for (const { key, inputs, project } of sections) {
+    out[key] = inputs
+      .map((k) => {
+        const read = project?.[k];
+
+        return `${k}=${stableValue(read ? read(state[k]) : state[k])}`;
+      })
+      .join("&");
   }
 
   return out;
