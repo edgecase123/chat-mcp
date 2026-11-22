@@ -351,13 +351,24 @@ test("a bumped epoch rebuilds registration even when nothing else moved", () => 
   assert.deepEqual(due, ["registration"]);
 });
 
-/** The epoch is useless if the clear path does not bump it. */
-test("submitRegistration bumps the epoch where it clears the draft", () => {
+/**
+ * 🛑 THE EPOCH MUST BUMP IN THE SUCCESS BRANCH, NOT MERELY SOMEWHERE NEARBY.
+ * A bump moved into the `catch` keeps a co-location check green while the
+ * clear goes invisible again, so this pins three indices the way the
+ * `scrollTop` test above pins read < mutate < write.
+ */
+test("submitRegistration bumps the epoch after the clear and before the catch", () => {
   const fn = APP_CODE.slice(
     APP_CODE.indexOf("async function submitRegistration("),
   ).split("\n}")[0];
 
-  assert.notEqual(fn.length, 0, "submitRegistration not found");
-  assert.match(fn, /state\.registrationDraft = \{/, "no draft clear — vacuous");
-  assert.match(fn, /state\.registrationEpoch\s*\+\+|registrationEpoch \+= 1/);
+  const clear = fn.indexOf("state.registrationDraft = {");
+  const bump = fn.indexOf("state.registrationEpoch++");
+  const caught = fn.indexOf("} catch");
+
+  assert.notEqual(clear, -1, "no draft clear — the pin would be vacuous");
+  assert.notEqual(bump, -1, "no epoch bump");
+  assert.notEqual(caught, -1, "no catch — the ordering could not discriminate");
+  assert.ok(clear < bump, "the bump must follow the clear it announces");
+  assert.ok(bump < caught, "the bump must be in the SUCCESS branch");
 });

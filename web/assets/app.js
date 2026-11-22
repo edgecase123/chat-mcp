@@ -2960,10 +2960,10 @@ function armPulseFailsafe(handle) {
 /**
  * Repaint ONE row from `state.activity`, without a render.
  *
- * 🛑 THIS MUST NOT CALL renderSidebar(). Since #399 it would rebuild only the
- * peers section, and `openMenuFor` is state-backed so a menu would be rebuilt
- * open rather than closed — but four section rebuilds a second is still the
- * wrong shape for a class toggle.
+ * 🛑 THIS MUST NOT CALL renderSidebar(). Since #399 it would rebuild the peers
+ * section, and `openMenuFor` is state-backed so a menu would be rebuilt open
+ * rather than closed — but four section rebuilds a second is still the wrong
+ * shape for a class toggle.
  *
  * A handle with no row is normal and silent — a pulse can arrive for an agent
  * the peer list has not caught up with, or one the operator cannot see.
