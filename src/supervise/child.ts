@@ -128,6 +128,22 @@ export interface AgentChild {
    */
   onSession(cb: (sessionId: string) => void): void;
 
+  /**
+   * This turn called a tool, named when the driver could read its name.
+   *
+   * 🛑 SEMANTIC, LIKE onTurnEnd, AND IT REPLACED SHAPE-SNIFFING ABOVE THE
+   * DRIVER. `silent-reply.ts` used to read Claude Code's `tool_use` blocks
+   * itself, so it was blind to Cursor, which emits a TOP-LEVEL `tool_call`
+   * event — every Cursor turn that sent was reported as answering nobody.
+   * #392.
+   *
+   * ⚠️ `null` MEANS A CALL HAPPENED AND THE DRIVER COULD NOT NAME IT. It is
+   * not the same as no call, and the supervisor logs it rather than dropping
+   * it — a vendor's event shape can change under us, and the failure mode of
+   * a wrong field path is silence.
+   */
+  onToolCall(cb: (name: string | null) => void): void;
+
   /** Raw driver events, for logging and diagnosis only. Never for control flow. */
   onEvent(cb: (event: Record<string, unknown>) => void): void;
 

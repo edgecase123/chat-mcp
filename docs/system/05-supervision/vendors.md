@@ -88,6 +88,60 @@ whole reason for the field.** `host-grant-reaches-bus.test.ts` pins each value
 against the argv, so a vendor declaring `"flags"` while ignoring the grant
 fails rather than silently never triggering the refusal.
 
+## A vendor reports its OWN tool calls, because the shapes are not alike
+
+`EventRouter` carries `toolCall?(name: string | null)`. The supervisor turns
+that into `turn.sent` for the silent-reply detector, and into nothing else.
+
+| vendor | a tool call arrives as                                        |
+| ------ | ------------------------------------------------------------- |
+| claude | a `tool_use` BLOCK inside an `assistant` message's `content`  |
+| cursor | a TOP-LEVEL `tool_call` event, `subtype` started or completed |
+
+🛑 **THE DETECTOR USED TO SNIFF FOR THE CLAUDE SHAPE ITSELF**, one layer above
+the drivers, so it was blind to Cursor and every Cursor turn that sent was
+reported as having answered nobody. #392.
+
+**Cursor's shape, read out of the shipped bundle at 2026.11.19-f005e9d:**
+
+```
+type:"tool_call",subtype:"started",call_id:…,tool_call:…,session_id:…
+```
+
+🛑 **THE EVENT KEYS ARE HAND-WRITTEN snake_case AND THE NESTED VALUE IS NOT.**
+The writer passes `tool_call: n.message.value.toolCall`, a raw internal object,
+so the keys under it are camelCase. `mcp_tool_call` appears in that bundle
+twice and both are protobuf schema strings.
+
+🛑 **THE CALL IS NAMED FROM ITS VARIANT KEY, NOT FROM ITS CONTENTS.**
+`tool_call` is a oneof whose variants are each `*_tool_call`, and 49 distinct
+camelCase `*ToolCall` keys appear in the bundle. Exactly one such key
+identifies the call even when the inside surprises us.
+
+| the `tool_call` object has           | the name is    |
+| ------------------------------------ | -------------- |
+| exactly one `*ToolCall` key          | that key       |
+| `mcpToolCall` with a `toolName`      | the `toolName` |
+| `mcpToolCall` with no `toolName`     | `null`         |
+| no `*ToolCall` key, or more than one | `null`         |
+
+⚠️ **A `kind` FALLBACK WAS TRIED AND IT DEFEATED THE GUARD.** Every sampled
+`toolCall` object carries a `kind`, so an unrecognised shape was named
+`"other"` — not null, no signal — and a bus `send` under a wrong path would
+have produced the same false warning as #392 with nothing reporting it.
+
+⚠️ **AN MCP CALL THAT CANNOT BE NAMED REPORTS `null`, NEVER ITS KEY.**
+`mcpToolCall` is the only variant a bus `send` arrives under, so naming it
+`"mcpToolCall"` would assert "a tool ran and it was not a send" — the one claim
+that must never rest on a guess.
+
+⚠️ **THAT NESTING IS READ OFF A BUNDLE, NOT OFF A CAPTURED EVENT.** So an
+unreadable shape reports `null` rather than being skipped, and the supervisor
+logs it — a wrong field path would otherwise reproduce #392 exactly.
+
+⚠️ **BOTH SUBTYPES ARE EMITTED FOR ONE CALL.** `turn.sent` only moves to true,
+so this costs nothing today; a future COUNT of them would double.
+
 ## Sharing an event spelling is a coincidence, not a contract
 
 Both CLIs happen to end a turn with `{"type":"result"}`.

@@ -149,6 +149,27 @@ export function writeClaudeMcpConfig(handle: string, entry?: string): string {
   return path;
 }
 
+/** Every `tool_use` name in one Claude Code assistant event. */
+function claudeToolNames(event: Record<string, unknown>): string[] {
+  if (event.type !== "assistant") return [];
+
+  const content = (event.message as { content?: unknown } | undefined)?.content;
+
+  if (!Array.isArray(content)) return [];
+
+  const names: string[] = [];
+
+  for (const block of content) {
+    const b = block as { type?: unknown; name?: unknown };
+
+    if (b.type === "tool_use" && typeof b.name === "string" && b.name) {
+      names.push(b.name);
+    }
+  }
+
+  return names;
+}
+
 /**
  * Map ONE parsed Claude Code event onto the semantic callbacks.
  *
@@ -168,6 +189,7 @@ export function routeClaudeEvent(
     context?(snapshot: ContextSnapshot): void;
     denial?(denial: Denial): void;
     session?(id: string): void;
+    toolCall?(name: string | null): void;
   },
 ): void {
   const usage = parseClaudeRateLimit(event);
@@ -181,6 +203,17 @@ export function routeClaudeEvent(
   // 🛑 BEFORE the denial check. The call arrives in an earlier event than
   // its refusal, so the recorder must see every assistant event first.
   rememberClaudeToolUse(event);
+
+  // 🛑 THE DRIVER REPORTS ITS OWN TOOL CALLS NOW. `silent-reply.ts` used to
+  // read `tool_use` blocks itself, above the drivers, which made it blind to
+  // any vendor that does not use Claude Code's shape — Cursor emits a
+  // TOP-LEVEL `tool_call` event and was invisible to it. #392.
+  //
+  // ⚠️ THE NAME IS PASSED THROUGH UNPREFIXED OR PREFIXED, WHICHEVER THE CLI
+  // USED. `isOutboundChatTool` handles both, in one place, above the vendors.
+  if (on.toolCall) {
+    for (const name of claudeToolNames(event)) on.toolCall(name);
+  }
 
   const denial = denialFromClaude(event);
   if (denial && on.denial) on.denial(denial);

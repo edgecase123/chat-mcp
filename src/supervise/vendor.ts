@@ -32,6 +32,21 @@ export type EventRouter = (
     context?(snapshot: ContextSnapshot): void;
     denial?(denial: Denial): void;
     session?(id: string): void;
+
+    /**
+     * This turn called a tool, named if the vendor could read its name.
+     *
+     * 🛑 `null` MEANS "A TOOL CALL HAPPENED AND I COULD NOT NAME IT", AND IT
+     * IS NOT THE SAME AS NOT CALLING THIS AT ALL. The supervisor logs it.
+     * Cursor's event shape is read out of its shipped bundle rather than off
+     * a captured stream, so a wrong field path is a live possibility — and
+     * the failure mode of a wrong path is the SILENCE #392 is about.
+     * Reporting `null` turns that guess into a signal.
+     *
+     * ⚠️ IT REPORTS EVERY TOOL, NOT ONLY BUS TOOLS. `isOutboundChatTool`
+     * decides which ones matter, in one place, above the vendors.
+     */
+    toolCall?(name: string | null): void;
   },
 ) => void;
 

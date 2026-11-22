@@ -29,6 +29,7 @@ function harness() {
   const lines: string[] = [];
   let emit: ((event: Record<string, unknown>) => void) | undefined;
   let endTurn: (() => void) | undefined;
+  let toolCall: ((name: string | null) => void) | undefined;
   const sent: string[] = [];
 
   const spawnChild = (_opts: SpawnOptions): AgentChild => ({
@@ -43,6 +44,9 @@ function harness() {
     onContext: () => undefined,
     onUsage: () => undefined,
     onDenial: () => undefined,
+    onToolCall: (cb) => {
+      toolCall = cb;
+    },
     onSession: (cb) => cb("sess"),
     onEvent: (cb) => {
       emit = cb;
@@ -57,6 +61,10 @@ function harness() {
     sent,
     spawnChild,
     emit: (e: Record<string, unknown>) => emit?.(e),
+    // 🛑 THE DRIVER NAMES THE TOOL NOW, so the wiring test must drive the
+    // same sink the real routers do. Emitting a `tool_use` BLOCK here would
+    // test a path `observe` no longer reads. #392.
+    toolCall: (name: string | null) => toolCall?.(name),
     endTurn: () => endTurn?.(),
     warnings: () => lines.filter((l) => /nobody received it/.test(l)),
   };
@@ -66,13 +74,6 @@ function text(t: string): Record<string, unknown> {
   return {
     type: "assistant",
     message: { content: [{ type: "text", text: t }] },
-  };
-}
-
-function tool(name: string): Record<string, unknown> {
-  return {
-    type: "assistant",
-    message: { content: [{ type: "tool_use", name }] },
   };
 }
 
@@ -133,7 +134,7 @@ test("a turn that called send is not reported", async () => {
     await deliverToSupervisor(handle, envelope(handle, 1));
 
     h.emit(text("Here is the answer."));
-    h.emit(tool("mcp__chat__send"));
+    h.toolCall("mcp__chat__send");
     h.endTurn();
 
     assert.deepEqual(h.warnings(), []);
@@ -184,6 +185,33 @@ test("a queued second message does not erase the first turn's verdict", async ()
       `the queued prompt erased the verdict; lines were ${JSON.stringify(h.lines)}`,
     );
     assert.equal(h.sent.length, 2, "the second prompt was never dispatched");
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🛑 THE UNNAMEABLE CALL, WIRED. Cursor's event shape is read out of its
+ * shipped bundle rather than off a captured stream, so a wrong field path is
+ * possible — and its failure mode is the silence #392 exists to end. The
+ * supervisor logs it, so a wrong guess is something an operator can report.
+ */
+test("🔴 a tool call the driver could not NAME is logged, and still warns", async () => {
+  const h = harness();
+  const { sup, handle } = await supervisor(h, "unnamed");
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    h.emit(text("Here is the answer."));
+    h.toolCall(null);
+    h.endTurn();
+
+    assert.ok(
+      h.lines.some((l) => /could not read its name/.test(l)),
+      "an unreadable tool call was swallowed, which is the bug under a new name",
+    );
+    assert.equal(h.warnings().length, 1, "a nameless call cleared the warning");
   } finally {
     await sup.stop();
   }

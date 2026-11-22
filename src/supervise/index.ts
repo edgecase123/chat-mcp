@@ -26,7 +26,12 @@ import {
   type ChildGrant,
 } from "./grant.js";
 import { announceChildExit } from "./exit-event.js";
-import { newTurn, observe, silentReplyWarning } from "./silent-reply.js";
+import {
+  newTurn,
+  observe,
+  observeToolCall,
+  silentReplyWarning,
+} from "./silent-reply.js";
 import { dirsFor } from "./projects.js";
 import { allowlistWith, resolveCwd } from "./allowlist.js";
 import { commandFromGrant, grantFor, grantVariants } from "./denial.js";
@@ -984,6 +989,26 @@ export async function startSupervisor(
         if (outcome) log(`← result: ${outcome}`);
 
         observe(turn, event);
+      }),
+    );
+
+    child.onToolCall(
+      ifCurrent("onToolCall", (name) => {
+        // 🛑 A CALL THE DRIVER COULD NOT NAME IS LOUD, NOT DROPPED. Cursor's
+        // event shape is read out of its shipped bundle rather than off a
+        // captured stream, so a wrong field path is possible — and its
+        // failure mode is the exact silence #392 exists to end. A line here
+        // turns that into something an operator can report.
+        if (name === null) {
+          log(
+            "⚠️ the agent called a tool and this driver could not read its name, " +
+              "so a send through it would not clear the silent-reply warning",
+          );
+
+          return;
+        }
+
+        observeToolCall(turn, name);
       }),
     );
 

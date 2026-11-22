@@ -44,6 +44,7 @@ function recordingChild(seen: SpawnOptions[]) {
       onContext: () => undefined,
       onUsage: () => undefined,
       onDenial: () => undefined,
+      onToolCall: () => undefined,
       onSession: (cb: (id: string) => void) => cb("sess-1"),
       onEvent: () => undefined,
       onStderr: () => undefined,

@@ -65,6 +65,7 @@ function harness() {
       context = cb;
     },
     onDenial: () => undefined,
+    onToolCall: () => undefined,
     onSession: (cb) => cb("sess"),
     onEvent: () => undefined,
     onStderr: () => undefined,

@@ -5,6 +5,7 @@ import {
   newTurn,
   observe,
   silentReplyWarning,
+  observeToolCall,
 } from "../../src/supervise/silent-reply.js";
 
 /**
@@ -65,7 +66,7 @@ test("a turn that called send is not warned about", () => {
   const turn = newTurn(true);
 
   observe(turn, assistantText("Here is the answer."));
-  observe(turn, assistantTool("mcp__chat__send"));
+  observeToolCall(turn, "mcp__chat__send");
 
   assert.equal(silentReplyWarning(turn), undefined);
 });
@@ -74,7 +75,7 @@ test("room_send counts as reaching somebody", () => {
   const turn = newTurn(true);
 
   observe(turn, assistantText("Posting this to the room."));
-  observe(turn, assistantTool("mcp__chat__room_send"));
+  observeToolCall(turn, "mcp__chat__room_send");
 
   assert.equal(silentReplyWarning(turn), undefined);
 });
@@ -87,7 +88,7 @@ test("room_send counts as reaching somebody", () => {
 test("a turn that produced no prose at all is NOT this defect", () => {
   const turn = newTurn(true);
 
-  observe(turn, assistantTool("Bash"));
+  observeToolCall(turn, "Bash");
 
   assert.equal(silentReplyWarning(turn), undefined);
 });
@@ -115,7 +116,7 @@ test("reading tools do not count as a send", () => {
   ]) {
     const turn = newTurn(true);
     observe(turn, assistantText("I read my messages."));
-    observe(turn, assistantTool(name));
+    observeToolCall(turn, name);
 
     assert.ok(
       silentReplyWarning(turn),
@@ -157,26 +158,46 @@ test("a non-assistant event cannot change the verdict", () => {
 test("a send before the prose still counts", () => {
   const turn = newTurn(true);
 
-  observe(turn, assistantTool("mcp__chat__send"));
+  observeToolCall(turn, "mcp__chat__send");
   observe(turn, assistantText("Done, I told them."));
 
   assert.equal(silentReplyWarning(turn), undefined);
 });
 
-test("one event may carry both prose and a send", () => {
+/**
+ * 🛑 THE TWO HALVES ARRIVE SEPARATELY NOW, AND THE PROPERTY IS UNCHANGED.
+ * Prose and a send in the same turn clear the warning no matter which input
+ * carried each — `observe` reads the text, the driver names the tool. One
+ * event used to carry both because this file read Claude Code's blocks
+ * directly, which is exactly what made it blind to Cursor. #392.
+ */
+test("prose and a send in one turn clear the warning, from separate inputs", () => {
   const turn = newTurn(true);
 
   observe(turn, {
     type: "assistant",
-    message: {
-      content: [
-        { type: "text", text: "Telling them now." },
-        { type: "tool_use", name: "mcp__chat__send" },
-      ],
-    },
+    message: { content: [{ type: "text", text: "Telling them now." }] },
   });
+  observeToolCall(turn, "mcp__chat__send");
 
   assert.equal(silentReplyWarning(turn), undefined);
+});
+
+/**
+ * 🛑 A CALL THE DRIVER COULD NOT NAME IS NOT A SEND. Treating `null` as one
+ * would hide the warning on every turn a vendor's event shape outran us,
+ * which is the silence #392 is about wearing a new hat.
+ */
+test("🔴 an UNNAMEABLE tool call does not clear the warning", () => {
+  const turn = newTurn(true);
+
+  observe(turn, {
+    type: "assistant",
+    message: { content: [{ type: "text", text: "Telling them now." }] },
+  });
+  observeToolCall(turn, null);
+
+  assert.match(String(silentReplyWarning(turn)), /nobody received it/);
 });
 
 /** A fresh turn must not inherit the previous turn's send. */
@@ -251,7 +272,7 @@ test("a REFUSED send still clears the warning — known gap, not a fix", () => {
   const turn = newTurn(true);
 
   observe(turn, assistantText("Answering you now."));
-  observe(turn, assistantTool("mcp__chat__send"));
+  observeToolCall(turn, "mcp__chat__send");
   observe(
     turn,
     toolFailed(

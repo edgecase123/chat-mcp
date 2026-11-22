@@ -38,6 +38,7 @@ test("a caller can observe the turn ending, instead of timing it", async () => {
     onContext: () => undefined,
     onUsage: () => undefined,
     onDenial: () => undefined,
+    onToolCall: () => undefined,
     onSession: (cb) => cb("sess"),
     onEvent: () => undefined,
     onStderr: () => undefined,

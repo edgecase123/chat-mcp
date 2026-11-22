@@ -112,6 +112,7 @@ export function routeCursorEvent(
     context?(snapshot: ContextSnapshot): void;
     denial?(denial: Denial): void;
     session?(id: string): void;
+    toolCall?(name: string | null): void;
   },
 ): void {
   // 🛑 THE ID ARRIVES ON THE INIT EVENT, WHICH IS THE FIRST LINE OF THE
@@ -129,6 +130,54 @@ export function routeCursorEvent(
   if (typeof id === "string" && on.session) on.session(id);
 
   if (event.type === "result") on.turnEnd();
+
+  // 🛑 A TOP-LEVEL EVENT, NOT A BLOCK INSIDE AN `assistant` MESSAGE. The
+  // silent-reply detector used to read `tool_use` blocks itself and returned
+  // at its first line for anything that was not `type: "assistant"` — so
+  // every Cursor turn that sent was reported as having answered nobody, and
+  // a real silent reply became indistinguishable from the false alarm. #392.
+  if (event.type === "tool_call" && on.toolCall) {
+    on.toolCall(cursorToolName(event.tool_call));
+  }
+}
+
+/**
+ * The tool's own name out of a Cursor `tool_call` event, or `null`.
+ *
+ * 🛑 THE VARIANT KEY IS THE NAME, AND IT NEEDS NO KNOWLEDGE OF THE INSIDE.
+ * `tool_call` is a oneof whose variants are each `*_tool_call`; 49 distinct
+ * camelCase `*ToolCall` keys appear in the bundle at 2026.11.19-f005e9d. So
+ * exactly one such key identifies the call even when its contents surprise us.
+ *
+ * 🛑 A `kind` FALLBACK WAS TRIED AND IT DEFEATED THE WHOLE GUARD. Every
+ * sampled `toolCall` object carries one, so an unrecognised shape was named
+ * `"other"` — not null, no signal — and a bus `send` under a wrong path
+ * produced the same false warning as #392 with nothing reporting it.
+ * claude1 on PR 393.
+ *
+ * ⚠️ AN MCP CALL WE CANNOT NAME REPORTS `null`, NOT ITS KEY. `mcpToolCall` is
+ * the only variant a bus `send` arrives under, so naming it `"mcpToolCall"`
+ * would assert "a tool ran and it was not a send" — the one claim this
+ * function must never make on a guess.
+ */
+function cursorToolName(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const variants = Object.keys(raw).filter((k) => k.endsWith("ToolCall"));
+
+  // Zero is an unrecognised shape. More than one is ambiguous, and picking
+  // either would be a guess about which tool actually ran.
+  if (variants.length !== 1) return null;
+
+  const key = variants[0];
+
+  if (key === "mcpToolCall") {
+    const name = (raw as Record<string, { toolName?: unknown }>)[key]?.toolName;
+
+    return typeof name === "string" && name ? name : null;
+  }
+
+  return key;
 }
 
 /**

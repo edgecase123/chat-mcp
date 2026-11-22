@@ -96,6 +96,7 @@ function harness() {
       onUsage: () => undefined,
       onContext: () => undefined,
       onDenial: () => undefined,
+      onToolCall: () => undefined,
       onSession: (cb) => cb("sess"),
       onEvent: (cb) => {
         slot.event = cb as (e: unknown) => void;
@@ -233,6 +234,7 @@ function deferredExitHarness() {
       onUsage: () => undefined,
       onContext: () => undefined,
       onDenial: () => undefined,
+      onToolCall: () => undefined,
       onSession: (cb) => cb("sess"),
       onEvent: () => undefined,
       onStderr: () => undefined,

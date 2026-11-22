@@ -40,6 +40,7 @@ function fakeChild(capture: {
     onContext: () => undefined,
     onUsage: () => undefined,
     onDenial: () => undefined,
+    onToolCall: () => undefined,
     onSession: () => undefined,
     onEvent: () => undefined,
     onStderr: () => undefined,

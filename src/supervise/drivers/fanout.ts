@@ -20,6 +20,7 @@ export type ChildSubscriptions = Pick<
   | "onContext"
   | "onDenial"
   | "onSession"
+  | "onToolCall"
   | "onStderr"
   | "onEvent"
   | "onExit"
@@ -89,6 +90,7 @@ export function createEventFanout(vendor: FanoutVendor): EventFanout {
   const contextCbs: ((s: ContextSnapshot) => void)[] = [];
   const denialCbs: ((d: Denial) => void)[] = [];
   const sessionCbs: ((id: string) => void)[] = [];
+  const toolCallCbs: ((name: string | null) => void)[] = [];
   const stderrCbs: ((chunk: string) => void)[] = [];
   const exitCbs: ((code: number | null, signal: string | null) => void)[] = [];
   let lastSession: string | null = null;
@@ -114,6 +116,9 @@ export function createEventFanout(vendor: FanoutVendor): EventFanout {
         if (lastSession === id) return;
         lastSession = id;
         for (const cb of sessionCbs) cb(id);
+      },
+      toolCall: (name) => {
+        for (const cb of toolCallCbs) cb(name);
       },
     });
   });
@@ -170,6 +175,9 @@ export function createEventFanout(vendor: FanoutVendor): EventFanout {
       },
       onDenial(cb): void {
         denialCbs.push(cb);
+      },
+      onToolCall(cb): void {
+        toolCallCbs.push(cb);
       },
       onSession(cb): void {
         sessionCbs.push(cb);
