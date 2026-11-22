@@ -103,10 +103,26 @@ function resolveLoader(): string {
  */
 export const CHAT_MCP_SERVER_ID = "chat";
 
+/**
+ * The shape `chatMcpServerConfig` returns, keyed off the constant.
+ *
+ * 🛑 THE RETURN TYPE WAS THE THIRD COPY OF THE LITERAL, one line below the
+ * constant that exists to be the only one. A type is not exempt: renaming the
+ * constant without renaming the type gives a value whose declared key and
+ * actual key disagree, and `tsc` is then the only thing that notices.
+ * claude1's 🔵 on PR 394.
+ */
+export type ChatMcpServerConfig = {
+  mcpServers: Record<
+    typeof CHAT_MCP_SERVER_ID,
+    { command: string; args: string[] }
+  >;
+};
+
 export function chatMcpServerConfig(
   handle: string,
   entry?: string,
-): { mcpServers: { chat: { command: string; args: string[] } } } {
+): ChatMcpServerConfig {
   const launch = entry
     ? { command: process.execPath, args: [entry] }
     : resolveChatMcpEntry();
