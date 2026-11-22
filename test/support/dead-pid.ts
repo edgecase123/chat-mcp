@@ -1,4 +1,4 @@
-import { isProcessAlive } from "../../src/storage/dao.js";
+import { isProcessAlive } from "../../src/util/process.js";
 
 /**
  * A pid that really is not running, found rather than assumed.
