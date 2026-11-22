@@ -175,17 +175,20 @@ test("🛑 spawnOnHost APPROVES cursor's bus server, so a granted host child has
       "spawnOnHost approved a bus server for an UNGRANTED child",
     );
 
-    // 🛑 THE PAIRED CONTROL, AND IT IS THE ONE THAT DISCRIMINATES. Claude
-    // delivers its grant by FLAGS and needs no approval step. A fix that
-    // approved unconditionally passes every assertion above and runs a
-    // `cursor-agent` subcommand against the `claude` binary.
+    // 🛑 A FLAGS-DELIVERED VENDOR REACHES NEITHER THE WRITE NOR THE APPROVAL.
+    //
+    // ⚠️ THIS IS NOT A CONTROL ON THE `hostGrantApproveArgs` GUARD, AND IT
+    // READ AS ONE. Measured: making the approver run for every vendor left
+    // this assertion GREEN, because `hostGrantDelivery === "file"` already
+    // excludes claude one line earlier. So the claim it actually pins is the
+    // DELIVERY branch, and the guard is pinned directly below instead.
     spawnOnHost(claudeSpawn, { grant: grantIn(claude), cwd: claude });
 
     assert.equal(
       runs.length,
       1,
-      "spawnOnHost ran an approval for a FLAGS-delivered vendor, which has no " +
-        "approval step and whose binary has no `mcp enable` subcommand",
+      "spawnOnHost ran an approval for a FLAGS-delivered vendor, which does not " +
+        "reach the host grant branch at all",
     );
 
     // 🛑 A REFUSED APPROVAL FAILS THE SPAWN RATHER THAN STARTING A DEAF CHILD.
@@ -211,5 +214,42 @@ test("🛑 spawnOnHost APPROVES cursor's bus server, so a granted host child has
     for (const dir of [granted, ungranted, claude, refused]) {
       rmSync(dir, { recursive: true, force: true });
     }
+  }
+});
+
+/**
+ * 🛑 THE `hostGrantApproveArgs` GUARD, AIMED AT THE ACTOR THAT CAN ACTUALLY
+ * REACH IT.
+ *
+ * Driving it through `spawnOnHost(claudeSpawn, …)` tests nothing: claude
+ * declares `hostGrantDelivery: "flags"`, so it never enters the branch the
+ * approver lives in. A mutant that approved EVERY vendor left that assertion
+ * green — measured, twice, in two different specs.
+ *
+ * **The reachable actor is a vendor that declares `"file"` delivery and no
+ * approval subcommand**, which is every future CLI whose config is enough on
+ * its own. Without the guard it meets `undefined(...)` and the spawn dies with
+ * a TypeError naming nothing an operator can act on.
+ *
+ * ⚠️ IT CALLS THE APPROVER DIRECTLY, AND THEREFORE NEEDS NO MODULE MOCK. There
+ * is no CLI to execute, because the whole claim is that nothing is executed.
+ */
+test("🛑 a FILE-delivered vendor with no approval subcommand is approved nothing", async () => {
+  const { approveHostGrantServer } =
+    await import("../../../src/supervise/drivers/host-grant.js");
+
+  const cwd = mkdtempSync(join(tmpdir(), "chat-mcp-approve-noargs-"));
+
+  try {
+    assert.equal(
+      approveHostGrantServer(
+        { vendor: "needs-no-approval", binary: "/nonexistent/binary" },
+        cwd,
+      ),
+      undefined,
+      "the approver ran something for a vendor that declares no approval step",
+    );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
   }
 });
