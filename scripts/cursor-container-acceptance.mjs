@@ -24,6 +24,7 @@ import * as dao from "../src/storage/dao.ts";
 import { cursorSpawn } from "../src/adapters/cursor-spawn.ts";
 import { markConfirmed } from "../src/supervise/container.ts";
 import { buildConfirmPlan } from "../src/supervise/confirmPlan.ts";
+import { ensureFreshVendorImage } from "./lib/fresh-image.mjs";
 import { readVendorToken } from "../src/supervise/auth.ts";
 
 if (!process.env.CHAT_MCP_LIVE) {
@@ -80,7 +81,10 @@ record(
 );
 
 // Satisfy the container gate the way the operator's confirm would.
-markConfirmed(HANDLE, buildConfirmPlan(cursorSpawn, HANDLE));
+const plan = buildConfirmPlan(cursorSpawn, HANDLE);
+markConfirmed(HANDLE, plan);
+
+ensureFreshVendorImage(plan, cursorSpawn, record);
 
 console.log(`supervisor=${HANDLE}  probe=${PROBE}  cwd=${childCwd}`);
 console.log(`image=${cursorSpawn.image}  token=${TOKEN}\n`);

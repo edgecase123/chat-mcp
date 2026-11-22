@@ -23,6 +23,7 @@ import * as dao from "../src/storage/dao.ts";
 import { cursorSpawn } from "../src/adapters/cursor-spawn.ts";
 import { markConfirmed } from "../src/supervise/container.ts";
 import { buildConfirmPlan } from "../src/supervise/confirmPlan.ts";
+import { ensureFreshVendorImage } from "./lib/fresh-image.mjs";
 
 if (!process.env.CHAT_MCP_LIVE) {
   console.error("Refusing: spawns a real containerized agent. CHAT_MCP_LIVE=1");
@@ -71,7 +72,10 @@ dao.upsertAgent(db, {
   metadata: { kind: "agent" },
 });
 
-markConfirmed(HANDLE, buildConfirmPlan(cursorSpawn, HANDLE));
+const plan = buildConfirmPlan(cursorSpawn, HANDLE);
+markConfirmed(HANDLE, plan);
+
+ensureFreshVendorImage(plan, cursorSpawn, record);
 
 // Turn one PLANTS the nonce. Turn two must recall it with no help.
 const TURN_ONE =
