@@ -318,8 +318,12 @@ function acquireContainerLock(): string {
  *
  * ⚠️ WHAT IS FIXED IS THE COMMON CASE, which is every write where no stale
  * lock is in play. Before this, ANY two overlapping writers lost one change.
- * A closing fix needs a real advisory lock, and the only one available here is
- * a SQLite transaction — which would pull the database into this file.
+ *
+ * ⚠️ TWO REMEDIES WERE PROPOSED AND NEITHER WAS RUN, so neither is ruled out
+ * here. Re-reading the state after the rename and re-applying the mutator
+ * would make a loss DETECTABLE rather than impossible. A SQLite transaction
+ * would hold the exclusion in the connection, which has no stale holder to
+ * break at all, at the cost of the database reaching this file.
  */
 function updateContainerState(
   mutate: (state: ContainerState) => ContainerState,
