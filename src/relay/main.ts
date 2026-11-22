@@ -69,15 +69,26 @@ function parseArgv(argv: readonly string[]): RelayArgv | string {
   for (let i = 0; i < own.length; i += 1) {
     const flag = own[i];
 
-    if (flag === "--vendor") {
-      vendor = own[i + 1];
-      i += 1;
-    } else if (flag === "--resume") {
-      resumeSessionId = own[i + 1];
-      i += 1;
-    } else {
+    if (flag !== "--vendor" && flag !== "--resume") {
       return `turn-relay: unknown option '${flag}'`;
     }
+
+    const value = own[i + 1];
+
+    // 🛑 A FLAG WITH NO VALUE IS A REFUSAL, NOT AN ABSENT FLAG. `--resume`
+    // with nothing after it used to read as undefined, and the field was then
+    // omitted — so the relay started a brand new session with an empty stderr
+    // and the agent forgot the task. That is PR 385's symptom reached through
+    // this file's own argv. A value starting with `--` is the next flag, which
+    // is the shape a shell leaves behind when a variable expanded to nothing.
+    if (value === undefined || value.startsWith("--")) {
+      return `turn-relay: '${flag}' was given with no value`;
+    }
+
+    if (flag === "--vendor") vendor = value;
+    else resumeSessionId = value;
+
+    i += 1;
   }
 
   if (!vendor)

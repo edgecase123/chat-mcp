@@ -645,10 +645,6 @@ export function dockerRunPlan(
   vendor: VendorSpawn,
   opts: SpawnOptions,
 ): DockerRunPlan {
-  // 🛑 THIS VENDOR'S OWN CREDENTIAL. One shared `readToken()` was injected
-  // under whatever name the vendor declared, so a Cursor container received a
-  // Claude subscription token as `CURSOR_API_KEY` — and `cursor-agent` sent it
-  // to Cursor as its own key. #347.
   // 🛑 DECLARED, NEVER INFERRED, AND THE CONTAINER PATH NEEDS IT AS MUCH AS THE
   // HOST ONE. An absent field is falsy, which reads as a long-lived process —
   // so the command below would be the CLI, the prompt would arrive unframed,
@@ -656,6 +652,10 @@ export function dockerRunPlan(
   // always asserted this; this path had no guard at all.
   assertDeclaresProcessLifetime(vendor);
 
+  // 🛑 THIS VENDOR'S OWN CREDENTIAL. One shared `readToken()` was injected
+  // under whatever name the vendor declared, so a Cursor container received a
+  // Claude subscription token as `CURSOR_API_KEY` — and `cursor-agent` sent it
+  // to Cursor as its own key. #347.
   const token = readVendorToken(vendor);
   // Optional, unlike the agent credential. Most handles need no GitHub access,
   // and one that does not must still be able to start.

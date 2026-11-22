@@ -292,3 +292,35 @@ test("🛑 a turn is spawned with all three streams piped", () => {
   assert.deepEqual(calls[0]?.stdio, ["pipe", "pipe", "pipe"]);
   assert.equal(calls[0]?.binary, "cursor-agent");
 });
+
+/**
+ * 🛑 FINDING 1 ON PR 386. `--resume` with no value read as `undefined`, the
+ * field was then omitted, and the relay started a BRAND NEW session with an
+ * empty stderr and no exit code. A relay that silently forgets the task is
+ * PR 385's symptom, and this module's own rule is to refuse loudly instead.
+ *
+ * ⚠️ NOT REACHABLE FROM `dockerRunPlan` TODAY, which pushes the flag only
+ * when it has an id. The guard is here because the relay is a separate
+ * process from the one building its argv. claude2 on PR 386.
+ */
+test("🛑 --resume with NO value is REFUSED, not silently dropped", () => {
+  const h = harness(["--vendor", "cursor", "--resume", "--", "cursor-agent"]);
+
+  assert.equal(h.turns.length, 0, "a turn started with a forgotten session");
+  assert.deepEqual(h.exits, [RELAY_USAGE_EXIT]);
+  assert.match(h.errors(), /--resume/);
+});
+
+test("🛑 --vendor with no value names the VALUE, not the flag, as missing", () => {
+  const h = harness(["--vendor", "--", "cursor-agent"]);
+
+  assert.deepEqual(h.exits, [RELAY_USAGE_EXIT]);
+  assert.match(h.errors(), /--vendor.*no value/);
+});
+
+test("🔴 control — a flag that is genuinely ABSENT still says so", () => {
+  const h = harness(["--resume", "SESS-A", "--", "cursor-agent"]);
+
+  assert.deepEqual(h.exits, [RELAY_USAGE_EXIT]);
+  assert.match(h.errors(), /no --vendor was given/);
+});
