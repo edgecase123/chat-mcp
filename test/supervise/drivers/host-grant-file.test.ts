@@ -503,3 +503,43 @@ test("🔴 a symlinked ancestor is refused even when the leaf directory is ABSEN
     }
   });
 });
+
+/**
+ * 🛑 CONTAINMENT IS JUDGED BEFORE ANY READ, NOT AFTER.
+ *
+ * Making re-delivery a no-op put an `existsSync`/`readFileSync` branch ABOVE
+ * `assertDirIsNotASymlinkEscape`, so a `.cursor` symlinked OUT of the project
+ * that happened to hold our exact bytes returned successfully — the escape the
+ * guard exists to refuse, waved through by the fix for a different bug.
+ *
+ * ⚠️ THE FIX FOR ONE FINDING OPENED A HOLE IN THE FIX FOR THE OTHER. The
+ * ordering is the whole contract: nothing about a path may be trusted, read or
+ * reported until the path itself is known to be inside the project.
+ * claude1 on PR 389, second review.
+ */
+test("🔴 a symlinked-OUT .cursor holding OUR OWN bytes is still refused", () => {
+  withTempCwd((cwd) => {
+    const elsewhere = mkdtempSync(join(tmpdir(), "chat-mcp-elsewhere-"));
+
+    try {
+      // The exact file this supervisor would write, planted outside.
+      const staged = mkdtempSync(join(tmpdir(), "chat-mcp-staged-"));
+      const ours = readFileSync(
+        deliverHostGrantFile(spawnFor("cursor"), grantIn(staged), staged),
+        "utf8",
+      );
+      writeFileSync(join(elsewhere, "mcp.json"), ours);
+      rmSync(staged, { recursive: true, force: true });
+
+      symlinkSync(elsewhere, join(cwd, ".cursor"));
+
+      assert.throws(
+        () => deliverHostGrantFile(spawnFor("cursor"), grantIn(cwd), cwd),
+        /symlink|outside/i,
+        "identical content waved the escape through",
+      );
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+});

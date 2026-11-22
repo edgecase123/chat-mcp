@@ -113,6 +113,13 @@ export function deliverHostGrantFile(
 
   const path = hostGrantConfigPathFor(vendor, cwd);
 
+  // 🛑 CONTAINMENT FIRST, BEFORE ANYTHING READS OR REPORTS THIS PATH. Making
+  // re-delivery a no-op once put an existsSync/readFileSync branch above this
+  // call, and a `.cursor` symlinked OUT of the project that held our exact
+  // bytes was then returned as success — the escape this guard exists to
+  // refuse, waved through by the fix for a different bug.
+  assertDirIsNotASymlinkEscape(cwd, path, vendor.vendor);
+
   const desired = `${JSON.stringify(chatMcpServerConfig(grant.handle), null, 2)}\n`;
 
   if (existsSync(path)) {
@@ -131,8 +138,6 @@ export function deliverHostGrantFile(
         `chat-mcp wrote it, delete it. Or run this handle UNGRANTED.`,
     );
   }
-
-  assertDirIsNotASymlinkEscape(cwd, path, vendor.vendor);
 
   mkdirSync(dirname(path), { recursive: true });
 
