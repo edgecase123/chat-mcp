@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import type { SpawnOptions } from "../child.js";
 import { type RateLimitSnapshot } from "../rate-limit.js";
 import {
@@ -14,6 +12,7 @@ import {
   mcpConfigPathFor,
   writePrivateFileSync,
 } from "../../util/paths.js";
+import { chatMcpServerConfig } from "./chat-mcp-server.js";
 
 /**
  * The Claude Code driver: the ONLY file that knows this CLI's flags and event
@@ -128,105 +127,24 @@ export function claudeArgs(opts: SpawnOptions = {}): string[] {
 }
 
 /**
- * How to launch this build of chat-mcp as the child's MCP server.
+ * Write the child's own MCP config into the STATE DIR and return its path.
  *
- * 🛑 RESOLVED MODULE-RELATIVE, NEVER FROM `process.argv[1]`. argv[1] was used
- * here to mean "the chat-mcp entry point". It means "whatever script is
- * running right now". Under the installed bin those coincide; under a script
- * or a test they do not, so a child got
- * `node scripts/supervise-live.mjs --handle ...` and had NO chat tool at all.
- * It woke, ran its turn, and could not answer. Found by the live harness —
- * every unit test here asserted the handle and none asserted the command.
+ * 🛑 THIS PATH IS NAMED ON THE ARGV, WHICH IS WHY IT MAY LIVE ANYWHERE. Claude
+ * Code is pointed at it by `--mcp-config`. A CLI with no such flag reads a
+ * fixed project-local location instead and is served by
+ * `deliverHostGrantFile`, not by this function.
  *
- * `package.json` ships only `dist`, so from `dist/supervise/child.js` the
- * sibling `../index.js` is the installed `bin`. Running from source there is
- * no `../index.js`, and the TypeScript entry needs a loader or the child exits
- * immediately — which looks exactly like the bug above.
- */
-function resolveChatMcpEntry(): { command: string; args: string[] } {
-  // 🚨 THESE ARE RELATIVE TO drivers/, AND THEY WERE OFF BY ONE LEVEL.
-  // `../index.ts` from `src/supervise/drivers/` is `src/supervise/index.ts`
-  // — the SUPERVISOR, not the CLI. The child's MCP server launched the
-  // supervisor, which exits immediately, so every child reported
-  // `chat: failed, Connection closed` and had no bus tools at all.
-  //
-  // ⚠️ THE EXISTING TEST COULD NOT SEE IT: it asserted the file EXISTS and
-  // is named `index.(js|ts)`, and the supervisor satisfies both. Third bug
-  // of this exact shape tonight.
-  //
-  // Installed layout: dist/supervise/drivers/claude.js -> dist/index.js
-  const built = fileURLToPath(new URL("../../index.js", import.meta.url));
-  if (existsSync(built)) return { command: process.execPath, args: [built] };
-
-  // Source layout with a build present — preferred, because it needs no loader
-  // and therefore nothing to resolve from the child's cwd.
-  const builtFromSource = fileURLToPath(
-    new URL("../../../dist/index.js", import.meta.url),
-  );
-  if (existsSync(builtFromSource))
-    return { command: process.execPath, args: [builtFromSource] };
-
-  // Source layout with no build. The loader has to be an ABSOLUTE path.
-  const source = fileURLToPath(new URL("../../index.ts", import.meta.url));
-  if (existsSync(source)) {
-    return {
-      command: process.execPath,
-      args: ["--import", resolveLoader(), source],
-    };
-  }
-
-  throw new Error(
-    `cannot locate the chat-mcp entry point next to ${import.meta.url}; ` +
-      "pass an explicit entry to writeClaudeMcpConfig",
-  );
-}
-
-/**
- * The tsx loader as an ABSOLUTE path.
- *
- * 🛑 `--import tsx` IS A BARE SPECIFIER AND THE CHILD RESOLVES IT FROM ITS OWN
- * CWD. The supervised child runs in whatever directory the operator chose, and
- * the live harness uses an empty temp dir — which has no `node_modules` above
- * it, so the chat server died with `ERR_MODULE_NOT_FOUND` the instant it
- * started. The agent then had no chat tool and WROTE OUT the call it could not
- * make, which reads like a model failure rather than a missing dependency.
- *
- * ⚠️ SECOND INSTANCE OF ONE MISTAKE. The script path was already absolute; the
- * loader name was not. Any part of this command line that is resolved rather
- * than stated is resolved against the CHILD's cwd, not ours.
- */
-function resolveLoader(): string {
-  return fileURLToPath(import.meta.resolve("tsx"));
-}
-
-/**
- * Write the child's own MCP config and return its path.
- *
- * 🛑 The child must reach the bus under a handle of its OWN. `inbox` marks
- * messages read, so a child sharing the supervisor's handle silently consumes
- * the deliveries meant for it. See chat-mcp#35.
- *
- * The server command is the binary this supervisor is itself running, not a
- * fresh `npx` fetch, so the child cannot end up on a different build of the
- * bus than the process delivering to it.
+ * The server block itself is `chatMcpServerConfig`'s, shared with that writer.
  */
 export function writeClaudeMcpConfig(handle: string, entry?: string): string {
   ensureMcpConfigDir();
 
-  const launch = entry
-    ? { command: process.execPath, args: [entry] }
-    : resolveChatMcpEntry();
   const path = mcpConfigPathFor(handle);
-  const config = {
-    mcpServers: {
-      chat: {
-        command: launch.command,
-        args: [...launch.args, "--handle", handle],
-      },
-    },
-  };
 
-  writePrivateFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+  writePrivateFileSync(
+    path,
+    `${JSON.stringify(chatMcpServerConfig(handle, entry), null, 2)}\n`,
+  );
 
   return path;
 }

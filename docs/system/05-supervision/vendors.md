@@ -57,7 +57,20 @@ easy to confuse and the confusion reproduces the bug above.
 | vendor | value     | why                                                         |
 | ------ | --------- | ----------------------------------------------------------- |
 | claude | `"flags"` | `claudeArgs` names `--mcp-config` and `--strict-mcp-config` |
-| cursor | `"none"`  | no flag can point `cursor-agent` at the grant's path        |
+| cursor | `"file"`  | no flag exists, so `<cwd>/.cursor/mcp.json` IS the wiring   |
+
+🛑 **`"file"` IS NOT SELF-ENFORCING, AND THE GUARD ALONE DOES NOT COVER IT.**
+`assertHostGrantReachesBus` admits `"file"` by NOT being `"none"`, so flipping
+the field and forgetting the writer would stop the refusal and restore the
+silence it was added for. Two things close that:
+
+1. **`hostGrantConfigPath` is required in practice whenever the value is
+   `"file"`.** `hostGrantConfigPathFor` throws when the pair disagrees, because
+   the type system cannot — `tsconfig.json` includes `src/**` only.
+2. **`host-grant-delivered-on-spawn.test.ts` asserts the FILE LANDS**, driven
+   through `spawnOnHost` with `node:child_process` mocked. Asserting the writer
+   directly was not enough: deleting its call site from `spawnOnHost` left all
+   19 of the writer's own tests green.
 
 🛑 **BOTH WAYS OF INFERRING THIS WERE PROPOSED AND BOTH ARE MEASURABLY
 WRONG.** They are recorded because each looks correct until measured.
@@ -154,19 +167,80 @@ live binary: `cursor-agent mcp --help` names `.cursor/mcp.json or
 empty.** `--approve-mcps` is what makes the file take effect — without it the
 server is prompted for, and a supervised child has no TTY to answer with.
 
-| mode     | where the config goes                | why                                                           |
-| -------- | ------------------------------------ | ------------------------------------------------------------- |
-| `docker` | `/root/.cursor/mcp.json`             | the image has no operator config to clobber                   |
-| host     | nowhere — a granted child is REFUSED | the grant's own path is a location `cursor-agent` never reads |
+| mode     | where the config goes          | why                                         |
+| -------- | ------------------------------ | ------------------------------------------- |
+| `docker` | `/root/.cursor/mcp.json`       | the image has no operator config to clobber |
+| host     | `<child cwd>/.cursor/mcp.json` | the only location this CLI reads            |
 
-🛑 **A GRANTED HOST CURSOR CHILD IS NOW REFUSED RATHER THAN STARTED.** It
-used to start, take its prompt and answer nothing, because the config was
-written to `grant.configPath` and never named. The operator granted a
-capability and was told nothing was wrong, which is #219's shape. #348.
+🛑 **A GRANTED HOST CURSOR CHILD IS NOW WIRED, NOT REFUSED.** lee approved
+writing the project-local file on 2026-11-21, bounded: _"as long as it cannot
+be used to run unauthorized paths or bypass gates and gaurds"_. It previously
+started, took its prompt and answered nothing, because the config went to
+`grant.configPath` and was never named — #219's shape, and #348.
 
-**An UNGRANTED host Cursor child still works and is the way to use Cursor on
-the host today.** The refusal names it, so the operator is not left at a dead
-end.
+⚠️ **THE WRITER REFUSES AN EXISTING FILE RATHER THAN OVERWRITING IT.** That
+file is the operator's own MCP configuration and this project may destroy it
+exactly never. `wx` backs the readable `existsSync` check, so two supervisors
+in one project directory cannot race past it.
+
+🛑 **RE-DELIVERING THE IDENTICAL FILE IS A NO-OP, NOT A REFUSAL.** Nothing
+deletes this file, so a blanket refusal meant a granted handle started exactly
+ONCE per project directory, and the second start blamed the operator for a file
+the supervisor itself had written. The content is fully determined by the
+handle, so "is this already ours?" is answerable exactly.
+
+| `<cwd>/.cursor/mcp.json` is… | result            |
+| ---------------------------- | ----------------- |
+| absent                       | written           |
+| byte-identical to ours       | left alone, no-op |
+| anything else                | refused           |
+
+⚠️ **THE REFUSAL CLAIMS NO AUTHOR.** It used to say "the supervisor did not
+create it", which is false whenever an older build of this project wrote it.
+It now names the file and the handle and says what to do.
+
+**The bound is enforced as tests, not as a comment.** The written file declares
+exactly one server named `chat`, and its `command` is this process's own
+interpreter running this build's own entry point — so the file cannot name a
+path the supervisor is not already running. The handle is validated here rather
+than borrowed from the state-dir writer's call path, and the file is 0600.
+
+🛑 **A SUPERVISED PROJECT IS NOT TRUSTED INPUT, AND `wx` ALONE DOES NOT MAKE IT
+SAFE.** `O_CREAT|O_EXCL` refuses to follow a symlink planted at `mcp.json`, and
+does nothing about `.cursor` itself being one: `mkdirSync({recursive:true})`
+no-ops on the resolved directory, `wx` succeeds, and the config lands in the
+link's TARGET. Measured — `.cursor -> /tmp/elsewhere` put the file at
+`/tmp/elsewhere/mcp.json`.
+
+🛑 **THE CHECK WALKS UP TO THE NEAREST EXISTING ANCESTOR.** Returning early
+when the config directory was absent left the escape open: `mkdirSync` with
+`recursive` FOLLOWS a symlinked ancestor and creates the leaf outside it.
+
+**So the writer refuses a symlinked config directory, using `realContains` from
+`containment.ts`** — the same `realpathSync` discipline the manifest script
+path uses, and for the same reason: `resolve` is lexical and cannot see a
+symlink.
+
+| `<cwd>/.cursor` is…                     | result  |
+| --------------------------------------- | ------- |
+| absent                                  | created |
+| a real directory                        | used    |
+| a symlink OUT of the project            | refused |
+| a symlink back INSIDE it                | refused |
+| reached through an intermediate symlink | refused |
+| ABSENT, under a symlinked ancestor      | refused |
+
+⚠️ **A symlinked CWD is legitimate and stays allowed.** macOS `/tmp` is one.
+Containment is judged on real paths rather than by banning them.
+
+🛑 **THE CWD FALLBACK IS `process.cwd()`, SO A SUPERVISOR WITH NO EXPLICIT
+`cwd` WRITES INTO ITS OWN DIRECTORY.** That is correct — the child runs there
+too — but in a git checkout it shows up as an untracked `.cursor/`. `.gitignore`
+carries it for that reason.
+
+**An UNGRANTED host Cursor child still works, and no file is written for it.**
+A config planted for a child that was promised no bus is litter in the
+operator's project.
 
 🛑 **THE OLD CLAIM THAT ONLY `~/.cursor/mcp.json` COULD WIRE A HOST CHILD IS
 WRONG, and it was wrong when it was written here.** Measured on #348 against
@@ -179,9 +253,9 @@ WRONG, and it was wrong when it was written here.** Measured on #348 against
 | plus its approval on file  | `chat: ready`, and `list-tools` returns 22 tools |
 
 **A project-local `.cursor/mcp.json` is read, and the human's home config is
-never touched.** Wiring the host path is therefore reachable; whether this
-project may create that file in the operator's project directory is the open
-question on #348.
+never touched.** lee answered the question this paragraph used to leave open:
+the supervisor may create that file, and refuses rather than overwriting one it
+did not create.
 
 🛑 **`VendorSpawn.containerMcpConfigPath` is REQUIRED and per-vendor.** It was
 one `${containerHome}/.chat-mcp-mcp.json` for every vendor, which works only
@@ -207,6 +281,10 @@ recall is the proof. The session store therefore survives inside the container.
 ⚠️ **Both scripts spend real money and need `CHAT_MCP_LIVE=1`.** They are
 acceptance checks, never suite tests, so nothing in `npm test` needs docker or
 a credential.
+
+⚠️ **Still unproven: that the HOST path produces a working turn.** The file
+now lands and its content is asserted against mocks; no live host Cursor turn
+has been run. The two acceptance scripts above cover the CONTAINER only.
 
 ## `--binary` is a HOST flag, and a container refuses it
 

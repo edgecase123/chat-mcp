@@ -12,6 +12,7 @@ import {
   routeCursorEvent,
 } from "../supervise/drivers/cursor.js";
 import { CURSOR_IMAGE_TAG } from "../supervise/container.js";
+import { cursorProjectMcpConfigPath } from "../supervise/drivers/host-grant.js";
 
 /**
  * The ONLY place a containerized `cursor-agent` looks for an MCP config.
@@ -98,15 +99,11 @@ export const cursorSpawn: VendorSpawn = {
   resumeFlags: cursorResumeFlags,
 
   /**
-   * 🛑 DOCKER GETS THE PATH CURSOR READS; THE HOST STILL GETS THE GRANT'S.
-   * The refusal this replaces applied to BOTH modes and only ever had a reason
-   * in one: writing `~/.cursor/mcp.json` on the HOST clobbers the human's own
-   * Cursor configuration. There is no operator config inside the image, so in
-   * a container the objection describes a file that does not exist (#372).
-   *
-   * ⚠️ THE HOST PATH IS THEREFORE STILL UNWIRED, AND STILL ON PURPOSE. A host
-   * Cursor child reaches no bus, because the only way to wire it is the file
-   * this project may not own. That is a separate decision from this one.
+   * 🛑 ONE CALL SITE, IN `containerized.ts`, SO ONLY THE DOCKER ARM IS READ.
+   * The host arm is unreachable today and kept rather than thrown from,
+   * because a library caller may still ask. A host grant does NOT travel
+   * through here — it is delivered by `hostGrantConfigPath` below, which this
+   * signature cannot express because it takes no cwd (#348).
    */
   mcpConfigFor: (grant: ChildGrant, mode: SandboxMode): string =>
     mode === "docker" ? CURSOR_CONTAINER_MCP_CONFIG_PATH : grant.configPath,
@@ -123,18 +120,26 @@ export const cursorSpawn: VendorSpawn = {
    * child has no TTY to answer with.
    */
   /**
-   * 🛑 `"none"`, AND THAT IS WHY A GRANTED HOST CURSOR CHILD IS NOW
-   * REFUSED. `mcpConfigFor` hands the host path `grant.configPath`, a location
-   * `cursor-agent` never reads, and no flag can point it there — so the file
-   * is written, never named, and the child starts and answers nothing. #348.
+   * 🛑 `"file"`, AND IT IS WHY A GRANTED HOST CURSOR CHILD NOW STARTS INSTEAD
+   * OF BEING REFUSED. `cursor-agent mcp --help` names
+   * `.cursor/mcp.json or ~/.cursor/mcp.json`, and a cwd-relative
+   * `.cursor/mcp.json` IS read — measured on #348 against an empty-cwd
+   * control. `hostGrantConfigPath` below is where it lands.
    *
-   * ⚠️ THIS BECOMES `"file"`, NOT `"flags"`, WHEN THE HOST PATH IS WIRED.
-   * `cursor-agent mcp --help` names `.cursor/mcp.json or ~/.cursor/mcp.json`,
-   * and a cwd-relative `.cursor/mcp.json` IS read — measured on #348 with an
-   * empty-cwd control. Writing it changes no argv, which is exactly why this
-   * field is a declaration rather than something read off the argv.
+   * 🛑 WRITING IT CHANGES NO ARGV, WHICH IS THE WHOLE REASON THIS FIELD IS A
+   * DECLARATION. Both agents independently proposed inferring the route from
+   * the argv, and both inferences were measured wrong: a granted host Cursor
+   * child's argv is identical to an ungranted one's before AND after this
+   * slice.
+   *
+   * ⚠️ `"file"` IS NOT SELF-ENFORCING. `assertHostGrantReachesBus` admits it
+   * by NOT being `"none"`, so flipping this and forgetting the writer would
+   * stop the refusal and restore the silence. `hostGrantConfigPathFor` throws
+   * on that pair and `host-grant-file.test.ts` asserts the file LANDS.
    */
-  hostGrantDelivery: "none",
+  hostGrantDelivery: "file",
+
+  hostGrantConfigPath: cursorProjectMcpConfigPath,
 
   mcpConfigFlags: (_path: string): readonly string[] => [],
 
