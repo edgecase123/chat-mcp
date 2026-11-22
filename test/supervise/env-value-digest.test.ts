@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -370,4 +371,76 @@ test("🛑 buildConfirmPlan digests the override it was GIVEN, not the file", as
   const read = buildConfirmPlan(vendor, "given");
 
   assert.ok(read.envVarNames.includes("ON_DISK"));
+});
+
+/* ==========================================================================
+ * A key file that is not 64 hex characters.
+ * ======================================================================= */
+
+/**
+ * 🛑 `Buffer.from(x, "hex")` STOPS AT THE FIRST BAD PAIR AND RETURNS WHAT IT
+ * GOT, so a partial key file decodes to fewer than 32 bytes and an unparseable
+ * one decodes to ZERO. `createHmac` accepts a zero-length key without
+ * complaint, and the digest is then a function of the input ALONE — exactly the
+ * install-independent, offline-sweepable value the key exists to prevent.
+ *
+ * ⚠️ IT IS REACHABLE BECAUSE `writePrivateFileSync` IS NOT ATOMIC. A plain
+ * `writeFileSync`, so an interrupted or full-disk first write leaves a partial
+ * file that every later run then trusts.
+ *
+ * The remedy is to REGENERATE, not to throw: a one-byte corruption must not
+ * brick every container spawn, and the docblock above already accepts that
+ * losing the key re-prompts each handle once.
+ */
+test("🛑 a key file that is not 64 hex characters is regenerated", () => {
+  const keyPath = join(process.env.CHAT_MCP_HOME!, "env-digest-key");
+
+  const digestUnder = (content: string): string => {
+    writeFileSync(keyPath, content);
+    const digest = envValuesDigest({ MY_VAR: SECRET });
+
+    assert.match(
+      readFileSync(keyPath, "utf8").trim(),
+      /^[0-9a-f]{64}$/,
+      `the key file still holds ${JSON.stringify(content)}`,
+    );
+
+    return digest;
+  };
+
+  // Empty, undecodable, odd-length, and one character short all decode to
+  // fewer than 32 bytes, the first two to none at all.
+  //
+  // 🛑 THE LAST SHAPE IS THE ONE A LENGTH CHECK ALONE WOULD ACCEPT. 64 good
+  // characters then junk decodes to a full 32 bytes, so the key would be
+  // trusted while the file is plainly damaged.
+  const digests = ["", "zz", "abc", "a".repeat(63), "0".repeat(64) + "zz"].map(
+    digestUnder,
+  );
+
+  // 🛑 THE PROPERTY, NOT THE BYTES. Under a zero-byte key the digest depends on
+  // the input only, so two different corrupt files would yield the SAME digest
+  // for the same input. Four distinct digests is four distinct keys.
+  assert.equal(
+    new Set(digests).size,
+    digests.length,
+    "two corrupt key files produced the same digest, so neither was keyed",
+  );
+});
+
+/**
+ * ⚠️ THE CONTROL, AND WITHOUT IT THE FIX ABOVE IS UNFALSIFIABLE: a key that
+ * regenerated on EVERY read would satisfy every assertion above and re-prompt
+ * every handle on every spawn.
+ */
+test("⚠️ control — a valid key file is left alone", () => {
+  const keyPath = join(process.env.CHAT_MCP_HOME!, "env-digest-key");
+  const valid = "ab".repeat(32);
+
+  writeFileSync(keyPath, valid);
+
+  const first = envValuesDigest({ MY_VAR: SECRET });
+
+  assert.equal(readFileSync(keyPath, "utf8"), valid, "the key was rewritten");
+  assert.equal(first, envValuesDigest({ MY_VAR: SECRET }));
 });

@@ -468,6 +468,18 @@ const NOT_RECORDED = "(not recorded)";
 const NOT_SHOWN = "(not shown)";
 
 /**
+ * What a usable `env-digest-key` file holds, and nothing else will do.
+ *
+ * 🛑 THE SHAPE IS THE WHOLE GUARD, BECAUSE A LENGTH CHECK IS NOT ENOUGH.
+ * `Buffer.from(x, "hex")` stops at the first byte it cannot read and returns
+ * what it already had, so 64 good characters followed by junk still decodes to
+ * a full 32 bytes and a file of pure junk decodes to NONE. `createHmac` takes a
+ * zero-length key without complaint, which leaves the digest a function of its
+ * input alone — the install-independent value this key exists to prevent.
+ */
+const ENV_DIGEST_KEY_HEX = /^[0-9a-f]{64}$/;
+
+/**
  * The per-install key the env digest is taken under.
  *
  * 🛑 WITHOUT IT THE DIGEST IS A GUESSABLE FUNCTION OF A SECRET. The names
@@ -484,11 +496,19 @@ const NOT_SHOWN = "(not shown)";
  *
  * ⚠️ LOSING IT RE-PROMPTS EVERY HANDLE ONCE, and that is the safe direction.
  * It is never rotated, because rotating it would do that on purpose.
+ *
+ * ⚠️ SO A MALFORMED FILE IS REPLACED RATHER THAN REFUSED. `writePrivateFileSync`
+ * is not atomic, so an interrupted first write leaves a partial key, and a
+ * throw there would brick every container spawn over one lost byte.
  */
 function envDigestKey(): Buffer {
   const path = join(stateDir(), "env-digest-key");
 
-  if (existsSync(path)) return Buffer.from(readFileSync(path, "utf8"), "hex");
+  if (existsSync(path)) {
+    const stored = readFileSync(path, "utf8").trim();
+
+    if (ENV_DIGEST_KEY_HEX.test(stored)) return Buffer.from(stored, "hex");
+  }
 
   const key = randomBytes(32).toString("hex");
   ensureStateDir();
