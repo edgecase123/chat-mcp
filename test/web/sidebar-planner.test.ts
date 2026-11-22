@@ -119,6 +119,9 @@ test("a change to the activity Set alone rebuilds peers", () => {
     s.activity = new Set(["a"]);
   });
 
+  // 🛑 AND NOT AGENTS, THOUGH ITS ROW IS A `sidebarItem` TOO. `activity`
+  // moves on its own, and a rebuild of the agents section discards a half-typed
+  // gate percent. `paintPulse` already dresses that row — see the pin below.
   assert.deepEqual(due, ["peers"]);
 });
 
@@ -192,7 +195,7 @@ test("renderSidebar reads scrollTop before mutating and restores it after", () =
 function liveState(child: Record<string, unknown> | null): State {
   const s = baseState();
   s.nowMinute = 1;
-  s.agents = [{ handle: "sup", boundAt: 1_000, child }];
+  s.agents = [{ handle: "sup", child }];
   return s;
 }
 
@@ -209,9 +212,10 @@ const reported = {
 };
 
 /**
- * 🛑 THE FROZEN CLOCK. `agentRow` derives `bound Xm` from `Date.now()`, not
- * from state, so a supervisor with `child: null` has a byte-stable payload and
- * its age would read `bound 0m` forever.
+ * 🛑 THE FROZEN CLOCK, AND #374 DID NOT REMOVE IT. The reason used to be
+ * `bound Xm`, which is gone — but the projection below drops `fresh`, so the
+ * minute bucket is now the ONLY thing that announces the 15-minute flip to the
+ * stale gauge band. A childless supervisor still has a byte-stable payload.
  */
 test("a childless supervisor rebuilds agents once the minute rolls", () => {
   const after = liveState(null);
@@ -315,13 +319,17 @@ test("storing a pair rebuilds the registration section", () => {
   assert.deepEqual(due, ["registration"]);
 });
 
-/** `openMenuFor` is an input of BOTH peers and rooms, so it rebuilds both. */
-test("an open (...) menu is an input of peers AND rooms", () => {
+/**
+ * `openMenuFor` is an input of agents, peers and rooms, so it rebuilds all
+ * three. Agents joined them in #374, when its row became a `sidebarItem` with
+ * the same (...) menu.
+ */
+test("an open (...) menu is an input of agents, peers AND rooms", () => {
   const due = plan((s) => {
     s.openMenuFor = "@alice";
   });
 
-  assert.deepEqual(due, ["peers", "rooms"]);
+  assert.deepEqual(due, ["agents", "peers", "rooms"]);
 });
 
 /**
@@ -371,4 +379,102 @@ test("submitRegistration bumps the epoch after the clear and before the catch", 
   assert.notEqual(caught, -1, "no catch — the ordering could not discriminate");
   assert.ok(clear < bump, "the bump must follow the clear it announces");
   assert.ok(bump < caught, "the bump must be in the SUCCESS branch");
+});
+
+/**
+ * 🛑 #374 — THE PEERS SECTION NOW HIDES SUPERVISED CHILDREN, so a child
+ * appearing changes what it renders while `state.peers` is byte-identical.
+ * Undeclared, the duplicate row would persist until some unrelated peer event
+ * happened to rebuild the section.
+ */
+test("a supervised child appearing rebuilds agents AND peers", () => {
+  const due = plan((s) => {
+    s.agents = [
+      {
+        handle: "sup",
+        child: { handle: "sup-agent", gauge: { show: true, percent: 10 } },
+      },
+    ];
+  });
+
+  assert.deepEqual(due, ["agents", "peers"]);
+});
+
+/**
+ * ⚠️ THE CONTROL FOR THE TEST ABOVE, AND IT DISCRIMINATES IN BOTH DIRECTIONS.
+ * Signing the whole `agents` payload for the peers section would rebuild it on
+ * every gauge tick — the churn #399 existed to stop — and a projection that
+ * returned a constant would satisfy the test above while never hiding anything.
+ */
+test("a clock-only agents change rebuilds neither agents nor peers", () => {
+  const due = plan((s) => {
+    s.agents = [
+      {
+        handle: "sup",
+        child: { gauge: { show: true, percent: 10 }, age_ms: 61_000 },
+      },
+    ];
+  });
+
+  assert.deepEqual(due, []);
+});
+
+/**
+ * 🛑 #374 — THE AGENT ROW'S DOT COMES FROM `state.peers` AND `peers` IS STILL
+ * NOT AN AGENTS INPUT. Declaring it would rebuild this section on every peer
+ * event, and it holds a half-typed gate percent that `gateControl` keeps in the
+ * DOM rather than in state — #399's registration defect in a second place.
+ * `paintAgentDots` updates the dot in place, which is why the plan stays narrow.
+ */
+test("a peer going offline rebuilds peers only, never the gate editor's section", () => {
+  const due = plan((s) => {
+    s.peers = [{ handle: "a", online: false }];
+  });
+
+  assert.deepEqual(due, ["peers"]);
+});
+
+/**
+ * ⚠️ THE PIN THAT MAKES THE SKIP SAFE. A dot that no rebuild announces must be
+ * painted out of band, and that paint has to follow the rebuild loop — called
+ * before it, a fresh section would overwrite what it just wrote.
+ */
+test("renderSidebar paints the agent dots after it rebuilds", () => {
+  const paint = APP_CODE.indexOf("paintAgentDots()");
+  const loop = APP_CODE.indexOf("SECTION_BUILDERS[key]()");
+
+  assert.notEqual(paint, -1, "nothing calls paintAgentDots");
+  assert.notEqual(loop, -1, "no rebuild loop — the pin would be vacuous");
+  assert.ok(loop < paint, "the paint must follow the rebuild it corrects");
+});
+
+/**
+ * 🛑 WHAT MAKES `activity`'s ABSENCE SAFE, AND IT IS A PROPERTY OF ONE
+ * SELECTOR. `paintPulse` is not scoped to the peers section, so it already
+ * dresses an agent row — which is built with `kind: "peer"` and therefore
+ * carries `data-kind="peer"`. Scope that selector to a section and the agents
+ * row silently stops pulsing, with the planner test above still green.
+ *
+ * ⚠️ ONE ROW PER HANDLE IS THE OTHER HALF. `querySelector` takes the first
+ * match, and `peersMinusSupervised` is what guarantees a supervised child is
+ * not also drawn in the peers section.
+ */
+test("the pulse selector reaches an agent row, not just a peers one", () => {
+  const body = APP_CODE.slice(APP_CODE.indexOf("function paintPulse("));
+
+  assert.ok(body.length > 0, "paintPulse not found in app.js");
+
+  const selector = body.match(/`([^`]*sidebar__item[^`]*)`/);
+
+  assert.notEqual(selector, null, "paintPulse no longer builds a selector");
+  assert.match(
+    selector![1]!,
+    /\[data-kind="peer"\]/,
+    "the pulse must key on the peer kind, which an agent row also carries",
+  );
+  assert.doesNotMatch(
+    selector![1]!,
+    /data-section|\.agent|sidebar__section/,
+    "the pulse selector is scoped to a section, so it cannot reach an agent row",
+  );
 });

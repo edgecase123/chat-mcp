@@ -1371,36 +1371,89 @@ export function claimsPanelEmpty() {
 /**
  * One row of the running-agents panel (#40).
  *
- * 🛑 TWO HANDLES ON ONE ROW. `handle` is the supervisor and is the only thing
- * `/api/agents/stop` accepts; the gauge belongs to its child. Posting the
- * child's handle returns a tested, honest-looking `ok: false`.
+ * 🛑 TWO HANDLES ON ONE ROW. `label` is what a human reads and messages, which
+ * is the CHILD; `handle` is the supervisor and is the only thing
+ * `/api/agents/stop` accepts. Collapsing them to one field is how a stop comes
+ * to answer a tested, honest-looking `ok: false`.
  *
- * @param {{handle: string, boundAt?: number|null, child?: object|null}} agent
- * @param {{nowMs?: number}} [opts]
+ * 🛑 NO SOCKET AGE. `bound Nm` was the supervisor's socket age sitting beside
+ * the child's handle, and lee read it as the agent's run time — which it never
+ * was. He ruled it out on 2026-11-21 rather than relabelled, because an
+ * operator acts on no part of it (#374).
+ *
+ * @param {{handle: string, child?: object|null}} agent
  */
-export function agentRow(agent, { nowMs = Date.now() } = {}) {
-  const boundAt = agent?.boundAt;
-  const known = typeof boundAt === "number" && Number.isFinite(boundAt);
-
+export function agentRow(agent) {
   return {
     handle: agent.handle,
     childHandle: agent.child?.handle ?? null,
+    // 🛑 FALLS BACK TO THE SUPERVISOR, because a supervisor binds its socket
+    // before its child's first bus touch. Without the fallback a just-spawned
+    // agent renders as a nameless row for that window.
+    label: agent.child?.handle ?? agent.handle,
     gauge: gaugeDisplay(agent.child),
     // #135 slice 4c — the CHILD's gate, resolved server-side. Null with no
     // child: there is no agent to gate, and inventing a number here would put
     // a second copy of the three-layer default in the browser.
     gate: agent.child?.context_gate ?? null,
     gateSource: agent.child?.context_gate_source ?? null,
-    // ⚠️ "bound", NEVER "uptime". The clamp is for clock skew between the
-    // socket's mtime and this page, which would otherwise render "-1m".
-    // An unreadable stat is NOT that case — it arrives as null (#373).
-    bound: known
-      ? `bound ${ageLabel(Math.max(0, nowMs - boundAt))}`
-      : "bound time unknown",
-    boundTitle:
-      "Age of the supervisor's socket, not the child's — a restart respawns " +
-      "the child without rebinding",
   };
+}
+
+/**
+ * Every handle that is the CHILD of a live supervisor.
+ *
+ * 🛑 CHILDREN ONLY, NEVER THE SUPERVISOR HANDLE. A supervisor never registers
+ * on the bus, so including it would be a filter key that matches nothing today
+ * and silently starts matching a real peer the day one does register.
+ */
+export function supervisedChildHandles(agents) {
+  if (!Array.isArray(agents)) return [];
+
+  return agents
+    .map((agent) => agent?.child?.handle)
+    .filter((handle) => typeof handle === "string");
+}
+
+/**
+ * Whether a supervised child is answering on the bus right now (#374).
+ *
+ * 🛑 THE AGENT ROW MUST NOT HARDCODE THIS. A running SUPERVISOR is not a
+ * connected CHILD: `cursorSpawn.processPerTurn` is true, so a Cursor handle is
+ * genuinely offline between turns while its supervisor stays up. A row that is
+ * always green is exactly what lee ruled against — a peer row's dot tells the
+ * truth, and this one has to as well.
+ *
+ * ⚠️ ABSENT READS AS OFFLINE, which is what a peers row does for a handle it
+ * cannot find. `fresh` on the child is NOT the substitute: `agentsWithoutClock`
+ * strips it from the signature, so the dot would move with nothing announcing
+ * it to the planner.
+ */
+export function childOnline(peers, childHandle) {
+  if (!Array.isArray(peers) || typeof childHandle !== "string") return false;
+
+  return peers.some(
+    (peer) => peer?.handle === childHandle && peer?.online === true,
+  );
+}
+
+/**
+ * The peers list with supervised children removed (#374).
+ *
+ * 🛑 THE CHILD IS A REAL PEER, WHICH IS WHY IT WAS DRAWN TWICE. `listAgents`
+ * returns it like any other registration, so the Peers section drew a second
+ * row for an agent the Agents section had already drawn — under a different
+ * handle, with nothing on screen saying they were one agent.
+ *
+ * ⚠️ THE AGENTS ROW IS THE ONE THAT SURVIVES, not the peer row. Only it can
+ * carry Stop, Stop now and the #135 context gate.
+ */
+export function peersMinusSupervised(peers, agents) {
+  if (!Array.isArray(peers)) return peers;
+
+  const supervised = new Set(supervisedChildHandles(agents));
+
+  return peers.filter((peer) => !supervised.has(peer?.handle));
 }
 
 /**
@@ -2216,11 +2269,42 @@ export const SIDEBAR_SECTIONS = [
   { key: "claims", inputs: ["claims", "handle"] },
   {
     key: "agents",
-    // `nowMinute` is a RENDER-TIME clock read, and it is in here because
-    // `agentRow` derives `bound Xm` from `Date.now()` rather than from state.
-    // Without it a supervisor whose payload never changes shows one age
-    // forever. ⚠️ TEMPORARY: #374 removes that label, and with it this input.
-    inputs: ["agents", "gateDefault", "gateEditing", "nowMinute"],
+    // 🛑 `nowMinute` SURVIVED #374, AND THE COMMENT HERE SAID IT WOULD NOT.
+    // It was justified as the thing that moved `bound Xm` along, so removing
+    // that label read as removing its last reader. It is not: the projection
+    // below drops `fresh`, so the minute bucket is the ONLY thing that
+    // announces the 15-minute flip to the stale gauge band. Dropping it would
+    // freeze a gauge at "ok" forever, silently.
+    //
+    // 🛑 THIS SECTION HOLDS A VALUE THAT LIVES ONLY IN THE DOM, so its input
+    // list is NOT the peers list copied across. `gateControl`'s percent input
+    // keeps what the operator typed in the element, never in state, so every
+    // rebuild here DISCARDS it — #399's registration defect in a second place.
+    //
+    // The test for any candidate input is WHO MOVES IT:
+    //
+    //   operator-initiated   `currentTarget`, `openMenuFor`. The operator
+    //                        clicked away from their own edit, so losing it is
+    //                        their choice. Declared.
+    //   background           `peers`, `activity`. These move on their own and
+    //                        would eat the typing with no action at all.
+    //                        ABSENT, and painted in place instead.
+    //
+    // ⚠️ `activity` WAS DECLARED HERE FOR ONE COMMIT and it was wrong: a child
+    // starting work rebuilt the section mid-edit. `paintPulse` already reaches
+    // an agent row — its selector is `.sidebar__item[data-kind="peer"]` with no
+    // section scoping, and the row is built with `kind: "peer"`. Caught by
+    // claude2 reviewing this PR.
+    //
+    // ⚠️ `peers` is the same: `paintAgentDots` paints the online dot instead.
+    inputs: [
+      "agents",
+      "gateDefault",
+      "gateEditing",
+      "nowMinute",
+      "currentTarget",
+      "openMenuFor",
+    ],
     project: { agents: agentsWithoutClock },
   },
   {
@@ -2242,7 +2326,14 @@ export const SIDEBAR_SECTIONS = [
   },
   {
     key: "peers",
-    inputs: ["peers", "currentTarget", "activity", "openMenuFor"],
+    // 🛑 `agents` IS AN INPUT BECAUSE #374 FILTERS BY IT. The section hides
+    // every supervised child, so a child appearing or exiting changes what
+    // this section renders while `state.peers` is byte-identical.
+    inputs: ["peers", "currentTarget", "activity", "openMenuFor", "agents"],
+    // 🛑 PROJECTED TO THE CHILD HANDLES ALONE. Signing the whole payload would
+    // rebuild the peers section on every gauge tick, which is the churn #399
+    // existed to stop.
+    project: { agents: supervisedChildHandles },
   },
   { key: "rooms", inputs: ["rooms", "currentTarget", "openMenuFor"] },
   { key: "discover", inputs: ["discoverRooms"] },

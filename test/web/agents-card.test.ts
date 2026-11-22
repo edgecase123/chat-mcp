@@ -34,14 +34,14 @@ const live = (over: Record<string, unknown> = {}) => ({
 });
 
 test("the row's stop target is the supervisor, never the child", () => {
-  const r = agentRow(live(), { nowMs: NOW });
+  const r = agentRow(live());
 
   assert.equal(r.handle, "smoke-container");
   assert.equal(r.childHandle, "smoke-container-agent");
 });
 
 test("the gauge is read from the child, because the supervisor has no context", () => {
-  const r = agentRow(live(), { nowMs: NOW });
+  const r = agentRow(live());
 
   assert.equal(r.gauge.show, true);
   assert.equal(r.gauge.percent, 16);
@@ -49,42 +49,19 @@ test("the gauge is read from the child, because the supervisor has no context", 
 });
 
 /**
- * 🛑 "bound", NEVER "uptime". A restart respawns the child without rebinding
- * the socket, so this number outlives the child sitting beside it. Labelling
- * it uptime would have an operator read a fresh agent as a two-hour-old one.
+ * 🛑 THE THREE `bound Nm` TESTS THAT STOOD HERE ARE DELETED, NOT MOVED. They
+ * pinned the label's wording, the clock-skew clamp and the unreadable-stat
+ * case — a contract lee removed on 2026-11-21, because an operator acts on no
+ * part of a supervisor's socket age. `agent-row-one-row.test.ts` asserts the
+ * row carries no such field at all (#374).
  */
-test("the age is labelled bound, because it is the socket's age and not the child's", () => {
-  assert.equal(agentRow(live(), { nowMs: NOW }).bound, "bound 2h");
-  assert.match(agentRow(live(), { nowMs: NOW }).boundTitle, /supervisor/i);
-  assert.doesNotMatch(agentRow(live(), { nowMs: NOW }).bound, /uptime/i);
-});
-
-/**
- * Clock skew between the socket's filesystem and this page can put the mtime
- * in the future. A zero or negative delta must not render as "-1m", which
- * reads as a bug in the page rather than as skew.
- *
- * 🛑 AN UNREADABLE STAT IS A DIFFERENT CASE and arrives as null, not as now —
- * see the test below and `boundAtOf` (#373).
- */
-test("a clock that runs backwards reads as a moment ago, not a negative age", () => {
-  const future = agentRow(live({ boundAt: NOW + 5000 }), { nowMs: NOW });
-
-  assert.equal(future.bound, "bound 0m");
-});
-
-test("a missing bind time says so, rather than borrowing ageLabel's never-reported", () => {
-  const r = agentRow(live({ boundAt: null }), { nowMs: NOW });
-
-  assert.equal(r.bound, "bound time unknown");
-});
 
 /**
  * A supervisor with no registered child is normal — it binds its socket
  * before the child's first bus touch.
  */
 test("a supervisor with no child still renders, with no gauge", () => {
-  const r = agentRow(live({ child: null }), { nowMs: NOW });
+  const r = agentRow(live({ child: null }));
 
   assert.equal(r.handle, "smoke-container");
   assert.equal(r.childHandle, null);
@@ -319,7 +296,6 @@ test("the row carries the child's gate and the layer that answered", () => {
         context_gate_source: "override",
       },
     }),
-    { nowMs: NOW },
   );
 
   assert.equal(r.gate, 25);
@@ -332,7 +308,7 @@ test("the row carries the child's gate and the layer that answered", () => {
  * put a second copy of the three-layer default in the browser.
  */
 test("a supervisor with no child reports no gate at all", () => {
-  const r = agentRow(live({ child: null }), { nowMs: NOW });
+  const r = agentRow(live({ child: null }));
 
   assert.equal(r.gate, null);
   assert.equal(r.gateSource, null);

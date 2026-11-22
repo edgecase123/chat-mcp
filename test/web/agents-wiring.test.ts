@@ -491,3 +491,69 @@ test("🛑 every view refresh() fills, boot() fills too — an empty panel must 
     `refresh() calls these and boot() does not, so they are empty or unpainted on a fresh page load: ${missing.join(", ")}`,
   );
 });
+
+/**
+ * 🛑 #374 — TWO HANDLES, ONE ROW, AND THEY MUST NOT SWAP. The row READS as
+ * the child, because that is the handle a human messages and clicks to DM.
+ * `/api/agents/stop` accepts only the supervisor, and so does a terminal kill,
+ * so the supervisor has to stay FINDABLE — it rides on the wrapper's tooltip.
+ *
+ * ⚠️ A `data-supervisor` ATTRIBUTE WAS THE FIRST CUT AND IT WAS DEAD MARKUP.
+ * Nothing in `web/` or `src/` read it, so the only reader was a test written to
+ * give it one. A tooltip has a reader: the browser renders it. Raised by
+ * claude2 reviewing this PR.
+ */
+test("🛑 the agent row targets the child and names its supervisor", () => {
+  const wrapper = APP_CODE.match(
+    /h\(\s*"div",\s*\{\s*className:\s*"agent",\s*title:\s*`([^`]+)`/,
+  );
+
+  assert.notEqual(wrapper, null, "no .agent wrapper with a title");
+  assert.match(
+    wrapper![1]!,
+    /\$\{a\.handle\}/,
+    "the tooltip must name the SUPERVISOR handle",
+  );
+  assert.doesNotMatch(
+    wrapper![1]!,
+    /childHandle/,
+    "the tooltip names the child, which the row already shows",
+  );
+
+  // THE OTHER HALF, and the test is vacuous without it: a tooltip holding the
+  // supervisor proves nothing if the clickable row targets it too.
+  const row = APP_CODE.match(/sidebarItem\(\{[\s\S]*?target:\s*([^,]+),/);
+
+  assert.notEqual(row, null, "the agent row is not a sidebarItem any more");
+  assert.equal(
+    row![1]!.trim(),
+    "a.childHandle",
+    "the clickable row must target the CHILD handle",
+  );
+});
+
+/**
+ * 🛑 A LIVE SUPERVISOR IS NOT A CONNECTED CHILD, AND THE FIRST CUT SAID IT
+ * WAS. `online: true` was hardcoded on the agent row, so the dot was green
+ * forever — and `cursorSpawn.processPerTurn` is `true`, meaning a Cursor handle
+ * is genuinely offline between turns. lee's ruling was that these rows look
+ * like peer rows, and a peer row's dot tells the truth. Raised by claude2.
+ */
+test("🛑 the agent row's online state is read, never asserted", () => {
+  const agentsRow = APP_CODE.slice(
+    APP_CODE.indexOf("function agentsSection("),
+    APP_CODE.indexOf("function peersSection("),
+  );
+
+  assert.ok(agentsRow.length > 0, "agentsSection() not found before peers");
+  assert.match(
+    agentsRow,
+    /online:\s*childOnline\(/,
+    "the agent row must resolve online from the peer record",
+  );
+  assert.doesNotMatch(
+    agentsRow,
+    /online:\s*(?:true|false)\b/,
+    "the agent row hardcodes an online state",
+  );
+});

@@ -40,6 +40,8 @@ import {
   claimRow,
   claimsPanelEmpty,
   agentRow,
+  childOnline,
+  peersMinusSupervised,
   agentsPanelEmpty,
   registrationRows,
   registrationsPanelEmpty,
@@ -438,7 +440,39 @@ function renderSidebar() {
   }
 
   sidebarSigs = next;
+
+  // 🛑 AFTER THE REBUILD LOOP, AND IT RUNS WHETHER OR NOT AGENTS REBUILT.
+  // That is the whole point: `peers` is not an agents input, so a child going
+  // offline moves no signature here. A rebuild paints the fresh value anyway
+  // and this is a no-op; a SKIP is the case it exists for.
+  paintAgentDots();
+
   el.sidebar.scrollTop = prevScrollTop;
+}
+
+/**
+ * Repaint each agent row's online dot from the current peer list (#374).
+ *
+ * 🛑 IN PLACE, NEVER THROUGH A REBUILD. `state.peers` changes on every
+ * `whoami`, and rebuilding the agents section would discard a half-typed gate
+ * percent — `gateControl`'s input holds its value in the DOM. #240 reached the
+ * same conclusion about the 250ms activity pulse, and this is its shape.
+ *
+ * ⚠️ SCOPED TO `.agent >`, so it cannot touch the peers section's own rows.
+ * Those carry the same `data-handle` and are rebuilt from state correctly.
+ */
+function paintAgentDots() {
+  for (const agent of state.agents ?? []) {
+    const child = agent?.child?.handle;
+    if (typeof child !== "string") continue;
+
+    const row = el.sidebar.querySelector(
+      `.agent > .sidebar__item[data-handle="${CSS.escape(child)}"]`,
+    );
+    if (row === null) continue;
+
+    row.classList.toggle("is-online", childOnline(state.peers, child));
+  }
 }
 
 /**
@@ -497,16 +531,38 @@ function agentsSection() {
         // blank panel and a failed fetch look identical.
         [h("div", { className: "sidebar__empty" }, [agentsPanelEmpty()])]
       : agents.map((a) =>
-          h("div", { className: "agent" }, [
-            h("div", { className: "agent__head" }, [
-              h("span", { className: "agent__handle" }, [a.handle]),
-              gaugeChip(a.gauge),
-            ]),
-            h("div", { className: "agent__meta", title: a.boundTitle }, [
-              a.childHandle === null
-                ? a.bound
-                : `${a.bound} \u00b7 ${a.childHandle}`,
-            ]),
+          // 🛑 THE SUPERVISOR HANDLE IS ON THE TOOLTIP, NOT IN A DEAD
+          // ATTRIBUTE. The row reads as the child, because that is the handle a
+          // human messages. The supervisor is still the only thing
+          // `/api/agents/stop` accepts and the only thing a terminal can kill,
+          // so an operator has to be able to find it — and a `data-` attribute
+          // nothing reads cannot tell them. #374 asked for a tooltip or an
+          // attribute; the tooltip is the one with a reader.
+          h("div", { className: "agent", title: `supervisor: ${a.handle}` }, [
+            // 🛑 THE SAME ROW COMPONENT AS A PEER, on lee's ruling of
+            // 2026-11-21: *"i'd like the dockerized agents to look like other
+            // agents like yourselves look in the web ui"*. The clickable row
+            // that opens a DM is the most visible half of that.
+            //
+            // ⚠️ NOT CLICKABLE WITH NO CHILD. A supervisor binds its socket
+            // before its child's first bus touch, and in that window there is
+            // no handle to message — a row targeting the supervisor would open
+            // a conversation that can never receive anything.
+            a.childHandle === null
+              ? h("div", { className: "agent__head" }, [
+                  h("span", { className: "agent__handle" }, [a.label]),
+                  gaugeChip(a.gauge),
+                ])
+              : sidebarItem({
+                  label: a.label,
+                  target: a.childHandle,
+                  // 🛑 NEVER A LITERAL `true`. A live supervisor does not mean a
+                  // connected child — a Cursor handle is offline between turns.
+                  online: childOnline(state.peers, a.childHandle),
+                  active: state.currentTarget === a.childHandle,
+                  kind: "peer",
+                  gauge: a.gauge,
+                }),
             h("div", { className: "agent__actions" }, [
               stopButton("Stop", a.handle, "graceful"),
               stopButton("Stop now", a.handle, "now"),
@@ -564,11 +620,20 @@ function agentsSection() {
 
 function peersSection() {
   // Peers
+  //
+  // 🛑 COMPUTED ONCE. `peersMinusSupervised` builds a Set per call, and the
+  // empty check and the map below both need the same answer — two calls is
+  // also two chances for them to disagree.
+  const peers = peersMinusSupervised(state.peers, state.agents);
+
   return h("div", { className: "sidebar__section" }, [
     h("div", { className: "sidebar__heading" }, ["Peers"]),
-    ...(state.peers.length === 0
+    // 🛑 THE FILTERED LIST, NOT `state.peers`. A bus whose only peer is a
+    // supervised child would otherwise fall through to the map and render a
+    // section with a heading and no rows.
+    ...(peers.length === 0
       ? [h("div", { className: "sidebar__empty" }, ["(none online)"])]
-      : state.peers.map((p) =>
+      : peers.map((p) =>
           sidebarItem({
             label: p.handle,
             target: p.handle,
