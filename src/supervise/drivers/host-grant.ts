@@ -1,5 +1,11 @@
-import { existsSync, lstatSync, mkdirSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { ChildGrant } from "../grant.js";
 import type { VendorSpawn } from "../vendor.js";
 import { realContains } from "../containment.js";
@@ -107,11 +113,22 @@ export function deliverHostGrantFile(
 
   const path = hostGrantConfigPathFor(vendor, cwd);
 
+  const desired = `${JSON.stringify(chatMcpServerConfig(grant.handle), null, 2)}\n`;
+
   if (existsSync(path)) {
+    // 🛑 RE-DELIVERY IS A NO-OP, NOT A REFUSAL. Nothing deletes this file, so
+    // a refusal on any existing file meant a granted handle started exactly
+    // ONCE per project directory and the second start blamed the operator for
+    // a file the supervisor itself had written.
+    if (readFileSync(path, "utf8") === desired) return path;
+
+    // ⚠️ THE MESSAGE CLAIMS NO AUTHOR. "the supervisor did not create it" was
+    // a guess stated as a fact: an older build of this project writes a
+    // different entry path and lands here too.
     throw new Error(
-      `refusing to overwrite ${path}: the supervisor did not create it. That file is the ` +
-        `operator's own MCP configuration. Move it aside to let a granted "${vendor.vendor}" ` +
-        `child be wired to the bus, or run this handle UNGRANTED.`,
+      `refusing to overwrite ${path}: its contents are not the config this supervisor ` +
+        `writes for handle "${grant.handle}". If it is yours, move it aside. If an older ` +
+        `chat-mcp wrote it, delete it. Or run this handle UNGRANTED.`,
     );
   }
 
@@ -126,11 +143,7 @@ export function deliverHostGrantFile(
   // ⚠️ `writePrivateFileSync` FOR 0600, MATCHING THE STATE-DIR WRITER. This
   // file holds no secret, but it lands in a project directory that may not
   // ignore it, and it names this host's absolute paths.
-  writePrivateFileSync(
-    path,
-    `${JSON.stringify(chatMcpServerConfig(grant.handle), null, 2)}\n`,
-    "wx",
-  );
+  writePrivateFileSync(path, desired, "wx");
 
   return path;
 }
@@ -159,11 +172,19 @@ function assertDirIsNotASymlinkEscape(
   path: string,
   vendor: string,
 ): void {
-  const dir = dirname(path);
+  // 🛑 THE NEAREST EXISTING ANCESTOR, NOT THE LEAF. Returning early when the
+  // config directory is absent left the escape open: `mkdirSync` with
+  // `recursive` then FOLLOWS a symlinked ancestor and creates the leaf
+  // outside the project. Measured — a `link -> /tmp/elsewhere` ancestor with
+  // no `inner/` under it wrote to `/tmp/elsewhere/inner/mcp.json` and threw
+  // nothing. claude1 on PR 389.
+  let dir = dirname(path);
+  while (!existsSync(dir) && dirname(dir) !== dir) dir = dirname(dir);
 
-  // An absent directory is about to be created inside the project, so there is
-  // nothing to resolve and nothing to escape through.
-  if (!existsSync(dir)) return;
+  // ⚠️ THE CWD ITSELF MAY BE A SYMLINK AND THAT IS LEGITIMATE — macOS `/tmp`
+  // is one. Only components BELOW it are judged, so a supervised project
+  // under a linked path still works.
+  if (realpathish(dir) === realpathish(cwd)) return;
 
   if (lstatSync(dir).isSymbolicLink() || !realContains(cwd, dir)) {
     throw new Error(
@@ -172,6 +193,15 @@ function assertDirIsNotASymlinkEscape(
         `in the supervised project, and a project directory is not trusted input. Remove ` +
         `the link, or run this handle UNGRANTED.`,
     );
+  }
+}
+
+/** A real path where one exists, and the resolved name where it does not. */
+function realpathish(path: string): string {
+  try {
+    return realpathSync(resolve(path));
+  } catch {
+    return resolve(path);
   }
 }
 

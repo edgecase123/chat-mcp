@@ -159,7 +159,13 @@ test("🔴 an EXISTING .cursor/mcp.json is REFUSED, not overwritten", () => {
   });
 });
 
-test("the refusal names the FILE and says the supervisor did not create it", () => {
+/**
+ * 🛑 THE MESSAGE NAMES THE FILE AND THE HANDLE, AND ASSERTS NO AUTHOR. It used
+ * to say "the supervisor did not create it", which is false whenever an older
+ * build of this project wrote it — and was false on every restart before
+ * re-delivery became a no-op.
+ */
+test("the refusal names the FILE and the HANDLE, and tells the operator what to do", () => {
   withTempCwd((cwd) => {
     mkdirSync(join(cwd, ".cursor"), { recursive: true });
     writeFileSync(join(cwd, ".cursor", "mcp.json"), "{}\n");
@@ -170,7 +176,9 @@ test("the refusal names the FILE and says the supervisor did not create it", () 
         const message = (e as Error).message;
 
         assert.match(message, /\.cursor\/mcp\.json/);
-        assert.match(message, /did not create/i);
+        assert.match(message, /h-child/);
+        assert.match(message, /move it aside|delete it/i);
+        assert.doesNotMatch(message, /did not create/i);
 
         return true;
       },
@@ -404,5 +412,94 @@ test("🔴 a malformed handle is refused before anything is written", () => {
       !existsSync(join(cwd, ".cursor")),
       "a malformed handle got as far as creating the directory",
     );
+  });
+});
+
+/**
+ * 🛑 THE SECOND START MUST NOT HIT A REFUSAL THE SUPERVISOR ITSELF CAUSED.
+ *
+ * Nothing deletes this file, so a granted host Cursor handle started exactly
+ * ONCE per project directory. The second start threw "the supervisor did not
+ * create it" — about a file the supervisor had just created. An operator then
+ * goes looking for a config of their own that is not there.
+ *
+ * ⚠️ IDENTICAL CONTENT IS A NO-OP, NOT AN OVERWRITE. The file we would write
+ * is fully determined by the handle, so "is this already ours?" is answerable
+ * exactly, and anything else keeps the refusal.
+ */
+test("🔴 starting TWICE in one project directory is a no-op, not a refusal", () => {
+  withTempCwd((cwd) => {
+    const first = deliverHostGrantFile(spawnFor("cursor"), grantIn(cwd), cwd);
+    const before = readFileSync(first, "utf8");
+
+    const second = deliverHostGrantFile(spawnFor("cursor"), grantIn(cwd), cwd);
+
+    assert.equal(second, first);
+    assert.equal(readFileSync(second, "utf8"), before);
+  });
+});
+
+/**
+ * 🛑 A DIFFERENT HANDLE IS STILL REFUSED, AND THE MESSAGE NO LONGER CLAIMS
+ * AUTHORSHIP. An older chat-mcp may have written it, so "the supervisor did
+ * not create it" was a guess stated as a fact.
+ */
+test("🔴 a file with DIFFERENT content is refused, and the message claims no author", () => {
+  withTempCwd((cwd) => {
+    deliverHostGrantFile(spawnFor("cursor"), grantIn(cwd), cwd);
+
+    const other = { ...grantIn(cwd), handle: "someone-else" };
+
+    assert.throws(
+      () => deliverHostGrantFile(spawnFor("cursor"), other, cwd),
+      (e) => {
+        const message = (e as Error).message;
+
+        assert.match(message, /refusing to overwrite/i);
+        assert.doesNotMatch(message, /did not create/i);
+
+        return true;
+      },
+    );
+  });
+});
+
+/**
+ * 🛑 THE DANGLING-LEAF ESCAPE. `assertDirIsNotASymlinkEscape` returned early
+ * when the config directory did not exist, reasoning it was about to be made
+ * inside the project. `mkdirSync({recursive:true})` then followed a symlinked
+ * ANCESTOR and created it outside.
+ *
+ * ⚠️ THE EARLIER INTERMEDIATE-SYMLINK TEST CANNOT SEE THIS, because its
+ * fixture creates the inner directory first, so the leaf always exists.
+ * Measured: without the fix the file landed in the link's target and nothing
+ * threw. claude1 on PR 389.
+ */
+test("🔴 a symlinked ancestor is refused even when the leaf directory is ABSENT", () => {
+  withTempCwd((cwd) => {
+    const elsewhere = mkdtempSync(join(tmpdir(), "chat-mcp-elsewhere-"));
+
+    try {
+      symlinkSync(elsewhere, join(cwd, "link"));
+
+      const nested = {
+        vendor: "nests-its-config",
+        hostGrantDelivery: "file" as const,
+        hostGrantConfigPath: (dir: string) =>
+          join(dir, "link", "inner", "mcp.json"),
+      };
+
+      assert.throws(
+        () => deliverHostGrantFile(nested, grantIn(cwd), cwd),
+        /symlink|outside/i,
+      );
+
+      assert.ok(
+        !existsSync(join(elsewhere, "inner")),
+        "mkdirSync followed a symlinked ancestor and created a directory outside the project",
+      );
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
   });
 });

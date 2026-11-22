@@ -180,9 +180,24 @@ started, took its prompt and answered nothing, because the config went to
 
 ⚠️ **THE WRITER REFUSES AN EXISTING FILE RATHER THAN OVERWRITING IT.** That
 file is the operator's own MCP configuration and this project may destroy it
-exactly never. The refusal names the path and the ungranted way out. `wx` backs
-the readable `existsSync` check, so two supervisors in one project directory
-cannot race past it.
+exactly never. `wx` backs the readable `existsSync` check, so two supervisors
+in one project directory cannot race past it.
+
+🛑 **RE-DELIVERING THE IDENTICAL FILE IS A NO-OP, NOT A REFUSAL.** Nothing
+deletes this file, so a blanket refusal meant a granted handle started exactly
+ONCE per project directory, and the second start blamed the operator for a file
+the supervisor itself had written. The content is fully determined by the
+handle, so "is this already ours?" is answerable exactly.
+
+| `<cwd>/.cursor/mcp.json` is… | result            |
+| ---------------------------- | ----------------- |
+| absent                       | written           |
+| byte-identical to ours       | left alone, no-op |
+| anything else                | refused           |
+
+⚠️ **THE REFUSAL CLAIMS NO AUTHOR.** It used to say "the supervisor did not
+create it", which is false whenever an older build of this project wrote it.
+It now names the file and the handle and says what to do.
 
 **The bound is enforced as tests, not as a comment.** The written file declares
 exactly one server named `chat`, and its `command` is this process's own
@@ -197,6 +212,10 @@ no-ops on the resolved directory, `wx` succeeds, and the config lands in the
 link's TARGET. Measured — `.cursor -> /tmp/elsewhere` put the file at
 `/tmp/elsewhere/mcp.json`.
 
+🛑 **THE CHECK WALKS UP TO THE NEAREST EXISTING ANCESTOR.** Returning early
+when the config directory was absent left the escape open: `mkdirSync` with
+`recursive` FOLLOWS a symlinked ancestor and creates the leaf outside it.
+
 **So the writer refuses a symlinked config directory, using `realContains` from
 `containment.ts`** — the same `realpathSync` discipline the manifest script
 path uses, and for the same reason: `resolve` is lexical and cannot see a
@@ -209,6 +228,7 @@ symlink.
 | a symlink OUT of the project            | refused |
 | a symlink back INSIDE it                | refused |
 | reached through an intermediate symlink | refused |
+| ABSENT, under a symlinked ancestor      | refused |
 
 ⚠️ **A symlinked CWD is legitimate and stays allowed.** macOS `/tmp` is one.
 Containment is judged on real paths rather than by banning them.
