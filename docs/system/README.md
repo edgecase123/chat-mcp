@@ -40,6 +40,7 @@ listed here will not be found. Add the row in the same commit as the page.
 | [container-isolation.md](05-supervision/container-isolation.md) | The two containers a spawn runs, which one holds the credentials, why the dependency install is not it, and what is still open                                       |
 | [handle-overrides.md](05-supervision/handle-overrides.md)       | The two override files, why the container surface stays at five keys, the ADD-only merge, and why a profile name may not be a path                                   |
 | [context-gate.md](05-supervision/context-gate.md)               | How a child's context fill triggers its own restart, which of the three layers decides the gate, and why a gate of 50 restarts a container child about every 9 turns |
+| [vendors.md](05-supervision/vendors.md)                         | Which agent CLIs the supervisor can drive, what each must declare about itself before it can be spawned, and why Cursor must be pinned to `auto` explicitly          |
 
 ### [06 — Interfaces](06-interfaces/)
 

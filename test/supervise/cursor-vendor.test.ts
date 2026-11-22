@@ -4,6 +4,7 @@ import {
   CURSOR_CONTAINER_BINARY,
   CURSOR_CONTAINER_HOME,
   CURSOR_HOST_BINARY,
+  CURSOR_DEFAULT_MODEL,
   cursorArgs,
   cursorEncodeInput,
   cursorMissingClauses,
@@ -118,13 +119,46 @@ test("🛑 cursorArgs carries the three flags that fail SILENTLY when absent", (
   );
 });
 
-test("cursorArgs passes model and resume only when asked", () => {
-  assert.ok(!cursorArgs().includes("--model"));
+test("cursorArgs passes resume only when asked", () => {
   assert.ok(!cursorArgs().includes("--resume"));
 
   const args = cursorArgs({ model: "m-1", resumeSessionId: "s-1" });
 
   assert.deepEqual(args.slice(-4), ["--model", "m-1", "--resume", "s-1"]);
+});
+
+/**
+ * lee's ruling of 2026-11-22: *"keep it on auto for now."*
+ *
+ * 🛑 OMITTING `--model` IS NOT `auto`, AND THAT IS THE WHOLE BUG THIS CLOSES.
+ * The CLI falls back to its own stored default, which on the measured host is
+ * Composer 2.5 Fast — a model the account's plan rejects, so the turn exits 1.
+ * The previous assertion here was `!cursorArgs().includes("--model")`, and it
+ * was GREEN on a build where no cursor turn could complete at all.
+ */
+test("🛑 cursorArgs PINS auto when the caller names no model", () => {
+  const args = cursorArgs();
+  const at = args.indexOf("--model");
+
+  assert.notEqual(at, -1, "no --model, so the CLI picks its own default");
+  assert.equal(args[at + 1], CURSOR_DEFAULT_MODEL);
+  assert.equal(CURSOR_DEFAULT_MODEL, "auto");
+});
+
+/**
+ * 🛑 A CALLER'S MODEL MUST WIN, AND AN `opts.model` OF `""` MUST NOT. An empty
+ * string would reach `--model` as an argument the CLI cannot resolve, which
+ * fails as a dead agent rather than as a bad flag.
+ */
+test("🛑 an explicit model overrides the pin; an empty one falls back", () => {
+  const named = cursorArgs({ model: "gpt-5.2" });
+
+  assert.equal(named[named.indexOf("--model") + 1], "gpt-5.2");
+
+  const empty = cursorArgs({ model: "" });
+
+  assert.equal(empty[empty.indexOf("--model") + 1], CURSOR_DEFAULT_MODEL);
+  assert.equal(empty.filter((a) => a === "--model").length, 1);
 });
 
 test("🛑 the flag set is the SAME in both sandbox modes, unlike claude's", () => {

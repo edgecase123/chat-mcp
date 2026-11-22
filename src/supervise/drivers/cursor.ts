@@ -71,6 +71,38 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
   return ["--resume", sessionId];
 }
 
+/**
+ * The model a supervised `cursor-agent` runs when no caller names one.
+ *
+ * 🛑 lee's RULING OF 2026-11-22: *"keep it on auto for now."* That SUPERSEDES
+ * his ruling of 2026-11-21, which named the native fast model — the account's
+ * plan cannot run it.
+ *
+ * 🛑 OMITTING `--model` DOES NOT MEAN `auto`. It means WHATEVER MODEL WAS LAST
+ * SELECTED ON THIS HOST. `cursor-agent --model X` PERSISTS X into
+ * `~/.cursor/cli-config.json`, and it persists it even when the turn FAILS — so
+ * one operator trying a model their plan rejects leaves every later unattended
+ * agent on it. Measured against the live binary, argv built by `cursorArgs()`,
+ * reading the stored value between runs:
+ *
+ * | stored before | `--model`           | exit | stored after   |
+ * |---------------|---------------------|------|----------------|
+ * | `auto`        | `composer-2.5-fast` | 1    | `composer-2.5` |
+ * | `composer-2.5`| none                | 1    | `composer-2.5` |
+ * | `composer-2.5`| `auto`              | 0    | `auto`         |
+ *
+ * ⚠️ THE SECOND ROW IS WHY A NO-FLAG RUN IS NOT REPRODUCIBLE. It inherits the
+ * row above it. An earlier measurement of mine read that inheritance as "the
+ * CLI's default is Composer" — it was my own previous command. claude1's
+ * counter-measurement on #371 is what exposed it.
+ *
+ * ⚠️ PINNING ANY MODEL BUYS NO CONTEXT GAUGE. A denominator needs the window
+ * size, and `--list-models` names one only in the ids that carry it:
+ * `Claude Opus 5 1M Thinking` does, `Composer 2.5 Fast` does not. So
+ * `cursorSpawn.reportsContext` stays `false`.
+ */
+export const CURSOR_DEFAULT_MODEL = "auto";
+
 export function cursorArgs(opts: SpawnOptions = {}): string[] {
   const args = [
     "-p",
@@ -83,7 +115,9 @@ export function cursorArgs(opts: SpawnOptions = {}): string[] {
     "--approve-mcps",
   ];
 
-  if (opts.model) args.push("--model", opts.model);
+  // ⚠️ ALWAYS PASSED, NEVER CONDITIONAL. Omitting it is NOT `auto` — see
+  // `CURSOR_DEFAULT_MODEL`, where the exit codes are.
+  args.push("--model", opts.model || CURSOR_DEFAULT_MODEL);
   if (opts.resumeSessionId) {
     args.push(...cursorResumeFlags(opts.resumeSessionId));
   }

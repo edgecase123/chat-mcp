@@ -1,6 +1,6 @@
 ---
 title: Supervised Vendors
-updated: 2026-11-20
+updated: 2026-11-22
 covers:
   - src/supervise/vendor.ts
   - src/supervise/drivers/index.ts
@@ -30,8 +30,9 @@ about itself before it can be spawned.
 | turn ends on             | `{"type":"result"}`    | `{"type":"result"}`                       |
 | reports a usage window   | yes                    | no                                        |
 | reports context fullness | yes                    | no                                        |
+| default model            | the CLI's own          | **pinned** `auto`                         |
 | container image          | `chat-mcp-agent:local` | `chat-mcp-cursor-agent:local`             |
-| reaches the bus          | yes                    | **not yet**                               |
+| reaches the bus          | yes                    | yes                                       |
 
 ## A vendor declares its own capabilities; the wiring never infers them
 
@@ -47,6 +48,47 @@ reading _"awaiting the first reading"_ forever.
 token-count fields, and `reportsUsage` is still `false`, because the sink takes
 a `RateLimitSnapshot` — a subscription status with named windows. The two are
 easy to confuse and the confusion reproduces the bug above.
+
+**A `false` is now RENDERED, not just logged.** `reportsContextFor` in
+`src/adapters/index.ts` is the non-throwing lookup the web UI reads, so a row
+for a vendor that reports no window shows `n/a` instead of a blank that could
+equally mean "not yet". The three states and the suffix join are in
+[context-gate.md](context-gate.md).
+
+## Cursor is PINNED to `auto`, because no flag means "whatever was last used"
+
+lee's ruling, 2026-11-22: _"keep it on auto for now."_ It supersedes his ruling
+of the 21st, which named the native fast model — the account's plan cannot run
+it. `CURSOR_DEFAULT_MODEL` in `src/supervise/drivers/cursor.ts` is `auto`, and
+`cursorArgs` passes `--model` on every spawn. A caller's own `opts.model` wins.
+
+🛑 **THE PIN IS LOAD-BEARING, AND NOT BECAUSE THE CLI HAS A BAD DEFAULT.**
+`cursor-agent --model X` **persists** X into `~/.cursor/cli-config.json`, and it
+persists it even when the turn FAILS. A run with no flag inherits that stored
+value. So one operator trying a model their plan rejects leaves every later
+unattended agent on it, and nothing in this repo records that it happened.
+
+Measured 2026-11-22 against the live binary, argv built by `cursorArgs()`,
+reading the stored value between runs:
+
+| stored before  | `--model`           | exit | stored after   |
+| -------------- | ------------------- | ---- | -------------- |
+| `auto`         | `composer-2.5-fast` | 1    | `composer-2.5` |
+| `composer-2.5` | none                | 1    | `composer-2.5` |
+| `composer-2.5` | `auto`              | 0    | `auto`         |
+
+⚠️ **A NO-FLAG RUN IS THEREFORE NOT REPRODUCIBLE**, and two agents measured it
+to opposite conclusions within four minutes on #371. The one who ran no flag
+after a successful `auto` saw it pass; the one who ran it after a rejected
+Composer saw it fail. Neither reading was about the CLI's default.
+
+⚠️ **ONLY `auto` IS PROVEN TO RUN ON A FREE PLAN.** `grok-4.7-low` is rejected
+too, though the error names Grok as included.
+
+⚠️ **A PIN BUYS NO CONTEXT GAUGE.** A percentage needs the window size, and
+`--list-models` names one only in the ids that carry it:
+`Claude Opus 5 1M Thinking` does, `Composer 2.5 Fast` does not. So
+`reportsContext` stays `false` and the gauge's fix is the `n/a` chip above.
 
 ## How a host grant is delivered is DECLARED, never inferred
 

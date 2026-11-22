@@ -177,3 +177,67 @@ test("age reads at a glance and never as raw milliseconds", () => {
   assert.equal(ageLabel(3 * 60 * 60 * 1000), "3h");
   assert.equal(ageLabel(5 * 24 * 60 * 60 * 1000), "5d");
 });
+
+/**
+ * #371 — a blank gauge had two causes and the operator needed opposite
+ * responses to them. A vendor that reports no window will never fill it in;
+ * a vendor that does has simply not reported yet.
+ */
+test("🛑 a vendor that reports NO window says so, instead of rendering nothing", () => {
+  const g = gaugeDisplay({ reports_context: false });
+
+  assert.equal(g.show, true, "the chip was dropped, so nothing says why");
+  assert.equal(g.percent, null);
+  assert.equal(g.band, "unreported");
+  assert.match(g.title, /no percentage is possible/);
+});
+
+/**
+ * 🛑 THE TWO STATES THIS CHANGE EXISTS TO SEPARATE. Both carry a null percent,
+ * so the BAND is the only thing a chip can style or a reader can tell apart —
+ * and a shared band would put them back under one glyph.
+ */
+test("🛑 unreported and STALE are different bands, not one null percent", () => {
+  const unreported = gaugeDisplay({ reports_context: false });
+  const stale = gaugeDisplay({
+    context_used: 10,
+    context_total: 100,
+    fresh: false,
+    age_ms: 60 * 60 * 1000,
+  });
+
+  assert.equal(unreported.percent, null);
+  assert.equal(stale.percent, null);
+  assert.notEqual(unreported.band, stale.band);
+});
+
+/**
+ * 🛑 `null` IS NOT `false`. An unregistered handle's vendor is unknown, and
+ * labelling it "n/a" would be a confident claim about the one case we cannot
+ * see.
+ */
+test("🛑 an UNKNOWN vendor keeps the older blank, never the n/a label", () => {
+  for (const reports_context of [null, undefined]) {
+    const g = gaugeDisplay({ reports_context });
+
+    assert.equal(g.show, false, `reports_context=${reports_context} rendered`);
+    assert.equal(g.band, "none");
+  }
+});
+
+/**
+ * ⚠️ THE SPLIT SITS INSIDE `!reported`, SO A REPORTING AGENT IS UNTOUCHED BY
+ * ITS REGISTRATION. An operator who registers the wrong vendor mislabels the
+ * WAIT and nothing else.
+ */
+test("🛑 a real reading beats reports_context: false", () => {
+  const g = gaugeDisplay({
+    context_used: 50,
+    context_total: 100,
+    fresh: true,
+    reports_context: false,
+  });
+
+  assert.equal(g.percent, 50);
+  assert.equal(g.band, "ok");
+});

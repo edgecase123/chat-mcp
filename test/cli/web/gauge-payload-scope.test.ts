@@ -67,6 +67,20 @@ function rampSites(): Site[] {
   );
 }
 
+/**
+ * Where a gauge payload says whether a reading is coming at all, and for whom
+ * (#371).
+ *
+ * 🛑 PAIRED HERE FOR THE SAME REASON THE RAMP IS. Both answer a question about
+ * the SAME receiver's gauge, and a payload carrying one without the other
+ * renders a blank chip that says nothing — which is the defect #371 names.
+ */
+function reportsContextSites(): Site[] {
+  return sites(
+    /reports_context:\s*reportsContextOf\(\s*\w+,\s*(\w+)\??\.handle/g,
+  );
+}
+
 test("🛑 EVERY gauge payload in server.ts ships a ramp beside its freshness", () => {
   const fresh = freshnessSites();
   const ramps = rampSites();
@@ -117,6 +131,57 @@ test("🛑 each ramp sits inside its OWN payload and names the same receiver", (
       r.recv,
       f.recv,
       `payload spreads \`${f.recv}\`'s freshness and ships \`${r.recv}\`'s ramp`,
+    );
+  });
+});
+
+test("🛑 EVERY gauge payload says whether a reading is coming at all", () => {
+  const fresh = freshnessSites();
+  const flags = reportsContextSites();
+
+  assert.ok(
+    fresh.length >= 2,
+    `only ${fresh.length} gauge payloads found — the regex stopped matching`,
+  );
+
+  assert.equal(
+    flags.length,
+    fresh.length,
+    `${fresh.length} gauge payloads, ${flags.length} reports_context fields. ` +
+      "Unpaired receivers: " +
+      fresh
+        .map((f) => f.recv)
+        .filter((r) => !flags.some((p) => p.recv === r))
+        .join(", "),
+  );
+});
+
+/**
+ * 🛑 THE COUNT ALONE WOULD LAUNDER A MISPLACED FLAG, exactly as it would a
+ * misplaced ramp. Two on one builder and none on the other still totals two.
+ */
+test("🛑 each reports_context sits inside its OWN payload and names the same receiver", () => {
+  const fresh = freshnessSites();
+  const flags = reportsContextSites();
+
+  assert.equal(
+    flags.length,
+    fresh.length,
+    "counts diverged — see the test above",
+  );
+
+  fresh.forEach((f, i) => {
+    const r = flags[i]!;
+    const next = fresh[i + 1]?.index ?? CODE.length;
+
+    assert.ok(
+      r.index > f.index && r.index < next,
+      `the reports_context for \`${f.recv}\` is outside its own payload`,
+    );
+    assert.equal(
+      r.recv,
+      f.recv,
+      `payload spreads \`${f.recv}\`'s freshness and ships \`${r.recv}\`'s flag`,
     );
   });
 });
