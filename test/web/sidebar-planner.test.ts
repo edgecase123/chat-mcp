@@ -114,14 +114,15 @@ test("a change to one agent's gauge percent alone rebuilds agents", () => {
  * the activity pulse compares equal forever and peers stops updating, which
  * looks exactly like success.
  */
-test("a change to the activity Set alone rebuilds peers and agents", () => {
+test("a change to the activity Set alone rebuilds peers", () => {
   const due = plan((s) => {
     s.activity = new Set(["a"]);
   });
 
-  // 🛑 AGENTS IS IN HERE SINCE #374. Its row is a `sidebarItem`, so the
-  // working pulse dresses an agent row exactly as it dresses a peer row.
-  assert.deepEqual(due, ["agents", "peers"]);
+  // 🛑 AND NOT AGENTS, THOUGH ITS ROW IS A `sidebarItem` TOO. `activity`
+  // moves on its own, and a rebuild of the agents section discards a half-typed
+  // gate percent. `paintPulse` already dresses that row — see the pin below.
+  assert.deepEqual(due, ["peers"]);
 });
 
 test("Set membership is compared by CONTENT, not insertion order", () => {
@@ -445,4 +446,35 @@ test("renderSidebar paints the agent dots after it rebuilds", () => {
   assert.notEqual(paint, -1, "nothing calls paintAgentDots");
   assert.notEqual(loop, -1, "no rebuild loop — the pin would be vacuous");
   assert.ok(loop < paint, "the paint must follow the rebuild it corrects");
+});
+
+/**
+ * 🛑 WHAT MAKES `activity`'s ABSENCE SAFE, AND IT IS A PROPERTY OF ONE
+ * SELECTOR. `paintPulse` is not scoped to the peers section, so it already
+ * dresses an agent row — which is built with `kind: "peer"` and therefore
+ * carries `data-kind="peer"`. Scope that selector to a section and the agents
+ * row silently stops pulsing, with the planner test above still green.
+ *
+ * ⚠️ ONE ROW PER HANDLE IS THE OTHER HALF. `querySelector` takes the first
+ * match, and `peersMinusSupervised` is what guarantees a supervised child is
+ * not also drawn in the peers section.
+ */
+test("the pulse selector reaches an agent row, not just a peers one", () => {
+  const body = APP_CODE.slice(APP_CODE.indexOf("function paintPulse("));
+
+  assert.ok(body.length > 0, "paintPulse not found in app.js");
+
+  const selector = body.match(/`([^`]*sidebar__item[^`]*)`/);
+
+  assert.notEqual(selector, null, "paintPulse no longer builds a selector");
+  assert.match(
+    selector![1]!,
+    /\[data-kind="peer"\]/,
+    "the pulse must key on the peer kind, which an agent row also carries",
+  );
+  assert.doesNotMatch(
+    selector![1]!,
+    /data-section|\.agent|sidebar__section/,
+    "the pulse selector is scoped to a section, so it cannot reach an agent row",
+  );
 });

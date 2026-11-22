@@ -2276,24 +2276,33 @@ export const SIDEBAR_SECTIONS = [
     // announces the 15-minute flip to the stale gauge band. Dropping it would
     // freeze a gauge at "ok" forever, silently.
     //
-    // 🛑 `currentTarget`, `activity` AND `openMenuFor` ARE READ BY THE ROW.
-    // The row is a `sidebarItem` since #374, so it reads the three keys the
-    // peers section already declared. Undeclared, a selection or an open (...)
-    // menu on an agent row would not repaint — #404's class exactly.
+    // 🛑 THIS SECTION HOLDS A VALUE THAT LIVES ONLY IN THE DOM, so its input
+    // list is NOT the peers list copied across. `gateControl`'s percent input
+    // keeps what the operator typed in the element, never in state, so every
+    // rebuild here DISCARDS it — #399's registration defect in a second place.
     //
-    // 🛑 `peers` IS DELIBERATELY ABSENT, AND IT IS THE ROW'S OWN DOT SOURCE.
-    // Declaring it makes any peer going online rebuild this section, and this
-    // section holds a half-typed gate percent: `gateControl`'s input keeps its
-    // value in the DOM, not in state, so a rebuild DISCARDS it. That is #399's
-    // registration defect in a second place. `paintAgentDots` updates the dot
-    // in place instead — the same out-of-band treatment #240 gave the pulse.
+    // The test for any candidate input is WHO MOVES IT:
+    //
+    //   operator-initiated   `currentTarget`, `openMenuFor`. The operator
+    //                        clicked away from their own edit, so losing it is
+    //                        their choice. Declared.
+    //   background           `peers`, `activity`. These move on their own and
+    //                        would eat the typing with no action at all.
+    //                        ABSENT, and painted in place instead.
+    //
+    // ⚠️ `activity` WAS DECLARED HERE FOR ONE COMMIT and it was wrong: a child
+    // starting work rebuilt the section mid-edit. `paintPulse` already reaches
+    // an agent row — its selector is `.sidebar__item[data-kind="peer"]` with no
+    // section scoping, and the row is built with `kind: "peer"`. Caught by
+    // claude2 reviewing this PR.
+    //
+    // ⚠️ `peers` is the same: `paintAgentDots` paints the online dot instead.
     inputs: [
       "agents",
       "gateDefault",
       "gateEditing",
       "nowMinute",
       "currentTarget",
-      "activity",
       "openMenuFor",
     ],
     project: { agents: agentsWithoutClock },
