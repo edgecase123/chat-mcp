@@ -75,6 +75,9 @@ import {
   PULSE_FAILSAFE_MS,
   SETTINGS_TABS,
   settingsTabSelection,
+  SIDEBAR_SECTIONS,
+  sidebarSignatures,
+  sectionsToRebuild,
 } from "./logic.js";
 //
 // State model: single `state` object holds handle, current target, peers,
@@ -363,14 +366,84 @@ function h(tag, attrs = {}, children = []) {
   return node;
 }
 
-function renderSidebar() {
-  el.sidebar.innerHTML = "";
+/**
+ * #399 — the sidebar used to open with `el.sidebar.innerHTML = ""`, so a peer
+ * status change destroyed the registration form, an open (...) menu and a gate
+ * editor mid-edit. Five features had each routed around it separately.
+ *
+ * Only the sections whose own inputs changed are rebuilt. `data-section` makes
+ * the DOM the record of what is mounted, so a sidebar that was emptied by
+ * anything else recovers on the next call.
+ *
+ * ⚠️ UNPROVEN HERE: that the nodes replaced are the ones the planner named.
+ * No test runs this file in a browser — that is #330.
+ */
+const SECTION_BUILDERS = {
+  claims: claimsSection,
+  agents: agentsSection,
+  registration: registrationSection,
+  peers: peersSection,
+  rooms: roomsSection,
+  discover: discoverSection,
+};
 
+let sidebarSigs = {};
+
+function renderSidebar() {
+  const next = sidebarSignatures(state);
+
+  // An empty sidebar has no nodes to keep, so every section is due.
+  const due =
+    el.sidebar.children.length === 0
+      ? SIDEBAR_SECTIONS.map((s) => s.key)
+      : sectionsToRebuild(sidebarSigs, next);
+
+  // 🛑 READ BEFORE THE FIRST MUTATION. Replacing a node resets the scroll of
+  // the container, which is the same restore the message pane does.
+  const prevScrollTop = el.sidebar.scrollTop;
+
+  for (const { key } of SIDEBAR_SECTIONS) {
+    const mounted = el.sidebar.querySelector(
+      `:scope > [data-section="${key}"]`,
+    );
+
+    if (!due.includes(key)) continue;
+
+    const built = SECTION_BUILDERS[key]();
+    if (built !== null) built.dataset.section = key;
+
+    if (mounted !== null && built !== null)
+      el.sidebar.replaceChild(built, mounted);
+    else if (mounted !== null) el.sidebar.removeChild(mounted);
+    else if (built !== null)
+      el.sidebar.insertBefore(built, nextMountedAfter(key));
+  }
+
+  sidebarSigs = next;
+  el.sidebar.scrollTop = prevScrollTop;
+}
+
+/**
+ * The mounted node of the first section that sorts AFTER `key`, or null for
+ * append. A section can be absent — `discover` renders nothing with nothing to
+ * discover — so the anchor is the next one that is actually mounted.
+ */
+function nextMountedAfter(key) {
+  const order = SIDEBAR_SECTIONS.map((s) => s.key);
+  for (const later of order.slice(order.indexOf(key) + 1)) {
+    const node = el.sidebar.querySelector(`:scope > [data-section="${later}"]`);
+    if (node !== null) return node;
+  }
+
+  return null;
+}
+
+function claimsSection() {
   // Claims (#101) — ABOVE Peers on purpose. Who holds the gate is the thing
   // an agent has to know before starting anything, and it used to live only
   // in chat scrollback.
   const claims = state.claims.map((c) => claimRow(c, { me: state.handle }));
-  const claimsSection = h("div", { className: "sidebar__section" }, [
+  return h("div", { className: "sidebar__section" }, [
     h("div", { className: "sidebar__heading" }, ["Claims"]),
     ...(claims.length === 0
       ? // 🛑 SAYS it is empty. A blank panel and a panel that failed to load
@@ -392,13 +465,14 @@ function renderSidebar() {
           ),
         )),
   ]);
-  el.sidebar.appendChild(claimsSection);
+}
 
+function agentsSection() {
   // Running agents (#40) — BELOW Claims and ABOVE Peers. A claim says what is
   // locked; this says what is RUNNING, and stopping one is the most
   // consequential thing this page can do.
   const agents = state.agents.map((a) => agentRow(a));
-  const agentsSection = h("div", { className: "sidebar__section" }, [
+  return h("div", { className: "sidebar__section" }, [
     h("div", { className: "sidebar__heading" }, ["Agents"]),
     ...(agents.length === 0
       ? // 🛑 SAYS it is empty, for the same reason as the claims panel: a
@@ -468,15 +542,11 @@ function renderSidebar() {
           }),
         ]),
   ]);
-  el.sidebar.appendChild(agentsSection);
+}
 
-  // Registered agents (#132 slice 4a) — BELOW the running panel and ABOVE
-  // Peers. Claims say what is locked, Agents says what is RUNNING, and this
-  // says what the operator CONFIGURED. Running outranks configured.
-  el.sidebar.appendChild(registrationSection());
-
+function peersSection() {
   // Peers
-  const peersSection = h("div", { className: "sidebar__section" }, [
+  return h("div", { className: "sidebar__section" }, [
     h("div", { className: "sidebar__heading" }, ["Peers"]),
     ...(state.peers.length === 0
       ? [h("div", { className: "sidebar__empty" }, ["(none online)"])]
@@ -491,10 +561,11 @@ function renderSidebar() {
           }),
         )),
   ]);
-  el.sidebar.appendChild(peersSection);
+}
 
+function roomsSection() {
   // Joined rooms
-  const roomsSection = h("div", { className: "sidebar__section" }, [
+  return h("div", { className: "sidebar__section" }, [
     h("div", { className: "sidebar__heading" }, ["Rooms"]),
     ...(state.rooms.length === 0
       ? [h("div", { className: "sidebar__empty" }, ["(none joined)"])]
@@ -509,32 +580,33 @@ function renderSidebar() {
           }),
         )),
   ]);
-  el.sidebar.appendChild(roomsSection);
+}
 
-  // Discover rooms
-  if (state.discoverRooms.length > 0) {
-    const discoverSection = h("div", { className: "sidebar__section" }, [
-      h("div", { className: "sidebar__heading" }, ["Discover"]),
-      ...state.discoverRooms.map((r) =>
-        h(
-          "div",
-          {
-            className: "sidebar__item sidebar__discover",
-            onclick: async () => {
-              await joinRoom(r.name);
-              await fetchWhoami();
-              selectTarget(r.name);
-            },
+// 🛑 RETURNS null WHEN THERE IS NOTHING TO DISCOVER, and the planner treats
+// null as "no node". The old code omitted the appendChild instead.
+function discoverSection() {
+  if (state.discoverRooms.length === 0) return null;
+
+  return h("div", { className: "sidebar__section" }, [
+    h("div", { className: "sidebar__heading" }, ["Discover"]),
+    ...state.discoverRooms.map((r) =>
+      h(
+        "div",
+        {
+          className: "sidebar__item sidebar__discover",
+          onclick: async () => {
+            await joinRoom(r.name);
+            await fetchWhoami();
+            selectTarget(r.name);
           },
-          [
-            h("span", { className: "sidebar__item-dot" }),
-            h("span", { className: "sidebar__item-label" }, [`+ ${r.name}`]),
-          ],
-        ),
+        },
+        [
+          h("span", { className: "sidebar__item-dot" }),
+          h("span", { className: "sidebar__item-label" }, [`+ ${r.name}`]),
+        ],
       ),
-    ]);
-    el.sidebar.appendChild(discoverSection);
-  }
+    ),
+  ]);
 }
 
 /**

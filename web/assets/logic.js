@@ -2201,3 +2201,75 @@ export function settingsTabSelection(requested, tabs = SETTINGS_TABS) {
 
   return match ? match.id : tabs[0].id;
 }
+
+/**
+ * #399 — which sidebar sections a state change actually requires rebuilding.
+ *
+ * 🛑 THE DECISION IS PURE AND THE MUTATION IS NOT. No `document` here, for the
+ * reason `logic.test.ts` already records about geometry: happy-dom reports
+ * nonsense and every assertion written against it passes while proving nothing.
+ *
+ * ⚠️ WHAT THIS CANNOT PROVE is that `renderSidebar` then replaces the nodes the
+ * planner named. That needs a browser and is #330.
+ */
+export const SIDEBAR_SECTIONS = [
+  { key: "claims", inputs: ["claims", "handle"] },
+  { key: "agents", inputs: ["agents", "gateDefault", "gateEditing"] },
+  {
+    key: "registration",
+    inputs: [
+      "registrations",
+      "vendors",
+      "registrationDraft",
+      "registrationError",
+      "capabilities",
+      "plans",
+      "planOpen",
+      "planBusy",
+    ],
+  },
+  {
+    key: "peers",
+    inputs: ["peers", "currentTarget", "activity", "openMenuFor"],
+  },
+  { key: "rooms", inputs: ["rooms", "currentTarget", "openMenuFor"] },
+  { key: "discover", inputs: ["discoverRooms"] },
+];
+
+/**
+ * A stable string for any state value.
+ *
+ * 🛑 A `Set` MUST NOT REACH `JSON.stringify`. It yields `{}` for every Set, so
+ * `state.activity` would compare equal forever and the peers section would stop
+ * updating — silently, in the direction that looks like success.
+ */
+function stableValue(value) {
+  if (value instanceof Set) return JSON.stringify([...value].sort());
+  if (value instanceof Map) {
+    return JSON.stringify(
+      [...value].sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    );
+  }
+
+  return JSON.stringify(value ?? null);
+}
+
+/** One signature per section, over a DEEP read of that section's inputs. */
+export function sidebarSignatures(state, sections = SIDEBAR_SECTIONS) {
+  const out = {};
+  for (const { key, inputs } of sections) {
+    out[key] = inputs.map((k) => `${k}=${stableValue(state[k])}`).join("&");
+  }
+
+  return out;
+}
+
+/**
+ * The section keys whose inputs changed, in render order.
+ *
+ * A key absent from `prev` counts as changed, so the first render rebuilds
+ * everything and a recovered-from-empty sidebar does too.
+ */
+export function sectionsToRebuild(prev, next, sections = SIDEBAR_SECTIONS) {
+  return sections.map((s) => s.key).filter((key) => prev[key] !== next[key]);
+}
