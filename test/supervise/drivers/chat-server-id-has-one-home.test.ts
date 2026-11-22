@@ -73,3 +73,23 @@ test("🛑 the host config, the container config and the approval all name ONE s
   // expected key is a deliberate act that should redden a test.
   assert.equal(CHAT_MCP_SERVER_ID, "chat");
 });
+
+/**
+ * 🛑 THE TYPE PIN HOLDS ONLY WHILE THE CONSTANT KEEPS ITS LITERAL TYPE, AND
+ * NOTHING AT RUNTIME CAN SEE THAT.
+ *
+ * `ChatMcpServerConfig` is `Record<typeof CHAT_MCP_SERVER_ID, …>`. Annotate the
+ * constant `: string` and `typeof` widens to `string`, `Record<string, …>`
+ * accepts ANY key, the type stops pinning anything — and every test above stays
+ * green, because the VALUES never changed. claude1 found this on PR 394.
+ *
+ * ⚠️ THE ASSERTION IS THE ANNOTATION, NOT THE BODY. `tsc -p tsconfig.test.json`
+ * is what fails, and CI runs it as `npm run typecheck`. A plain `npm test` goes
+ * green either way, which is exactly why this comment names the command.
+ */
+test("🛑 CHAT_MCP_SERVER_ID keeps its LITERAL type, or the Record pins nothing", () => {
+  // If the constant ever widens to `string`, this assignment stops compiling.
+  const pinned: "chat" = CHAT_MCP_SERVER_ID;
+
+  assert.equal(pinned, CHAT_MCP_SERVER_ID);
+});
