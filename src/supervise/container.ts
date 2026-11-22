@@ -1,4 +1,10 @@
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
 import { execFileSync as realExecFileSync } from "node:child_process";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -519,6 +525,22 @@ function envDigestKey(): Buffer {
 
   const key = randomBytes(32).toString("hex");
   ensureStateDir();
+
+  // 🛑 CHECKED OUTSIDE THE BRANCH ABOVE, BECAUSE `existsSync` FOLLOWS THE LINK.
+  // A DANGLING link reads as absent and reaches this write just the same.
+  //
+  // ⚠️ REFUSED RATHER THAN REGENERATED, UNLIKE A MALFORMED FILE. Nothing here
+  // ever writes a link, so one is deliberate rather than damage, and
+  // `writeFileSync` plus `chmodSync` would both land on its TARGET — an
+  // arbitrary file overwritten with hex and chmodded 0600.
+  if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) {
+    throw new Error(
+      `refusing to write the env digest key through ${path}: it is a symlink, so ` +
+        `the key would land in the link's target and overwrite whatever is there. ` +
+        `Remove the link.`,
+    );
+  }
+
   writePrivateFileSync(path, key);
 
   return Buffer.from(key, "hex");

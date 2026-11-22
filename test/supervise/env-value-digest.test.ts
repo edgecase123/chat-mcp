@@ -4,9 +4,12 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  lstatSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -475,4 +478,79 @@ test("⚠️ control — a valid key file is left alone", () => {
 
   assert.equal(readFileSync(keyPath, "utf8"), valid, "the key was rewritten");
   assert.equal(first, envValuesDigest({ MY_VAR: SECRET }));
+});
+
+/* ==========================================================================
+ * The key path is a symlink.
+ * ======================================================================= */
+
+/**
+ * 🛑 REGENERATING INTRODUCED THE FIRST WRITE OVER A FILE THAT IS ALREADY
+ * THERE, and `writeFileSync` and `chmodSync` both follow a link. So a planted
+ * `env-digest-key -> /somewhere/else` turns the regeneration into an arbitrary
+ * file overwritten with hex and chmodded 0600, at the operator's privilege.
+ *
+ * ⚠️ MEASURED IN BOTH DIRECTIONS before it was fixed. Under the committed
+ * regeneration the target read back as the new key; one commit earlier the
+ * symlink was only ever READ, so nothing was clobbered.
+ *
+ * ⚠️ REFUSED, NOT REGENERATED, UNLIKE A MALFORMED FILE. Nothing in this
+ * codebase writes a link here, so one is a deliberate act rather than damage.
+ * `host-grant.ts` refuses the same shape for the same reason.
+ */
+test("🛑 a symlinked key path is refused rather than written through", () => {
+  const keyPath = join(process.env.CHAT_MCP_HOME!, "env-digest-key");
+  const victimDir = mkdtempSync(join(tmpdir(), "chat-mcp-env-digest-victim-"));
+  const victim = join(victimDir, "victim");
+
+  writeFileSync(victim, "PRECIOUS");
+  rmSync(keyPath, { force: true });
+
+  try {
+    symlinkSync(victim, keyPath);
+
+    assert.throws(
+      () => envValuesDigest({ MY_VAR: SECRET }),
+      /refusing to write the env digest key/,
+    );
+    assert.equal(
+      readFileSync(victim, "utf8"),
+      "PRECIOUS",
+      "the link's target was overwritten with the new key",
+    );
+
+    // 🛑 A DANGLING LINK IS THE SAME WRITE AND MUST BE REFUSED TOO. `existsSync`
+    // follows the link, so a dangling one reads as ABSENT and would reach the
+    // mint path without ever meeting the shape check above.
+    unlinkSync(keyPath);
+    symlinkSync(join(victimDir, "not-there"), keyPath);
+
+    assert.throws(
+      () => envValuesDigest({ MY_VAR: SECRET }),
+      /refusing to write the env digest key/,
+    );
+    assert.ok(
+      !existsSync(join(victimDir, "not-there")),
+      "the dangling link's target was created",
+    );
+  } finally {
+    // ⚠️ `unlink`, NOT `rm`: `rmSync` with `force` silently leaves a DANGLING
+    // link in place, and the next test then writes through it.
+    if (lstatSync(keyPath, { throwIfNoEntry: false })) unlinkSync(keyPath);
+    rmSync(victimDir, { recursive: true, force: true });
+  }
+});
+
+/**
+ * ⚠️ THE CONTROL: a REGULAR file at that path must still be regenerated. A
+ * refusal that fired on everything would satisfy the test above and brick every
+ * spawn on the damaged-file case this whole change exists to handle.
+ */
+test("⚠️ control — a regular damaged key file is still regenerated, not refused", () => {
+  const keyPath = join(process.env.CHAT_MCP_HOME!, "env-digest-key");
+
+  writeFileSync(keyPath, "zz");
+
+  assert.match(envValuesDigest({ MY_VAR: SECRET }), /^[0-9a-f]{64}$/);
+  assert.match(readFileSync(keyPath, "utf8").trim(), /^[0-9a-f]{64}$/);
 });
