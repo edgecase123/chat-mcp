@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { reapThenRemove } from "../../support/reap.js";
 
 /**
  * 🛑 THE UNIT TESTS PROVE THE RESOLVER. THIS ONE PROVES SOMETHING CALLS IT.
@@ -68,8 +70,11 @@ async function webBanner(env: Record<string, string>): Promise<string> {
       child.on("exit", () => settle());
     });
   } finally {
-    child.kill("SIGKILL");
-    rmSync(root, { recursive: true, force: true });
+    // 🛑 REAPED BEFORE REMOVED, NEVER SIGNALLED-THEN-REMOVED. #351: `kill` does
+    // not reap, so this child could still be writing `chat.db-wal` inside
+    // `root` while `rmSync` walked it, and the `ENOTEMPTY` landed on whatever
+    // diff was in the tree.
+    await reapThenRemove(child, root);
   }
 }
 
