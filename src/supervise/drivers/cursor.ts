@@ -79,11 +79,32 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
 /**
  * The model a supervised `cursor-agent` runs when no caller names one.
  *
- * 🛑 lee's RULING OF 2026-11-22: *"keep it on auto for now."* That SUPERSEDES
- * his ruling of 2026-11-21, which named the native fast model — the account's
- * plan cannot run it.
+ * 🛑 lee's RULING OF 2026-11-23: *"The default for cursor is Composer 2.5 Fast
+ * and that is what we'll use as the default."* That SUPERSEDES his ruling of
+ * 2026-11-22, *"keep it on auto for now."* #419.
  *
- * 🛑 OMITTING `--model` DOES NOT MEAN `auto`. It means WHATEVER MODEL WAS LAST
+ * 🛑 USE THE DISTINCT ID, NEVER THE BASE MODEL PLUS A `fast` PARAMETER. The
+ * other route to this model is `composer-2.5` with `modelParameters` in
+ * `~/.cursor/cli-config.json`, which is HOST STATE A CONTAINER WILL NOT HAVE.
+ * 🛑 DERIVED, NOT MEASURED. No run from an absent config was ever made, so
+ * neither "the flag alone resolves" nor the `init` string is observed. Every
+ * measurement to date ran on a host that already had a stored model.
+ *
+ * ⚠️ IT STILL WRITES. `composer-2.5-fast` NORMALISES INTO THE STORE AS
+ * `composer-2.5` PLUS `fast: true`, so it is a no-op only from a store that
+ * already holds that pair. An earlier cut of this note claimed it left the
+ * file byte-identical — that was ONE measurement, from exactly that state,
+ * read as a property.
+ *
+ * 🛑 THE TABLE BELOW IS CONTRADICTED BY MEASUREMENT, AND NO CAUSE IS
+ * ESTABLISHED. Row 1 has `composer-2.5-fast` exiting 1; a 4-turn resume chain
+ * on 2026-11-23 exits 0 every turn. **Why row 1 exited 1 is UNKNOWN.** An
+ * earlier cut of this note argued its `stored after` of `composer-2.5` was the
+ * tell of a contaminated run — the normalisation above makes that the CORRECT
+ * stored value for the id passed, so the argument was void. **The table is
+ * kept as history, not as current behaviour.**
+ *
+ * 🛑 OMITTING `--model` DOES NOT MEAN A SAFE DEFAULT. It means WHATEVER MODEL WAS LAST
  * SELECTED ON THIS HOST. `cursor-agent --model X` PERSISTS X into
  * `~/.cursor/cli-config.json`, and it persists it even when the turn FAILS — so
  * one operator trying a model their plan rejects leaves every later unattended
@@ -101,12 +122,15 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
  * CLI's default is Composer" — it was my own previous command. claude1's
  * counter-measurement on #371 is what exposed it.
  *
- * ⚠️ PINNING ANY MODEL BUYS NO CONTEXT GAUGE. A denominator needs the window
- * size, and `--list-models` names one only in the ids that carry it:
- * `Claude Opus 5 1M Thinking` does, `Composer 2.5 Fast` does not. So
- * `cursorSpawn.reportsContext` stays `false`.
+ * 🛑 PINNING THIS MODEL IS WHAT MAKES A CONTEXT GAUGE POSSIBLE, and the
+ * previous note here said the opposite. It concluded from `--list-models`
+ * naming no window for `Composer 2.5 Fast` that no denominator existed. **A
+ * window does not have to arrive in the stream — it is a constant per model,
+ * and the stream only has to name which model ran.** An `auto` handle reports
+ * its model as the literal `"Auto"`, which names nothing; a pinned one reports
+ * a display name the driver can map. #419.
  */
-export const CURSOR_DEFAULT_MODEL = "auto";
+export const CURSOR_DEFAULT_MODEL = "composer-2.5-fast";
 
 export function cursorArgs(opts: SpawnOptions = {}): string[] {
   const args = [
