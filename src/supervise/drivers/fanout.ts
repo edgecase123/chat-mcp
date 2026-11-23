@@ -98,16 +98,17 @@ export function createEventFanout(vendor: FanoutVendor): EventFanout {
   let lastSession: string | null = null;
 
   /**
-   * ONE bag per fan-out, and a fan-out is one child.
+   * ONE bag per fan-out, and a fan-out is one HANDLE.
    *
    * 🛑 CREATED HERE AND NOWHERE INSIDE THE PARSER CALLBACK. A `{}` built at
    * the route call would be a fresh bag per event, which is the same as no
    * bag at all for the one router that needs it — and it would still
    * typecheck, still build, and still pass every existing test.
    *
-   * ⚠️ IT SPANS TURNS IN THE PER-TURN WIRING. `per-turn.ts` holds one
-   * fan-out across every process, so clearing at a turn boundary is the
-   * ROUTER's job. `EventRouter` states that obligation.
+   * ⚠️ NOT "one child". `per-turn.ts` holds one fan-out across every turn
+   * and each turn is its own process, so the bag OUTLIVES a child there.
+   * Clearing it at a turn boundary is the ROUTER's job, and `EventRouter`
+   * states that obligation.
    */
   const routerState: RouterState = {};
 
