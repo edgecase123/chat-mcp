@@ -181,7 +181,8 @@ export interface Supervisor {
 export function formatPrompt(envelope: WakeEnvelope): string {
   const from = envelope.from || "unknown";
   const body = envelope.body?.trim();
-  const where = envelope.to.startsWith("#") ? ` in ${envelope.to}` : "";
+  const inRoom = envelope.to.startsWith("#");
+  const where = inRoom ? ` in ${envelope.to}` : "";
 
   // 🛑 An `alert` is BLOCKING by this bus's own definition. Rendering it the
   // same as a chat message loses the urgency at the layer built to deliver it
@@ -201,7 +202,57 @@ export function formatPrompt(envelope: WakeEnvelope): string {
     return `${banner}[chat-mcp] ${from}${where} sent you something (id ${envelope.id}). The wake carried no body, so read your inbox.`;
   }
 
-  return `${banner}[chat-mcp] ${from}${where}:\n\n${body}`;
+  return `${banner}[chat-mcp] ${from}${where}:\n\n${body}${roomClause(inRoom, envelope.kind)}`;
+}
+
+/**
+ * Told to a room reader: answering is optional.
+ *
+ * 🛑 A ROOM POST REACHES EVERY MEMBER, SO MOST ARE NOT ADDRESSED TO THE
+ * READER. The sender and the room were already in the prompt and were not
+ * enough — a supervised `cursor-agent` answered two consecutive `#mcp` posts
+ * that named another agent in their first line.
+ *
+ * 🛑 LAST, SO IT IS THE CLOSEST INSTRUCTION TO THE REPLY. A turn is handed a
+ * single string and acts on the end of it. That is also why an escalation may
+ * not end with permission to stay silent — see the kind split below.
+ *
+ * ⚠️ NOT ADDED TO THE BODYLESS FALLBACK, WHICH SAYS "READ YOUR INBOX". That
+ * path never asks for an answer, so the clause would refuse a request it did
+ * not make.
+ */
+function roomClause(inRoom: boolean, kind: WakeEnvelope["kind"]): string {
+  if (!inRoom) return "";
+
+  // 🛑 AN ESCALATION KEEPS THE ADDRESSING HALF AND LOSES THE PERMISSION HALF.
+  // `alert` is BLOCKING by this bus's own definition and `dispatch` is a
+  // hand-off, so ending either with "silence is a valid response" would
+  // authorise the one outcome each kind exists to prevent — and this clause
+  // renders LAST, which is exactly why it would win.
+  //
+  // ⚠️ DROPPING THE WHOLE CLAUSE HERE WOULD RESTORE THE MEASURED DEFECT IN ITS
+  // LOUDEST FORM: a room alert naming one agent, answered by every member.
+  // Raised by claude2 on PR 412; the split is the answer to it.
+  //
+  // 🛑 IT ASKS FOR SOMETHING OBSERVABLE, AND ONLY FOR A VERB THE CHILD HAS.
+  // "Do not assume another member will take it" forbade a belief and emitted
+  // nothing, so no later reader could tell whether anyone complied. Saying so
+  // in the room uses `room_send`, which `DEFAULT_ALLOWED` grants. CLAIMING it
+  // would read better and `mcp__chat__claim` is in no allowlist in this tree,
+  // so that instruction would buy a denial.
+  if (kind === "alert" || kind === "dispatch") {
+    return (
+      "\n\n⚠️ This is a ROOM post, so every member received it. If it names " +
+      "someone else, leave it to them. If it names nobody, either take it or " +
+      "say in the room that you are not — do not leave it unanswered."
+    );
+  }
+
+  return (
+    "\n\n⚠️ This is a ROOM post. Every member received it, so it may not be " +
+    "addressed to you. Reply only if it concerns you — silence is a valid " +
+    "response."
+  );
 }
 
 /**

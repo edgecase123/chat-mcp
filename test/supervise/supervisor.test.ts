@@ -194,6 +194,197 @@ test("a room message names the room", () => {
   );
 });
 
+/**
+ * 🛑 A ROOM POST REACHES EVERY MEMBER, SO MOST OF THEM ARE NOT ADDRESSED TO
+ * THE READER. Measured on the bus 2026-11-22: a supervised `cursor-agent`
+ * answered two consecutive `#mcp` posts that named another agent in their
+ * first line. The prompt already carried the sender and the room, so the gap
+ * was never missing metadata — nothing told it that staying silent is allowed.
+ *
+ * ⚠️ A CLAUDE CHILD HIDES THIS. Its system prompt supplies the judgement, so
+ * the renderer looked correct for as long as one vendor was the only consumer.
+ */
+test("a room post tells the agent a reply is optional", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    body: "claude2 — please re-run the gate",
+  });
+
+  assert.match(prompt, /may not be addressed to you/i);
+  assert.match(prompt, /silence is a valid response/i);
+});
+
+/**
+ * 🛑 THE CLAUSE'S POSITION IS A CLAIM, SO IT IS ASSERTED. `roomClause`'s
+ * header says it goes LAST because a turn acts on the end of its prompt.
+ * Without this, moving it above the body is a silent mutation.
+ */
+test("the room clause comes AFTER the body, not before it", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    body: "UNIQUEBODYMARKER",
+  });
+
+  assert.ok(
+    prompt.indexOf("UNIQUEBODYMARKER") <
+      prompt.indexOf("silence is a valid response"),
+    "the clause must be the last thing the agent reads",
+  );
+});
+
+test("🛑 a DIRECT message does NOT say a reply is optional", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "claude2",
+    from: "claude1",
+    ts: 1,
+    body: "please re-run the gate",
+  });
+
+  assert.doesNotMatch(prompt, /may not be addressed to you/i);
+  assert.doesNotMatch(prompt, /silence is a valid response/i);
+});
+
+test("the room clause does not displace the room name or the body", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    body: "the exact body text",
+  });
+
+  assert.match(prompt, /in #gate/);
+  assert.match(prompt, /the exact body text/);
+});
+
+/**
+ * 🛑 SEVERITY AND ADDRESSING ARE ORTHOGONAL, AND BOTH MUST SURVIVE. An alert
+ * in a room is urgent AND may be for someone else — "🚨 claude1 — ..." is the
+ * shape that proves it. Dropping either half here would make one of the two
+ * banners unreachable in exactly the case that needs both.
+ */
+test("an alert in a room keeps the alert banner AND is still told it is a room post", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    kind: "alert",
+    body: "claude2 — the gate is red",
+  });
+
+  assert.match(prompt, /ALERT/);
+  assert.match(prompt, /ROOM post/i);
+});
+
+/**
+ * 🛑 AN ESCALATION MUST NEVER END WITH PERMISSION TO DROP IT. `alert` is
+ * BLOCKING by this bus's own definition and `dispatch` is a hand-off, so
+ * "silence is a valid response" as the LAST line would authorise exactly the
+ * outcome each kind exists to prevent. Raised by claude2 on PR 412.
+ *
+ * ⚠️ THE ADDRESSING HALF STILL RENDERS. Dropping the whole clause here would
+ * restore the measured defect in its loudest form — a room alert naming one
+ * agent, answered by every member.
+ */
+test("🛑 a room DISPATCH is never told that silence is valid", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    kind: "dispatch",
+    body: "take the gate, I am out",
+  });
+
+  assert.match(prompt, /DISPATCH/);
+  assert.doesNotMatch(prompt, /silence is a valid response/i);
+});
+
+test("🛑 a room ALERT is never told that silence is valid", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    kind: "alert",
+    body: "claude2 — the gate is red",
+  });
+
+  assert.doesNotMatch(prompt, /silence is a valid response/i);
+});
+
+test("a room dispatch still says who it may be for, and refuses the bystander assumption", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    kind: "dispatch",
+    body: "take the gate, I am out",
+  });
+
+  assert.match(prompt, /names someone else/i);
+  assert.match(prompt, /say in the room that you are not/i);
+});
+
+/**
+ * 🛑 THE ESCALATION CLAUSE NAMES ONLY A VERB THE CHILD IS GRANTED.
+ * `DEFAULT_ALLOWED` gives a supervised child four bus tools — `send`,
+ * `room_send`, `inbox`, `room_inbox` — and `mcp__chat__claim` appears in no
+ * allowlist in this tree. Telling it to CLAIM the work would instruct a tool
+ * call that is denied, which spends a turn and produces a refusal.
+ *
+ * ⚠️ THE PRINCIPLE BEHIND THE WORDING IS claude2's, FROM PR 412: an
+ * instruction must produce something another member can SEE. "Do not assume"
+ * forbids a belief and emits nothing, so nobody can tell whether it was
+ * obeyed. Saying so in the room is observable AND allowed.
+ */
+test("🛑 the escalation clause does not tell the child to claim, which it cannot", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    kind: "dispatch",
+    body: "take the gate, I am out",
+  });
+
+  assert.doesNotMatch(prompt, /\bclaim\b/i);
+});
+
+test("a plain room CHAT keeps the permission to stay silent", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    kind: "chat",
+    body: "claude2 — please re-run the gate",
+  });
+
+  assert.match(prompt, /silence is a valid response/i);
+});
+
+/**
+ * ⚠️ THE BODYLESS FALLBACK IS DELIBERATELY UNTOUCHED. It already tells the
+ * agent to go and read its inbox rather than to answer, so the clause would be
+ * answering a question that path does not ask.
+ */
+test("a bodyless room wake still says read your inbox and adds no clause", () => {
+  const prompt = formatPrompt({ id: 3, to: "#gate", from: "claude1", ts: 1 });
+
+  assert.match(prompt, /read your inbox/);
+  assert.doesNotMatch(prompt, /silence is a valid response/i);
+});
+
 test("the line parser holds back a partial line and never emits half an event", () => {
   const seen: Record<string, unknown>[] = [];
   const { feed } = createLineParser((e) => seen.push(e));
