@@ -256,14 +256,19 @@ test("no stop confirm asserts that a turn is running", () => {
     stopAllConfirmText(3, "now"),
   ];
 
-  // ⚠️ THE DENOMINATOR, PRINTED. A helper that returned fewer strings
-  // would otherwise sweep clean over whatever it did not reach.
+  // ⚠️ A TRIPWIRE, NOT A MEASUREMENT. The array is a literal, so this
+  // cannot fail today. It reds if someone later builds the list from a
+  // helper that reaches fewer strings than there are confirms.
   assert.equal(texts.length, 4);
 
   for (const text of texts) {
     assert.doesNotMatch(text, /its current turn/i);
     assert.doesNotMatch(text, /finishes its current turn/i);
     assert.doesNotMatch(text, /every turn in flight/i);
+    // 🛑 NO IMMEDIACY PROMISE EITHER. The containerized driver awaits
+    // `dockerTeardownFor`, up to the grace window plus 5s, and this copy
+    // cannot see which driver the handle runs under.
+    assert.doesNotMatch(text, /immediately/i);
     // Both limbs: the running case and the idle case, in every string.
     assert.match(
       text,

@@ -1490,6 +1490,9 @@ export function agentsPanelEmpty() {
  *
  * ⚠️ REJECTED: branch on `processPerTurn`. It says a turn COULD be absent,
  * never that one IS.
+ *
+ * ⚠️ REJECTED: "exits immediately". The containerized driver awaits
+ * `dockerTeardownFor`, so the wait is up to the grace window plus 5s.
  */
 export function stopConfirmText(handle, mode) {
   return mode === "now"
@@ -1497,7 +1500,7 @@ export function stopConfirmText(handle, mode) {
         "If a turn is running, it is cut mid-stream and the tokens it has " +
         "already spent produce nothing.\n" +
         "If none is running, nothing is spent.\n" +
-        "Either way the supervisor exits immediately."
+        "Either way the supervisor does not wait for a turn to end."
     : `Stop ${handle}?\n\n` +
         "If a turn is running, it finishes first.\n" +
         "If none is running, this starts one and bills it.\n" +
@@ -1606,7 +1609,7 @@ export function stopAllConfirmText(count, mode) {
         "Any turn in flight is cut mid-stream and its spent tokens produce " +
         "nothing.\n" +
         "An idle agent spends nothing.\n" +
-        "Either way each supervisor exits immediately."
+        "Either way no supervisor waits for a turn to end."
     : `Stop all agents?\n\n${shown}\n\n` +
         "Each one with a turn running finishes it first.\n" +
         "Each one idle starts a turn and bills it.\n" +
