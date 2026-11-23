@@ -21,9 +21,34 @@ import type { UnnamedToolCall } from "./child.js";
 export type SandboxMode = "host" | "docker";
 
 /**
+ * Scratch space one vendor's router may carry between events of ONE child.
+ *
+ * 🛑 UNTYPED ON PURPOSE: WHAT IS IN IT IS THE VENDOR'S OWN BUSINESS. Naming
+ * Cursor's `model` key here would put one vendor's event shape in the seam
+ * every vendor implements, which is the edge `routeEvent` exists to keep out.
+ *
+ * 🛑 PASSED IN RATHER THAN HELD IN A MODULE, because two handles share the
+ * module and a module slot makes one agent's reading come from the other
+ * agent's events. `router-state-bag.test.ts` pins both halves.
+ */
+export type RouterState = Record<string, unknown>;
+
+/**
  * Map ONE parsed CLI event onto the supervisor's semantic callbacks.
  *
  * Each vendor writes its own. `routeClaudeEvent` is the Claude Code one.
+ *
+ * 🛑 `state` IS FOR A VENDOR WHOSE FACTS ARRIVE ON DIFFERENT EVENTS, and only
+ * Cursor has that problem: it names its model on `system init` and its token
+ * counts on `result`. Claude Code puts `message.model` beside the usage on
+ * every assistant event, so `routeClaudeEvent` declares two parameters and
+ * still satisfies this type.
+ *
+ * ⚠️ A ROUTER THAT KEEPS STATE MUST CLEAR IT AT ITS TURN BOUNDARY. The bag
+ * outlives a turn — `per-turn.ts` holds one fan-out across every turn — so a
+ * turn whose events omit the fact would otherwise inherit the previous turn's
+ * answer and report it as measured. `claude-events.ts` records the two cuts
+ * where exactly that shipped on the Claude side.
  */
 export type EventRouter = (
   event: Record<string, unknown>,
@@ -49,6 +74,7 @@ export type EventRouter = (
      */
     toolCall?(name: string | null, why?: UnnamedToolCall): void;
   },
+  state: RouterState,
 ) => void;
 
 /**

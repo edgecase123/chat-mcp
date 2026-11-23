@@ -9,6 +9,8 @@ import {
   unframeTurn,
   UNFRAMED_PROMPT_EXIT,
 } from "../../../src/supervise/drivers/turn-relay.js";
+import type { TurnRelayIo } from "../../../src/supervise/drivers/turn-relay.js";
+import type { RouterState } from "../../../src/supervise/vendor.js";
 import { routeCursorEvent } from "../../../src/supervise/drivers/cursor.js";
 
 /**
@@ -92,7 +94,10 @@ interface Harness {
   send(prompt: string): void;
 }
 
-function harness(initialSessionId?: string): Harness {
+function harness(
+  initialSessionId?: string,
+  routeEvent: TurnRelayIo["routeEvent"] = routeCursorEvent,
+): Harness {
   const input = new PassThrough();
   const output = new PassThrough();
   let seen = "";
@@ -115,10 +120,12 @@ function harness(initialSessionId?: string): Harness {
     input,
     output,
     errorOutput,
-    // 🛑 THE REAL ROUTER, NOT A STAND-IN. The property under test is that the
-    // relay and the supervisor cannot disagree about a turn end, and a fake
-    // router would be exactly the second opinion this is meant to exclude.
-    routeEvent: routeCursorEvent,
+    // 🛑 THE REAL ROUTER BY DEFAULT, NOT A STAND-IN. The property under test
+    // is that the relay and the supervisor cannot disagree about a turn end,
+    // and a fake router would be exactly the second opinion this is meant to
+    // exclude. Only the bag test below overrides it, because no real router
+    // reports what it was handed.
+    routeEvent,
     initialSessionId,
     spawnTurn: (request: TurnRequest) => {
       requests.push(request);
@@ -528,4 +535,43 @@ test("🔴 control — a death with NOTHING queued says nothing about a drop", (
 
   assert.equal(h.exits.length, 1, "the death itself was not propagated");
   assert.doesNotMatch(h.errors(), /queued prompt/);
+});
+
+/**
+ * ⚠️ THE SECOND ROUTE CALL SITE, AND THE ONE WHERE A MISSING BAG THROWS.
+ *
+ * `fanout.ts` is the site the gauge reads through; this one is inside the
+ * container. A router that reads `state.model` against an `undefined` third
+ * argument dies of a TypeError here, and the relay dying takes the container
+ * with it — so the supervisor would report a dead agent for a reading bug.
+ */
+test("the relay hands the router a bag, and the SAME one across turns", () => {
+  const bags: RouterState[] = [];
+  // 🛑 THE REAL ROUTER PLUS A RECORDER, NOT A STAND-IN. A recorder that never
+  // calls `on.turnEnd()` leaves `inTurn` set, so turn two is QUEUED rather
+  // than spawned and the second half of this test cannot run at all.
+  const h = harness(undefined, (event, on, state) => {
+    bags.push(state);
+    routeCursorEvent(event, on);
+  });
+
+  h.send("turn one");
+  h.turns[0].say('{"type":"system","subtype":"init"}');
+  h.turns[0].say('{"type":"result"}');
+  h.turns[0].exit(0);
+  h.send("turn two");
+  h.turns[1].say('{"type":"result"}');
+
+  assert.equal(bags.length, 3, "the relay routed no events");
+  assert.equal(typeof bags[0], "object", "the relay passed no bag");
+  assert.equal(
+    bags[0],
+    bags[1],
+    "a fresh bag per EVENT carries nothing forward",
+  );
+  assert.equal(
+    bags[1],
+    bags[2],
+    "a fresh bag per TURN drops the fact on the turn boundary",
+  );
 });

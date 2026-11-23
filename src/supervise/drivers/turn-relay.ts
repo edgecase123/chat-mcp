@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
-import type { VendorSpawn } from "../vendor.js";
+import type { RouterState, VendorSpawn } from "../vendor.js";
 
 /**
  * The container-side half of a per-turn vendor.
@@ -106,6 +106,16 @@ export function runTurnRelay(io: TurnRelayIo): void {
   let pending = "";
 
   /**
+   * The router's own scratch space, one bag for this relay.
+   *
+   * ⚠️ THE RELAY READS NOTHING OUT OF IT. It asks the router only for a turn
+   * boundary and a session id. It exists because the router is the
+   * supervisor's, so a router that reads `state` must not find `undefined`
+   * here and die of a TypeError inside the container.
+   */
+  const routerState: RouterState = {};
+
+  /**
    * 🛑 ACROSS TURNS, NOT PER TURN, AND THE RELAY IS THE ONLY PARTY THAT CAN
    * HOLD IT. Each turn is its own process and its exit happens inside the
    * container, so the supervisor never sees a turn boundary to carry an id
@@ -188,22 +198,26 @@ export function runTurnRelay(io: TurnRelayIo): void {
 
       if (typeof event !== "object" || event === null) return;
 
-      relay.routeEvent(event as Record<string, unknown>, {
-        turnEnd: () => {
-          sawTurnEnd = true;
+      relay.routeEvent(
+        event as Record<string, unknown>,
+        {
+          turnEnd: () => {
+            sawTurnEnd = true;
+          },
+          // The supervisor owns these. The relay only needs the turn boundary,
+          // and a router that calls them must still find them callable.
+          usage: () => undefined,
+          context: () => undefined,
+          denial: () => undefined,
+          // 🔴 ONLY EVER ASSIGNED, NEVER CLEARED. The router calls this only
+          // when an event carries a string id, so a turn whose events omit the
+          // field leaves the held id alone instead of dropping the session.
+          session: (id: string) => {
+            sessionId = id;
+          },
         },
-        // The supervisor owns these. The relay only needs the turn boundary,
-        // and a router that calls them must still find them callable.
-        usage: () => undefined,
-        context: () => undefined,
-        denial: () => undefined,
-        // 🔴 ONLY EVER ASSIGNED, NEVER CLEARED. The router calls this only
-        // when an event carries a string id, so a turn whose events omit the
-        // field leaves the held id alone instead of dropping the session.
-        session: (id: string) => {
-          sessionId = id;
-        },
-      });
+        routerState,
+      );
     };
 
     child.stdout.setEncoding("utf8");

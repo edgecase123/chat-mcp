@@ -172,15 +172,19 @@ test("🛑 the Claude Code vendor ROUTES both readings it declares, not just dec
   let context = false;
 
   for (const event of [USAGE_EVENT, CONTEXT_EVENT]) {
-    claudeSpawn.routeEvent(event as never, {
-      turnEnd: () => undefined,
-      usage: () => {
-        usage = true;
+    claudeSpawn.routeEvent(
+      event as never,
+      {
+        turnEnd: () => undefined,
+        usage: () => {
+          usage = true;
+        },
+        context: () => {
+          context = true;
+        },
       },
-      context: () => {
-        context = true;
-      },
-    });
+      {},
+    );
   }
 
   assert.equal(

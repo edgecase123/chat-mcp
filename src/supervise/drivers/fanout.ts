@@ -4,7 +4,7 @@ import { createLineParser } from "../child.js";
 import type { RateLimitSnapshot } from "../rate-limit.js";
 import type { ContextSnapshot } from "../context-gauge.js";
 import type { Denial } from "../denial.js";
-import type { VendorSpawn } from "../vendor.js";
+import type { RouterState, VendorSpawn } from "../vendor.js";
 import type { UnnamedToolCall } from "../child.js";
 
 /**
@@ -97,35 +97,54 @@ export function createEventFanout(vendor: FanoutVendor): EventFanout {
   const exitCbs: ((code: number | null, signal: string | null) => void)[] = [];
   let lastSession: string | null = null;
 
+  /**
+   * ONE bag per fan-out, and a fan-out is one HANDLE.
+   *
+   * 🛑 CREATED HERE AND NOWHERE INSIDE THE PARSER CALLBACK. A `{}` built at
+   * the route call would be a fresh bag per event, which is the same as no
+   * bag at all for the one router that needs it — and it would still
+   * typecheck, still build, and still pass every existing test.
+   *
+   * ⚠️ NOT "one child". `per-turn.ts` holds one fan-out across every turn
+   * and each turn is its own process, so the bag OUTLIVES a child there.
+   * Clearing it at a turn boundary is the ROUTER's job, and `EventRouter`
+   * states that obligation.
+   */
+  const routerState: RouterState = {};
+
   const parser = createLineParser((parsed) => {
     for (const cb of eventCbs) cb(parsed);
 
-    vendor.routeEvent(parsed, {
-      turnEnd: () => {
-        for (const cb of turnEndCbs) cb();
+    vendor.routeEvent(
+      parsed,
+      {
+        turnEnd: () => {
+          for (const cb of turnEndCbs) cb();
+        },
+        usage: (snapshot) => {
+          for (const cb of usageCbs) cb(snapshot);
+        },
+        context: (snapshot) => {
+          for (const cb of contextCbs) cb(snapshot);
+        },
+        denial: (d) => {
+          for (const cb of denialCbs) cb(d);
+        },
+        session: (id) => {
+          // Only the FIRST sighting matters; every later event repeats it.
+          if (lastSession === id) return;
+          lastSession = id;
+          for (const cb of sessionCbs) cb(id);
+        },
+        toolCall: (name, why) => {
+          // ⚠️ THE `why` MUST RIDE ALONG. Dropping it here would make every
+          // unnamed call read as `unknown-shape` downstream, which is the one
+          // cause that may NOT soften the silent-reply warning. #417.
+          for (const cb of toolCallCbs) cb(name, why);
+        },
       },
-      usage: (snapshot) => {
-        for (const cb of usageCbs) cb(snapshot);
-      },
-      context: (snapshot) => {
-        for (const cb of contextCbs) cb(snapshot);
-      },
-      denial: (d) => {
-        for (const cb of denialCbs) cb(d);
-      },
-      session: (id) => {
-        // Only the FIRST sighting matters; every later event repeats it.
-        if (lastSession === id) return;
-        lastSession = id;
-        for (const cb of sessionCbs) cb(id);
-      },
-      toolCall: (name, why) => {
-        // ⚠️ THE `why` MUST RIDE ALONG. Dropping it here would make every
-        // unnamed call read as `unknown-shape` downstream, which is the one
-        // cause that may NOT soften the silent-reply warning. #417.
-        for (const cb of toolCallCbs) cb(name, why);
-      },
-    });
+      routerState,
+    );
   });
 
   let errBuffer = "";
