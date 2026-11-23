@@ -1484,17 +1484,24 @@ export function agentsPanelEmpty() {
 /**
  * The confirm an operator reads before a stop (#40).
  *
- * 🛑 ONLY `now` MENTIONS THE COST, because only `now` pays it. lee ruled
- * graceful the default on 2026-10-31: a turn cut mid-stream spends its tokens
- * and produces nothing.
+ * 🛑 BOTH OUTCOMES, UNCONDITIONALLY. Nothing in the browser can tell
+ * whether a turn is running, so neither branch may assert that one is. lee
+ * ruled this over a server-reported in-flight field on 2026-11-23 (#415).
+ *
+ * ⚠️ REJECTED: branch on `processPerTurn`. It says a turn COULD be absent,
+ * never that one IS.
  */
 export function stopConfirmText(handle, mode) {
   return mode === "now"
     ? `Stop ${handle} NOW?\n\n` +
-        "Its current turn is cut mid-stream. The tokens it has already spent " +
-        "produce nothing."
+        "If a turn is running, it is cut mid-stream and the tokens it has " +
+        "already spent produce nothing.\n" +
+        "If none is running, nothing is spent.\n" +
+        "Either way the supervisor exits immediately."
     : `Stop ${handle}?\n\n` +
-        "Its current turn finishes first, then the supervisor exits.";
+        "If a turn is running, it finishes first.\n" +
+        "If none is running, this starts one and bills it.\n" +
+        "Either way the supervisor then exits.";
 }
 
 /**
@@ -1583,6 +1590,9 @@ export function stopAllVisible(count) {
  * live sockets when it runs, so a supervisor that bound or exited since the
  * last poll joins or leaves the sweep regardless of this number.
  *
+ * 🛑 BOTH OUTCOMES, UNCONDITIONALLY, for the same reason as
+ * `stopConfirmText` — and a sweep cannot know it for any single agent either.
+ *
  * @param {number} count
  * @param {"graceful"|"now"} mode
  */
@@ -1593,10 +1603,14 @@ export function stopAllConfirmText(count, mode) {
 
   return mode === "now"
     ? `Stop all agents NOW?\n\n${shown}\n\n` +
-        "Every turn in flight is cut mid-stream. The tokens they have " +
-        "already spent produce nothing."
+        "Any turn in flight is cut mid-stream and its spent tokens produce " +
+        "nothing.\n" +
+        "An idle agent spends nothing.\n" +
+        "Either way each supervisor exits immediately."
     : `Stop all agents?\n\n${shown}\n\n` +
-        "Each one finishes its current turn first, then its supervisor exits.";
+        "Each one with a turn running finishes it first.\n" +
+        "Each one idle starts a turn and bills it.\n" +
+        "Either way each supervisor then exits.";
 }
 
 /**

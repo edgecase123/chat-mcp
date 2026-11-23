@@ -77,20 +77,26 @@ test("the empty panel says nothing is running, in words", () => {
 });
 
 /**
- * lee's ruling of 2026-10-31: graceful is the default because a turn killed
- * mid-stream spends its tokens and produces nothing. The confirm copy is
- * where that cost reaches the operator.
+ * 🛑 EACH MODE NAMES BOTH OUTCOMES, because nothing in the browser can
+ * tell whether a turn is running (#415, lee's ruling of 2026-11-23).
+ *
+ * ⚠️ THE SECOND LIMB IS THE DISCRIMINATOR. `/finishes/i` alone passed
+ * against the defect too, so an idle-case assertion is what detects the fix.
  */
-test("the two modes warn about different things, and only now mentions the cost", () => {
+test("each stop mode names both the running-turn and the idle outcome", () => {
   const graceful = stopConfirmText("smoke-container", "graceful");
   const now = stopConfirmText("smoke-container", "now");
 
   assert.match(graceful, /smoke-container/);
-  assert.match(graceful, /finishes/i);
+  assert.match(graceful, /if a turn is running, it finishes first/i);
+  assert.match(graceful, /if none is running, this starts one and bills it/i);
   assert.doesNotMatch(graceful, /mid-stream/i);
+  assert.doesNotMatch(graceful, /its current turn/i);
 
-  assert.match(now, /mid-stream/i);
+  assert.match(now, /cut mid-stream/i);
+  assert.match(now, /if none is running, nothing is spent/i);
   assert.match(now, /tokens/i);
+  assert.doesNotMatch(now, /its current turn/i);
 });
 
 /**
@@ -218,19 +224,53 @@ test("a one-agent confirm still reads as English, because the helper is callable
 });
 
 /**
- * lee's ruling of 2026-10-31: graceful by default because a turn cut
- * mid-stream spends its tokens and produces nothing. A sweep pays that cost
- * once per agent, so the immediate copy is the one that must say it.
+ * 🛑 THE SWEEP NAMES BOTH OUTCOMES TOO. It was the second site of the
+ * same defect and #415 did not name it, so a one-site fix left an honest row
+ * dialog beside a misleading sweep dialog on one panel.
  */
-test("only the immediate sweep mentions the cost, matching the per-row copy", () => {
+test("each sweep mode names both the running-turn and the idle outcome", () => {
   const graceful = stopAllConfirmText(3, "graceful");
   const now = stopAllConfirmText(3, "now");
 
-  assert.match(graceful, /finishes its current turn/i);
+  assert.match(graceful, /each one with a turn running finishes it first/i);
+  assert.match(graceful, /each one idle starts a turn and bills it/i);
   assert.doesNotMatch(graceful, /mid-stream/i);
+  assert.doesNotMatch(graceful, /finishes its current turn/i);
 
-  assert.match(now, /mid-stream/i);
+  assert.match(now, /cut mid-stream/i);
+  assert.match(now, /an idle agent spends nothing/i);
   assert.match(now, /tokens/i);
+  assert.doesNotMatch(now, /every turn in flight/i);
+});
+
+/**
+ * 🛑 NEITHER CONFIRM MAY ASSERT A TURN IS RUNNING, AND THIS TEST IS WHY
+ * ONE SITE CANNOT BE FIXED ALONE. It names both functions, so repairing the row
+ * copy while leaving the sweep copy reds here rather than shipping.
+ */
+test("no stop confirm asserts that a turn is running", () => {
+  const texts = [
+    stopConfirmText("smoke-container", "graceful"),
+    stopConfirmText("smoke-container", "now"),
+    stopAllConfirmText(3, "graceful"),
+    stopAllConfirmText(3, "now"),
+  ];
+
+  // ⚠️ THE DENOMINATOR, PRINTED. A helper that returned fewer strings
+  // would otherwise sweep clean over whatever it did not reach.
+  assert.equal(texts.length, 4);
+
+  for (const text of texts) {
+    assert.doesNotMatch(text, /its current turn/i);
+    assert.doesNotMatch(text, /finishes its current turn/i);
+    assert.doesNotMatch(text, /every turn in flight/i);
+    // Both limbs: the running case and the idle case, in every string.
+    assert.match(
+      text,
+      /if a turn is running|with a turn running|turn in flight/i,
+    );
+    assert.match(text, /if none is running|each one idle|an idle agent/i);
+  }
 });
 
 /**
