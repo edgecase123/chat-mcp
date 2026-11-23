@@ -65,11 +65,11 @@ a shared room exposed it within three messages.
 An alert in a room is urgent _and_ may be for someone else, so **both** render.
 What changes is the clause's second half.
 
-| kind in a room | says it is a room post | says silence is valid                                |
-| -------------- | ---------------------- | ---------------------------------------------------- |
-| `chat`         | yes                    | **yes**                                              |
-| `dispatch`     | yes                    | **no** — "do NOT assume another member will take it" |
-| `alert`        | yes                    | **no** — the same wording                            |
+| kind in a room | says it is a room post | says silence is valid                                         |
+| -------------- | ---------------------- | ------------------------------------------------------------- |
+| `chat`         | yes                    | **yes**                                                       |
+| `dispatch`     | yes                    | **no** — "either take it or say in the room that you are not" |
+| `alert`        | yes                    | **no** — the same wording                                     |
 
 🛑 **An escalation may not end with permission to drop it.** `alert` is
 BLOCKING by this bus's own definition and `dispatch` is a hand-off, so
@@ -81,6 +81,17 @@ why it would win.
 It restores the original defect in its loudest form: a room alert naming one
 agent, answered by every member. The addressing half stays; only the
 permission half goes.
+
+🛑 **The escalation wording asks for something OBSERVABLE, and names only a
+verb the child is granted.** "Do not assume another member will take it"
+forbade a belief and emitted nothing, so no later reader could tell whether
+anyone complied. Saying so in the room uses `room_send`, which
+`DEFAULT_ALLOWED` grants.
+
+⚠️ **Telling it to CLAIM the work would read better and would not work.**
+`mcp__chat__claim` is registered as a tool but appears in no allowlist in this
+tree, so that instruction buys a denial and spends a turn. The principle is
+claude2's, from PR 412; the verb had to change to a granted one.
 
 `/alert`, `/dm` and `/dispatch` each accept a joined room
 — the `target` case in `src/cli/ink/input/completions.ts` resolves a leading

@@ -332,7 +332,32 @@ test("a room dispatch still says who it may be for, and refuses the bystander as
   });
 
   assert.match(prompt, /names someone else/i);
-  assert.match(prompt, /do not assume another member will take it/i);
+  assert.match(prompt, /say in the room that you are not/i);
+});
+
+/**
+ * 🛑 THE ESCALATION CLAUSE NAMES ONLY A VERB THE CHILD IS GRANTED.
+ * `DEFAULT_ALLOWED` gives a supervised child four bus tools — `send`,
+ * `room_send`, `inbox`, `room_inbox` — and `mcp__chat__claim` appears in no
+ * allowlist in this tree. Telling it to CLAIM the work would instruct a tool
+ * call that is denied, which spends a turn and produces a refusal.
+ *
+ * ⚠️ THE PRINCIPLE BEHIND THE WORDING IS claude2's, FROM PR 412: an
+ * instruction must produce something another member can SEE. "Do not assume"
+ * forbids a belief and emits nothing, so nobody can tell whether it was
+ * obeyed. Saying so in the room is observable AND allowed.
+ */
+test("🛑 the escalation clause does not tell the child to claim, which it cannot", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    kind: "dispatch",
+    body: "take the gate, I am out",
+  });
+
+  assert.doesNotMatch(prompt, /\bclaim\b/i);
 });
 
 test("a plain room CHAT keeps the permission to stay silent", () => {

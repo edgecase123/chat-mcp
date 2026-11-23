@@ -233,11 +233,18 @@ function roomClause(inRoom: boolean, kind: WakeEnvelope["kind"]): string {
   // ⚠️ DROPPING THE WHOLE CLAUSE HERE WOULD RESTORE THE MEASURED DEFECT IN ITS
   // LOUDEST FORM: a room alert naming one agent, answered by every member.
   // Raised by claude2 on PR 412; the split is the answer to it.
+  //
+  // 🛑 IT ASKS FOR SOMETHING OBSERVABLE, AND ONLY FOR A VERB THE CHILD HAS.
+  // "Do not assume another member will take it" forbade a belief and emitted
+  // nothing, so no later reader could tell whether anyone complied. Saying so
+  // in the room uses `room_send`, which `DEFAULT_ALLOWED` grants. CLAIMING it
+  // would read better and `mcp__chat__claim` is in no allowlist in this tree,
+  // so that instruction would buy a denial.
   if (kind === "alert" || kind === "dispatch") {
     return (
       "\n\n⚠️ This is a ROOM post, so every member received it. If it names " +
-      "someone else, leave it to them. If it names nobody, do NOT assume " +
-      "another member will take it."
+      "someone else, leave it to them. If it names nobody, either take it or " +
+      "say in the room that you are not — do not leave it unanswered."
     );
   }
 
