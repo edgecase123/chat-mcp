@@ -157,6 +157,7 @@ test("🛑 EVERY vendor's router reports a tool call, and there is at least one"
     spawn.routeEvent(
       started({ mcpToolCall: { toolName: "send" } }),
       s.on as never,
+      {},
     );
     spawn.routeEvent(
       {
@@ -166,6 +167,7 @@ test("🛑 EVERY vendor's router reports a tool call, and there is at least one"
         },
       },
       s.on as never,
+      {},
     );
 
     assert.ok(
