@@ -29,6 +29,13 @@ import { rmSync } from "node:fs";
  * fail deterministically.
  */
 export type Reapable = {
+  /**
+   * `undefined` when the spawn itself failed, so no process ever existed.
+   *
+   * ⚠️ OPTIONAL, NOT `number | undefined`. `ChildProcessByStdio` declares it
+   * optional, and a required field here does not accept a real child.
+   */
+  readonly pid?: number | undefined;
   readonly exitCode: number | null;
   readonly signalCode: NodeJS.Signals | null;
   kill(signal: NodeJS.Signals): boolean;
@@ -50,7 +57,14 @@ export async function reapThenRemove(
     child.kill("SIGKILL");
     await new Promise<void>((resolve) => {
       child.once("exit", () => resolve());
-      child.once("error", () => resolve());
+
+      // 🛑 AN `error` IS NOT A REAP. A failed spawn has no process, so there
+      // is nothing to wait for and nothing to race. A child that DID spawn
+      // still owes an `exit`, and resolving here would remove the tree from
+      // under it — this bug again, in a quieter form.
+      child.once("error", () => {
+        if (child.pid === undefined) resolve();
+      });
     });
   }
 
