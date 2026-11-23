@@ -67,10 +67,14 @@ passes `--model` on every spawn. A caller's own `opts.model` wins. #419.
 other route to the same model is `composer-2.5` with
 `modelParameters."composer-2.5" = [{fast: "true"}]` in
 `~/.cursor/cli-config.json` — **host state a container does not have**, so that
-route would run a different model in the two sandbox modes. Measured from no
-config at all: the flag alone resolves, and `init` reports
-`"Composer 2.5 Fast"`. Passing bare `composer-2.5` persists `fast: false` and
-changes the operator's own picker.
+route would run a different model in the two sandbox modes. Passing bare
+`composer-2.5` persists `fast: false` and changes the operator's own picker.
+
+🛑 **DERIVED, NOT MEASURED: no run from an absent config was ever made.** So
+neither "the flag alone resolves" nor `init` reporting `"Composer 2.5 Fast"` is
+observed. Every measurement below ran on a host that already had a
+stored model, which is the same identical-starting-state trap this page records
+twice more. A two-turn container run is what would settle it.
 
 ⚠️ **THE DISTINCT ID STILL WRITES TO THAT FILE.** `composer-2.5-fast`
 normalises into the store as `composer-2.5` plus `fast: true`, so it is a no-op

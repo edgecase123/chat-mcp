@@ -86,8 +86,9 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
  * 🛑 USE THE DISTINCT ID, NEVER THE BASE MODEL PLUS A `fast` PARAMETER. The
  * other route to this model is `composer-2.5` with `modelParameters` in
  * `~/.cursor/cli-config.json`, which is HOST STATE A CONTAINER WILL NOT HAVE.
- * Measured from no config at all: the flag alone resolves, and the `init`
- * event reports `"Composer 2.5 Fast"`.
+ * 🛑 DERIVED, NOT MEASURED. No run from an absent config was ever made, so
+ * neither "the flag alone resolves" nor the `init` string is observed. Every
+ * measurement to date ran on a host that already had a stored model.
  *
  * ⚠️ IT STILL WRITES. `composer-2.5-fast` NORMALISES INTO THE STORE AS
  * `composer-2.5` PLUS `fast: true`, so it is a no-op only from a store that
