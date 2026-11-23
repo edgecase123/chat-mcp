@@ -270,7 +270,7 @@ test("the room clause does not displace the room name or the body", () => {
  * shape that proves it. Dropping either half here would make one of the two
  * banners unreachable in exactly the case that needs both.
  */
-test("an alert in a room keeps the alert banner AND the room clause", () => {
+test("an alert in a room keeps the alert banner AND is still told it is a room post", () => {
   const prompt = formatPrompt({
     id: 1,
     to: "#gate",
@@ -281,7 +281,71 @@ test("an alert in a room keeps the alert banner AND the room clause", () => {
   });
 
   assert.match(prompt, /ALERT/);
-  assert.match(prompt, /may not be addressed to you/i);
+  assert.match(prompt, /ROOM post/i);
+});
+
+/**
+ * 🛑 AN ESCALATION MUST NEVER END WITH PERMISSION TO DROP IT. `alert` is
+ * BLOCKING by this bus's own definition and `dispatch` is a hand-off, so
+ * "silence is a valid response" as the LAST line would authorise exactly the
+ * outcome each kind exists to prevent. Raised by claude2 on PR 412.
+ *
+ * ⚠️ THE ADDRESSING HALF STILL RENDERS. Dropping the whole clause here would
+ * restore the measured defect in its loudest form — a room alert naming one
+ * agent, answered by every member.
+ */
+test("🛑 a room DISPATCH is never told that silence is valid", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    kind: "dispatch",
+    body: "take the gate, I am out",
+  });
+
+  assert.match(prompt, /DISPATCH/);
+  assert.doesNotMatch(prompt, /silence is a valid response/i);
+});
+
+test("🛑 a room ALERT is never told that silence is valid", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    kind: "alert",
+    body: "claude2 — the gate is red",
+  });
+
+  assert.doesNotMatch(prompt, /silence is a valid response/i);
+});
+
+test("a room dispatch still says who it may be for, and refuses the bystander assumption", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    kind: "dispatch",
+    body: "take the gate, I am out",
+  });
+
+  assert.match(prompt, /names someone else/i);
+  assert.match(prompt, /do not assume another member will take it/i);
+});
+
+test("a plain room CHAT keeps the permission to stay silent", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    kind: "chat",
+    body: "claude2 — please re-run the gate",
+  });
+
+  assert.match(prompt, /silence is a valid response/i);
 });
 
 /**

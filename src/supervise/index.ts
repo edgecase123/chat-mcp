@@ -202,7 +202,7 @@ export function formatPrompt(envelope: WakeEnvelope): string {
     return `${banner}[chat-mcp] ${from}${where} sent you something (id ${envelope.id}). The wake carried no body, so read your inbox.`;
   }
 
-  return `${banner}[chat-mcp] ${from}${where}:\n\n${body}${roomClause(inRoom)}`;
+  return `${banner}[chat-mcp] ${from}${where}:\n\n${body}${roomClause(inRoom, envelope.kind)}`;
 }
 
 /**
@@ -214,14 +214,32 @@ export function formatPrompt(envelope: WakeEnvelope): string {
  * that named another agent in their first line.
  *
  * 🛑 LAST, SO IT IS THE CLOSEST INSTRUCTION TO THE REPLY. A turn is handed a
- * single string and acts on the end of it.
+ * single string and acts on the end of it. That is also why an escalation may
+ * not end with permission to stay silent — see the kind split below.
  *
  * ⚠️ NOT ADDED TO THE BODYLESS FALLBACK, WHICH SAYS "READ YOUR INBOX". That
  * path never asks for an answer, so the clause would refuse a request it did
  * not make.
  */
-function roomClause(inRoom: boolean): string {
+function roomClause(inRoom: boolean, kind: WakeEnvelope["kind"]): string {
   if (!inRoom) return "";
+
+  // 🛑 AN ESCALATION KEEPS THE ADDRESSING HALF AND LOSES THE PERMISSION HALF.
+  // `alert` is BLOCKING by this bus's own definition and `dispatch` is a
+  // hand-off, so ending either with "silence is a valid response" would
+  // authorise the one outcome each kind exists to prevent — and this clause
+  // renders LAST, which is exactly why it would win.
+  //
+  // ⚠️ DROPPING THE WHOLE CLAUSE HERE WOULD RESTORE THE MEASURED DEFECT IN ITS
+  // LOUDEST FORM: a room alert naming one agent, answered by every member.
+  // Raised by claude2 on PR 412; the split is the answer to it.
+  if (kind === "alert" || kind === "dispatch") {
+    return (
+      "\n\n⚠️ This is a ROOM post, so every member received it. If it names " +
+      "someone else, leave it to them. If it names nobody, do NOT assume " +
+      "another member will take it."
+    );
+  }
 
   return (
     "\n\n⚠️ This is a ROOM post. Every member received it, so it may not be " +
