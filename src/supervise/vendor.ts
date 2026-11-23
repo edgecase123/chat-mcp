@@ -4,6 +4,7 @@ import type { Denial } from "./denial.js";
 import type { RateLimitSnapshot } from "./rate-limit.js";
 import type { ContextSnapshot } from "./context-gauge.js";
 import type { RedispatchInput } from "./drivers/claude-redispatch.js";
+import type { UnnamedToolCall } from "./child.js";
 
 /**
  * The spawn contract, defined in the SUPERVISE layer rather than beside
@@ -46,7 +47,7 @@ export type EventRouter = (
      * ⚠️ IT REPORTS EVERY TOOL, NOT ONLY BUS TOOLS. `isOutboundChatTool`
      * decides which ones matter, in one place, above the vendors.
      */
-    toolCall?(name: string | null): void;
+    toolCall?(name: string | null, why?: UnnamedToolCall): void;
   },
 ) => void;
 

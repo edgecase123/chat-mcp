@@ -13,6 +13,7 @@ import {
   writePrivateFileSync,
 } from "../../util/paths.js";
 import { chatMcpServerConfig } from "./chat-mcp-server.js";
+import type { UnnamedToolCall } from "../child.js";
 
 /**
  * The Claude Code driver: the ONLY file that knows this CLI's flags and event
@@ -189,7 +190,7 @@ export function routeClaudeEvent(
     context?(snapshot: ContextSnapshot): void;
     denial?(denial: Denial): void;
     session?(id: string): void;
-    toolCall?(name: string | null): void;
+    toolCall?(name: string | null, why?: UnnamedToolCall): void;
   },
 ): void {
   const usage = parseClaudeRateLimit(event);

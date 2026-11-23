@@ -7,6 +7,7 @@ import {
   silentReplyWarning,
   observeToolCall,
 } from "../../src/supervise/silent-reply.js";
+import type { UnnamedToolCall } from "../../src/supervise/child.js";
 
 /**
  * 🛑 THE DEFECT: A TURN THAT ANSWERED NOBODY LOGGED LIKE ONE THAT ANSWERED.
@@ -183,21 +184,78 @@ test("prose and a send in one turn clear the warning, from separate inputs", () 
   assert.equal(silentReplyWarning(turn), undefined);
 });
 
-/**
- * 🛑 A CALL THE DRIVER COULD NOT NAME IS NOT A SEND. Treating `null` as one
- * would hide the warning on every turn a vendor's event shape outran us,
- * which is the silence #392 is about wearing a new hat.
- */
-test("🔴 an UNNAMEABLE tool call does not clear the warning", () => {
+/** A reply owed, prose produced, and a tool call that may have been the send. */
+function unnamedTurn(why?: UnnamedToolCall) {
   const turn = newTurn(true);
 
   observe(turn, {
     type: "assistant",
     message: { content: [{ type: "text", text: "Telling them now." }] },
   });
-  observeToolCall(turn, null);
+  observeToolCall(turn, null, why);
 
-  assert.match(String(silentReplyWarning(turn)), /nobody received it/);
+  return turn;
+}
+
+/**
+ * 🛑 AN UNNAMEABLE MCP CALL MAY HAVE BEEN THE SEND, SO THE WARNING MAY NOT
+ * BLAME THE AGENT. `mcpToolCall` is the only variant a bus `send` arrives
+ * under. #417.
+ */
+test("🔴 an unnameable MCP call withholds the delivery claim", () => {
+  const warning = String(silentReplyWarning(unnamedTurn("unnamed-mcp")));
+
+  assert.match(warning, /UNKNOWN/);
+  assert.doesNotMatch(warning, /nobody received it/);
+});
+
+/**
+ * 🛑 THE SCOPE IS THE POINT, AND THIS IS WHAT STOPS THE FIX OVER-REACHING.
+ * An unknown or ambiguous SHAPE is as likely a file read as a send, so
+ * softening the warning for those would hide a real lost reply — #392
+ * inverted. claude1 raised it on the #417 plan.
+ */
+test("🔴 an unknown or ambiguous tool SHAPE still gets the confident line", () => {
+  for (const why of ["unknown-shape", "ambiguous"] as UnnamedToolCall[]) {
+    const warning = String(silentReplyWarning(unnamedTurn(why)));
+
+    assert.match(warning, /nobody received it/, why);
+    assert.doesNotMatch(warning, /UNKNOWN/, why);
+  }
+});
+
+/** A driver that reports no reason at all is not evidence of a send either. */
+test("a null name with NO reason still gets the confident line", () => {
+  assert.match(String(silentReplyWarning(unnamedTurn())), /nobody received it/);
+});
+
+/** An agent that called an unnameable tool AND a real send answered somebody. */
+test("a real send outranks an unnameable call", () => {
+  const turn = unnamedTurn("unnamed-mcp");
+
+  observeToolCall(turn, "mcp__chat__send");
+
+  assert.equal(silentReplyWarning(turn), undefined);
+});
+
+/**
+ * 🛑 THIS IS THE NON-VACUITY CONTROL FOR THE THREE TESTS ABOVE. Do not
+ * delete it. A fix that returned the UNKNOWN line for EVERY warning case
+ * would pass all of them, and only this test notices that the original
+ * detector was swallowed.
+ */
+test("a turn with no tool call at all keeps the original confident line", () => {
+  const turn = newTurn(true);
+
+  observe(turn, {
+    type: "assistant",
+    message: { content: [{ type: "text", text: "Telling them now." }] },
+  });
+
+  const warning = String(silentReplyWarning(turn));
+
+  assert.match(warning, /nobody received it/);
+  assert.doesNotMatch(warning, /UNKNOWN/);
 });
 
 /** A fresh turn must not inherit the previous turn's send. */

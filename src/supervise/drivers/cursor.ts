@@ -5,6 +5,11 @@ import type { RateLimitSnapshot } from "../rate-limit.js";
 import type { Denial } from "../denial.js";
 import type { ContextSnapshot } from "../context-gauge.js";
 import type { RedispatchInput } from "./claude-redispatch.js";
+import type { UnnamedToolCall } from "../child.js";
+
+/** `cursorToolName`'s answer: a name, or the reason there is none. */
+type NamedToolCall =
+  { name: string; why?: undefined } | { name: null; why: UnnamedToolCall };
 
 /**
  * The Cursor CLI driver: the ONLY file that knows `cursor-agent`'s flags and
@@ -146,7 +151,7 @@ export function routeCursorEvent(
     context?(snapshot: ContextSnapshot): void;
     denial?(denial: Denial): void;
     session?(id: string): void;
-    toolCall?(name: string | null): void;
+    toolCall?(name: string | null, why?: UnnamedToolCall): void;
   },
 ): void {
   // 🛑 THE ID ARRIVES ON THE INIT EVENT, WHICH IS THE FIRST LINE OF THE
@@ -171,7 +176,9 @@ export function routeCursorEvent(
   // every Cursor turn that sent was reported as having answered nobody, and
   // a real silent reply became indistinguishable from the false alarm. #392.
   if (event.type === "tool_call" && on.toolCall) {
-    on.toolCall(cursorToolName(event.tool_call));
+    const named = cursorToolName(event.tool_call);
+
+    on.toolCall(named.name, named.why);
   }
 }
 
@@ -193,25 +200,33 @@ export function routeCursorEvent(
  * the only variant a bus `send` arrives under, so naming it `"mcpToolCall"`
  * would assert "a tool ran and it was not a send" — the one claim this
  * function must never make on a guess.
+ *
+ * 🛑 THE `why` IS LOAD-BEARING, NOT DIAGNOSTIC. Only `unnamed-mcp` can
+ * have swallowed a send, so it is the only cause that may soften the
+ * silent-reply warning. #417.
  */
-function cursorToolName(raw: unknown): string | null {
-  if (!raw || typeof raw !== "object") return null;
+function cursorToolName(raw: unknown): NamedToolCall {
+  if (!raw || typeof raw !== "object")
+    return { name: null, why: "unknown-shape" };
 
   const variants = Object.keys(raw).filter((k) => k.endsWith("ToolCall"));
 
   // Zero is an unrecognised shape. More than one is ambiguous, and picking
   // either would be a guess about which tool actually ran.
-  if (variants.length !== 1) return null;
+  if (variants.length === 0) return { name: null, why: "unknown-shape" };
+  if (variants.length > 1) return { name: null, why: "ambiguous" };
 
   const key = variants[0];
 
   if (key === "mcpToolCall") {
     const name = (raw as Record<string, { toolName?: unknown }>)[key]?.toolName;
 
-    return typeof name === "string" && name ? name : null;
+    return typeof name === "string" && name
+      ? { name }
+      : { name: null, why: "unnamed-mcp" };
   }
 
-  return key;
+  return { name: key };
 }
 
 /**
