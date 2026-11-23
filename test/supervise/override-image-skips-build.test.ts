@@ -7,7 +7,7 @@ import { join } from "node:path";
 // 🛑 BEFORE the container import, which resolves a state path at module load.
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "cm-skip-"));
 
-const { prepareAgentImage, IMAGE_TAG } =
+const { prepareAgentImage, IMAGE_TAG, CURSOR_IMAGE_TAG } =
   await import("../../src/supervise/container.js");
 
 const OVERRIDE_IMAGE = "someone-elses/agent:latest";
@@ -132,8 +132,66 @@ test("the skip is reported, naming the image that caused it", () => {
 /**
  * 🛑 THE PAIRED CONTROL. A `prepareAgentImage` that simply stopped building
  * would pass all four tests above and break every handle that works today.
+ *
+ * 🛑 `buildVendor` IS PASSED, AND IT IS THE WHOLE POINT OF THIS SHAPE. The
+ * only production caller names the vendor whenever the plan runs that vendor's
+ * own image — `src/index.ts`, `plan.image === vendor.image`. An earlier cut of
+ * this control omitted it and asserted a build, which made it indistinguishable
+ * from the defect below and is what blocked that fix.
  */
 test("🛑 control — the project's own image is STILL built when stale", () => {
+  const r = recorder(true);
+
+  prepareAgentImage(r.compile, {
+    image: IMAGE_TAG,
+    buildVendor: "claude",
+    run: r.run,
+    needsBuild: r.needsBuild,
+    logLine: r.logLine,
+  });
+
+  assert.ok(
+    r.args.some((a) => a[0] === "build"),
+    "a stale project image was not rebuilt, so the skip is unconditional",
+  );
+});
+
+/**
+ * 🛑 THE DEFECT OF #391: AN OVERRIDE THAT HAPPENS TO EQUAL A BUILDABLE TAG.
+ *
+ * A non-Claude handle pointed by hand at `IMAGE_TAG` waits out a full docker
+ * build and is THEN refused by `runDependencyInstall` for not having the image
+ * it needs. The refusal is right and is lee's ruling of 2026-11-15; the minutes
+ * spent before it are the defect.
+ *
+ * 🛑 THE TAG CANNOT BE THE DISCRIMINATOR, WHICH IS WHY THE OLD CONDITION MISSED
+ * IT. `image !== IMAGE_TAG` is false here, so the skip never fired. What
+ * separates this from the control above is that no vendor is named: the only
+ * production caller omits `buildVendor` exactly when the image is an operator
+ * override.
+ */
+test("🔴 an override EQUAL to the project tag, with no vendor, skips the build", () => {
+  const r = recorder(true);
+
+  prepareAgentImage(r.compile, {
+    image: IMAGE_TAG,
+    run: r.run,
+    needsBuild: r.needsBuild,
+    logLine: r.logLine,
+  });
+
+  assert.deepEqual(
+    r.args.filter((a) => a[0] === "build"),
+    [],
+    "a docker build ran for an override this handle will be refused for",
+  );
+});
+
+/**
+ * 🛑 THE FRESHNESS CHECK TOO, for the same reason as the stranger-tag case: it
+ * is the call that decides whether the minutes get spent.
+ */
+test("🔴 an override equal to the project tag does not consult freshness", () => {
   const r = recorder(true);
 
   prepareAgentImage(r.compile, {
@@ -144,8 +202,30 @@ test("🛑 control — the project's own image is STILL built when stale", () =>
   });
 
   assert.ok(
+    !r.order.includes("needsBuild"),
+    "freshness was computed for an image this handle will not run",
+  );
+});
+
+/**
+ * 🛑 A VENDOR'S OWN NON-CLAUDE IMAGE MUST STILL BUILD. The second half of the
+ * pair above: keying the skip on "no vendor named" must not stop a Cursor
+ * handle building the Cursor image.
+ */
+test("🛑 control — a vendor's own non-Claude image is STILL built", () => {
+  const r = recorder(true);
+
+  prepareAgentImage(r.compile, {
+    image: CURSOR_IMAGE_TAG,
+    buildVendor: "cursor",
+    run: r.run,
+    needsBuild: r.needsBuild,
+    logLine: r.logLine,
+  });
+
+  assert.ok(
     r.args.some((a) => a[0] === "build"),
-    "a stale project image was not rebuilt, so the skip is unconditional",
+    "a vendor's own image stopped being built, so the skip is too broad",
   );
 });
 
