@@ -39,7 +39,15 @@ export type Reapable = {
   readonly exitCode: number | null;
   readonly signalCode: NodeJS.Signals | null;
   kill(signal: NodeJS.Signals): boolean;
-  once(event: "exit" | "error", listener: () => void): unknown;
+  once(event: "exit", listener: () => void): unknown;
+  /**
+   * 🛑 PERSISTENT, AND `once` IS NARROWED TO `exit` SO THIS CANNOT BE UNDONE
+   * BY HABIT. A `once("error")` is consumed when it fires. On a live child it
+   * does not resolve, so a SECOND `error` reaches no listener and
+   * `EventEmitter` THROWS. The one caller happens to hold its own persistent
+   * handler, so the safety was OUTSIDE this module until now.
+   */
+  on(event: "error", listener: () => void): unknown;
 };
 
 /**
@@ -62,7 +70,7 @@ export async function reapThenRemove(
       // is nothing to wait for and nothing to race. A child that DID spawn
       // still owes an `exit`, and resolving here would remove the tree from
       // under it — this bug again, in a quieter form.
-      child.once("error", () => {
+      child.on("error", () => {
         if (child.pid === undefined) resolve();
       });
     });

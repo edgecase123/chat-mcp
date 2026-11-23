@@ -13,14 +13,19 @@ import { reapThenRemove } from "./reap.js";
  * assert the ORDER that makes the race impossible, using a fake child whose
  * exit timing they control, and each one fails on the defect it names:
  *
- * | mutant                                  | reds   | how                   |
- * | --------------------------------------- | ------ | --------------------- |
- * | `void` in place of the `await` on exit  | 2 of 5 | assertion             |
- * | drop the `exitCode === null` guard      | 4 of 5 | never settles         |
- * | drop the `signalCode === null` guard    | 3 of 5 | never settles         |
- * | drop the `rmSync`                       | 5 of 5 | assertion             |
- * | drop the `error` listener               | 2 of 5 | unhandled `error`     |
- * | make the `error` listener unconditional | 1 of 5 | assertion             |
+ * | mutant                                  | reds   | how               |
+ * | --------------------------------------- | ------ | ----------------- |
+ * | `void` in place of the `await` on exit  | 3 of 6 | assertion         |
+ * | drop the `exitCode === null` guard      | 5 of 6 | never settles     |
+ * | drop the `signalCode === null` guard    | 4 of 6 | never settles     |
+ * | drop the `rmSync`                       | 6 of 6 | assertion         |
+ * | drop the `error` listener               | 3 of 6 | unhandled `error` |
+ * | make the `error` listener unconditional | 2 of 6 | assertion         |
+ * | the module as it was before `on("error")` | 1 of 6 | unhandled `error` |
+ *
+ * 🛑 THE LAST ROW IS `git show origin/main:test/support/reap.ts`, NOT A HAND
+ * MUTANT. It is the only row that proves the `on` change is not a no-op, and
+ * a hand-written guess at the old code would have proved nothing about it.
  *
  * ⚠️ EVERY ROW WAS TYPECHECKED BEFORE IT WAS RUN. A mutant that does not
  * compile reds the file without measuring anything, and an earlier cut of
@@ -162,6 +167,43 @@ test(
         setImmediate(() => {
           dirAtExit = existsSync(root);
           child.emit("exit");
+        });
+      });
+      return true;
+    };
+
+    await reapThenRemove(child, root);
+
+    assert.equal(
+      dirAtExit,
+      true,
+      "the tree was removed on `error`, before the child had exited",
+    );
+    assert.equal(existsSync(root), false, "the tree was left behind");
+  },
+);
+
+test(
+  "🛑 a second error from a live child reaches a listener, with no help from the caller",
+  { timeout: 5_000 },
+  async () => {
+    const root = tree();
+    const child = bare();
+
+    // This fake holds NO `error` listener of its own, which is the future
+    // caller the module must survive. A consumed `once` would leave the
+    // second `error` unhandled, and `EventEmitter` throws on that.
+    let dirAtExit: boolean | null = null;
+    child.kill = (signal) => {
+      child.signals.push(signal);
+      setImmediate(() => {
+        child.emit("error", new Error("first EPERM"));
+        setImmediate(() => {
+          child.emit("error", new Error("second EPERM"));
+          setImmediate(() => {
+            dirAtExit = existsSync(root);
+            child.emit("exit");
+          });
         });
       });
       return true;
