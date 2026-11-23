@@ -1047,22 +1047,25 @@ export async function startSupervisor(
     );
 
     child.onToolCall(
-      ifCurrent("onToolCall", (name) => {
+      ifCurrent("onToolCall", (name, why) => {
         // 🛑 A CALL THE DRIVER COULD NOT NAME IS LOUD, NOT DROPPED. Cursor's
         // event shape is read out of its shipped bundle rather than off a
         // captured stream, so a wrong field path is possible — and its
         // failure mode is the exact silence #392 exists to end. A line here
         // turns that into something an operator can report.
+        //
+        // 🛑 IT USED TO `return` HERE, SO THE NULL NEVER REACHED THE FOLD.
+        // `observeToolCall`'s own null branch was unreachable, and the unit
+        // test that covered it could not have said no. #417.
         if (name === null) {
           log(
-            "⚠️ the agent called a tool and this driver could not read its name, " +
-              "so a send through it would not clear the silent-reply warning",
+            `⚠️ the agent called a tool and this driver could not read its ` +
+              `name (${why ?? "no reason given"}), so a send through it would ` +
+              `not clear the silent-reply warning`,
           );
-
-          return;
         }
 
-        observeToolCall(turn, name);
+        observeToolCall(turn, name, why);
       }),
     );
 

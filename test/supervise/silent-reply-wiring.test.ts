@@ -15,6 +15,7 @@ const { startSupervisor } = await import("../../src/supervise/index.js");
 const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
 import { supervisorOptions } from "../support/supervisor-options.js";
+import type { UnnamedToolCall } from "../../src/supervise/child.js";
 
 /**
  * 🛑 THE AGENT ANSWERED, AND THE PEER GOT NOTHING.
@@ -25,11 +26,16 @@ import { supervisorOptions } from "../support/supervisor-options.js";
  * wiring, which is where `owed` and the turn-end ORDER can be wrong.
  */
 
+// 🛑 KEEP TEST HANDLES SHORT — UNDER ABOUT TEN CHARACTERS. The supervisor
+// binds a unix socket at <tmp>/sock/<handle>-<pid>, and macOS caps that path at
+// 104 bytes. "unnamed-mcp-wiring" produced 106 and failed with a bare
+// `listen EINVAL`, which names neither the handle nor the limit.
 function harness() {
   const lines: string[] = [];
   let emit: ((event: Record<string, unknown>) => void) | undefined;
   let endTurn: (() => void) | undefined;
-  let toolCall: ((name: string | null) => void) | undefined;
+  let toolCall:
+    ((name: string | null, why?: UnnamedToolCall) => void) | undefined;
   const sent: string[] = [];
 
   const spawnChild = (_opts: SpawnOptions): AgentChild => ({
@@ -64,7 +70,8 @@ function harness() {
     // 🛑 THE DRIVER NAMES THE TOOL NOW, so the wiring test must drive the
     // same sink the real routers do. Emitting a `tool_use` BLOCK here would
     // test a path `observe` no longer reads. #392.
-    toolCall: (name: string | null) => toolCall?.(name),
+    toolCall: (name: string | null, why?: UnnamedToolCall) =>
+      toolCall?.(name, why),
     endTurn: () => endTurn?.(),
     warnings: () => lines.filter((l) => /nobody received it/.test(l)),
   };
@@ -212,6 +219,62 @@ test("🔴 a tool call the driver could not NAME is logged, and still warns", as
       "an unreadable tool call was swallowed, which is the bug under a new name",
     );
     assert.equal(h.warnings().length, 1, "a nameless call cleared the warning");
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * \u{1F6D1} THE PRODUCTION PATH, WHICH IS THE ONE THE UNIT TEST COULD NOT REACH.
+ * `index.ts` used to `return` on a null name BEFORE `observeToolCall`, so the
+ * fold never saw it and the unit test for that branch called a function
+ * production never called with that argument. This drives the real sink. #417.
+ */
+test("an unnameable MCP call reaches the fold and withholds the claim", async () => {
+  const h = harness();
+  const { sup, handle } = await supervisor(h, "mcpnull");
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    h.emit(text("Here is the answer."));
+    h.toolCall(null, "unnamed-mcp");
+    h.endTurn();
+
+    assert.equal(
+      h.warnings().length,
+      0,
+      "the confident line fired on a call that may have BEEN the send",
+    );
+    assert.ok(
+      h.lines.some((l) => /is UNKNOWN/.test(l)),
+      "no line reported the delivery as unknown",
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * \u{26A0}\u{FE0F} THE SCOPE, AT THE WIRING LEVEL. An unknown SHAPE must still get
+ * the confident line, or this fix hides the lost reply it was meant to expose.
+ */
+test("an unknown tool SHAPE still reaches the confident line", async () => {
+  const h = harness();
+  const { sup, handle } = await supervisor(h, "shapenull");
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    h.emit(text("Here is the answer."));
+    h.toolCall(null, "unknown-shape");
+    h.endTurn();
+
+    assert.equal(
+      h.warnings().length,
+      1,
+      "an unknown shape softened the warning",
+    );
   } finally {
     await sup.stop();
   }

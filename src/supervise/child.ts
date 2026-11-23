@@ -5,6 +5,16 @@ import type { ChildGrant } from "./grant.js";
 import type { ContainerOverride } from "./overrides.js";
 
 /**
+ * Why a driver could not name a tool call.
+ *
+ * 🛑 ONLY `unnamed-mcp` CAN HIDE A BUS SEND. `mcpToolCall` is the one
+ * variant a `send` arrives under, so an unknown or ambiguous SHAPE is just as
+ * likely a file read — and downgrading the silent-reply warning for those
+ * would soften a real lost reply, which is #392 inverted. claude1 on #417.
+ */
+export type UnnamedToolCall = "unnamed-mcp" | "unknown-shape" | "ambiguous";
+
+/**
  * 🛑 THE SEAM. NOTHING IN THIS FILE KNOWS ANY CLI's EVENT SHAPES.
  *
  * Claude Code signals turn completion with a `{"type":"result"}` stream-json
@@ -142,7 +152,7 @@ export interface AgentChild {
    * it — a vendor's event shape can change under us, and the failure mode of
    * a wrong field path is silence.
    */
-  onToolCall(cb: (name: string | null) => void): void;
+  onToolCall(cb: (name: string | null, why?: UnnamedToolCall) => void): void;
 
   /** Raw driver events, for logging and diagnosis only. Never for control flow. */
   onEvent(cb: (event: Record<string, unknown>) => void): void;

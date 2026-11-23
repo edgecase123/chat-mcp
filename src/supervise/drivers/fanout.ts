@@ -5,6 +5,7 @@ import type { RateLimitSnapshot } from "../rate-limit.js";
 import type { ContextSnapshot } from "../context-gauge.js";
 import type { Denial } from "../denial.js";
 import type { VendorSpawn } from "../vendor.js";
+import type { UnnamedToolCall } from "../child.js";
 
 /**
  * The subscribe half of `AgentChild` — everything that is not `send`, `kill`
@@ -90,7 +91,8 @@ export function createEventFanout(vendor: FanoutVendor): EventFanout {
   const contextCbs: ((s: ContextSnapshot) => void)[] = [];
   const denialCbs: ((d: Denial) => void)[] = [];
   const sessionCbs: ((id: string) => void)[] = [];
-  const toolCallCbs: ((name: string | null) => void)[] = [];
+  const toolCallCbs: ((name: string | null, why?: UnnamedToolCall) => void)[] =
+    [];
   const stderrCbs: ((chunk: string) => void)[] = [];
   const exitCbs: ((code: number | null, signal: string | null) => void)[] = [];
   let lastSession: string | null = null;
@@ -117,8 +119,11 @@ export function createEventFanout(vendor: FanoutVendor): EventFanout {
         lastSession = id;
         for (const cb of sessionCbs) cb(id);
       },
-      toolCall: (name) => {
-        for (const cb of toolCallCbs) cb(name);
+      toolCall: (name, why) => {
+        // ⚠️ THE `why` MUST RIDE ALONG. Dropping it here would make every
+        // unnamed call read as `unknown-shape` downstream, which is the one
+        // cause that may NOT soften the silent-reply warning. #417.
+        for (const cb of toolCallCbs) cb(name, why);
       },
     });
   });
