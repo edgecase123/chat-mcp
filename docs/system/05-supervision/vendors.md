@@ -63,13 +63,20 @@ it on auto for now."_ `CURSOR_DEFAULT_MODEL` in
 `src/supervise/drivers/cursor.ts` is `composer-2.5-fast`, and `cursorArgs`
 passes `--model` on every spawn. A caller's own `opts.model` wins. #419.
 
-🛑 **USE THE DISTINCT ID, NEVER THE BASE MODEL PLUS A `fast` PARAMETER.**
-`composer-2.5-fast` is its own `--list-models` entry, and a 4-turn run left
-`~/.cursor/cli-config.json` byte-identical. The other route to the same model is
-`composer-2.5` with `modelParameters."composer-2.5" = [{fast: "true"}]` in that
-file — **host state a container does not have**, so that route would run a
-different model in the two sandbox modes. Passing bare `composer-2.5` also
-persists `fast: false` and changes the operator's own picker.
+🛑 **USE THE DISTINCT ID, NEVER THE BASE MODEL PLUS A `fast` PARAMETER.** The
+other route to the same model is `composer-2.5` with
+`modelParameters."composer-2.5" = [{fast: "true"}]` in
+`~/.cursor/cli-config.json` — **host state a container does not have**, so that
+route would run a different model in the two sandbox modes. Measured from no
+config at all: the flag alone resolves, and `init` reports
+`"Composer 2.5 Fast"`. Passing bare `composer-2.5` persists `fast: false` and
+changes the operator's own picker.
+
+⚠️ **THE DISTINCT ID STILL WRITES TO THAT FILE.** `composer-2.5-fast`
+normalises into the store as `composer-2.5` plus `fast: true`, so it is a no-op
+only from a store that already holds that pair. An earlier cut of this page said
+a 4-turn run left the file byte-identical — that run started from exactly that
+state, and one measurement was read as a property.
 
 🛑 **THE PIN IS LOAD-BEARING, AND NOT BECAUSE THE CLI HAS A BAD DEFAULT.**
 `cursor-agent --model X` **persists** X into `~/.cursor/cli-config.json`, and it
@@ -87,11 +94,15 @@ contradicted, see below:**
 | `composer-2.5` | none                | 1    | `composer-2.5` |
 | `composer-2.5` | `auto`              | 0    | `auto`         |
 
-🛑 **ROW 1 WAS MEASURED THROUGH THE VERY BUG ROW 2 DESCRIBES, AND ITS OWN
-`stored after` IS THE TELL.** It records `composer-2.5` after passing
-`composer-2.5-fast`, which is not the id that was passed. Re-measured
-2026-11-23 over a 4-turn `--resume` chain: `composer-2.5-fast` exits **0** every
-turn and leaves the config unchanged.
+🛑 **ROW 1 IS CONTRADICTED AND NO CAUSE IS ESTABLISHED.** Re-measured 2026-11-23
+over a 4-turn `--resume` chain: `composer-2.5-fast` exits **0** every turn.
+**Why it exited 1 on the 22nd is UNKNOWN.**
+
+⚠️ **AN EARLIER CUT OF THIS PAGE NAMED A CAUSE, AND THE ARGUMENT WAS VOID.** It
+read row 1's `stored after` of `composer-2.5` as the tell of a contaminated run,
+because that is not the id passed. **The normalisation above makes
+`composer-2.5` the CORRECT stored value for `composer-2.5-fast`**, so the tell
+was never a tell. A plausible mechanism is not a measured one.
 
 ⚠️ **A NO-FLAG RUN IS THEREFORE NOT REPRODUCIBLE**, and two agents measured it
 to opposite conclusions within four minutes on #371. The one who ran no flag
@@ -99,8 +110,8 @@ after a successful `auto` saw it pass; the one who ran it after a rejected
 Composer saw it fail. Neither reading was about the CLI's default.
 
 ⚠️ **`grok-4.7-low` IS REJECTED**, though the error names Grok as included. The
-earlier claim that `auto` was the ONLY runnable model rested on row 1 above and
-does not survive it.
+earlier claim that `auto` was the ONLY runnable model does not survive the
+2026-11-23 measurement, in which `composer-2.5-fast` ran four turns.
 
 🛑 **PINNING A MODEL IS WHAT MAKES A CONTEXT GAUGE POSSIBLE, and the note here
 used to say the opposite.** It concluded from `--list-models` naming no window

@@ -83,19 +83,25 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
  * and that is what we'll use as the default."* That SUPERSEDES his ruling of
  * 2026-11-22, *"keep it on auto for now."* #419.
  *
- * 🛑 USE THE DISTINCT ID, NEVER THE BASE MODEL PLUS A `fast` PARAMETER.
- * `composer-2.5-fast` is its own `--list-models` entry and left
- * `~/.cursor/cli-config.json` byte-identical. The other route to the same
- * model is `composer-2.5` with `modelParameters` in that file, which is HOST
- * STATE A CONTAINER WILL NOT HAVE.
+ * 🛑 USE THE DISTINCT ID, NEVER THE BASE MODEL PLUS A `fast` PARAMETER. The
+ * other route to this model is `composer-2.5` with `modelParameters` in
+ * `~/.cursor/cli-config.json`, which is HOST STATE A CONTAINER WILL NOT HAVE.
+ * Measured from no config at all: the flag alone resolves, and the `init`
+ * event reports `"Composer 2.5 Fast"`.
  *
- * 🛑 THE TABLE BELOW CONTRADICTS THAT, AND THE CONTRADICTION IS THE POINT.
- * Its first row has `composer-2.5-fast` exiting 1 — yet it records the stored
- * value afterwards as `composer-2.5`, which is NOT the id that was passed.
- * That stored value is the tell: the row was measured through the inheritance
- * bug the row below it describes. claude1 re-measured on 2026-11-23 over a
- * 4-turn resume chain: EXIT 0 every turn, and the config diffed UNCHANGED.
- * **The table is kept as history, not as current behaviour.**
+ * ⚠️ IT STILL WRITES. `composer-2.5-fast` NORMALISES INTO THE STORE AS
+ * `composer-2.5` PLUS `fast: true`, so it is a no-op only from a store that
+ * already holds that pair. An earlier cut of this note claimed it left the
+ * file byte-identical — that was ONE measurement, from exactly that state,
+ * read as a property.
+ *
+ * 🛑 THE TABLE BELOW IS CONTRADICTED BY MEASUREMENT, AND NO CAUSE IS
+ * ESTABLISHED. Row 1 has `composer-2.5-fast` exiting 1; a 4-turn resume chain
+ * on 2026-11-23 exits 0 every turn. **Why row 1 exited 1 is UNKNOWN.** An
+ * earlier cut of this note argued its `stored after` of `composer-2.5` was the
+ * tell of a contaminated run — the normalisation above makes that the CORRECT
+ * stored value for the id passed, so the argument was void. **The table is
+ * kept as history, not as current behaviour.**
  *
  * 🛑 OMITTING `--model` DOES NOT MEAN A SAFE DEFAULT. It means WHATEVER MODEL WAS LAST
  * SELECTED ON THIS HOST. `cursor-agent --model X` PERSISTS X into
