@@ -567,20 +567,22 @@ export function prepareAgentImage(
      * The image this handle will actually run, from
      * `effectiveImage(vendor, override)`.
      *
-     * 🛑 DEFAULTS TO `IMAGE_TAG`, SO OMITTING IT MEANS "BUILD AS BEFORE". The
-     * skip below is the new behaviour and a default of `undefined` must not
-     * reach it, or every caller that omits this stops building.
+     * 🛑 OMITTING IT MEANS "BUILD AS BEFORE", AND THE SKIP READS `opts.image`
+     * RATHER THAN THE DEFAULTED VALUE. An explicit `IMAGE_TAG` and an omitted
+     * one resolve to the same string, so testing the resolved value cannot
+     * tell a default apart from an override that names the project's own tag.
      */
     image?: string;
 
     /**
      * The vendor whose image `image` is, when it is a vendor's at all.
      *
-     * 🛑 ITS PRESENCE IS WHAT SEPARATES A VENDOR IMAGE FROM A STRANGER'S.
-     * This project can build any vendor's image and cannot build an operator
-     * override, so the skip below keys on this rather than on the tag — a
-     * check against `IMAGE_TAG` alone called the cursor image somebody
-     * else's and never built it.
+     * 🛑 ITS PRESENCE IS WHAT SEPARATES A VENDOR IMAGE FROM AN OVERRIDE, AND
+     * THE TAG CANNOT DO IT. The only production caller names the vendor
+     * exactly when the plan runs that vendor's own image, so an `image` given
+     * with no vendor IS an override — including one an operator pointed at a
+     * tag this project can build. Keying the skip on `image !== IMAGE_TAG`
+     * missed that case and paid for a build the handle was then refused for.
      */
     buildVendor?: string;
   } = {},
@@ -606,9 +608,13 @@ export function prepareAgentImage(
   // `runDependencyInstall` inspects this same value and refuses when it is not
   // present. What this skip removes is paying for a build before that refusal,
   // not the refusal.
-  if (image !== IMAGE_TAG && !vendor) {
+  //
+  // 🛑 THE CONDITION IS "AN IMAGE WAS NAMED AND NO VENDOR WAS", NOT A TAG
+  // COMPARISON. An override equal to `IMAGE_TAG` is still an override, and a
+  // tag check reads it as the project's own image and builds it.
+  if (opts.image !== undefined && !vendor) {
     logLine(
-      `"${image}" is not an image this project can build, so ` +
+      `"${image}" is an operator override, so ` +
         "no image was built for this handle",
     );
     return;
