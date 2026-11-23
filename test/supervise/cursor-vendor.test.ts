@@ -128,21 +128,33 @@ test("cursorArgs passes resume only when asked", () => {
 });
 
 /**
- * lee's ruling of 2026-11-22: *"keep it on auto for now."*
+ * lee's ruling of 2026-11-23: *"The default for cursor is Composer 2.5 Fast
+ * and that is what we'll use as the default."* #419.
  *
- * 🛑 OMITTING `--model` IS NOT `auto`, AND THAT IS THE WHOLE BUG THIS CLOSES.
- * The CLI falls back to its own stored default, which on the measured host is
- * Composer 2.5 Fast — a model the account's plan rejects, so the turn exits 1.
- * The previous assertion here was `!cursorArgs().includes("--model")`, and it
- * was GREEN on a build where no cursor turn could complete at all.
+ * 🛑 OMITTING `--model` IS NOT A SAFE DEFAULT, AND THAT IS THE BUG THIS CLOSES.
+ * The CLI falls back to whatever model was last selected on the host, which an
+ * unattended agent never chose. The assertion before this one was
+ * `!cursorArgs().includes("--model")`, and it was GREEN on a build where no
+ * cursor turn could complete at all.
+ *
+ * 🛑 THE LITERAL IS ASSERTED, NOT ONLY THE PIN. Comparing `args[at + 1]` to
+ * `CURSOR_DEFAULT_MODEL` passes for ANY value the const holds, so on its own it
+ * cannot see the ruling reverted. The second assertion is what pins lee's
+ * decision rather than the plumbing.
+ *
+ * 🛑 AND THE `-fast` SUFFIX IS THE LOAD-BEARING PART. The base id
+ * `composer-2.5` reaches the same model only through `modelParameters` in
+ * `~/.cursor/cli-config.json`, which is host state a container does not have,
+ * so a default that lost the suffix would run a DIFFERENT model in the two
+ * sandbox modes.
  */
-test("🛑 cursorArgs PINS auto when the caller names no model", () => {
+test("🛑 cursorArgs PINS Composer 2.5 Fast when the caller names no model", () => {
   const args = cursorArgs();
   const at = args.indexOf("--model");
 
   assert.notEqual(at, -1, "no --model, so the CLI picks its own default");
   assert.equal(args[at + 1], CURSOR_DEFAULT_MODEL);
-  assert.equal(CURSOR_DEFAULT_MODEL, "auto");
+  assert.equal(CURSOR_DEFAULT_MODEL, "composer-2.5-fast");
 });
 
 /**

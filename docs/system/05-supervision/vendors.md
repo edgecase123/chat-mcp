@@ -55,12 +55,21 @@ for a vendor that reports no window shows `n/a` instead of a blank that could
 equally mean "not yet". The three states and the suffix join are in
 [context-gate.md](context-gate.md).
 
-## Cursor is PINNED to `auto`, because no flag means "whatever was last used"
+## Cursor is PINNED to `composer-2.5-fast`, because no flag means "whatever was last used"
 
-lee's ruling, 2026-11-22: _"keep it on auto for now."_ It supersedes his ruling
-of the 21st, which named the native fast model — the account's plan cannot run
-it. `CURSOR_DEFAULT_MODEL` in `src/supervise/drivers/cursor.ts` is `auto`, and
-`cursorArgs` passes `--model` on every spawn. A caller's own `opts.model` wins.
+lee's ruling, 2026-11-23: _"The default for cursor is Composer 2.5 Fast and that
+is what we'll use as the default."_ It supersedes his ruling of the 22nd, _"keep
+it on auto for now."_ `CURSOR_DEFAULT_MODEL` in
+`src/supervise/drivers/cursor.ts` is `composer-2.5-fast`, and `cursorArgs`
+passes `--model` on every spawn. A caller's own `opts.model` wins. #419.
+
+🛑 **USE THE DISTINCT ID, NEVER THE BASE MODEL PLUS A `fast` PARAMETER.**
+`composer-2.5-fast` is its own `--list-models` entry, and a 4-turn run left
+`~/.cursor/cli-config.json` byte-identical. The other route to the same model is
+`composer-2.5` with `modelParameters."composer-2.5" = [{fast: "true"}]` in that
+file — **host state a container does not have**, so that route would run a
+different model in the two sandbox modes. Passing bare `composer-2.5` also
+persists `fast: false` and changes the operator's own picker.
 
 🛑 **THE PIN IS LOAD-BEARING, AND NOT BECAUSE THE CLI HAS A BAD DEFAULT.**
 `cursor-agent --model X` **persists** X into `~/.cursor/cli-config.json`, and it
@@ -69,7 +78,8 @@ value. So one operator trying a model their plan rejects leaves every later
 unattended agent on it, and nothing in this repo records that it happened.
 
 Measured 2026-11-22 against the live binary, argv built by `cursorArgs()`,
-reading the stored value between runs:
+reading the stored value between runs. **Kept as history — row 1 is now
+contradicted, see below:**
 
 | stored before  | `--model`           | exit | stored after   |
 | -------------- | ------------------- | ---- | -------------- |
@@ -77,18 +87,28 @@ reading the stored value between runs:
 | `composer-2.5` | none                | 1    | `composer-2.5` |
 | `composer-2.5` | `auto`              | 0    | `auto`         |
 
+🛑 **ROW 1 WAS MEASURED THROUGH THE VERY BUG ROW 2 DESCRIBES, AND ITS OWN
+`stored after` IS THE TELL.** It records `composer-2.5` after passing
+`composer-2.5-fast`, which is not the id that was passed. Re-measured
+2026-11-23 over a 4-turn `--resume` chain: `composer-2.5-fast` exits **0** every
+turn and leaves the config unchanged.
+
 ⚠️ **A NO-FLAG RUN IS THEREFORE NOT REPRODUCIBLE**, and two agents measured it
 to opposite conclusions within four minutes on #371. The one who ran no flag
 after a successful `auto` saw it pass; the one who ran it after a rejected
 Composer saw it fail. Neither reading was about the CLI's default.
 
-⚠️ **ONLY `auto` IS PROVEN TO RUN ON A FREE PLAN.** `grok-4.7-low` is rejected
-too, though the error names Grok as included.
+⚠️ **`grok-4.7-low` IS REJECTED**, though the error names Grok as included. The
+earlier claim that `auto` was the ONLY runnable model rested on row 1 above and
+does not survive it.
 
-⚠️ **A PIN BUYS NO CONTEXT GAUGE.** A percentage needs the window size, and
-`--list-models` names one only in the ids that carry it:
-`Claude Opus 5 1M Thinking` does, `Composer 2.5 Fast` does not. So
-`reportsContext` stays `false` and the gauge's fix is the `n/a` chip above.
+🛑 **PINNING A MODEL IS WHAT MAKES A CONTEXT GAUGE POSSIBLE, and the note here
+used to say the opposite.** It concluded from `--list-models` naming no window
+for `Composer 2.5 Fast` that no denominator existed. **A window does not have to
+arrive in the stream — it is a constant per model, and the stream only has to
+name which model ran.** An `auto` handle reports its model as the literal
+`"Auto"`, which names nothing; a pinned one reports a display name a driver can
+map. #419.
 
 ## How a host grant is delivered is DECLARED, never inferred
 
