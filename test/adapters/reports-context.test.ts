@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reportsContextFor, spawnFor } from "../../src/adapters/index.js";
+import {
+  reportsContextFor,
+  spawnFor,
+  vendorsWithSpawn,
+} from "../../src/adapters/index.js";
 
 /**
  * #371 — the web card needs to say WHY a gauge is blank, and the question
@@ -19,26 +23,35 @@ test("🛑 an UNKNOWN vendor answers null, it does NOT throw", () => {
   assert.equal(reportsContextFor(""), null);
 });
 
-/**
- * 🛑 `false` MUST SURVIVE, AND `?? null` IS WHAT MAKES THAT TRUE. A `||` here
- * would turn cursor's deliberate `false` into `null`, and `null` renders the
- * older blank — so the one vendor this ticket exists for would show nothing.
- */
-test("🛑 a vendor that reports FALSE answers false, never null", () => {
-  assert.equal(reportsContextFor("cursor"), false);
-});
-
-test("a vendor that reports a window answers true", () => {
+test("every shipped vendor that reports a window answers true", () => {
   assert.equal(reportsContextFor("claude"), true);
+  assert.equal(reportsContextFor("cursor"), true);
 });
 
 /**
  * 🛑 ONE HOME. A second copy of this answer in `server.ts` or the browser is
  * free to drift from the adapter that declares it, and the adapter is the only
  * place that measured the CLI.
+ *
+ * 🛑 EVERY VENDOR, NOT A HARDCODED PAIR. The pair was `["claude", "cursor"]`,
+ * which is the whole registry today and silently stops covering the third
+ * vendor the day it lands.
+ *
+ * ⚠️ THIS IS ALSO THE ONLY THING LEFT GUARDING `?? null` AGAINST `|| null`,
+ * AND IT CANNOT FIRE TODAY. Those two differ only on a `false` declaration,
+ * and since #419 made cursor report a window NO SHIPPED VENDOR DECLARES
+ * `false`. The test that used to exercise it asserted cursor's `false`
+ * directly. It is deleted rather than flipped, because flipping it to `true`
+ * would have left a test named for a branch it no longer reaches. **The guard
+ * is unexercised until a vendor declares `false` again**, at which point this
+ * loop catches it with no edit.
  */
 test("🛑 the answer comes from the adapter's own declaration", () => {
-  for (const vendor of ["claude", "cursor"]) {
+  const vendors = vendorsWithSpawn();
+
+  assert.ok(vendors.length > 0, "the control: the registry is not empty");
+
+  for (const vendor of vendors) {
     assert.equal(
       reportsContextFor(vendor),
       spawnFor(vendor).reportsContext,

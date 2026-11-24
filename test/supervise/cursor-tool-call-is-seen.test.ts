@@ -57,6 +57,7 @@ test("🔴 a Cursor MCP tool call is reported, with its BARE tool name", () => {
       mcpToolCall: { providerIdentifier: "chat", toolName: "send" },
     }),
     s.on,
+    {},
   );
 
   assert.deepEqual(s.names, ["send"]);
@@ -74,7 +75,7 @@ test("🔴 a Cursor MCP tool call is reported, with its BARE tool name", () => {
 test("🔴 a tool_call whose name cannot be READ reports null, it is not dropped", () => {
   const s = sink();
 
-  routeCursorEvent(started({ somethingNobodyPredicted: { id: 1 } }), s.on);
+  routeCursorEvent(started({ somethingNobodyPredicted: { id: 1 } }), s.on, {});
 
   assert.deepEqual(
     s.names,
@@ -86,7 +87,7 @@ test("🔴 a tool_call whose name cannot be READ reports null, it is not dropped
 test("🛑 the unreadable case fires for a MISSING tool_call member too", () => {
   const s = sink();
 
-  routeCursorEvent({ ...started(undefined), tool_call: undefined }, s.on);
+  routeCursorEvent({ ...started(undefined), tool_call: undefined }, s.on, {});
 
   assert.deepEqual(s.names, [null]);
 });
@@ -100,8 +101,8 @@ test("🛑 started AND completed both report, so a COUNT of them is not a count 
   const s = sink();
   const call = { mcpToolCall: { toolName: "send" } };
 
-  routeCursorEvent(started(call), s.on);
-  routeCursorEvent({ ...started(call), subtype: "completed" }, s.on);
+  routeCursorEvent(started(call), s.on, {});
+  routeCursorEvent({ ...started(call), subtype: "completed" }, s.on, {});
 
   assert.deepEqual(s.names, ["send", "send"]);
 });
@@ -109,8 +110,8 @@ test("🛑 started AND completed both report, so a COUNT of them is not a count 
 test("🔴 control — a Cursor event that is NOT a tool call reports nothing", () => {
   const s = sink();
 
-  routeCursorEvent({ type: "assistant", session_id: "s1" }, s.on);
-  routeCursorEvent({ type: "result", session_id: "s1" }, s.on);
+  routeCursorEvent({ type: "assistant", session_id: "s1" }, s.on, {});
+  routeCursorEvent({ type: "result", session_id: "s1" }, s.on, {});
 
   assert.deepEqual(s.names, []);
 });
@@ -198,6 +199,7 @@ test("🔴 a realish tool_call with a `kind` but NO variant key reports null", (
   routeCursorEvent(
     started({ toolCallId: "t1", title: "Other", kind: "other", status: "ok" }),
     s.on,
+    {},
   );
 
   assert.deepEqual(
@@ -216,7 +218,7 @@ test("🔴 a realish tool_call with a `kind` but NO variant key reports null", (
 test("🔴 a built-in Cursor tool is named by its VARIANT KEY", () => {
   const s = sink();
 
-  routeCursorEvent(started({ shellToolCall: { command: "ls" } }), s.on);
+  routeCursorEvent(started({ shellToolCall: { command: "ls" } }), s.on, {});
 
   assert.deepEqual(s.names, ["shellToolCall"]);
 });
@@ -233,6 +235,7 @@ test("🔴 an mcpToolCall with no readable toolName reports null, not its key", 
   routeCursorEvent(
     started({ mcpToolCall: { providerIdentifier: "chat" } }),
     s.on,
+    {},
   );
 
   assert.deepEqual(s.names, [null]);
@@ -244,6 +247,7 @@ test("🛑 TWO variant keys is ambiguous and reports null", () => {
   routeCursorEvent(
     started({ shellToolCall: { command: "ls" }, readToolCall: { path: "a" } }),
     s.on,
+    {},
   );
 
   assert.deepEqual(s.names, [null]);

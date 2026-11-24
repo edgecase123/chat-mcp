@@ -4,6 +4,7 @@ import type { SpawnOptions } from "../child.js";
 import type { RateLimitSnapshot } from "../rate-limit.js";
 import type { Denial } from "../denial.js";
 import type { ContextSnapshot } from "../context-gauge.js";
+import type { RouterState } from "../vendor.js";
 import type { RedispatchInput } from "./claude-redispatch.js";
 import type { UnnamedToolCall } from "../child.js";
 
@@ -77,6 +78,25 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
 }
 
 /**
+ * Every Cursor model this driver knows, keyed on the `--model` id.
+ *
+ * 🛑 ONE ROW PER MODEL, BECAUSE THE ID AND THE DISPLAY NAME ARE TWO SPELLINGS
+ * OF ONE THING. The command line takes `composer-2.5-fast`; `system init`
+ * reports `Composer 2.5 Fast`. Held in two constants, a model upgrade could
+ * change the id and its test literal, leave the window keyed on the old
+ * display name, and every default handle would fall back. Measured before this
+ * table existed: that mutant passed 2707 of 2707.
+ *
+ * ⚠️ 200K IS READ FROM THE CURSOR IDE'S `/context`, NOT FROM `cursor-agent`.
+ * Whether the CLI uses the same window is unproven. #419.
+ */
+export const CURSOR_MODELS = {
+  "composer-2.5-fast": { displayName: "Composer 2.5 Fast", window: 200_000 },
+} as const satisfies Readonly<
+  Record<string, { readonly displayName: string; readonly window: number }>
+>;
+
+/**
  * The model a supervised `cursor-agent` runs when no caller names one.
  *
  * 🛑 lee's RULING OF 2026-11-23: *"The default for cursor is Composer 2.5 Fast
@@ -129,8 +149,14 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
  * and the stream only has to name which model ran.** An `auto` handle reports
  * its model as the literal `"Auto"`, which names nothing; a pinned one reports
  * a display name the driver can map. #419.
+ *
+ * 🛑 `satisfies keyof typeof CURSOR_MODELS` IS THE GUARD ON THE PIN, AND IT IS
+ * A TYPECHECK RATHER THAN A TEST. A pin naming no row in `CURSOR_MODELS` fails
+ * `tsc`, so no test can show it going red — `tsc` exiting 1 is the whole of
+ * the evidence.
  */
-export const CURSOR_DEFAULT_MODEL = "composer-2.5-fast";
+export const CURSOR_DEFAULT_MODEL =
+  "composer-2.5-fast" satisfies keyof typeof CURSOR_MODELS;
 
 export function cursorArgs(opts: SpawnOptions = {}): string[] {
   const args = [
@@ -155,6 +181,158 @@ export function cursorArgs(opts: SpawnOptions = {}): string[] {
 }
 
 /**
+ * Context-window size per Cursor model, or null when the model is not mapped.
+ *
+ * 🛑 KEYED ON THE DISPLAY NAME, NOT THE `--model` ID. `system init` reports
+ * `model: "Composer 2.5 Fast"`; the id passed on the command line is
+ * `composer-2.5-fast`. A map keyed on the id matches nothing, every reading
+ * falls back, and nothing says so louder than one quiet boolean.
+ *
+ * 🛑 CURSOR'S OWN MAP, NOT `claude-events.ts`'s. Those keys are Claude model
+ * ids, and sharing the table would let one vendor's knowledge decide another
+ * vendor's denominator.
+ */
+/**
+ * Re-key a model table onto the display names `system init` reports.
+ *
+ * 🛑 A FUNCTION OVER A PASSED TABLE, NOT A `Object.fromEntries` OVER THE
+ * CONST. `CURSOR_MODELS` holds ONE row, so keying on the id and keying on the
+ * display name both produce a one-entry map — a control against the const
+ * cannot tell them apart, and the module const gives a test no way to inject a
+ * second row. A passed table pins the direction today instead of promising it
+ * at the second model. Same reasoning as `smallestWindow` below.
+ */
+export function contextWindowsByDisplayName(
+  models: Readonly<
+    Record<string, { readonly displayName: string; readonly window: number }>
+  >,
+): Readonly<Record<string, number>> {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.values(models).map((m) => [m.displayName, m.window]),
+    ),
+  );
+}
+
+export const CURSOR_CONTEXT_WINDOWS: Readonly<Record<string, number>> =
+  contextWindowsByDisplayName(CURSOR_MODELS);
+
+/**
+ * The smallest window in a map, which is what an unmapped model measures
+ * against.
+ *
+ * 🛑 TOO-SMALL IS THE SAFE DIRECTION, the same rule `claude-events.ts` states:
+ * a denominator that is too large reads LOW, so no band fires and the gauge
+ * goes quiet exactly when the agent is full. Too-small reads high and warns
+ * early.
+ *
+ * 🛑 A FUNCTION OVER A PASSED MAP, NOT A `Math.min` OVER THE CONST. Over a
+ * one-entry map `Math.min` and `Math.max` return the same number, so a control
+ * against the const could not tell a correct derivation from a reversed one —
+ * and a module const gives a test no way to inject a second entry. Taking a
+ * map as an argument pins the direction today instead of promising it at the
+ * second model. Raised by claude1 reviewing the plan.
+ */
+export function smallestWindow(
+  windows: Readonly<Record<string, number>>,
+): number {
+  const sizes = Object.values(windows);
+
+  if (sizes.length === 0) {
+    throw new Error("smallestWindow needs at least one mapped window");
+  }
+
+  return Math.min(...sizes);
+}
+
+/** The window an unmapped Cursor model is measured against. */
+export const CURSOR_FALLBACK_CONTEXT_WINDOW: number = smallestWindow(
+  CURSOR_CONTEXT_WINDOWS,
+);
+
+/**
+ * One mapped window, or undefined.
+ *
+ * 🛑 `Object.hasOwn`, NEVER `windows[name] ?? fallback`. An inherited member is
+ * not nullish, so a model reported as `"toString"` answered with a FUNCTION
+ * where the signature promises a number — `totalIsFallback` came back false,
+ * nothing logged, and the percentage was NaN. Measured on the Claude side and
+ * carried here deliberately.
+ */
+function mappedCursorWindow(name: string): number | undefined {
+  return Object.hasOwn(CURSOR_CONTEXT_WINDOWS, name)
+    ? CURSOR_CONTEXT_WINDOWS[name]
+    : undefined;
+}
+
+/**
+ * The tokens a Cursor turn is holding, out of a `result` event's usage.
+ *
+ * 🛑 THE SUM, NEVER `inputTokens` ALONE. On a resumed turn the earlier context
+ * moves into the cache, so `inputTokens` FALLS while the real fill RISES —
+ * measured at 13764 then 2490 over a context that grew. A gauge built on
+ * `inputTokens` runs backwards and goes quiet as the agent fills.
+ *
+ * ⚠️ `cacheWriteTokens` AND `reasoningTokens` ARE LEFT OUT, and that is not
+ * settled. Both were 0 or absent in every measured turn, so neither has been
+ * observed to matter. #419.
+ */
+function cursorUsedTokens(usage: Record<string, unknown>): number | null {
+  const input = usage.inputTokens;
+  const cached = usage.cacheReadTokens;
+
+  if (typeof input !== "number") return null;
+
+  return input + (typeof cached === "number" ? cached : 0);
+}
+
+/**
+ * The context reading a `result` event carries, or null if it carries none.
+ *
+ * 🛑 THE MODEL COMES OUT OF THE BAG, BECAUSE IT IS ON A DIFFERENT EVENT.
+ * `system init` names the model and `result` carries the counts, and
+ * `routeCursorEvent` is otherwise stateless. `claude-events.ts` records that
+ * remembered-`init` state was tried twice on the Claude side and rejected —
+ * there a mid-session model change emits no new `init` and leaves a
+ * confidently wrong percentage. Cursor is not subject to that: `processPerTurn`
+ * is true, so every turn is its own process and re-emits its own `init`.
+ *
+ * 🛑 A TURN WITH NO `init` MUST NOT INHERIT THE PREVIOUS TURN'S MODEL. That is
+ * what the caller's clear is for, and it is why this reads `state.model`
+ * rather than a module slot.
+ */
+export function cursorContextSnapshot(
+  event: Record<string, unknown>,
+  model: string | null,
+): ContextSnapshot | null {
+  const usage = event.usage;
+
+  if (!usage || typeof usage !== "object") return null;
+
+  const used = cursorUsedTokens(usage as Record<string, unknown>);
+
+  if (used === null) return null;
+
+  const mapped = model === null ? undefined : mappedCursorWindow(model);
+
+  return {
+    used,
+    total: mapped ?? CURSOR_FALLBACK_CONTEXT_WINDOW,
+    model,
+    totalIsFallback: mapped === undefined,
+  };
+}
+
+/**
+ * Where `routeCursorEvent` keeps the model between `init` and `result`.
+ *
+ * 🛑 ONE SPELLING, IN ONE PLACE. The key is written on one event and read on
+ * another, so two literals could drift and the reader would silently find
+ * `undefined` — which resolves to a fallback rather than to an error.
+ */
+const MODEL_KEY = "cursorModel";
+
+/**
  * Map one `cursor-agent` stream-json event onto the semantic callbacks.
  *
  * 🛑 THE TERMINAL EVENT IS `{"type":"result"}`, THE SAME SPELLING CLAUDE CODE
@@ -163,9 +341,13 @@ export function cursorArgs(opts: SpawnOptions = {}): string[] {
  * invisible: such a bug would pass for both vendors and only surface on a
  * third. Each driver still owns its own mapping for that reason.
  *
- * ⚠️ NEITHER THE `usage` NOR THE `context` SINK IS CALLED, and
- * `cursorSpawn` declares both `false` to match. See the note on
- * `reportsUsage` in `cursorSpawn`.
+ * ⚠️ THE `usage` SINK IS NEVER CALLED, and `cursorSpawn` declares
+ * `reportsUsage: false` to match. Token counts are not a `RateLimitSnapshot`.
+ *
+ * 🛑 THE `context` SINK IS CALLED ON `result`, and an earlier cut of this note
+ * said a Cursor gauge was impossible. Its reasoning was that no window TOTAL
+ * appears in the stream. A window is a constant per model, so the stream only
+ * has to name WHICH model ran — and `system init` does. #419.
  */
 export function routeCursorEvent(
   event: Record<string, unknown>,
@@ -177,6 +359,7 @@ export function routeCursorEvent(
     session?(id: string): void;
     toolCall?(name: string | null, why?: UnnamedToolCall): void;
   },
+  state: RouterState,
 ): void {
   // 🛑 THE ID ARRIVES ON THE INIT EVENT, WHICH IS THE FIRST LINE OF THE
   // STREAM. Measured against cursor-agent 2026.11.19-f005e9d:
@@ -192,7 +375,32 @@ export function routeCursorEvent(
 
   if (typeof id === "string" && on.session) on.session(id);
 
-  if (event.type === "result") on.turnEnd();
+  // 🛑 WRITTEN ON `init` AND READ ON `result`. Those are two events, and this
+  // function is called once per event with no memory of its own. The bag is
+  // the only thing that spans them. #419.
+  if (event.type === "system" && event.subtype === "init") {
+    const model = event.model;
+
+    state[MODEL_KEY] =
+      typeof model === "string" && model.length > 0 ? model : null;
+  }
+
+  if (event.type === "result") {
+    const held = state[MODEL_KEY];
+    const model = typeof held === "string" ? held : null;
+
+    // 🛑 CLEARED BEFORE THE TURN ENDS, NOT AFTER. The bag outlives a turn —
+    // `per-turn.ts` holds one fan-out across every process — so a turn that
+    // emits a `result` with no preceding `init` would otherwise inherit the
+    // previous turn's model and report a guess as measured.
+    delete state[MODEL_KEY];
+
+    const snapshot = cursorContextSnapshot(event, model);
+
+    if (snapshot && on.context) on.context(snapshot);
+
+    on.turnEnd();
+  }
 
   // 🛑 A TOP-LEVEL EVENT, NOT A BLOCK INSIDE AN `assistant` MESSAGE. The
   // silent-reply detector used to read `tool_use` blocks itself and returned
