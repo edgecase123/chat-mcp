@@ -558,9 +558,17 @@ export function messageMarkdown(
   return `**${from}** · ${time}\n\n${body.trimEnd()}`;
 }
 
-/** `/name <arg>`, with the space dropped when a command takes no argument. */
-export function commandUsage(command) {
-  return `/${command.name} ${command.arg}`.trimEnd();
+/**
+ * `<prefix>name <arg>`, with the space dropped when a command takes no
+ * argument.
+ *
+ * 🛑 THE DEFAULT PREFIX IS WHAT KEEPS `/help` AND `/cheat-sheet` UNCHANGED.
+ * Both reach this through `commandBlock`, and both describe slash commands.
+ * `commandRows` passes a per-table prefix instead, because a CLI row is
+ * pasted into a terminal verbatim and a leading slash makes it unrunnable.
+ */
+export function commandUsage(command, prefix = "/") {
+  return `${prefix}${command.name} ${command.arg}`.trimEnd();
 }
 
 /**
@@ -633,20 +641,31 @@ export function commandBlock(
  * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
  * @param {Record<string, string>} labels category key -> heading
  */
-export function commandRows(commands, labels) {
-  return Object.keys(labels)
-    .map((cat) => ({
-      cat,
-      heading: labels[cat],
-      rows: commands
-        .filter((c) => c.cat === cat)
-        .map((c) => ({
-          usage: commandUsage(c),
+export function commandRows(commands, labels, prefixes) {
+  // flatMap, not map-then-filter: dropping an empty category with
+  // `.filter(Boolean)` widens the return type to include null, and every
+  // caller then has to narrow a value this builder never emits.
+  return Object.keys(labels).flatMap((cat) => {
+    const inCat = commands.filter((c) => c.cat === cat);
+    if (!inCat.length) return [];
+
+    const prefix = prefixes[cat];
+    if (typeof prefix !== "string") {
+      throw new Error(`commandRows: category "${cat}" has no prefix`);
+    }
+
+    return [
+      {
+        cat,
+        heading: labels[cat],
+        rows: inCat.map((c) => ({
+          usage: commandUsage(c, prefix),
           desc: c.desc,
-          copy: `/${c.name}`,
+          copy: `${prefix}${c.name}`,
         })),
-    }))
-    .filter((section) => section.rows.length > 0);
+      },
+    ];
+  });
 }
 
 /** Gestures, as data, so one measurement can cover them and the commands. */

@@ -2327,37 +2327,17 @@ test("no room at all is an empty line, never the word undefined", () => {
 
 // ── /cli-commands ───────────────────────────────────────────────────────
 
-test("🛑 /cli-commands carries EVERY command the text surfaces print", () => {
-  // The whole point of a third surface is that it cannot drift from the other
-  // two. A hand-kept row list is the defect; this fails the moment the
-  // structured builder and the text builder disagree on the command SET.
-  const structured = commandRows(WIDE, LABELS).flatMap((s) =>
-    s.rows.map((r) => r.usage),
-  );
-  const text = commandBlock(WIDE, LABELS, { headingIndent: "" })
-    .split("\n")
-    .filter((l) => l.trim().startsWith("/"))
-    .map((l) =>
-      l
-        .trim()
-        .split(/\s+—\s+/)[0]
-        .replace(/\s+/g, " "),
-    );
-
-  assert.deepEqual(
-    structured,
-    text,
-    "the two surfaces list different commands",
-  );
-  // The denominator, so a builder that returned [] cannot pass the compare.
-  assert.equal(structured.length, WIDE.length);
-  assert.equal(WIDE.length, 9);
-});
+/** `/` for every category a fixture declares. The slash surfaces are what
+ *  these three tests describe, so the prefix is uniform here on purpose. */
+const slashPrefixes = (labels: Record<string, string>) =>
+  Object.fromEntries(Object.keys(labels).map((k) => [k, "/"]));
 
 test("🛑 each row's copy payload is the BARE command, ready to paste", () => {
   // The clipboard is the only place this shows, so a payload carrying the
   // `<peer>` placeholder is undetectable until someone pastes it and sends.
-  const rows = commandRows(WIDE, LABELS).flatMap((s) => s.rows);
+  const rows = commandRows(WIDE, LABELS, slashPrefixes(LABELS)).flatMap(
+    (s) => s.rows,
+  );
   const withPlaceholder = rows.filter((r) => /[<>]/.test(r.copy));
   assert.deepEqual(withPlaceholder, [], "a copy payload carried a placeholder");
 
@@ -2374,7 +2354,7 @@ test("🛑 each row's copy payload is the BARE command, ready to paste", () => {
 test("🛑 a category with no commands is DROPPED, not rendered empty", () => {
   // An empty heading reads as a section that failed to load.
   const only = [{ name: "who", arg: "", desc: "list peers", cat: "status" }];
-  const sections = commandRows(only, LABELS);
+  const sections = commandRows(only, LABELS, slashPrefixes(LABELS));
   assert.deepEqual(
     sections.map((s) => s.cat),
     ["status"],
@@ -2386,7 +2366,7 @@ test("🛑 a category with no commands is DROPPED, not rendered empty", () => {
 test("🛑 every category that HAS commands keeps its heading and its order", () => {
   // A mutant keeping only the first command per category passes a set compare,
   // so this asserts the per-section counts too. CMDS carries 2+ in four cats.
-  const sections = commandRows(CMDS, LABELS);
+  const sections = commandRows(CMDS, LABELS, slashPrefixes(LABELS));
   assert.deepEqual(
     sections.map((s) => [s.cat, s.heading, s.rows.length]),
     [
@@ -2396,5 +2376,60 @@ test("🛑 every category that HAS commands keeps its heading and its order", ()
       ["admin", "ADMIN — destructive", 1],
       ["system", "SYSTEM", 2],
     ],
+  );
+});
+
+// ── a CLI row's prefix belongs to the table, not the builder (#429) ──────
+
+/** Two verbs that really are `chat-mcp` subcommands, so the fixture is not a
+ *  shape the product cannot produce. Both are in KNOWN_SUBCOMMANDS. */
+const CLI_FIXTURE = [
+  { name: "send", arg: "<to> [body]", desc: "send a message", cat: "cli" },
+  { name: "web", arg: "", desc: "run the dashboard", cat: "cli" },
+];
+
+test("🛑 a CLI row copies the command VERBATIM, with no slash bolted on", () => {
+  // `/npx chat-mcp install …` is the defect this ticket is about. The slash
+  // was added by the builder, so no caller could opt out of it.
+  const rows = commandRows(
+    CLI_FIXTURE,
+    { cli: "CLI" },
+    {
+      cli: "chat-mcp ",
+    },
+  ).flatMap((s) => s.rows);
+
+  assert.deepEqual(
+    rows.map((r) => r.copy),
+    ["chat-mcp send", "chat-mcp web"],
+  );
+  // `usage` keeps the placeholder; `copy` drops it. Same split as a slash row.
+  assert.deepEqual(
+    rows.map((r) => r.usage),
+    ["chat-mcp send <to> [body]", "chat-mcp web"],
+  );
+});
+
+test("🛑 an empty prefix is HONOURED, because an MCP tool name stands alone", () => {
+  // "" is falsy, so a `prefixes[cat] || "/"` fallback would quietly re-add the
+  // slash here and the MCP section would read as 24 slash commands.
+  const rows = commandRows(
+    [{ name: "whoami", arg: "", desc: "who am I", cat: "mcp" }],
+    { mcp: "MCP" },
+    { mcp: "" },
+  ).flatMap((s) => s.rows);
+
+  assert.deepEqual(rows, [
+    { usage: "whoami", desc: "who am I", copy: "whoami" },
+  ]);
+});
+
+test("🛑 a category with no prefix THROWS rather than guessing a slash", () => {
+  // A typo'd key is the one way a wrong prefix could still ship. A default
+  // would render it as a slash command and nothing would say so.
+  assert.throws(
+    () => commandRows(CLI_FIXTURE, { cli: "CLI" }, {}),
+    /prefix/,
+    "a missing prefix was silently defaulted",
   );
 });

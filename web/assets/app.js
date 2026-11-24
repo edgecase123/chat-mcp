@@ -81,6 +81,11 @@ import {
   sidebarSignatures,
   sectionsToRebuild,
 } from "./logic.js";
+import {
+  INVENTORY,
+  INVENTORY_LABELS,
+  INVENTORY_PREFIXES,
+} from "./inventory.js";
 //
 // State model: single `state` object holds handle, current target, peers,
 // rooms, and the messages for the current view. Every mutation goes through
@@ -2545,7 +2550,7 @@ const COMMANDS = [
   {
     name: "cli-commands",
     arg: "",
-    desc: "the same commands, each with a button that copies it",
+    desc: "the CLI, MCP and supervisor commands, each with a copy button",
     cat: "system",
   },
 ];
@@ -2810,9 +2815,13 @@ async function tryDispatchSlashCommand(input) {
       showEphemeral("/cheat-sheet", cheatSheet(COMMANDS, CATEGORY_LABELS));
       return true;
     }
+    // 🛑 NOT `COMMANDS`. The slash commands have two homes already, `/help`
+    // and `/cheat-sheet`, and this surface is the only one that can carry a
+    // copy button — which is what makes it the right home for commands you
+    // paste into a terminal. Ruled by lee.
     case "cli-commands": {
       showEphemeral("/cli-commands", null, {
-        sections: commandRows(COMMANDS, CATEGORY_LABELS),
+        sections: commandRows(INVENTORY, INVENTORY_LABELS, INVENTORY_PREFIXES),
       });
       return true;
     }
