@@ -1623,6 +1623,17 @@ async function handleLiveAgents(
       return {
         handle: s.handle,
         boundAt: s.boundAt,
+        // #415 slice 2 — the mode this agent's Stop uses when the caller names
+        // none, RESOLVED here so the browser reads a decision and never learns
+        // `processPerTurn`. `handleStopAgents` resolves through the same
+        // function, so the panel's offer and the route's default agree.
+        //
+        // 🛑 PER HANDLE, beside `handle` rather than under `child`: the
+        // SUPERVISOR's vendor decides it, `/api/agents/stop` accepts only the
+        // supervisor, and a childless supervisor is still stoppable.
+        defaultStopMode: defaultStopModeFor(
+          registrations.agents[s.handle]?.vendor ?? "",
+        ),
         child:
           child === undefined || child === null
             ? null
