@@ -372,6 +372,22 @@ export function menuEntriesFor(kind, label) {
       action: "copyName",
     },
     {
+      // #397 slice 3b — ONE entry on the DEFAULT branch, which serves agent
+      // rows and peer rows both because they already share `kind: "peer"`.
+      //
+      // 🛑 NO ELLIPSIS, AND IT IS NOT AN OVERSIGHT. In this menu the ellipsis
+      // means "opens in the composer" — `menu-entries.test.ts` asserts it iff
+      // a `prefill` is present. This opens a MODAL, so the ellipsis would
+      // promise the wrong surface. lee's own wording carried none either.
+      //
+      // 🛑 NO ARGUMENT AND NO PREFILL. The handler reads the gate and the
+      // current fill out of state by handle, because `menuEntriesFor` is pure
+      // and `label` is the only thing it is given.
+      text: "Set Threshold",
+      title: `Set the context restart threshold for ${label}`,
+      action: "setThreshold",
+    },
+    {
       text: "Kick",
       title: `Remove ${label} from the bus`,
       action: "kickPeer",
@@ -1455,6 +1471,51 @@ export function agentRow(agent) {
 }
 
 /**
+ * What the threshold modal needs for one handle, from whichever row it sits on.
+ *
+ * 🛑 ONE LOOKUP FOR BOTH ROW TYPES. An agent row's gate lives under
+ * `state.agents[].child` and a peer row's lives on `state.peers[]` directly,
+ * but the SERVER writes both through `gateFields()`, so the field names agree.
+ * Two call sites reading two shapes is how they drift.
+ *
+ * 🛑 AGENTS ARE SEARCHED FIRST, AND THAT ORDER IS LOAD-BEARING. A supervised
+ * child is filtered OUT of the peers section but is still present in
+ * `state.peers`, so a handle that is both must resolve as the agent row the
+ * operator clicked.
+ *
+ * ⚠️ `fillPercent` IS `gaugeDisplay().percent`, WHICH IS NULL WHENEVER THE
+ * GAUGE CANNOT SHOW A NUMBER — a vendor that reports no window returns
+ * `show: true` with a null percent, so reading `percent` alone is not a
+ * shortcut past the `show` flag.
+ *
+ * ⚠️ `null` IS IN THE TYPE ON PURPOSE. `state.agents` and `state.peers` are
+ * both initialised before the first fetch and a failed fetch leaves them as
+ * they were, but a caller passing a half-built state object is exactly the
+ * case the `Array.isArray` guards below exist for — so the TYPE has to admit
+ * what the CODE already handles, or the guard reads as dead.
+ *
+ * @param {string} handle
+ * @param {{ agents?: unknown[] | null, peers?: unknown[] | null }} [state]
+ */
+export function gateTargetFor(handle, { agents = [], peers = [] } = {}) {
+  const fromAgent = (Array.isArray(agents) ? agents : [])
+    .map((a) => a?.child)
+    .find((c) => c?.handle === handle);
+
+  const row =
+    fromAgent ??
+    (Array.isArray(peers) ? peers : []).find((p) => p?.handle === handle);
+
+  if (row === undefined || row === null) return null;
+
+  return {
+    gate: row.context_gate ?? null,
+    source: row.context_gate_source ?? null,
+    fillPercent: gaugeDisplay(row).percent,
+  };
+}
+
+/**
  * Every handle that is the CHILD of a live supervisor.
  *
  * 🛑 CHILDREN ONLY, NEVER THE SUPERVISOR HANDLE. A supervisor never registers
@@ -2371,7 +2432,6 @@ export const SIDEBAR_SECTIONS = [
     inputs: [
       "agents",
       "gateDefault",
-      "gateEditing",
       "nowMinute",
       "currentTarget",
       "openMenuFor",

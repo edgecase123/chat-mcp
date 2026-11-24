@@ -314,26 +314,22 @@ test("setGate repaints the sidebar AND the dialog", () => {
 });
 
 /**
- * 🛑 THE CLEAR IS SCOPED, AND THE TWO ASSERTIONS KILL DIFFERENT MUTANTS.
- * The global control is in the settings dialog; a row's editor is in the
- * sidebar. An unguarded clear collapses an editor the operator cannot see
- * behind the modal.
+ * 🛑 THE SCOPE GUARD IS GONE BECAUSE ITS SUBJECT IS. `state.gateEditing` held
+ * a sidebar row's open editor; #397 slice 3b put that editor in a dialog whose
+ * own open state replaces it, so `setGate` has nothing left to clear.
  *
- * ⚠️ THE SECOND ASSERTION IS NOT REDUNDANT. A guard ADDED while the bare line
- * stayed would satisfy the first one and still clear on every submit.
+ * ⚠️ A GUARD DELETED WITH ITS SUBJECT IS NOT A GUARD DROPPED. This asserts the
+ * key is really gone rather than leaving the old test asserting a branch that
+ * no longer exists.
  */
-test("a global submit leaves a row's open gate editor alone", () => {
+test("setGate clears no editor state, because none is left to clear", () => {
   const body = fnBody("setGate");
 
+  assert.doesNotMatch(body, /gateEditing/);
   assert.match(
     body,
-    /if \(!global\) state\.gateEditing = null;/,
-    "setGate clears gateEditing without checking the scope",
-  );
-  assert.doesNotMatch(
-    body,
-    /^\s*state\.gateEditing = null;/m,
-    "an unguarded clear survives alongside the guarded one",
+    /repaintThreshold\(\)/,
+    "setGate never repaints the modal",
   );
 });
 

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  gateTargetFor,
   gateSubmission,
   gateRisk,
   gateControlDisplay,
@@ -302,4 +303,154 @@ test("the global scope refuses a clear even when handed an override source", () 
   );
 
   assert.equal(out.canClear, false, "the global offered a clear");
+});
+
+/**
+ * #397 slice 3b — the `⋯` menu's `Set Threshold…` needs one handle's gate and
+ * its current fill, and the two row types keep them in different slices of
+ * state.
+ *
+ * 🛑 THE SERVER WRITES BOTH THROUGH `gateFields()`, so the FIELD NAMES agree
+ * even though the paths do not. `whoami.peers[]` carries them directly;
+ * `/api/agents/live` carries them on `agents[].child`. One resolver is what
+ * stops two call sites drifting.
+ */
+
+const AGENT_ROW = {
+  handle: "sup-a",
+  child: {
+    handle: "sup-a-agent",
+    context_gate: 25,
+    context_gate_source: "override",
+    context_used: 42_000,
+    context_total: 200_000,
+    // 🛑 `fresh: true` IS NOT DECORATION. `gaugeDisplay` returns a NULL percent
+    // for any row it considers stale, so a fixture without it measures the
+    // stale path while reading as the happy one. It cost me a wrong expected
+    // value before the first run.
+    fresh: true,
+  },
+};
+
+const PEER_ROW = {
+  handle: "cursor-b",
+  context_gate: 60,
+  context_gate_source: "global",
+  context_used: 30_000,
+  context_total: 200_000,
+  fresh: true,
+};
+
+test("🛑 an AGENT row resolves through its child, not its supervisor handle", () => {
+  const got = gateTargetFor("sup-a-agent", {
+    agents: [AGENT_ROW],
+    peers: [],
+  });
+
+  assert.deepEqual(got, { gate: 25, source: "override", fillPercent: 21 });
+
+  // ⚠️ THE SUPERVISOR HANDLE MUST NOT RESOLVE. The two differ by a suffix, so
+  // a resolver that matched either would read as correct and gate the wrong
+  // handle — the same trap the row's own docblock names about the Stop button.
+  assert.equal(
+    gateTargetFor("sup-a", { agents: [AGENT_ROW], peers: [] }),
+    null,
+  );
+});
+
+test("🛑 a PEER row resolves from state.peers, with the same field names", () => {
+  const got = gateTargetFor("cursor-b", { agents: [], peers: [PEER_ROW] });
+
+  assert.deepEqual(got, { gate: 60, source: "global", fillPercent: 15 });
+});
+
+/**
+ * 🛑 A SUPERVISED CHILD IS IN BOTH LISTS. `peersMinusSupervised` hides it from
+ * the peers SECTION, but `state.peers` still holds it. Searching peers first
+ * would answer with a row the operator did not click.
+ */
+test("🛑 a handle in BOTH lists resolves as the agent row", () => {
+  const alsoAPeer = { ...PEER_ROW, handle: "sup-a-agent", context_gate: 99 };
+  const got = gateTargetFor("sup-a-agent", {
+    agents: [AGENT_ROW],
+    peers: [alsoAPeer],
+  });
+
+  assert.equal(
+    got?.gate,
+    25,
+    "the peers entry won, so the agent row is shadowed",
+  );
+});
+
+/**
+ * ⚠️ `show: true` WITH A NULL PERCENT IS A REAL STATE — a vendor that reports
+ * no context window. `fillPercent` must be null there, or `gateRisk` compares
+ * a threshold against a number that does not exist.
+ */
+test("⚠️ a row that reports no window resolves a NULL fill, not a zero", () => {
+  const noWindow = {
+    handle: "cursor-c",
+    context_gate: 50,
+    context_gate_source: "builtin",
+    reports_context: false,
+  };
+
+  assert.deepEqual(
+    gateTargetFor("cursor-c", { agents: [], peers: [noWindow] }),
+    {
+      gate: 50,
+      source: "builtin",
+      fillPercent: null,
+    },
+  );
+});
+
+/**
+ * 🛑 THREE DIFFERENT STATES GIVE A NULL FILL, AND THE MODAL MEETS ALL THREE.
+ * A vendor with no window, a handle that has never reported, and a row whose
+ * last report went stale. `gateRisk` compares a threshold against this number,
+ * so a null has to stay a null rather than becoming a zero.
+ */
+test("🛑 a STALE row resolves a null fill even though it HAS used and total", () => {
+  const stale = {
+    handle: "cursor-d",
+    context_gate: 40,
+    context_gate_source: "override",
+    context_used: 90_000,
+    context_total: 200_000,
+    fresh: false,
+  };
+
+  const got = gateTargetFor("cursor-d", { agents: [], peers: [stale] });
+
+  assert.equal(got?.fillPercent, null, "a stale row reported a fill");
+  // The denominator: the SAME row with `fresh: true` must give a number, or
+  // this test passes against a resolver that never reads the fill at all.
+  assert.equal(
+    gateTargetFor("cursor-d", {
+      agents: [],
+      peers: [{ ...stale, fresh: true }],
+    })?.fillPercent,
+    45,
+  );
+});
+
+test("an unknown handle resolves to null rather than a half-filled object", () => {
+  assert.equal(
+    gateTargetFor("nobody", { agents: [AGENT_ROW], peers: [PEER_ROW] }),
+    null,
+  );
+  // The denominator: the same call with a KNOWN handle must not be null, or
+  // this test passes against a resolver that returns null for everything.
+  assert.notEqual(
+    gateTargetFor("cursor-b", { agents: [AGENT_ROW], peers: [PEER_ROW] }),
+    null,
+  );
+});
+
+test("missing or malformed state resolves null instead of throwing", () => {
+  assert.equal(gateTargetFor("x"), null);
+  assert.equal(gateTargetFor("x", {}), null);
+  assert.equal(gateTargetFor("x", { agents: null, peers: null }), null);
 });

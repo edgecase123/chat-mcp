@@ -184,6 +184,35 @@
       ></div>
       <div class="settings__panels" id="settings-panels"></div>
     </dialog>
+
+    <!-- #397 slice 3b — one agent's restart threshold, opened from the row's
+         (...) menu rather than inline on the row.
+
+         A SECOND dialog, not a third tab on the one above. This one is about
+         ONE handle and is reached from that handle's row; the settings dialog
+         is about the install. Folding it in would mean the row menu opening a
+         panel the operator then has to re-aim at the agent they clicked.
+
+         It reuses the .settings classes on purpose — same visual language, and
+         a near-duplicate CSS block is how the two drift. -->
+    <dialog
+      id="threshold"
+      class="settings settings--narrow"
+      aria-labelledby="threshold-title"
+    >
+      <header class="settings__head">
+        <h2 class="settings__title" id="threshold-title">Set threshold</h2>
+        <button
+          type="button"
+          id="threshold-close"
+          class="settings__close"
+          aria-label="Close threshold"
+        >
+          ✕
+        </button>
+      </header>
+      <div class="settings__body" id="threshold-body"></div>
+    </dialog>
     <div id="loading" class="loading">Loading…</div>
     <script src="/assets/app.js" type="module"></script>
   </body>

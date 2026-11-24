@@ -58,6 +58,7 @@ import {
   stopConfirmText,
   stopOutcomeText,
   gateControlDisplay,
+  gateTargetFor,
   gateRisk,
   gateSubmission,
   matchPositionLabel,
@@ -134,9 +135,6 @@ const state = {
   // shown relative to these.
   roots: null,
   theme: null, // set below
-  // #135 slice 4c — the child handle whose gate editor is open. At most one at
-  // a time. The global control has no key: it lives in the settings dialog and
-  // is always open.
   //
   // 🛑 IT LIVES HERE AND NOT IN THE DOM. A peer event no longer reaches the
   // agents section (#399), but `nowMinute` is one of its inputs, so the first
@@ -144,11 +142,14 @@ const state = {
   // as a class is wiped mid-edit by that render.
   //
   // ⚠️ NOT A TIMER. Nothing polls, so a quiet bus never interrupts an edit.
-  gateEditing: null,
   // #135 slice 4c — { gate, source } for the GLOBAL default, from /api/whoami.
   // Not derivable from the rows: a peer reports the global only while it has
   // no override of its own.
   gateDefault: null,
+  // #397 slice 3b — which handle the threshold dialog is open on, or null.
+  // It lives here and not in the DOM for the same reason the settings tab
+  // does: a repaint has to put the dialog back on the handle it was showing.
+  thresholdFor: null,
   // #240 — handles whose supervisor says they are producing output right now.
   // 🛑 IT LIVES HERE AND NOT IN THE DOM. renderSidebar() rebuilds every row on
   // any peer status change, so a pulse held only as a class is dropped by the
@@ -222,6 +223,9 @@ const el = {
   settings: document.getElementById("settings"),
   settingsClose: document.getElementById("settings-close"),
   settingsTabs: document.getElementById("settings-tabs"),
+  threshold: document.getElementById("threshold"),
+  thresholdBody: document.getElementById("threshold-body"),
+  thresholdClose: document.getElementById("threshold-close"),
   settingsPanels: document.getElementById("settings-panels"),
 };
 
@@ -371,6 +375,68 @@ el.settingsOpen.addEventListener("click", () => {
 
 el.settingsClose.addEventListener("click", () => {
   el.settings.close();
+});
+
+// ── Threshold modal (#397 slice 3b) ──────────────────────────────────────
+
+/**
+ * One handle's restart threshold, opened from that row's `\u22ef` menu.
+ *
+ * 🛑 THE HANDLE IS THE ONLY INPUT. `menuEntriesFor` is pure and is given the
+ * row's label, so the gate and the current fill are resolved HERE, out of
+ * state, by `gateTargetFor`.
+ *
+ * 🛑 THE FILL IS CARRIED, AND THAT IS THE WHOLE REASON THIS IS A MODAL AND NOT
+ * A PROMPT. The control used to sit beside the gauge; without the fill the
+ * operator loses the number they were reacting to and `gateRisk` has nothing
+ * to compare a typed threshold against.
+ *
+ * ⚠️ A NULL FILL IS A REAL STATE, NOT A MISSING ONE. A vendor with no context
+ * window, a handle that has never reported, and a row gone stale all resolve
+ * null — `gateRisk` already takes null and says nothing rather than guessing.
+ */
+function renderThreshold(handle) {
+  const target = gateTargetFor(handle, state);
+
+  el.thresholdBody.replaceChildren(
+    target === null
+      ? // 🛑 SAYS SO RATHER THAN RENDERING AN EMPTY BOX. A row can leave
+        // between the menu opening and this call, and a blank dialog and a
+        // broken one look identical.
+        h("p", { className: "settings__placeholder" }, [
+          `${handle} is no longer on screen, so its threshold cannot be read.`,
+        ])
+      : gateControl({
+          scope: "handle",
+          handle,
+          resolved: { gate: target.gate, source: target.source },
+          fillPercent: target.fillPercent,
+        }),
+  );
+}
+
+/** Open the threshold dialog on one handle. Render first, then show. */
+function openThreshold(handle) {
+  state.thresholdFor = handle;
+  renderThreshold(handle);
+  el.threshold.showModal();
+}
+
+/**
+ * Repaint the threshold dialog if it is open, keeping it on its handle.
+ *
+ * 🛑 GUARDED ON `open`. `renderThreshold` reads state the sidebar also drives,
+ * so calling it on a closed dialog is work nobody sees.
+ */
+function repaintThreshold() {
+  if (el.threshold.open && state.thresholdFor !== null) {
+    renderThreshold(state.thresholdFor);
+  }
+}
+
+el.thresholdClose.addEventListener("click", () => {
+  el.threshold.close();
+  state.thresholdFor = null;
 });
 
 // ── API ──────────────────────────────────────────────────────────────────
@@ -650,17 +716,12 @@ function agentsSection() {
             //
             // 🛑 SKIPPED FOR A SUPERVISOR WITH NO CHILD. There is no agent to
             // gate, and `gateFields` was never resolved for a null child.
-            a.childHandle === null
-              ? null
-              : gateControl({
-                  scope: "handle",
-                  handle: a.childHandle,
-                  resolved: {
-                    gate: a.gate,
-                    source: a.gateSource,
-                  },
-                  fillPercent: a.gauge.show ? a.gauge.percent : null,
-                }),
+            // #397 slice 3b — the per-row gate control moved onto this row's
+            // `⋯` menu as `Set Threshold`, which opens a modal.
+            //
+            // 🛑 THE GATE IS STILL ON THE ROW, AS COLOUR. It scales the
+            // gauge's bands, so two agents on different thresholds turn amber
+            // at different fills. What left is the LEGEND, not the gate.
           ]),
         )),
     // The sweep sits BELOW the rows (#40). The operator reads what is running
@@ -820,11 +881,10 @@ function stopButton(label, target, mode) {
 function gateControl({ scope, handle, resolved, fillPercent = null }) {
   const d = gateControlDisplay(resolved, { scope, fillPercent });
   const global = scope === "global";
-  // 🛑 THE GLOBAL CONTROL IS ALWAYS OPEN AND HAS NO KEY. It is the only place
-  // the default can be set, so collapsing it would hide the control entirely.
-  // A row's editor is keyed by handle because a row's gate is usually
-  // inherited and rarely changed.
-  const open = global || state.gateEditing === handle;
+  // 🛑 BOTH CALL SITES RENDER OPEN, AND NEITHER COLLAPSES. The global control
+  // is the only place the default can be set; the handle control is now inside
+  // a dialog whose own open state IS the editor's. `state.gateEditing` existed
+  // to collapse a row editor that no longer exists.
 
   // Built before the input so the `oninput` handler can close over it. The
   // note reflects the TYPED value, not the stored one, which is the whole
@@ -835,7 +895,7 @@ function gateControl({ scope, handle, resolved, fillPercent = null }) {
     note.className = `gate__note${risk ? ` gate__note--${risk.severity}` : ""}`;
   };
 
-  if (open && !global) paint(d.risk);
+  if (!global) paint(d.risk);
 
   const input = h("input", {
     className: "gate__input",
@@ -853,10 +913,6 @@ function gateControl({ scope, handle, resolved, fillPercent = null }) {
     },
     onkeydown: (e) => {
       if (e.key === "Enter") submit();
-      if (e.key === "Escape" && !global) {
-        state.gateEditing = null;
-        renderSidebar();
-      }
     },
   });
 
@@ -865,50 +921,29 @@ function gateControl({ scope, handle, resolved, fillPercent = null }) {
   return h("div", { className: `gate${global ? " gate--global" : ""}` }, [
     h("div", { className: "gate__head" }, [
       h("span", { className: "gate__label", title: d.label }, [d.label]),
-      global
-        ? null
-        : h(
+    ]),
+    h("div", { className: "gate__form" }, [
+      input,
+      h("span", { className: "gate__pct" }, ["%"]),
+      h("button", { className: "gate__btn", type: "button", onclick: submit }, [
+        "Set",
+      ]),
+      // 🛑 OFFERED ONLY WHERE AN OVERRIDE EXISTS TO REMOVE. On an
+      // inherited gate a clear reports success and changes nothing, and
+      // the global has no layer below it at all.
+      d.canClear
+        ? h(
             "button",
             {
               className: "gate__btn",
               type: "button",
-              "aria-expanded": open ? "true" : "false",
-              onclick: () => {
-                state.gateEditing = open ? null : handle;
-                renderSidebar();
-              },
+              onclick: () => setGate(scope, handle, ""),
             },
-            [open ? "Done" : "Edit"],
-          ),
+            ["Clear"],
+          )
+        : null,
     ]),
-    ...(open
-      ? [
-          h("div", { className: "gate__form" }, [
-            input,
-            h("span", { className: "gate__pct" }, ["%"]),
-            h(
-              "button",
-              { className: "gate__btn", type: "button", onclick: submit },
-              ["Set"],
-            ),
-            // 🛑 OFFERED ONLY WHERE AN OVERRIDE EXISTS TO REMOVE. On an
-            // inherited gate a clear reports success and changes nothing, and
-            // the global has no layer below it at all.
-            d.canClear
-              ? h(
-                  "button",
-                  {
-                    className: "gate__btn",
-                    type: "button",
-                    onclick: () => setGate(scope, handle, ""),
-                  },
-                  ["Clear"],
-                )
-              : null,
-          ]),
-          note,
-        ]
-      : []),
+    note,
   ]);
 }
 
@@ -940,10 +975,6 @@ async function setGate(scope, handle, raw) {
         ? `${handle} is back on the default gate`
         : `gate for ${scope === "global" ? "new agents" : handle} is now ${parsed.gate}%`,
     );
-    // 🛑 SCOPED. The global control lives in the settings dialog and a row's
-    // editor lives in the sidebar, so an unguarded clear collapses an editor
-    // the operator cannot see behind the modal.
-    if (!global) state.gateEditing = null;
   } catch (e) {
     toast(`gate change failed: ${e.message}`, "error");
   }
@@ -958,6 +989,7 @@ async function setGate(scope, handle, raw) {
   await Promise.all([fetchWhoami(), fetchLiveAgents()]);
   renderSidebar();
   repaintSettings();
+  repaintThreshold();
 }
 
 function sidebarItem({
@@ -1024,13 +1056,22 @@ function sidebarItem({
   );
 }
 
-function itemMenu({ kind, label }) {
+/**
+ * 🛑 `target` AND `label` ARE NOT THE SAME HANDLE, AND ONLY ONE IS GATEABLE.
+ * `agentRow` documents `label` as falling back to the SUPERVISOR handle when a
+ * child has not bound yet; `target` is the child by construction. They are
+ * equal for every row built today, so a `label` here would be correct by
+ * coincidence — and the two differ by a suffix, which is how the Stop button's
+ * own docblock describes reading as correct and coming back 404.
+ */
+function itemMenu({ kind, label, target }) {
   const handlers = {
     prefill: (e) => prefillComposer(e.prefill),
     copyName: () => copyTargetName(label),
     leaveRoom: () => leaveRoomEntry(label),
     deleteRoom: () => deleteRoomEntry(label),
     kickPeer: () => kickPeer(label),
+    setThreshold: () => openThreshold(target),
   };
 
   return h(

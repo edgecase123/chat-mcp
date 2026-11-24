@@ -1696,6 +1696,19 @@ body {
   color: var(--fg-faint);
 }
 
+/* #397 slice 3b — the threshold dialog is one control, not a tabbed panel. */
+.settings--narrow {
+  width: min(420px, calc(100vw - 32px));
+}
+/* 🛑 ITS OWN MAX-HEIGHT. `.settings__panels` subtracts 110px for the head AND
+   the tab strip; this dialog has no strip, so reusing that number would leave
+   a dead band at the foot. */
+.settings__body {
+  padding: 16px;
+  overflow-y: auto;
+  max-height: calc(min(600px, 100vh - 64px) - 64px);
+}
+
 /* The panel's own group and heading. `.settings__panels` already pays the 16px
    gutter, so the sidebar's `.sidebar__heading` would double it horizontally. */
 .settings__group {
