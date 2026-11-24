@@ -170,6 +170,13 @@ const state = {
   // The draft is not signed, so this is the only way to ask.
   registrationEpoch: 0,
   registrationError: null,
+  // The tab the settings dialog is showing. In state and not only in the DOM
+  // because a write handler inside a panel has to re-render the panel it is
+  // on, and the DOM only says which tab LOOKS active.
+  //
+  // ⚠️ DERIVED FROM THE LIST, never the id written out. A reordered list would
+  // otherwise open on a tab that is no longer first.
+  settingsTab: SETTINGS_TABS[0].id,
   // #132 slice 4b — one handle's container plan, as `/api/agents/plan`
   // returned it. Keyed by handle so re-reading one row cannot blank another's.
   plans: {},
@@ -259,6 +266,10 @@ el.themeToggle.addEventListener("click", () => {
  */
 function renderSettings(requested) {
   const active = settingsTabSelection(requested);
+
+  // 🛑 THE RESOLVED ID, NOT `requested`. An unknown id stored here would be
+  // handed straight back by the next caller.
+  state.settingsTab = active;
 
   el.settingsTabs.replaceChildren(
     ...SETTINGS_TABS.map((tab) =>
