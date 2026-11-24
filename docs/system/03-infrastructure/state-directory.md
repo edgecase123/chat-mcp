@@ -130,11 +130,16 @@ route accepts **any** non-empty vendor string and `spawnFor` is what throws —
 at START time, one step removed from whoever typed it. So the surface that
 collects a vendor constrains it, and it has to constrain it to this build.
 
-## The Registered card in the web UI
+## The Registered panel in the web UI
 
-`web/assets/app.js` renders a **Registered** section in the sidebar, below the
-running-agents panel and above Peers. Claims say what is locked, Agents says
-what is **running**, and this says what the operator **configured**.
+`web/assets/app.js` renders a **Registered** group on the **Agents** tab of the
+settings modal. Claims say what is locked, Agents says what is **running**, and
+this says what the operator **configured**.
+
+⚠️ **IT USED TO BE A SIDEBAR CARD, BELOW AGENTS AND ABOVE PEERS.** #397 moved
+it, because `renderSidebar()` rebuilds every section on any peer status change
+and that wiped the register form mid-typing. See
+[settings-modal.md](../06-interfaces/settings-modal.md).
 
 | who sees what                 | `read`          | `admin`   |
 | ----------------------------- | --------------- | --------- |

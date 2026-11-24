@@ -1695,3 +1695,26 @@ body {
   margin: 0;
   color: var(--fg-faint);
 }
+
+/* The panel's own group and heading. `.settings__panels` already pays the 16px
+   gutter, so the sidebar's `.sidebar__heading` would double it horizontally. */
+.settings__group {
+  margin-bottom: 20px;
+}
+.settings__group:last-child {
+  margin-bottom: 0;
+}
+.settings__group-heading {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+  margin-bottom: 8px;
+}
+.settings__note {
+  padding: 4px 0;
+  color: var(--fg-faint);
+  font-size: 12px;
+  font-style: italic;
+}

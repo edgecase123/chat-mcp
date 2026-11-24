@@ -1,6 +1,6 @@
 ---
 title: The settings modal
-updated: 2026-11-22
+updated: 2026-11-24
 covers:
   - web/index.html
   - web/assets/app.js
@@ -60,6 +60,48 @@ enforced rather than intended:
 `settingsTabSelection()` picks the open tab and falls back to the first entry
 for an unknown id, so a renamed tab opens the modal rather than a blank box.
 
+## What is on each panel
+
+`SETTINGS_PANEL_BUILDERS` in `web/assets/app.js` maps a tab id to the builder
+that fills its panel. It is the same shape as `SECTION_BUILDERS`, for the same
+reason: the lookup is data, so adding a panel is a row rather than a branch in
+the renderer.
+
+| tab      | panel                                                                                                  |
+| -------- | ------------------------------------------------------------------------------------------------------ |
+| `agents` | `registrationSection()` — the stored pairs, Forget, the register form, and the container plan controls |
+| `rooms`  | no builder yet, so the placeholder                                                                     |
+
+🛑 **A tab with no builder is supported, not broken.** The lookup is optional
+(`SETTINGS_PANEL_BUILDERS[active]?.()`) and falls back to the placeholder. A
+plain call would be a `TypeError` that takes the whole strip down with it, which
+is the one thing lee's "a new tab is one list entry" ruling cannot survive.
+
+## Repainting the panel
+
+🛑 **Eight handlers repaint the panel, and `repaintSettings()` is the only way
+they do it.** Their controls used to live in the sidebar, so each one used to
+call `renderSidebar()`.
+
+```
+submitRegistration  the invalid-input path, and the tail
+forgetRegistration  the tail
+openPlan            the close path, the busy paint, and the tail
+approvePlan         the busy paint, and the tail
+```
+
+🛑 **The argument is `state.settingsTab`, never `null`.**
+`settingsTabSelection(null)` resolves to the FIRST tab, so a null would pull an
+operator who is on `Rooms` back to `Agents` mid-action.
+
+⚠️ **`null` passes every behavioural test today by coincidence**, because
+`agents` is both the first tab and the tab these controls sit on. That is why
+`settings-wiring.test.ts` pins the argument as source text instead.
+
+⚠️ **`registrationEpoch` is gone.** It existed to force a sidebar section
+rebuild when `registrations` was byte-identical, and the panel now repaints
+unconditionally with no signature gate to satisfy.
+
 ## The dialog is native
 
 `<dialog>` with `showModal()`, so the focus trap, the backdrop and Esc are the
@@ -77,12 +119,12 @@ hidden by the UA until opened and needs no such help.
 
 ## Source files
 
-| File                   | Role                                                                   |
-| ---------------------- | ---------------------------------------------------------------------- |
-| `web/index.html`       | the opener button, and the dialog's head, strip and panel container    |
-| `web/assets/logic.js`  | `SETTINGS_TABS` and `settingsTabSelection()` — the decisions, DOM-free |
-| `web/assets/app.js`    | `renderSettings()`, the open and close handlers                        |
-| `web/assets/style.css` | `.settings*` — keyed to no tab count and no tab id                     |
+| File                   | Role                                                                                            |
+| ---------------------- | ----------------------------------------------------------------------------------------------- |
+| `web/index.html`       | the opener button, and the dialog's head, strip and panel container                             |
+| `web/assets/logic.js`  | `SETTINGS_TABS` and `settingsTabSelection()` — the decisions, DOM-free                          |
+| `web/assets/app.js`    | `renderSettings()`, `SETTINGS_PANEL_BUILDERS`, `repaintSettings()`, the open and close handlers |
+| `web/assets/style.css` | `.settings*` — keyed to no tab count and no tab id                                              |
 
 ## Related docs
 

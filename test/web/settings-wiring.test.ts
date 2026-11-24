@@ -89,8 +89,8 @@ test("the strip is built by mapping the list, not written out tab by tab", () =>
  * 🛑 THE OPENER MUST RENDER, AND RENDER FIRST.
  *
  * Found by claude2 on PR 401: with `renderSettings(null)` deleted from this
- * handler, all ten tests here stayed GREEN and the modal opened with no tab
- * strip and no panel. Every other test proves the renderer is CORRECT and none
+ * handler, EVERY test in this file stayed GREEN and the modal opened with no
+ * tab strip and no panel. The others prove the renderer is CORRECT and none
  * proved it was CALLED — the exact trap this file's own header warns about.
  *
  * Order is asserted too. Rendering after `showModal()` shows an empty dialog
@@ -129,28 +129,24 @@ test("the dialog opens with showModal(), not a class toggle", () => {
  * VALUE. `app.js` runs at import and reaches `document.getElementById`, so
  * `renderSettings` can never be CALLED from a test. That is #330.
  *
- * 🛑 MEASURED SURVIVING MUTANT, so a reader can re-run it:
+ * 🛑 MEASURED SURVIVING MUTANT, re-run on 2026-11-24 after the panels landed:
  *   `state.settingsTab = active` -> `state.settingsTab = SETTINGS_TABS[0].id`
- *   tsc exit 0 · this file 9/9 · full suite 2712/2712 · EXIT 0
+ *   tsc exit 0 · this file 16/16 · full suite 2718/2718 · EXIT 0
  * It is not `requested`, and `settingsTabSelection(` still precedes the store,
  * so BOTH assertions below hold for a store that is always wrong.
  *
- * ⚠️ THE VALUE PROOF BELONGS TO ITEM 3, where `submitRegistration` reads
- * `state.settingsTab` back and re-renders the panel. A wrong stored value
- * changes what that call renders, and a test CAN observe that. Until item 3
- * lands, neither name below is a value guarantee.
+ * 🛑 ITEM 3 HAS LANDED AND DID NOT KILL THAT MUTANT. The promise that used to
+ * sit here was wrong: a test still cannot CALL `renderSettings`, so it still
+ * cannot observe which panel a wrong stored value draws. What item 3 did buy is
+ * the pin on `repaintSettings` below — the argument is now readable as source.
+ * The value proof itself needs a browser and is #330.
  */
 
 /**
- * 🛑 THE ACTIVE TAB MUST LIVE IN STATE, NOT ONLY IN THE DOM. Slice 2 moves the
- * register form in here, and `submitRegistration` has to re-render the panel it
- * now lives on. With the tab readable only as an `is-active` class, the only
- * argument it could pass is `null`.
- *
- * ⚠️ `null` WOULD WORK TODAY BY COINCIDENCE. It falls back to `tabs[0]`, which
- * is the tab the form sits on. It breaks the day a tab is inserted before it,
- * and lee's ruling that a new tab is ONE list entry is what makes that a
- * supported edit.
+ * 🛑 THE ACTIVE TAB MUST LIVE IN STATE, NOT ONLY IN THE DOM. #397 moved the
+ * register form into the dialog, and eight handlers now repaint the panel it
+ * lives on. With the tab readable only as an `is-active` class, the only
+ * argument any of them could pass is `null`.
  */
 test("renderSettings contains an assignment to state.settingsTab", () => {
   const body = fnBody("renderSettings");
@@ -215,4 +211,143 @@ test("renderSidebar never touches the settings modal", () => {
 
   assert.doesNotMatch(body, /renderSettings/);
   assert.doesNotMatch(body, /el\.settings/);
+});
+
+/**
+ * 🛑 THE PANEL LOOKUP IS DATA, NOT A BRANCH. lee ruled a new tab must be one
+ * entry in `SETTINGS_TABS` and nothing else. A `if (active === "agents")` in the
+ * renderer makes it an entry AND a branch, and the branch is the one a reader
+ * adding the third tab does not know to look for.
+ */
+test("the panel is chosen by a lookup keyed on the tab id", () => {
+  const body = fnBody("renderSettings");
+
+  assert.match(body, /SETTINGS_PANEL_BUILDERS\[/);
+
+  for (const tab of SETTINGS_TABS) {
+    assert.doesNotMatch(
+      body,
+      new RegExp(`active\\s*===\\s*["'\`]${tab.id}["'\`]`),
+      `renderSettings() branches on the "${tab.id}" tab instead of looking it up`,
+    );
+  }
+});
+
+/**
+ * 🛑 A TAB WITHOUT A PANEL MUST STILL RENDER SOMETHING. `Rooms` has no builder
+ * until its controls move, and an empty panel and a thrown renderer look
+ * identical from the operator's side.
+ *
+ * ⚠️ THE OPTIONAL CALL IS THE WHOLE GUARD. `SETTINGS_PANEL_BUILDERS[active]()`
+ * on a tab with no entry is a TypeError that takes the strip down with it.
+ */
+test("a tab with no builder falls back rather than throwing", () => {
+  const body = fnBody("renderSettings");
+
+  assert.match(
+    body,
+    /SETTINGS_PANEL_BUILDERS\[active\]\?\.\(\)/,
+    "the builder is called unconditionally, so a tab without one throws",
+  );
+  assert.match(body, /settings__placeholder/);
+});
+
+/**
+ * 🛑 THE AGENTS TAB IS WIRED TO THE REAL BUILDER. Every test above proves the
+ * renderer is correct about tabs and none proved a panel has any content — the
+ * same trap this file's header names for the opener.
+ */
+test("the agents tab is wired to registrationSection", () => {
+  const m = APP_CODE.match(/const SETTINGS_PANEL_BUILDERS = \{[\s\S]*?\n\};/);
+
+  assert.notEqual(m, null, "no SETTINGS_PANEL_BUILDERS in app.js");
+  assert.match(m![0], /agents:\s*registrationSection\b/);
+});
+
+/**
+ * 🛑 THE ARGUMENT IS THE STORED TAB, NEVER `null`. `settingsTabSelection(null)`
+ * resolves to the FIRST tab, so a null here pulls an operator who is on `Rooms`
+ * back to `Agents` in the middle of what they were doing.
+ *
+ * ⚠️ IT WOULD PASS EVERY BEHAVIOURAL TEST TODAY BY COINCIDENCE, because
+ * `agents` is both the first tab and the tab these controls sit on. That is
+ * exactly why this is pinned as source text.
+ */
+test("the repaint keeps the operator's tab instead of resetting it", () => {
+  const body = fnBody("repaintSettings");
+
+  assert.match(body, /renderSettings\(state\.settingsTab\)/);
+  assert.doesNotMatch(
+    body,
+    /renderSettings\(null\)/,
+    "the repaint resets to the first tab, so it moves the operator off Rooms",
+  );
+});
+
+/**
+ * 🛑 ALL EIGHT HANDLERS REPAINT THE PANEL, AND NONE STILL REPAINTS THE SIDEBAR.
+ * Their controls left the sidebar, so a `renderSidebar()` left behind is a call
+ * that repaints nothing — the plan panel never opens and nothing errors.
+ *
+ * ⚠️ THE COUNT IS THE POINT. An earlier reading of this move named two sites,
+ * and the six it missed are the plan controls.
+ */
+test("every handler whose controls moved repaints the panel, not the sidebar", () => {
+  const handlers = {
+    submitRegistration: 2,
+    forgetRegistration: 1,
+    openPlan: 3,
+    approvePlan: 2,
+  };
+
+  let total = 0;
+
+  for (const [name, expected] of Object.entries(handlers)) {
+    const body = fnBody(name);
+    const repaints = [...body.matchAll(/repaintSettings\(\)/g)].length;
+
+    assert.equal(
+      repaints,
+      expected,
+      `${name}() repaints the panel ${repaints} times, not ${expected}`,
+    );
+    assert.doesNotMatch(
+      body,
+      /renderSidebar\(\)/,
+      `${name}() still repaints the sidebar, where its controls no longer are`,
+    );
+
+    total += repaints;
+  }
+
+  assert.equal(
+    total,
+    8,
+    "the eight moved render sites are not all accounted for",
+  );
+});
+
+/**
+ * 🛑 THE SIDEBAR MUST NOT STILL CLAIM THE SECTION. `renderSidebar` walks
+ * `SIDEBAR_SECTIONS` and calls `SECTION_BUILDERS[key]()`, so a key left in one
+ * without a row in the other throws on the first render.
+ */
+test("the sidebar builds no registration section", () => {
+  const m = APP_CODE.match(/const SECTION_BUILDERS = \{[\s\S]*?\n\};/);
+
+  assert.notEqual(m, null, "no SECTION_BUILDERS in app.js");
+  assert.doesNotMatch(m![0], /registration/);
+});
+
+/**
+ * 🛑 THE PANEL PAYS ITS OWN GUTTER, SO THE SIDEBAR'S CLASSES DOUBLE IT.
+ * `.settings__panels` already sets `padding: 16px` and `.sidebar__heading` adds
+ * `4px 16px` on top. A class name that still says `sidebar` inside the dialog is
+ * also the next reader's wrong premise about where this renders.
+ */
+test("the moved card carries no sidebar class names", () => {
+  const section = fnBody("registrationSection");
+
+  assert.doesNotMatch(section, /sidebar__/);
+  assert.match(section, /settings__group\b/);
 });
