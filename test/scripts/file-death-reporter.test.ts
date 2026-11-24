@@ -20,6 +20,15 @@ function failEvent(name: string, file: string, line: number, column: number) {
 }
 
 /**
+ * Composes the two exported steps the way the reporter does, so a case cannot
+ * pass by hand-assembling a shape `classify` would never produce.
+ */
+function verdictFor(events: ReturnType<typeof failEvent>[]): string | null {
+  const filesSeen = new Set(events.map((e) => e.data.file));
+  return verdict({ ...classify(events), filesSeen });
+}
+
+/**
  * 🛑 `NODE_TEST_CONTEXT` MUST BE STRIPPED FROM THE CHILD. The runner sets it to
  * `child-v8`, a child inherits it, and Node then emits v8-serialized output and
  * IGNORES `--test-reporter` entirely. The child produces an empty stdout and the
@@ -90,26 +99,17 @@ test("🔴 an ordinary assertion failure is NOT a file death", () => {
 });
 
 test("🔴 no file deaths yields NO verdict, so a normal red is unchanged", () => {
-  const v = verdict({
-    fileDeaths: [],
-    testFailures: [failEvent("x", "/r/test/a.test.ts", 2, 9).data],
-    filesSeen: new Set(["/r/test/a.test.ts"]),
-  });
+  const v = verdictFor([failEvent("a real test", "/r/test/a.test.ts", 2, 9)]);
 
   assert.equal(v, null);
 });
 
 test("🔴 one dead file names THAT FILE and the re-run that confirms it", () => {
-  const v = verdict({
-    fileDeaths: [
-      {
-        file: "/r/test/web/sidebar.test.ts",
-        name: "/r/test/web/sidebar.test.ts",
-      },
-    ],
-    testFailures: [],
-    filesSeen: new Set(["/r/test/web/sidebar.test.ts", "/r/test/b.test.ts"]),
-  });
+  const dead = "/r/test/web/sidebar.test.ts";
+  const v = verdictFor([
+    failEvent(dead, dead, 1, 1),
+    failEvent("a test that ran fine elsewhere", "/r/test/b.test.ts", 2, 9),
+  ]);
 
   assert.ok(v, "expected a verdict");
   assert.match(v, /sidebar\.test\.ts/);
@@ -124,11 +124,7 @@ test("🔴 one dead file names THAT FILE and the re-run that confirms it", () =>
  */
 test("🔴 EVERY file dead reads as a broken environment, not #427", () => {
   const files = ["/r/test/a.test.ts", "/r/test/b.test.ts"];
-  const v = verdict({
-    fileDeaths: files.map((file) => ({ file, name: file })),
-    testFailures: [],
-    filesSeen: new Set(files),
-  });
+  const v = verdictFor(files.map((f) => failEvent(f, f, 1, 1)));
 
   assert.ok(v, "expected a verdict");
   assert.match(v, /npm ci/);
