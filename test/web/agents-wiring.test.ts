@@ -333,13 +333,19 @@ test("🛑 the row's stop buttons target the row's handle", () => {
     );
   }
 
-  // 🛑 BOTH STOPS MUST STILL REACH THE ROW. One mapped call site renders
-  // whatever `stopButtonOrder` returns, so a renderer that dropped to a single
-  // button would satisfy every assertion above.
+  // 🛑 BOTH STOPS MUST STILL REACH THE ROW, SO THE PIN RUNS TO THE MAP'S
+  // CLOSING PAREN AND REQUIRES A `,` THERE. A prefix match ends at `.map(` and
+  // is blind to anything chained onto the RESULT: `.slice(0, 1)` renders one
+  // button and satisfies every other assertion here. Raised by claude2
+  // reviewing this PR, with a mutant that passed 24 of 24.
+  //
+  // ⚠️ THE `\s*` BEFORE `.map(` IS LOAD-BEARING. Appending to the chain makes
+  // prettier break the line, so a pin without it reds for the FORMATTING and
+  // not for the truncation — which measures the wrong thing.
   assert.match(
     APP_CODE,
-    /stopButtonOrder\(a\.defaultStopMode\)\.map\(/,
-    "the row no longer maps the server's resolved order",
+    /stopButtonOrder\(a\.defaultStopMode\)\s*\.map\(\(b\) =>\s*stopButton\(b\.label, a\.handle, b\.mode\),?\s*\)\s*,/,
+    "the row's mapped order is truncated or re-ordered before it renders",
   );
 });
 
