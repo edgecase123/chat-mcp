@@ -182,6 +182,19 @@ test("🛑 eight concurrent writers all land, with nothing lost", async () => {
   );
 });
 
+/**
+ * ⚠️ `withFileLock`'s OWN PROPERTIES MOVED TO `test/util/file-lock.test.ts`.
+ *
+ * 🛑 THEY WERE PINNED HERE, THROUGH `markConfirmed()`, IN A FILE NAMED FOR ONE
+ * CALLER. `agents.json` now takes the same lock, so the day `container.json`
+ * stops using it this file goes with it and the other caller silently loses
+ * the robbed-holder, dead-pid and empty-lock guarantees. Raised by claude2 on
+ * PR 437.
+ *
+ * What stays here is what `container.ts` owns: that it TAKES the lock, and its
+ * own staging-file cleanup.
+ */
+
 /* ==========================================================================
  * The lock's own behaviour, in process.
  * ======================================================================= */
@@ -202,84 +215,6 @@ test("⚠️ control — one writer alone writes, twice, leaving no lock", () =>
   );
 
   assert.deepEqual(leftovers(), [], "the lock was not released");
-});
-
-/**
- * 🛑 A DEAD HOLDER IS BROKEN IMMEDIATELY, NOT WAITED OUT. A `SIGKILL`ed
- * supervisor leaves its lock behind, and a lock that only ever expires on a
- * timer bricks every spawn until a human deletes a file.
- */
-test("🛑 a lock held by a dead process is broken", () => {
-  const dead = deadPid();
-
-  // The premise, asserted rather than assumed — `dead-pid.ts` explains why.
-  assert.ok(dead > 0);
-
-  writeFileSync(LOCK, `${dead}\n`);
-
-  markConfirmed("after-dead-holder", plan());
-
-  assert.ok(
-    onDisk().confirmed?.["after-dead-holder"],
-    "a dead holder's lock blocked the write",
-  );
-  assert.deepEqual(leftovers(), [], "the broken lock was not cleaned up");
-});
-
-/**
- * 🛑 THE CONTROL THAT MAKES THE ONE ABOVE MEAN ANYTHING. A lock broken
- * unconditionally would pass it and would reintroduce #377 — two writers would
- * simply take turns stealing each other's lock.
- *
- * This process is alive, so its own pid in the lock must be waited for and
- * then refused.
- */
-test("🛑 a lock held by a LIVE process is refused, not stolen", () => {
-  writeFileSync(LOCK, `${process.pid}\n`);
-
-  const before = readFileSync(STATE, "utf8");
-
-  assert.throws(
-    () => markConfirmed("should-not-land", plan()),
-    /waiting for .*container\.json\.lock/,
-  );
-
-  assert.equal(readFileSync(STATE, "utf8"), before, "the state was written");
-  assert.equal(
-    readFileSync(LOCK, "utf8").trim(),
-    String(process.pid),
-    "the live holder's lock was overwritten",
-  );
-
-  // 🛑 REMOVED, NOT BLANKED. An empty lock is a LIVE holder by design, so
-  // leaving one here would time out every test below instead of this one.
-  rmSync(LOCK, { force: true });
-});
-
-/**
- * 🛑 AN EMPTY LOCK READS AS LIVE, AND THAT IS NOT AN OVERSIGHT. Creating the
- * file and writing the pid into it are one call today, but a reader can still
- * catch a lock whose bytes have not landed. Treating empty as DEAD lets two
- * processes break each other's fresh locks, which is a slower #377.
- *
- * Raised by claude1 reviewing the plan, before the code existed.
- */
-test("🛑 an empty lock file is treated as a live holder", () => {
-  writeFileSync(LOCK, "");
-
-  assert.throws(
-    () => markConfirmed("empty-lock", plan()),
-    /waiting for .*container\.json\.lock/,
-  );
-
-  writeFileSync(LOCK, "not-a-pid");
-
-  assert.throws(
-    () => markConfirmed("junk-lock", plan()),
-    /waiting for .*container\.json\.lock/,
-  );
-
-  rmSync(LOCK, { force: true });
 });
 
 /**
@@ -305,43 +240,6 @@ test("⚠️ a throw while serialising releases the lock", () => {
   // And the next writer is not blocked by the wreckage.
   markConfirmed("after-the-throw", plan());
   assert.ok(onDisk().confirmed?.["after-the-throw"]);
-});
-
-/**
- * 🛑 A HOLDER WHOSE LOCK HAS BEEN ROBBED MUST NOT UNLINK ON ITS WAY OUT.
- *
- * Breaking a dead holder's lock is not conditional on the file's content, so a
- * slow process can move a lock that a live one has already replaced. If the
- * robbed holder then releases blindly, it deletes the ROBBER's live lock and a
- * third writer walks in beside it.
- *
- * ⚠️ THE ROBBERY IS STAGED FROM INSIDE THE CRITICAL SECTION, via `toJSON`.
- * `JSON.stringify` calls it while the lock is held, which is the only seam
- * into that window that does not require adding one to the production code.
- */
-test("🛑 a robbed holder does not delete the lock that replaced its own", () => {
-  const robber = 1; // init. Alive on every platform this runs on.
-
-  assert.equal(isProcessAlive(robber), true, "pid 1 reads as dead");
-
-  const robbing = plan({
-    binary: {
-      toJSON: () => {
-        writeFileSync(LOCK, `${robber}\n`);
-        return "claude";
-      },
-    } as unknown as string,
-  });
-
-  markConfirmed("robbed-holder", robbing);
-
-  assert.equal(
-    readFileSync(LOCK, "utf8").trim(),
-    String(robber),
-    "the robbed holder deleted or overwrote the robber's lock",
-  );
-
-  rmSync(LOCK, { force: true });
 });
 
 /**

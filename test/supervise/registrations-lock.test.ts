@@ -206,35 +206,7 @@ test("⚠️ control — a forget takes and releases the lock as well", () => {
 });
 
 /**
- * 🛑 A THROW INSIDE THE CRITICAL SECTION MUST LEAVE NO LOCK BEHIND.
- *
- * A lock left by a throwing writer bricks every later write for the whole
- * wait budget and then throws a timeout naming a live process — the most
- * misleading error this code can produce.
- *
- * ⚠️ THIS DRIVES `withFileLock` DIRECTLY, AND THE FIRST CUT DID NOT.
- * It went through `registerAgent` with an unserialisable `mode`, which
- * `parseRecord` rejects BEFORE the lock is taken — so the lock was never held
- * and the assertion could not fail. MEASURED: moving `release` out of the
- * `finally` left all four tests green.
+ * ⚠️ THE LOCK'S OWN PROPERTIES LIVE IN `test/util/file-lock.test.ts`, driven
+ * directly — the dead holder, the live holder, the empty lock, the robbed
+ * holder and the throw. What is asserted here is that `agents.json` TAKES it.
  */
-test("🛑 a throw inside the lock releases it", () => {
-  const path = join(HOME, "throw-probe.lock");
-
-  assert.throws(
-    () =>
-      withFileLock(path, () => {
-        throw new Error("boom");
-      }),
-    /boom/,
-  );
-
-  assert.equal(existsSync(path), false, "a throwing section left its lock");
-
-  // The positive half: the lock is reusable, not merely absent.
-  assert.equal(
-    withFileLock(path, () => "taken again"),
-    "taken again",
-  );
-  assert.equal(existsSync(path), false);
-});
