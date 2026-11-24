@@ -20,11 +20,19 @@ function failEvent(name: string, file: string, line: number, column: number) {
 }
 
 /**
- * Composes the two exported steps the way the reporter does, so a case cannot
- * pass by hand-assembling a shape `classify` would never produce.
+ * Composes `classify` then `verdict`, so a case cannot pass on a shape
+ * `classify` would never produce.
+ *
+ * 🛑 `alsoSeen` IS NOT OPTIONAL DETAIL — IT PICKS THE BRANCH. The reporter
+ * learns the files that did NOT fail from their passing events; this helper is
+ * handed failures only. A case that omits them makes every seen file a dead
+ * one, which silently measures the broken-install branch.
  */
-function verdictFor(events: ReturnType<typeof failEvent>[]): string | null {
-  const filesSeen = new Set(events.map((e) => e.data.file));
+function verdictFor(
+  events: ReturnType<typeof failEvent>[],
+  alsoSeen: string[] = [],
+): string | null {
+  const filesSeen = new Set([...events.map((e) => e.data.file), ...alsoSeen]);
   return verdict({ ...classify(events), filesSeen });
 }
 
@@ -115,6 +123,29 @@ test("🔴 one dead file names THAT FILE and the re-run that confirms it", () =>
   assert.match(v, /sidebar\.test\.ts/);
   assert.match(v, /#427/);
   assert.match(v, /NOT the change under test/);
+});
+
+/**
+ * 🛑 THE BRANCH TURNS ON THE FILES THAT DID *NOT* FAIL, SO A CASE MUST NAME
+ * THEM. The reporter learns them from passing events; this helper is handed
+ * failures only. A case that forgets them silently measures the `npm ci`
+ * branch instead of the per-file one. claude1 found this in review of PR 439.
+ */
+test("🔴 files that DIE beside one that PASSES is #427, not a broken install", () => {
+  const dead = ["/r/test/a.test.ts", "/r/test/b.test.ts"];
+  const v = verdictFor(
+    dead.map((f) => failEvent(f, f, 1, 1)),
+    ["/r/test/passes.test.ts"],
+  );
+
+  assert.ok(v, "expected a verdict");
+  assert.match(v, /#427/);
+  assert.doesNotMatch(
+    v,
+    /npm ci/,
+    "2 dead of 3 seen is NOT a broken install — and with the passing file " +
+      "omitted it would be 2 of 2, which is",
+  );
 });
 
 /**
