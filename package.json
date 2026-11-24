@@ -26,7 +26,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "smoke": "npm run build && node scripts/smoke.mjs",
-    "test": "node --test --experimental-test-module-mocks --import tsx 'test/**/*.test.ts'",
+    "test": "node --test --experimental-test-module-mocks --import tsx --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/file-death-reporter.mjs --test-reporter-destination=stdout 'test/**/*.test.ts'",
     "test:docker": "DOCKER_TESTS=1 npm test",
     "prepare": "npm run build"
   },
