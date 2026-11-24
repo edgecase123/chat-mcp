@@ -360,9 +360,14 @@ test("🛑 both gate controls are built by gateControl, with a denominator", () 
  * ⚠️ THIS CATCHES THE INSTANCE, NOT THE CLASS. A different free variable still
  * ships green. The only instrument that sees the class is a compiler, and
  * `checkJs` is off here by lee's ruling on #177 — see `typecheck-config.test.ts`.
- * MEASURED, so the gap is a number rather than a worry: with `checkJs` on over
- * `web/assets`, TS2304 ("Cannot find name") counted 1 before the fix and 0
- * after, against 510 errors of every other kind.
+ * MEASURED, so the gap is a number rather than a worry. The invocation is part
+ * of the measurement — an ad-hoc run over `app.js` alone reports a tenth of the
+ * debt and reads as though this comment went stale:
+ *
+ *   npx tsc -p tsconfig.test.json --checkJs
+ *     TS2304 "Cannot find name"   1 before this fix, 0 after
+ *     every other code            509 in `web/assets`, all pre-existing
+ *     and 14 more outside it, in `scripts/lib/fresh-image.mjs`
  */
 test("🛑 the row's gate editor keys off a binding that exists", () => {
   const body = fnBody("gateControl");
