@@ -78,6 +78,25 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
 }
 
 /**
+ * Every Cursor model this driver knows, keyed on the `--model` id.
+ *
+ * 🛑 ONE ROW PER MODEL, BECAUSE THE ID AND THE DISPLAY NAME ARE TWO SPELLINGS
+ * OF ONE THING. The command line takes `composer-2.5-fast`; `system init`
+ * reports `Composer 2.5 Fast`. Held in two constants, a model upgrade could
+ * change the id and its test literal, leave the window keyed on the old
+ * display name, and every default handle would fall back. Measured before this
+ * table existed: that mutant passed 2707 of 2707.
+ *
+ * ⚠️ 200K IS READ FROM THE CURSOR IDE'S `/context`, NOT FROM `cursor-agent`.
+ * Whether the CLI uses the same window is unproven. #419.
+ */
+export const CURSOR_MODELS = {
+  "composer-2.5-fast": { displayName: "Composer 2.5 Fast", window: 200_000 },
+} as const satisfies Readonly<
+  Record<string, { readonly displayName: string; readonly window: number }>
+>;
+
+/**
  * The model a supervised `cursor-agent` runs when no caller names one.
  *
  * 🛑 lee's RULING OF 2026-11-23: *"The default for cursor is Composer 2.5 Fast
@@ -130,8 +149,14 @@ export function cursorResumeFlags(sessionId: string): readonly string[] {
  * and the stream only has to name which model ran.** An `auto` handle reports
  * its model as the literal `"Auto"`, which names nothing; a pinned one reports
  * a display name the driver can map. #419.
+ *
+ * 🛑 `satisfies keyof typeof CURSOR_MODELS` IS THE GUARD ON THE PIN, AND IT IS
+ * A TYPECHECK RATHER THAN A TEST. A pin naming no row in `CURSOR_MODELS` fails
+ * `tsc`, so no test can show it going red — `tsc` exiting 1 is the whole of
+ * the evidence.
  */
-export const CURSOR_DEFAULT_MODEL = "composer-2.5-fast";
+export const CURSOR_DEFAULT_MODEL =
+  "composer-2.5-fast" satisfies keyof typeof CURSOR_MODELS;
 
 export function cursorArgs(opts: SpawnOptions = {}): string[] {
   const args = [
@@ -166,13 +191,31 @@ export function cursorArgs(opts: SpawnOptions = {}): string[] {
  * 🛑 CURSOR'S OWN MAP, NOT `claude-events.ts`'s. Those keys are Claude model
  * ids, and sharing the table would let one vendor's knowledge decide another
  * vendor's denominator.
- *
- * ⚠️ 200K IS READ FROM THE CURSOR IDE'S `/context`, NOT FROM `cursor-agent`.
- * Whether the CLI uses the same window is unproven. #419.
  */
-export const CURSOR_CONTEXT_WINDOWS: Readonly<Record<string, number>> = {
-  "Composer 2.5 Fast": 200_000,
-};
+/**
+ * Re-key a model table onto the display names `system init` reports.
+ *
+ * 🛑 A FUNCTION OVER A PASSED TABLE, NOT A `Object.fromEntries` OVER THE
+ * CONST. `CURSOR_MODELS` holds ONE row, so keying on the id and keying on the
+ * display name both produce a one-entry map — a control against the const
+ * cannot tell them apart, and the module const gives a test no way to inject a
+ * second row. A passed table pins the direction today instead of promising it
+ * at the second model. Same reasoning as `smallestWindow` below.
+ */
+export function contextWindowsByDisplayName(
+  models: Readonly<
+    Record<string, { readonly displayName: string; readonly window: number }>
+  >,
+): Readonly<Record<string, number>> {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.values(models).map((m) => [m.displayName, m.window]),
+    ),
+  );
+}
+
+export const CURSOR_CONTEXT_WINDOWS: Readonly<Record<string, number>> =
+  contextWindowsByDisplayName(CURSOR_MODELS);
 
 /**
  * The smallest window in a map, which is what an unmapped model measures

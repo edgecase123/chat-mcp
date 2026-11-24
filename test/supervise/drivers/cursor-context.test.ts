@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   CURSOR_CONTEXT_WINDOWS,
   CURSOR_FALLBACK_CONTEXT_WINDOW,
+  CURSOR_MODELS,
+  contextWindowsByDisplayName,
   routeCursorEvent,
   smallestWindow,
 } from "../../../src/supervise/drivers/cursor.js";
@@ -184,6 +186,37 @@ test("the real fallback is derived from the real map, never written as a literal
   assert.equal(
     CURSOR_FALLBACK_CONTEXT_WINDOW,
     smallestWindow(CURSOR_CONTEXT_WINDOWS),
+  );
+});
+
+/**
+ * 🛑 THE DIRECTION OF THE RE-KEY, PINNED OVER TWO ROWS. Over the real one-row
+ * `CURSOR_MODELS`, keying on the id and keying on the display name both yield
+ * a one-entry map, so a control against the const cannot discriminate them.
+ * Two rows whose ids and display names all differ can. Same shape as the
+ * `smallestWindow` test above.
+ */
+test("🛑 the window map is keyed on the DISPLAY NAME, never on the --model id", () => {
+  const windows = contextWindowsByDisplayName({
+    "composer-2.5-fast": { displayName: "Composer 2.5 Fast", window: 200_000 },
+    "sonnet-4.5": { displayName: "Sonnet 4.5", window: 1_000_000 },
+  });
+
+  assert.deepEqual(windows, {
+    "Composer 2.5 Fast": 200_000,
+    "Sonnet 4.5": 1_000_000,
+  });
+  assert.equal(
+    Object.hasOwn(windows, "composer-2.5-fast"),
+    false,
+    "an id-keyed map matches nothing the stream ever reports",
+  );
+});
+
+test("the real window map is derived from the real table, never written out", () => {
+  assert.deepEqual(
+    CURSOR_CONTEXT_WINDOWS,
+    contextWindowsByDisplayName(CURSOR_MODELS),
   );
 });
 

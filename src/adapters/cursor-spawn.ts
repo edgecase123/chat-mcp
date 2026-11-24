@@ -83,10 +83,15 @@ export const cursorSpawn: VendorSpawn = {
    * carries the numerator.
    *
    * ⚠️ PER VENDOR, NOT PER HANDLE. `reportsContextFor` at `adapters/index.ts`
-   * takes a vendor, so an `auto` handle cannot declare `false` on its own. It
-   * does get a reading; only its denominator is a declared guess, which is
-   * exactly what `totalIsFallback` exists to say. #219's hazard is an operator
-   * told a reading is coming and waiting forever, and a reading does arrive.
+   * takes a vendor, so an `auto` handle cannot declare `false` on its own. A
+   * reading does arrive, so #219's hazard — an operator told a reading is
+   * coming and waiting forever — is absent.
+   *
+   * ⚠️ BUT ITS DENOMINATOR MAY BE A GUESS AND NOTHING SAYS SO TO THE OPERATOR.
+   * `totalIsFallback` reaches a supervisor log line and stops there;
+   * `applyContextReport` takes `used` and `total` only, so the stored state
+   * carries no marker. An earlier cut of this note claimed the flag said it to
+   * the operator. Surfacing it is its own ticket.
    */
   reportsUsage: false,
   reportsContext: true,
