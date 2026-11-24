@@ -168,7 +168,6 @@ const state = {
   registrationDraft: { handle: "", vendor: "", mode: "docker" },
   // Bumped when something OTHER than typing has to rebuild the register form.
   // The draft is not signed, so this is the only way to ask.
-  registrationEpoch: 0,
   registrationError: null,
   // The tab the settings dialog is showing. In state and not only in the DOM
   // because a write handler inside a panel has to re-render the panel it is
@@ -260,6 +259,20 @@ el.themeToggle.addEventListener("click", () => {
 // ── Settings modal (#397) ────────────────────────────────────────────────
 
 /**
+ * Which builder fills each tab's panel, keyed by tab id.
+ *
+ * 🛑 A TAB WITHOUT AN ENTRY IS SUPPORTED, NOT BROKEN. lee ruled a new tab must
+ * be one entry in `SETTINGS_TABS` and nothing else, so a tab whose controls
+ * have not moved yet falls back to the placeholder rather than throwing.
+ *
+ * Same shape as `SECTION_BUILDERS`, for the same reason: the lookup is data, so
+ * adding a panel is a row here instead of a branch in the renderer.
+ */
+const SETTINGS_PANEL_BUILDERS = {
+  agents: registrationSection,
+};
+
+/**
  * 🛑 THIS RENDERS FROM `SETTINGS_TABS` AND IS NEVER CALLED BY renderSidebar().
  * Being outside the sidebar's render path is the whole reason the modal exists:
  * a control in there is destroyed by the next peer event, mid-use.
@@ -288,13 +301,30 @@ function renderSettings(requested) {
     ),
   );
 
-  // Slice 1 moves no controls. The panel names what is coming so the tab is
+  const built = SETTINGS_PANEL_BUILDERS[active]?.();
+
+  // A tab whose controls have not moved in yet names what is coming, so it is
   // not an empty box that reads as broken.
   el.settingsPanels.replaceChildren(
-    h("p", { className: "settings__placeholder" }, [
-      `${SETTINGS_TABS.find((t) => t.id === active).label} settings move here.`,
-    ]),
+    built ??
+      h("p", { className: "settings__placeholder" }, [
+        `${SETTINGS_TABS.find((t) => t.id === active).label} settings move here.`,
+      ]),
   );
+}
+
+/**
+ * Repaint the open panel without moving the operator off their tab.
+ *
+ * 🛑 `state.settingsTab`, NEVER `null`. `settingsTabSelection(null)` resolves to
+ * the first tab, so a null argument here would pull an operator on the Rooms tab
+ * back to Agents in the middle of what they were doing.
+ *
+ * Eight handlers call this. They used to call `renderSidebar()`, which is where
+ * their controls used to live.
+ */
+function repaintSettings() {
+  renderSettings(state.settingsTab);
 }
 
 el.settingsOpen.addEventListener("click", () => {
@@ -407,7 +437,6 @@ function h(tag, attrs = {}, children = []) {
 const SECTION_BUILDERS = {
   claims: claimsSection,
   agents: agentsSection,
-  registration: registrationSection,
   peers: peersSection,
   rooms: roomsSection,
   discover: discoverSection,
@@ -1913,7 +1942,7 @@ async function submitRegistration() {
 
   if (invalid !== null) {
     state.registrationError = invalid;
-    renderSidebar();
+    repaintSettings();
     return;
   }
 
@@ -1944,10 +1973,6 @@ async function submitRegistration() {
       vendor: draft.vendor,
       mode: draft.mode,
     };
-    // 🛑 THE CLEAR IS INVISIBLE WITHOUT THIS. Re-storing an IDENTICAL pair
-    // leaves `registrations` byte-identical, so nothing else would mark the
-    // form due and the submitted handle would stay in the input.
-    state.registrationEpoch++;
     toast(`Registered ${draft.handle.trim()}`, "info");
   } catch (e) {
     // The route's own 400s land here — it owns the rules and this reports them
@@ -1956,7 +1981,7 @@ async function submitRegistration() {
   }
 
   await fetchRegistrations();
-  renderSidebar();
+  repaintSettings();
 }
 
 /**
@@ -1979,7 +2004,7 @@ async function forgetRegistration(handle) {
   }
 
   await fetchRegistrations();
-  renderSidebar();
+  repaintSettings();
 }
 
 /**
@@ -1999,12 +2024,12 @@ async function readPlan(handle) {
 async function openPlan(handle) {
   if (state.planOpen === handle) {
     state.planOpen = null;
-    renderSidebar();
+    repaintSettings();
     return;
   }
 
   state.planBusy = handle;
-  renderSidebar();
+  repaintSettings();
 
   try {
     await readPlan(handle);
@@ -2017,7 +2042,7 @@ async function openPlan(handle) {
   }
 
   state.planBusy = null;
-  renderSidebar();
+  repaintSettings();
 }
 
 /**
@@ -2037,7 +2062,7 @@ async function approvePlan(handle) {
   if (shown === undefined) return;
 
   state.planBusy = handle;
-  renderSidebar();
+  repaintSettings();
 
   try {
     await api("/api/agents/confirm", {
@@ -2058,7 +2083,7 @@ async function approvePlan(handle) {
     state.planOpen = null;
   }
 
-  renderSidebar();
+  repaintSettings();
 }
 
 /**
@@ -2147,15 +2172,15 @@ function registrationSection() {
   const notice = registrationNotice(state.capabilities);
   const admin = state.capabilities.includes("admin");
 
-  return h("div", { className: "sidebar__section" }, [
-    h("div", { className: "sidebar__heading" }, ["Registered"]),
+  return h("div", { className: "settings__group" }, [
+    h("div", { className: "settings__group-heading" }, ["Registered"]),
     notice === null
       ? null
-      : h("div", { className: "sidebar__empty" }, [notice]),
+      : h("div", { className: "settings__note" }, [notice]),
     ...(rows.length === 0
       ? // 🛑 SAYS it is empty, for the same reason as the claims panel: a
         // blank card and a failed fetch look identical.
-        [h("div", { className: "sidebar__empty" }, [registrationsPanelEmpty()])]
+        [h("div", { className: "settings__note" }, [registrationsPanelEmpty()])]
       : rows.map((r) =>
           h("div", { className: "registration" }, [
             h("div", { className: "registration__head" }, [

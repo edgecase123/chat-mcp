@@ -51,16 +51,30 @@ const plan = (mutate: (s: State) => void) => {
   return sectionsToRebuild(prev, sidebarSignatures(after));
 };
 
-test("the six sections are declared in render order", () => {
+test("the five sections are declared in render order", () => {
   assert.deepEqual(
     SIDEBAR_SECTIONS.map((s) => s.key),
-    ["claims", "agents", "registration", "peers", "rooms", "discover"],
+    ["claims", "agents", "peers", "rooms", "discover"],
   );
 });
 
 /**
- * 🛑 THE DEFECT ITSELF. A peer going online must not reach the registration
- * form, which is where a half-typed handle lives.
+ * 🛑 THE REGISTRATION SECTION IS GONE, NOT RENAMED. #397 moved its controls into
+ * the settings dialog, which `renderSidebar` never calls. A key left here would
+ * send `renderSidebar` to `SECTION_BUILDERS` for a builder that is not there.
+ */
+test("no sidebar section claims the registration controls", () => {
+  assert.deepEqual(
+    SIDEBAR_SECTIONS.filter((s) => s.key === "registration"),
+    [],
+  );
+});
+
+/**
+ * 🛑 THE DEFECT ITSELF, AND IT IS STILL WORTH PINNING. The half-typed handle
+ * now lives in the settings dialog, so a peer event cannot reach it structurally
+ * — but `peers` must still not drag four other sections through a rebuild on
+ * every status tick, which is the rest of what #399 bought.
  */
 test("a peers-only change rebuilds peers and NOTHING else", () => {
   const due = plan((s) => {
@@ -74,18 +88,14 @@ test("a peers-only change rebuilds peers and NOTHING else", () => {
 });
 
 /**
- * ⚠️ THE CO-PRIMARY CONTROL, and the identity half cannot fail without it: a
- * planner that returns [] for everything satisfies "registration was not
- * rebuilt" perfectly.
+ * ⚠️ THE CO-PRIMARY CONTROL, and the identity half above cannot fail without it:
+ * a planner that returns [] for everything satisfies "peers was not rebuilt"
+ * perfectly.
+ *
+ * ⚠️ ITS `registrationError` HALF WENT WITH THE SECTION. `claims` is an owned
+ * input of a section that still exists, so the control keeps its power.
  */
 test("a change a section DOES own rebuilds that section", () => {
-  assert.deepEqual(
-    plan((s) => {
-      s.registrationError = "handle is already registered";
-    }),
-    ["registration"],
-  );
-
   assert.deepEqual(
     plan((s) => {
       s.claims = [{ resource: "issue-399", holder: "claude2" }];
@@ -307,19 +317,6 @@ test("renderSidebar stamps the minute before it signs", () => {
 });
 
 /**
- * 🛑 THE TWO TESTS BELOW BACK CLAIMS THAT NOW SIT IN COMMENTS IN `app.js`.
- * A comment asserting render behaviour and nothing proving it is how the four
- * stale justifications this slice replaced got there in the first place.
- */
-test("storing a pair rebuilds the registration section", () => {
-  const due = plan((s) => {
-    s.registrations = { agents: { "claude-x": { vendor: "cursor" } } };
-  });
-
-  assert.deepEqual(due, ["registration"]);
-});
-
-/**
  * `openMenuFor` is an input of agents, peers and rooms, so it rebuilds all
  * three. Agents joined them in #374, when its row became a `sidebarItem` with
  * the same (...) menu.
@@ -333,11 +330,15 @@ test("an open (...) menu is an input of agents, peers AND rooms", () => {
 });
 
 /**
- * 🛑 THE HEADLINE CASE OF #399, AND SLICES 1 AND 2 DID NOT FIX IT.
- * `registrationDraft` was an input of the section it exists to protect, so
- * typing was itself what triggered the rebuild that swaps the <input> out.
+ * 🛑 THE HEADLINE CASE OF #399. `registrationDraft` was once an input of the
+ * section it exists to protect, so typing was itself what triggered the rebuild
+ * that swaps the focused <input> out.
+ *
+ * ⚠️ #397 MADE THIS STRUCTURAL RATHER THAN PLANNED. The form is in the settings
+ * dialog now and no section reads the draft at all, so this guards against the
+ * draft being signed again rather than against the original defect.
  */
-test("typing into the register form rebuilds nothing", () => {
+test("no sidebar section is signed against the register form's draft", () => {
   const due = plan((s) => {
     s.registrationDraft = { handle: "cla", vendor: "cursor", mode: "docker" };
   });
@@ -346,39 +347,36 @@ test("typing into the register form rebuilds nothing", () => {
 });
 
 /**
- * 🛑 WHY AN EXPLICIT EPOCH AND NOT JUST DROPPING THE DRAFT. On success
- * `submitRegistration` clears the draft, and the input only empties because the
- * section rebuilds. Re-submitting an IDENTICAL pair changes `registrations` by
- * zero bytes, so without this the cleared handle would stay on screen.
+ * 🛑 THE CLEAR MUST BE IN THE SUCCESS BRANCH, AND THE REPAINT AFTER BOTH.
+ * A clear moved into the `catch` wipes what the operator typed at the one moment
+ * they need it — the route has refused the pair and they have one field to fix.
+ * A repaint moved inside the `try` builds the error message and never renders it.
+ *
+ * ⚠️ THIS REPLACED AN EPOCH PIN, and the claim is what survived, not the
+ * mechanism. #397 moved the form out of the sidebar, so `registrationEpoch` had
+ * no reader left and the panel repaints unconditionally.
+ *
+ * 🛑 `lastIndexOf`, NOT `indexOf`. The invalid-input path repaints too, and it
+ * returns BEFORE the try — so the first hit would satisfy `caught < repaint`
+ * for a tail that had been moved inside the try.
  */
-test("a bumped epoch rebuilds registration even when nothing else moved", () => {
-  const due = plan((s) => {
-    s.registrationEpoch = 1;
-  });
-
-  assert.deepEqual(due, ["registration"]);
-});
-
-/**
- * 🛑 THE EPOCH MUST BUMP IN THE SUCCESS BRANCH, NOT MERELY SOMEWHERE NEARBY.
- * A bump moved into the `catch` keeps a co-location check green while the
- * clear goes invisible again, so this pins three indices the way the
- * `scrollTop` test above pins read < mutate < write.
- */
-test("submitRegistration bumps the epoch after the clear and before the catch", () => {
+test("submitRegistration clears in the success branch and repaints after both", () => {
   const fn = APP_CODE.slice(
     APP_CODE.indexOf("async function submitRegistration("),
   ).split("\n}")[0];
 
   const clear = fn.indexOf("state.registrationDraft = {");
-  const bump = fn.indexOf("state.registrationEpoch++");
   const caught = fn.indexOf("} catch");
+  const repaint = fn.lastIndexOf("repaintSettings()");
 
   assert.notEqual(clear, -1, "no draft clear — the pin would be vacuous");
-  assert.notEqual(bump, -1, "no epoch bump");
   assert.notEqual(caught, -1, "no catch — the ordering could not discriminate");
-  assert.ok(clear < bump, "the bump must follow the clear it announces");
-  assert.ok(bump < caught, "the bump must be in the SUCCESS branch");
+  assert.notEqual(repaint, -1, "submitRegistration never repaints the panel");
+  assert.ok(clear < caught, "the clear is not in the SUCCESS branch");
+  assert.ok(
+    caught < repaint,
+    "the repaint sits inside the try, so a refused pair never renders its error",
+  );
 });
 
 /**
