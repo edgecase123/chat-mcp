@@ -2424,6 +2424,42 @@ test("🛑 an empty prefix is HONOURED, because an MCP tool name stands alone", 
   ]);
 });
 
+test("🛑 a prefix that RUNS INTO the command name THROWS, because it is DATA", () => {
+  // `cli: "chat-mcp"` renders AND copies `chat-mcpsend`. It is a string, so a
+  // typeof check passes it, and nothing on screen reads as wrong.
+  assert.throws(
+    () => commandRows(CLI_FIXTURE, { cli: "CLI" }, { cli: "chat-mcp" }),
+    /trailing space/,
+    "a prefix with no separator was accepted",
+  );
+
+  // 🛑 TWO POSITIVE CONTROLS, because the rule is NOT "ends in a space".
+  // `/` separates itself and `` is the MCP case. A `endsWith(" ")` guard
+  // rejected both, and broke three passing tests before I measured it.
+  assert.doesNotThrow(
+    () => commandRows(CLI_FIXTURE, { cli: "CLI" }, { cli: "/" }),
+    "the slash prefix was rejected",
+  );
+  assert.doesNotThrow(
+    () =>
+      commandRows(
+        [{ name: "whoami", arg: "", desc: "who am I", cat: "mcp" }],
+        { mcp: "MCP" },
+        { mcp: "" },
+      ),
+    "the empty prefix was rejected",
+  );
+});
+
+test("🛑 the missing-prefix message names the keys that DO exist", () => {
+  // Naming only what is missing leaves the reader guessing at a typo.
+  assert.throws(
+    () => commandRows(CLI_FIXTURE, { cli: "CLI" }, { cl1: "chat-mcp " }),
+    /cl1/,
+    "the error did not name the available keys",
+  );
+});
+
 test("🛑 a category with no prefix THROWS rather than guessing a slash", () => {
   // A typo'd key is the one way a wrong prefix could still ship. A default
   // would render it as a slash command and nothing would say so.
@@ -2431,5 +2467,58 @@ test("🛑 a category with no prefix THROWS rather than guessing a slash", () =>
     () => commandRows(CLI_FIXTURE, { cli: "CLI" }, {}),
     /prefix/,
     "a missing prefix was silently defaulted",
+  );
+});
+
+/**
+ * 🛑 `commands.map(commandUsage)` PASSES THE ARRAY INDEX AS THE PREFIX.
+ * `map` calls back with `(element, index, array)`, so widening `commandUsage`
+ * with a second parameter silently rebound it. Every usage string became
+ * `0dm <peer>`, `1join <#room>` and so on.
+ *
+ * 🛑 THE OLD TABLE HID IT BY COINCIDENCE. Its widest row sat at index 5, and
+ * one digit is as wide as one slash, so the column came out 26 either way.
+ * This fixture puts the widest row past index 9, where the index is TWO
+ * characters, which is the only place the defect shows.
+ *
+ * It can only over-pad, never collide, so no existing assertion can see it.
+ */
+const LATE_WIDEST = [
+  ...Array.from({ length: 11 }, (_, i) => ({
+    name: `c${i}`,
+    arg: "",
+    desc: "filler",
+    cat: "system",
+  })),
+  {
+    name: "broadcast",
+    arg: "<#room> <text>",
+    desc: "the widest row",
+    cat: "system",
+  },
+];
+
+test("🛑 the dash column is measured with the PREFIX, never the array index", () => {
+  const correct = dashColumn(
+    LATE_WIDEST.map((c) => `/${c.name} ${c.arg}`.trimEnd()),
+  );
+  assert.equal(correct, 26, "the fixture's widest row is not where I think");
+
+  // 🛑 THE PADDING IS THE ONLY OBSERVABLE. Each ROW renders through an arrow
+  // function, so the rendered usage is always correct; it is only the WIDTH
+  // that was measured over `11broadcast …`. An earlier cut of this test also
+  // asserted no row began with a digit, which could never fail.
+  const dashAt = [
+    ...new Set(
+      commandBlock(LATE_WIDEST, { system: "SYSTEM" })
+        .split("\n")
+        .filter((l) => l.includes("—"))
+        .map((l) => l.indexOf("—")),
+    ),
+  ];
+  assert.deepEqual(
+    dashAt,
+    [correct + 2],
+    "the column was measured over an index-prefixed table",
   );
 });

@@ -605,7 +605,7 @@ export function commandBlock(
   labels,
   { width, headingIndent = "  " } = {},
 ) {
-  const w = width ?? dashColumn(commands.map(commandUsage));
+  const w = width ?? dashColumn(commands.map((c) => commandUsage(c)));
 
   return Object.keys(labels)
     .map((cat) => {
@@ -650,8 +650,22 @@ export function commandRows(commands, labels, prefixes) {
     if (!inCat.length) return [];
 
     const prefix = prefixes[cat];
+    // 🛑 THE SEPARATOR IS DATA, NOT FORMATTING. `cli: "chat-mcp"` renders AND
+    // copies `chat-mcpsend`. It is a string, so a typeof check passes it and
+    // nothing on screen reads as wrong.
+    // The rule is "does not END IN A WORD CHARACTER", not "ends in a space":
+    // `/` separates itself, `chat-mcp ` needs the space, and `` is the MCP
+    // case, where a tool is named rather than typed.
     if (typeof prefix !== "string") {
-      throw new Error(`commandRows: category "${cat}" has no prefix`);
+      const known = Object.keys(prefixes).join(", ") || "(none)";
+      throw new Error(
+        `commandRows: category "${cat}" has no prefix. Known: ${known}`,
+      );
+    }
+    if (/\w$/.test(prefix)) {
+      throw new Error(
+        `commandRows: prefix "${prefix}" for "${cat}" runs into the command name; it needs a trailing space`,
+      );
     }
 
     return [
@@ -661,7 +675,9 @@ export function commandRows(commands, labels, prefixes) {
         rows: inCat.map((c) => ({
           usage: commandUsage(c, prefix),
           desc: c.desc,
-          copy: `${prefix}${c.name}`,
+          // Same builder, argument dropped. The two strings differ by exactly
+          // the placeholder, and a second concatenation here is what drifts.
+          copy: commandUsage({ ...c, arg: "" }, prefix),
         })),
       },
     ];
@@ -729,7 +745,10 @@ export function cheatSheet(commands, labels) {
   const gestureLabels = GESTURE_SECTIONS.flatMap(([, rows]) =>
     rows.filter(Array.isArray).map(([label]) => label),
   );
-  const width = dashColumn([...commands.map(commandUsage), ...gestureLabels]);
+  const width = dashColumn([
+    ...commands.map((c) => commandUsage(c)),
+    ...gestureLabels,
+  ]);
 
   const gestures = GESTURE_SECTIONS.flatMap(([heading, rows]) => [
     heading,

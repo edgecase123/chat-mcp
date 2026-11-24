@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
+import { commandRows } from "../../web/assets/logic.js";
 import { KNOWN_SUBCOMMANDS } from "../../src/util/subcommands.js";
 import {
   INVENTORY,
@@ -43,6 +44,24 @@ test("🛑 every chat-mcp subcommand appears on the CLI sheet", () => {
     real,
     "the CLI sheet drifted from KNOWN_SUBCOMMANDS",
   );
+
+  // 🛑 AND `KNOWN_SUBCOMMANDS` ITSELF MUST NOT DRIFT FROM COMMANDER.
+  // `test/supervise/subcommands.test.ts` only asserts every commander verb is
+  // IN the set, never the reverse. Before this sheet existed a stale entry
+  // cost an `unknown command` at a terminal. Now the sheet RENDERS it with a
+  // copy button, so an operator pastes a command that does not exist — which
+  // is this ticket's own defect class. Caught by claude2 on PR 432.
+  const registered = [
+    ...srcText("src/index.ts").matchAll(/\.command\(['"]([^'"\s<[]+)/g),
+  ]
+    .map((m) => m[1])
+    .sort();
+  assert.deepEqual(
+    real,
+    registered,
+    "KNOWN_SUBCOMMANDS lists a verb commander never registers",
+  );
+
   // The denominator. A filter that removed everything would pass the compare.
   assert.equal(real.length, 18);
 });
@@ -93,4 +112,20 @@ test("🛑 every inventory row sits in a category that has a heading AND a prefi
   assert.deepEqual(cats, ["cli", "mcp", "supervisor"]);
   assert.deepEqual(Object.keys(INVENTORY_LABELS).sort(), cats);
   assert.deepEqual(Object.keys(INVENTORY_PREFIXES).sort(), cats);
+});
+
+test("🛑 EVERY inventory row reaches the sheet, not just every category", () => {
+  // 🛑 THIS IS THE HALF THE DELETED TEST CARRIED THAT STILL MATTERS. The old
+  // `/cli-commands` test pinned the row COUNT against the real table, so a
+  // builder returning [] could not pass. The category tests use a 4-row
+  // fixture and never see the shipped one.
+  const rows = commandRows(
+    INVENTORY,
+    INVENTORY_LABELS,
+    INVENTORY_PREFIXES,
+  ).flatMap((s: { rows: unknown[] }) => s.rows);
+
+  assert.equal(rows.length, INVENTORY.length, "a row never reached the sheet");
+  // The denominator, so an empty INVENTORY cannot satisfy the compare.
+  assert.equal(INVENTORY.length, 46);
 });
