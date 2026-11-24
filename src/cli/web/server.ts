@@ -71,6 +71,7 @@ import {
   type RegistrationConfig,
 } from "../../supervise/registrations.js";
 import {
+  defaultStopModeFor,
   reportsContextFor,
   spawnFor,
   vendorsWithSpawn,
@@ -1653,9 +1654,10 @@ const STOP_MODES = new Set(["graceful", "now"]);
  * `all` gives the operator no way to tell a refused stop from an agent that
  * was never running, which is the whole reason this control exists.
  *
- * 🛑 GRACEFUL IS THE DEFAULT, BY lee's RULING OF 2026-10-31. A turn killed
- * mid-stream spends its tokens and produces nothing, so cutting it costs money
- * to save seconds.
+ * 🛑 THE DEFAULT MODE IS PER VENDOR, NOT A CONSTANT (#415). `graceful` by
+ * lee's ruling of 2026-10-31, except for a vendor running one process per turn
+ * — there an idle agent's graceful stop spawns a turn and bills it, so lee
+ * ruled `now` on 2026-11-24. `defaultStopModeFor` owns that answer.
  */
 async function handleStopAgents(
   req: IncomingMessage,
@@ -1675,16 +1677,31 @@ async function handleStopAgents(
     all?: unknown;
     mode?: unknown;
   };
-  const mode = input.mode === undefined ? "graceful" : input.mode;
+  const all = input.all === true;
+  const named = typeof input.handle === "string" ? input.handle.trim() : "";
+
+  // #415 — an omitted mode is resolved from THAT agent's vendor, never from a
+  // constant. `defaultStopModeFor`'s header carries the reasoning.
+  //
+  // 🛑 THE SWEEP KEEPS `graceful`. `all` crosses a fleet whose vendors may
+  // differ, so no single per-vendor default is correct for it.
+  //
+  // ⚠️ `AgentRegistration.mode` IS `docker` OR `host`, NOT A STOP MODE. Only
+  // its `vendor` is read here.
+  const mode =
+    input.mode !== undefined
+      ? input.mode
+      : all
+        ? "graceful"
+        : defaultStopModeFor(
+            registrationsOrEmpty().agents[named]?.vendor ?? "",
+          );
 
   // 🛑 VALIDATED BEFORE ANYTHING IS SENT. A 400 returned after a graceful stop
   // has already left is a refusal that stopped the agent anyway.
   if (typeof mode !== "string" || !STOP_MODES.has(mode)) {
     return respondJson(res, { error: 'mode must be "graceful" or "now"' }, 400);
   }
-
-  const all = input.all === true;
-  const named = typeof input.handle === "string" ? input.handle.trim() : "";
 
   if (!all && named === "") {
     return respondJson(res, { error: "name a handle, or pass all: true" }, 400);

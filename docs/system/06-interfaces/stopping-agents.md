@@ -43,8 +43,19 @@ agents.pid = 41   never refreshed   ->  not consulted at all
 { "all": true, "mode": "now" }
 ```
 
-- **`graceful` is the default**, by lee's ruling of 2026-10-31. A turn killed
-  mid-stream spends its tokens and produces nothing.
+- **The default depends on the agent's VENDOR, and is resolved server-side.**
+  `graceful` by lee's ruling of 2026-10-31, because a turn killed mid-stream
+  spends its tokens and produces nothing.
+- **A vendor that runs one process per turn defaults to `now` instead**, by
+  lee's ruling of 2026-11-24. With no turn live, a graceful stop queues a
+  shutdown notice, and that notice SPAWNS a turn and bills it — so graceful
+  becomes the only mode that spends anything. `defaultStopModeFor` in
+  `src/adapters/index.ts` owns the answer, from the adapter's own
+  `processPerTurn`.
+- **An unknown vendor keeps `graceful`.** Neither mode is right when the
+  process lifetime is unknown, so the shipped answer stands.
+- **The sweep keeps `graceful` whatever the fleet runs.** `all: true` crosses
+  vendors that may differ, so no single per-vendor default fits it.
 - **`now` skips the graceful notice only.** A container teardown still waits
   out its own grace, so neither mode is instant.
 - **An unknown `mode` is refused with a 400 before anything is sent.** A
