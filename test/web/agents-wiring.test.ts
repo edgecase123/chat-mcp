@@ -33,10 +33,17 @@ const APP_CODE = APP.replace(/\/\*[\s\S]*?\*\//g, "")
   .filter((line) => !line.trimStart().startsWith("//"))
   .join("\n");
 
-/** The body of one top-level function in `app.js`, comments already gone. */
+/**
+ * The body of one top-level function in `app.js`, comments already gone.
+ *
+ * ⚠️ `async` IS OPTIONAL, AND IT WAS NOT. Every caller happened to name an
+ * async function, so a plain `function agentsSection()` reported
+ * "not found" — which reads as "the function was deleted" rather than
+ * "this helper cannot see it". The sibling wiring tests already allow both.
+ */
 function fnBody(name: string): string {
   const m = APP_CODE.match(
-    new RegExp(`async function ${name}\\([^)]*\\)[\\s\\S]*?\\n\\}`),
+    new RegExp(`(?:async )?function ${name}\\([^)]*\\)[\\s\\S]*?\\n\\}`),
   );
 
   assert.notEqual(m, null, `${name}() not found in app.js`);
@@ -323,15 +330,35 @@ test("🛑 both gate controls are built by gateControl, with a denominator", () 
   // declaration too would let one deleted call site hide behind it.
   const found = APP_CODE.match(/(?<!function )gateControl\(\{/g);
 
-  // ⚠️ THE DENOMINATOR. TWO call sites: the per-agent row and the footer. One
-  // match means a scope was dropped, and the surviving claims below would then
-  // all be about the other one.
+  // ⚠️ THE DENOMINATOR. TWO call sites: the per-agent row in this section, and
+  // the global default, which #397 moved into the settings dialog. One match
+  // means a scope was dropped, and the surviving claims below would then all be
+  // about the other one.
+  //
+  // 🛑 A COUNT CANNOT SAY WHERE EITHER ONE LIVES. The test below pins that.
   assert.notEqual(found, null, "nothing calls gateControl");
   assert.equal(
     found!.length,
     2,
     `expected 2 gateControl call sites, got ${found!.length}`,
   );
+});
+
+/**
+ * 🛑 THE GLOBAL CONTROL LEFT THIS SECTION, AND THE COUNT ABOVE CANNOT SEE THAT.
+ * Moving it back would keep the call count at two and red nothing. The sidebar
+ * rebuilds on every peer event, which is the whole reason #397 moved it.
+ */
+test("the agents section builds no global gate control", () => {
+  const body = fnBody("agentsSection");
+
+  assert.match(body, /gateControl\(\{/, "the per-row control left too");
+  assert.doesNotMatch(
+    body,
+    /scope: "global"/,
+    "the global default is back in the sidebar, where a peer event rebuilds it",
+  );
+  assert.doesNotMatch(body, /state\.gateDefault/);
 });
 
 /**

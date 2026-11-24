@@ -134,8 +134,9 @@ const state = {
   // shown relative to these.
   roots: null,
   theme: null, // set below
-  // #135 slice 4c — the child handle whose gate editor is open, or the literal
-  // GLOBAL_GATE_KEY for the footer. At most one at a time.
+  // #135 slice 4c — the child handle whose gate editor is open. At most one at
+  // a time. The global control has no key: it lives in the settings dialog and
+  // is always open.
   //
   // 🛑 IT LIVES HERE AND NOT IN THE DOM. A peer event no longer reaches the
   // agents section (#399), but `nowMinute` is one of its inputs, so the first
@@ -274,8 +275,39 @@ el.themeToggle.addEventListener("click", () => {
  * adding a panel is a row here instead of a branch in the renderer.
  */
 const SETTINGS_PANEL_BUILDERS = {
-  agents: registrationSection,
+  agents: agentsPanel,
 };
+
+/**
+ * The Agents tab: what is configured, then the default that applies to
+ * everything not configured.
+ *
+ * 🛑 THE DEFAULT IS LAST, AND THAT IS THE SAME ORDER IT HELD IN THE SIDEBAR.
+ * It is the weakest layer, so it reads after the specifics that override it.
+ *
+ * 🛑 RENDERED EVEN WITH NO AGENTS REGISTERED. The default applies to agents
+ * spawned LATER, so hiding it on an empty panel hides it exactly when an
+ * operator is about to start one.
+ */
+function agentsPanel() {
+  return h("div", {}, [
+    registrationSection(),
+    ...(state.gateDefault === null
+      ? []
+      : [
+          // 🛑 NO HEADING HERE. `gateControlDisplay` already renders
+          // "Default gate 35%", so a heading above it repeats the same two
+          // words. `.gate--global`'s own rule is the separator.
+          h("div", { className: "settings__group" }, [
+            gateControl({
+              scope: "global",
+              handle: null,
+              resolved: state.gateDefault,
+            }),
+          ]),
+        ]),
+  ]);
+}
 
 /**
  * 🛑 THIS RENDERS FROM `SETTINGS_TABS` AND IS NEVER CALLED BY renderSidebar().
@@ -646,20 +678,6 @@ function agentsSection() {
           ]),
         ]
       : []),
-    // #135 slice 4c — the global default, BELOW the rows and the sweep.
-    //
-    // 🛑 RENDERED EVEN WITH NO AGENTS RUNNING. The default applies to agents
-    // spawned LATER, so hiding it on an empty panel hides it exactly when an
-    // operator is about to start one.
-    ...(state.gateDefault === null
-      ? []
-      : [
-          gateControl({
-            scope: "global",
-            handle: null,
-            resolved: state.gateDefault,
-          }),
-        ]),
   ]);
 }
 
@@ -786,14 +804,6 @@ function stopButton(label, target, mode) {
 }
 
 /**
- * `state.gateEditing` for the footer, which has no handle of its own.
- *
- * 🛑 NOT null AND NOT "". Either would collide with "no editor open", and the
- * footer would then render open on every page load.
- */
-const GLOBAL_GATE_KEY = "\u0000global";
-
-/**
  * One gate control — the current gate, and a form to change it (#135 slice 4c).
  *
  * 🛑 THE ROW'S GATE BELONGS TO THE CHILD, NOT THE SUPERVISOR. `stopAgents`
@@ -810,8 +820,11 @@ const GLOBAL_GATE_KEY = "\u0000global";
 function gateControl({ scope, handle, resolved, fillPercent = null }) {
   const d = gateControlDisplay(resolved, { scope, fillPercent });
   const global = scope === "global";
-  const key = global ? GLOBAL_GATE_KEY : handle;
-  const open = global || state.gateEditing === key;
+  // 🛑 THE GLOBAL CONTROL IS ALWAYS OPEN AND HAS NO KEY. It is the only place
+  // the default can be set, so collapsing it would hide the control entirely.
+  // A row's editor is keyed by handle because a row's gate is usually
+  // inherited and rarely changed.
+  const open = global || state.gateEditing === handle;
 
   // Built before the input so the `oninput` handler can close over it. The
   // note reflects the TYPED value, not the stored one, which is the whole
@@ -908,6 +921,7 @@ function gateControl({ scope, handle, resolved, fillPercent = null }) {
  * below it to fall back to.
  */
 async function setGate(scope, handle, raw) {
+  const global = scope === "global";
   const parsed = gateSubmission(raw, { scope });
 
   if (!parsed.ok) return toast(parsed.reason, "error");
@@ -926,15 +940,24 @@ async function setGate(scope, handle, raw) {
         ? `${handle} is back on the default gate`
         : `gate for ${scope === "global" ? "new agents" : handle} is now ${parsed.gate}%`,
     );
-    state.gateEditing = null;
+    // 🛑 SCOPED. The global control lives in the settings dialog and a row's
+    // editor lives in the sidebar, so an unguarded clear collapses an editor
+    // the operator cannot see behind the modal.
+    if (!global) state.gateEditing = null;
   } catch (e) {
     toast(`gate change failed: ${e.message}`, "error");
   }
 
   // Refetched either way: a refused POST and a thrown request both leave the
   // panel showing a number nobody has re-read.
+  // 🛑 BOTH SURFACES, FOR EITHER SCOPE. A handle with no override of its own
+  // resolves through the global, so one global submit moves every inheriting
+  // row's number, its `· global` source AND the fill at which its gauge
+  // changes colour. A handle override moves that handle out of the default's
+  // reach, which the row shows and the dialog does not.
   await Promise.all([fetchWhoami(), fetchLiveAgents()]);
   renderSidebar();
+  repaintSettings();
 }
 
 function sidebarItem({
