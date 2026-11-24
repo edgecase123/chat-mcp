@@ -1,0 +1,11 @@
+// The BOUNDARY control for `web-assets-parse.test.ts`.
+//
+// 🛑 THIS FILE PARSES, AND THAT IS THE POINT. `nosuchbinding` does not exist,
+// so this throws a ReferenceError the moment it runs — the exact class that
+// shipped to main on 2026-11-24 and the exact class a parse check CANNOT see.
+//
+// Catching it needs `tsc --checkJs` filtered to TS2304, which is a separate
+// guard and a separate ruling.
+function run(handle) {
+  return resolve(handle, nosuchbinding);
+}

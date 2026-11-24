@@ -1,12 +1,15 @@
 // The negative control for `web-assets-parse.test.ts`.
 //
 // 🛑 `.js.txt`, NOT `.js`. A real `.js` here would be picked up by the very
-// scan it is the control for, and the guard would then fail against itself.
-// The extension is what keeps it out of `web/assets` and out of the program.
+// scan it is the control for, and the guard would fail against itself.
+//
+// 🛑 NO `export` IN THIS FILE, AND THAT IS DELIBERATE. The first cut had one,
+// and the check rejected the file for the export rather than for the bracket —
+// so it passed while proving nothing. `parseable.js.txt` is the other half.
 //
 // This is the shape the live defect had: a spread whose ternary tail survived
 // after its head was replaced.
-export function broken() {
+function broken() {
   return [
     ...[
       "a",
