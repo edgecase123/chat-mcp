@@ -345,6 +345,49 @@ test("🛑 both gate controls are built by gateControl, with a denominator", () 
 });
 
 /**
+ * 🛑 A SHIPPED ReferenceError, AND THE SUITE WAS GREEN THROUGH IT.
+ *
+ * PR 433 deleted `const key = global ? GLOBAL_GATE_KEY : handle` and left one
+ * read of `key` behind, in the Edit button's onclick. Clicking Edit on any
+ * agent row threw `ReferenceError: key is not defined` and the editor never
+ * opened. Every test here pins `app.js` as TEXT and none executes it, so
+ * nothing could see it.
+ *
+ * 🛑 `key` IS THE RIGHT THING TO BAN, NOT `handle` THE RIGHT THING TO REQUIRE.
+ * The constant is gone, so any `key` identifier in this builder is a leftover
+ * read of a binding that does not exist.
+ *
+ * ⚠️ THIS CATCHES THE INSTANCE, NOT THE CLASS. A different free variable still
+ * ships green. The only instrument that sees the class is a compiler, and
+ * `checkJs` is off here by lee's ruling on #177 — see `typecheck-config.test.ts`.
+ * MEASURED, so the gap is a number rather than a worry. The invocation is part
+ * of the measurement — an ad-hoc run over `app.js` alone reports a tenth of the
+ * debt and reads as though this comment went stale:
+ *
+ *   npx tsc -p tsconfig.test.json --checkJs
+ *     TS2304 "Cannot find name"   1 before this fix, 0 after
+ *     every other code            509 in `web/assets`, all pre-existing
+ *     and 14 more outside it, in `scripts/lib/fresh-image.mjs`
+ */
+test("🛑 the row's gate editor keys off a binding that exists", () => {
+  const body = fnBody("gateControl");
+
+  // ⚠️ NOT A BARE `\bkey\b` BAN. The first cut was, and it matched `e.key` in
+  // the keydown handler — so it failed on the FIXED code too and discriminated
+  // nothing. This names the defect's shape instead.
+  assert.doesNotMatch(
+    body,
+    /null : key\b/,
+    "gateControl reads `key`, which was deleted with GLOBAL_GATE_KEY",
+  );
+  assert.match(
+    body,
+    /state\.gateEditing = open \? null : handle;/,
+    "the Edit toggle does not store the row's handle",
+  );
+});
+
+/**
  * 🛑 THE GLOBAL CONTROL LEFT THIS SECTION, AND THE COUNT ABOVE CANNOT SEE THAT.
  * Moving it back would keep the call count at two and red nothing. The sidebar
  * rebuilds on every peer event, which is the whole reason #397 moved it.

@@ -874,7 +874,7 @@ function gateControl({ scope, handle, resolved, fillPercent = null }) {
               type: "button",
               "aria-expanded": open ? "true" : "false",
               onclick: () => {
-                state.gateEditing = open ? null : key;
+                state.gateEditing = open ? null : handle;
                 renderSidebar();
               },
             },
