@@ -45,11 +45,12 @@ listed here will not be found. Add the row in the same commit as the page.
 
 ### [06 — Interfaces](06-interfaces/)
 
-| File                                                   | What it covers                                                                                                                 |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| [terminal-ui.md](06-interfaces/terminal-ui.md)         | The fallback terminal surfaces — the ink CLI, the line REPL, shell aliases, the one-shot subcommands, and the layout limits    |
-| [stopping-agents.md](06-interfaces/stopping-agents.md) | How an operator stops a running agent from the dashboard, why the socket directory is the register, and what the reply reports |
-| [settings-modal.md](06-interfaces/settings-modal.md)   | Where operator configuration lives in the dashboard, why it is a modal and not a sidebar card, and why the tabs are a list     |
+| File                                                   | What it covers                                                                                                                                      |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [terminal-ui.md](06-interfaces/terminal-ui.md)         | The fallback terminal surfaces — the ink CLI, the line REPL, shell aliases, the one-shot subcommands, and the layout limits                         |
+| [stopping-agents.md](06-interfaces/stopping-agents.md) | How an operator stops a running agent from the dashboard, why the socket directory is the register, and what the reply reports                      |
+| [settings-modal.md](06-interfaces/settings-modal.md)   | Where operator configuration lives in the dashboard, why it is a modal and not a sidebar card, and why the tabs are a list                          |
+| [command-sheets.md](06-interfaces/command-sheets.md)   | The two inventories `/help`, `/cheat-sheet` and `/cli-commands` print, which one carries a copy button, and how the names are kept from going stale |
 
 ### [07 — Operations](07-operations/)
 

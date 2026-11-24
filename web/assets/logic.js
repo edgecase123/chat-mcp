@@ -558,9 +558,17 @@ export function messageMarkdown(
   return `**${from}** · ${time}\n\n${body.trimEnd()}`;
 }
 
-/** `/name <arg>`, with the space dropped when a command takes no argument. */
-export function commandUsage(command) {
-  return `/${command.name} ${command.arg}`.trimEnd();
+/**
+ * `<prefix>name <arg>`, with the space dropped when a command takes no
+ * argument.
+ *
+ * 🛑 THE DEFAULT PREFIX IS WHAT KEEPS `/help` AND `/cheat-sheet` UNCHANGED.
+ * Both reach this through `commandBlock`, and both describe slash commands.
+ * `commandRows` passes a per-table prefix instead, because a CLI row is
+ * pasted into a terminal verbatim and a leading slash makes it unrunnable.
+ */
+export function commandUsage(command, prefix = "/") {
+  return `${prefix}${command.name} ${command.arg}`.trimEnd();
 }
 
 /**
@@ -597,7 +605,7 @@ export function commandBlock(
   labels,
   { width, headingIndent = "  " } = {},
 ) {
-  const w = width ?? dashColumn(commands.map(commandUsage));
+  const w = width ?? dashColumn(commands.map((c) => commandUsage(c)));
 
   return Object.keys(labels)
     .map((cat) => {
@@ -633,20 +641,47 @@ export function commandBlock(
  * @param {{ name: string, arg: string, desc: string, cat: string }[]} commands
  * @param {Record<string, string>} labels category key -> heading
  */
-export function commandRows(commands, labels) {
-  return Object.keys(labels)
-    .map((cat) => ({
-      cat,
-      heading: labels[cat],
-      rows: commands
-        .filter((c) => c.cat === cat)
-        .map((c) => ({
-          usage: commandUsage(c),
+export function commandRows(commands, labels, prefixes) {
+  // flatMap, not map-then-filter: dropping an empty category with
+  // `.filter(Boolean)` widens the return type to include null, and every
+  // caller then has to narrow a value this builder never emits.
+  return Object.keys(labels).flatMap((cat) => {
+    const inCat = commands.filter((c) => c.cat === cat);
+    if (!inCat.length) return [];
+
+    const prefix = prefixes[cat];
+    // 🛑 THE SEPARATOR IS DATA, NOT FORMATTING. `cli: "chat-mcp"` renders AND
+    // copies `chat-mcpsend`. It is a string, so a typeof check passes it and
+    // nothing on screen reads as wrong.
+    // The rule is "does not END IN A WORD CHARACTER", not "ends in a space":
+    // `/` separates itself, `chat-mcp ` needs the space, and `` is the MCP
+    // case, where a tool is named rather than typed.
+    if (typeof prefix !== "string") {
+      const known = Object.keys(prefixes).join(", ") || "(none)";
+      throw new Error(
+        `commandRows: category "${cat}" has no prefix. Known: ${known}`,
+      );
+    }
+    if (/\w$/.test(prefix)) {
+      throw new Error(
+        `commandRows: prefix "${prefix}" for "${cat}" runs into the command name; it needs a trailing space`,
+      );
+    }
+
+    return [
+      {
+        cat,
+        heading: labels[cat],
+        rows: inCat.map((c) => ({
+          usage: commandUsage(c, prefix),
           desc: c.desc,
-          copy: `/${c.name}`,
+          // Same builder, argument dropped. The two strings differ by exactly
+          // the placeholder, and a second concatenation here is what drifts.
+          copy: commandUsage({ ...c, arg: "" }, prefix),
         })),
-    }))
-    .filter((section) => section.rows.length > 0);
+      },
+    ];
+  });
 }
 
 /** Gestures, as data, so one measurement can cover them and the commands. */
@@ -710,7 +745,10 @@ export function cheatSheet(commands, labels) {
   const gestureLabels = GESTURE_SECTIONS.flatMap(([, rows]) =>
     rows.filter(Array.isArray).map(([label]) => label),
   );
-  const width = dashColumn([...commands.map(commandUsage), ...gestureLabels]);
+  const width = dashColumn([
+    ...commands.map((c) => commandUsage(c)),
+    ...gestureLabels,
+  ]);
 
   const gestures = GESTURE_SECTIONS.flatMap(([heading, rows]) => [
     heading,
