@@ -2519,6 +2519,62 @@ test("🛑 the dash column is measured with the PREFIX, never the array index", 
   assert.deepEqual(
     dashAt,
     [correct + 2],
-    "the column was measured over an index-prefixed table",
+    "commandBlock's column was measured over an index-prefixed table",
+  );
+});
+
+/**
+ * 🛑 WIDER THAN `LATE_WIDEST`, BECAUSE `cheatSheet` MEASURES OVER THE GESTURE
+ * LABELS TOO. The widest gesture is 25 characters, so a fixture topping out at
+ * `/broadcast <#room> <text>` lets the gestures set the column and the leak
+ * cannot move it. The denominator in the test below is what caught that.
+ */
+const LATE_WIDEST_XL = [
+  ...Array.from({ length: 11 }, (_, i) => ({
+    name: `c${i}`,
+    arg: "",
+    desc: "filler",
+    cat: "system",
+  })),
+  {
+    name: "announce-to-every-room",
+    arg: "<#room> <text>",
+    desc: "the widest row, and it sits past index 9",
+    cat: "system",
+  },
+];
+
+test("🛑 cheatSheet measures its column with the PREFIX too, not the index", () => {
+  // 🛑 THE FIX HAD TWO SITES AND MY FIRST GUARD COVERED ONE. `cheatSheet`
+  // measures over the commands AND the gesture labels, so it is a second
+  // `map` call with its own leak. claude2 caught the gap on PR 432.
+  const correct = dashColumn(
+    LATE_WIDEST_XL.map((c) => `/${c.name} ${c.arg}`.trimEnd()),
+  );
+
+  // 🛑 THE DENOMINATOR, AND WITHOUT IT THIS TEST IS VACUOUS. If a gesture
+  // label is wider than the widest command, the gesture sets the column and
+  // the leak is masked. This asserts the commands really do dominate.
+  const gestureOnly = cheatSheet([], {})
+    .split("\n")
+    .filter((l) => l.includes("—"))
+    .map((l) => l.indexOf("—"));
+  assert.ok(
+    Math.max(...gestureOnly) < correct + 2,
+    "a gesture label is wider than the fixture, so the column cannot move",
+  );
+
+  const dashAt = [
+    ...new Set(
+      cheatSheet(LATE_WIDEST_XL, { system: "SYSTEM" })
+        .split("\n")
+        .filter((l) => l.includes("—"))
+        .map((l) => l.indexOf("—")),
+    ),
+  ];
+  assert.deepEqual(
+    dashAt,
+    [correct + 2],
+    "cheatSheet's column was measured over an index-prefixed table",
   );
 });
