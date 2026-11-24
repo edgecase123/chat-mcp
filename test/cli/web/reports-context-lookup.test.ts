@@ -22,6 +22,13 @@ const CONFIG: RegistrationConfig = {
 };
 
 /**
+ * ⚠️ BOTH SHIPPED VENDORS NOW ANSWER `true`, SO `false` IS NOT AVAILABLE AS A
+ * DISCRIMINATOR HERE. Cursor declared `false` until #419 gave it a window.
+ * Every test below therefore pins `true` against `null` — the answer a handle
+ * gets when the join does not resolve it at all.
+ */
+
+/**
  * 🛑 THE WHOLE MECHANISM. `agents.json` is keyed by the SUPERVISOR's handle and
  * every gauge row is keyed by its CHILD's, which differ by a suffix. Without
  * the inverse a supervised agent — the only kind that has a vendor at all —
@@ -35,14 +42,27 @@ test("🛑 a CHILD handle resolves through the supervisor's registration", () =>
     "c1docker",
     "the suffix is gone, so this proves nothing",
   );
-  assert.equal(reportsContextOf(CONFIG, child), false);
+  assert.equal(reportsContextOf(CONFIG, child), true);
   assert.equal(reportsContextOf(CONFIG, childHandleFor("c1host")), true);
+
+  // 🛑 THE DISCRIMINATOR IS `true` AGAINST `null`, NOT AGAINST `false`.
+  // It used to be the latter, because cursor declared `reportsContext: false`
+  // and claude declared `true`. #419 made cursor report a window too, so a
+  // lookup that answered a constant `true` would now pass the two rows above.
+  // A join that fails answers `null`, which is what this row pins.
+  assert.equal(
+    reportsContextOf(CONFIG, childHandleFor("never-registered")),
+    null,
+    "a constant answer passes this file; only an unresolved handle tells them apart",
+  );
 });
 
 /** The supervisor's own handle still resolves, since the peer list holds both. */
 test("a SUPERVISOR handle resolves directly", () => {
-  assert.equal(reportsContextOf(CONFIG, "c1docker"), false);
+  assert.equal(reportsContextOf(CONFIG, "c1docker"), true);
   assert.equal(reportsContextOf(CONFIG, "c1host"), true);
+  // Same reason as above: without a `null` row a constant would pass.
+  assert.equal(reportsContextOf(CONFIG, "never-registered"), null);
 });
 
 /**
@@ -74,5 +94,10 @@ test("a registered handle that itself ends in the child suffix still resolves", 
     agents: { "weird-agent": { vendor: "cursor", mode: "docker" } },
   };
 
-  assert.equal(reportsContextOf(cfg, "weird-agent"), false);
+  assert.equal(reportsContextOf(cfg, "weird-agent"), true);
+  assert.equal(
+    reportsContextOf(cfg, "other-agent"),
+    null,
+    "the control: an unregistered handle with the same suffix is still unknown",
+  );
 });

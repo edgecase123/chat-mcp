@@ -188,7 +188,7 @@ test("🛑 the flag set is the SAME in both sandbox modes, unlike claude's", () 
 test("🛑 a result event ends the turn", () => {
   const r = recorder();
 
-  routeCursorEvent({ type: "result" }, r.on);
+  routeCursorEvent({ type: "result" }, r.on, {});
 
   assert.deepEqual(r.calls, ["turnEnd"]);
 });
@@ -196,7 +196,7 @@ test("🛑 a result event ends the turn", () => {
 test("🛑 a non-terminal event does NOT end the turn", () => {
   const r = recorder();
 
-  routeCursorEvent({ type: "assistant" }, r.on);
+  routeCursorEvent({ type: "assistant" }, r.on, {});
 
   assert.deepEqual(r.calls, [], "an in-flight turn must stay in flight");
 });
@@ -204,7 +204,7 @@ test("🛑 a non-terminal event does NOT end the turn", () => {
 test("the session id is routed off the terminal event", () => {
   const r = recorder();
 
-  routeCursorEvent({ type: "result", session_id: "sess-7" }, r.on);
+  routeCursorEvent({ type: "result", session_id: "sess-7" }, r.on, {});
 
   assert.deepEqual(r.calls, ["session:sess-7", "turnEnd"]);
 });
@@ -222,7 +222,7 @@ test("the session id is routed off the terminal event", () => {
 test("🛑 a session id on a NON-terminal event is routed, and does not end the turn", () => {
   const r = recorder();
 
-  routeCursorEvent({ type: "assistant", session_id: "sess-9" }, r.on);
+  routeCursorEvent({ type: "assistant", session_id: "sess-9" }, r.on, {});
 
   assert.deepEqual(r.calls, ["session:sess-9"]);
 });
@@ -251,18 +251,20 @@ test("🛑 the INIT event's session id is routed, measured against a live run", 
       permissionMode: "default",
     },
     r.on,
+    {},
   );
 
   assert.deepEqual(r.calls, ["session:2fb62aea-5657-4e6d-a70c-07d35e831a27"]);
 });
 
-test("🔴 the usage and context sinks are NEVER called, matching both declarations", () => {
-  // 🛑 #219 IS THE FAILURE THIS GUARDS. Declaring `reportsUsage: true` while
-  // the router never calls the sink tells the operator a reading is coming and
-  // leaves them waiting for it forever. The declaration and the router must
-  // agree, so both halves are asserted together.
+test("🔴 each sink matches its declaration: usage silent, context reported", () => {
+  // 🛑 #219 IS THE FAILURE THIS GUARDS, AND IT CUTS BOTH WAYS. Declaring
+  // `true` while the router never calls the sink leaves the operator waiting
+  // for a reading forever; declaring `false` while it DOES call leaves a
+  // reading computed and never shown. The declaration and the router must
+  // agree, so both halves are asserted together for each sink.
   assert.equal(cursorSpawn.reportsUsage, false);
-  assert.equal(cursorSpawn.reportsContext, false);
+  assert.equal(cursorSpawn.reportsContext, true);
 
   const r = recorder();
 
@@ -290,6 +292,7 @@ test("🔴 the usage and context sinks are NEVER called, matching both declarati
       },
     },
     r.on,
+    {},
   );
 
   assert.ok(
@@ -297,8 +300,8 @@ test("🔴 the usage and context sinks are NEVER called, matching both declarati
     "token counts are not a RateLimitSnapshot, so the sink must stay silent",
   );
   assert.ok(
-    !r.calls.includes("context"),
-    "no window TOTAL is reported, and used-without-total cannot make a percentage",
+    r.calls.includes("context"),
+    "reportsContext is true, so a result event must produce a reading",
   );
   assert.ok(r.calls.includes("turnEnd"), "the control: this event WAS routed");
 });

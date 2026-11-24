@@ -552,7 +552,7 @@ test("the relay hands the router a bag, and the SAME one across turns", () => {
   // than spawned and the second half of this test cannot run at all.
   const h = harness(undefined, (event, on, state) => {
     bags.push(state);
-    routeCursorEvent(event, on);
+    routeCursorEvent(event, on, state);
   });
 
   h.send("turn one");
