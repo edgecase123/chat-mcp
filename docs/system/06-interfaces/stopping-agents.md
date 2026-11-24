@@ -110,12 +110,10 @@ supervisor that answered a probe.
 
 ```
 Agents
-  smoke-container              16%     <- the CHILD's context gauge
-  bound 2h · smoke-container-agent
-  [Stop]  [Stop now]
-  gopher                       62%
-  bound 11m · gopher-agent
-  [Stop]  [Stop now]
+  smoke-container-agent        16%     <- the CHILD's context gauge
+  [Stop now]  [Stop]                   <- a per-turn vendor: `now` is default
+  gopher-agent                 62%
+  [Stop]  [Stop now]                   <- every other vendor, unchanged
 [Stop all]  [Stop all now]            <- only once a SECOND agent is running
 ```
 
@@ -133,6 +131,18 @@ Agents
   would say the graceful stop costs what the immediate one costs. The decision
   is `stopButtonClass()`, because a source-text count of the class could not
   tell a correct pair from a pair that was both coloured.
+- 🛑 **THE ROW'S DEFAULT BUTTON COMES FIRST, and which one that is depends on
+  the agent's VENDOR.** A per-turn vendor leads with `Stop now`, because lee's
+  ruling of 2026-11-24 made `now` its default and an operator only feels that
+  ruling if the cheaper stop is the button their hand lands on. Both stops are
+  always offered; only the order moves.
+- **The browser reads a DECISION, not a capability.** `/api/agents/live` serves
+  the already-resolved `defaultStopMode` per agent, so no vendor map is
+  hand-typed under `web/assets/` and nothing there can drift from the adapters.
+  The same `defaultStopModeFor` answers the route's own omitted-mode default.
+- ⚠️ **THE SWEEP'S ORDER DOES NOT MOVE.** `Stop all` reaches a mixed fleet, so
+  there is no one vendor whose default could lead. Each swept agent still
+  RESOLVES its own mode when the caller omits one.
 
 ### The sweep
 
@@ -158,6 +168,7 @@ what is running before reaching the control that stops all of it.
 | what                                 | where                                 |
 | ------------------------------------ | ------------------------------------- |
 | the row's labels                     | `agentRow()` in `web/assets/logic.js` |
+| which stop button comes FIRST        | `stopButtonOrder()`                   |
 | the confirm copy                     | `stopConfirmText()`                   |
 | the sweep's confirm copy             | `stopAllConfirmText()`                |
 | whether the sweep is offered         | `stopAllVisible()`                    |

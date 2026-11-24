@@ -105,10 +105,11 @@ test("🛑 the stop request posts the supervisor handle, never the child's", () 
   const calls = APP_CODE.match(/stop(?:Agents|Button)\([^)]*\)/g);
 
   assert.notEqual(calls, null, "nothing calls stopAgents or stopButton");
-  // THE DENOMINATOR: 4 buttons, stopButton's own stopAgents call, and the two
-  // declarations.
+  // THE DENOMINATOR, reconciled PER SITE after #415 slice 2 collapsed the two
+  // row literals into one mapped call: 1 row call, 2 sweep buttons,
+  // stopButton's own stopAgents call, and the two declarations.
   assert.ok(
-    calls!.length >= 7,
+    calls!.length >= 6,
     `only ${calls!.length} stop call sites found; the regex has drifted`,
   );
 
@@ -300,15 +301,29 @@ test("🛑 app.js never decides a stop button's danger colour itself", () => {
  *
  * ⚠️ THE PAIRED CONTROL TO "both sweep buttons target null". That test filters
  * on the "Stop all" label, so it still finds its 2 when the ROW buttons become
- * sweeps, and the `>= 7` call count does not move either. MEASURED: both row
+ * sweeps, and the `>= 6` call count does not move either. MEASURED: both row
  * buttons turned into sweeps passed 36 of 36 before this test existed.
  * Raised by claude1 reviewing PR 303.
+ *
+ * 🛑 #415 slice 2 — THE ROW IS NOW ONE MAPPED CALL, not two literals. The
+ * labels moved into `stopButtonOrder`, where `stop-button-order.test.ts` pins
+ * them as values; what stays here is the property a unit test cannot see,
+ * which is that the RENDERER passes the row's handle.
  */
-test("🛑 both row stop buttons target the row's handle", () => {
-  const rows = APP_CODE.match(/stopButton\("Stop(?! all)[^)]*\)/g);
+test("🛑 the row's stop buttons target the row's handle", () => {
+  // ⚠️ THE LOOKBEHIND EXCLUDES THE DECLARATION, so the count is call sites
+  // alone. Counting `function stopButton(label, target, mode)` too would let a
+  // deleted row call site hide behind it.
+  const rows = APP_CODE.match(
+    /(?<!function )stopButton\((?!"Stop all)[^)]*\)/g,
+  );
 
   assert.notEqual(rows, null, "no per-row stop button is built");
-  assert.equal(rows!.length, 2, `expected 2 row buttons, got ${rows!.length}`);
+  assert.equal(
+    rows!.length,
+    1,
+    `expected 1 row call site, got ${rows!.length}`,
+  );
 
   for (const call of rows!) {
     assert.match(
@@ -317,6 +332,15 @@ test("🛑 both row stop buttons target the row's handle", () => {
       `a row button lost its handle: ${call}`,
     );
   }
+
+  // 🛑 BOTH STOPS MUST STILL REACH THE ROW. One mapped call site renders
+  // whatever `stopButtonOrder` returns, so a renderer that dropped to a single
+  // button would satisfy every assertion above.
+  assert.match(
+    APP_CODE,
+    /stopButtonOrder\(a\.defaultStopMode\)\.map\(/,
+    "the row no longer maps the server's resolved order",
+  );
 });
 
 /**

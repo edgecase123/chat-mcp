@@ -1451,7 +1451,12 @@ export function claimsPanelEmpty() {
  * was. He ruled it out on 2026-11-21 rather than relabelled, because an
  * operator acts on no part of it (#374).
  *
- * @param {{handle: string, child?: object|null}} agent
+ * ⚠️ `defaultStopMode` IS OPTIONAL IN THE TYPE ON PURPOSE. A response from a
+ * server older than #415 slice 2 carries no such field, which is exactly the
+ * case the `?? "graceful"` below handles — so the TYPE has to admit what the
+ * CODE already handles, or the fallback reads as dead.
+ *
+ * @param {{handle: string, defaultStopMode?: string|null, child?: object|null}} agent
  */
 export function agentRow(agent) {
   return {
@@ -1467,6 +1472,11 @@ export function agentRow(agent) {
     // a second copy of the three-layer default in the browser.
     gate: agent.child?.context_gate ?? null,
     gateSource: agent.child?.context_gate_source ?? null,
+    // #415 slice 2 — the SUPERVISOR's vendor decides this, and the stop posts
+    // the supervisor, so it sits beside `handle` rather than under `child`.
+    // Absent on a response older than this slice, where `graceful` is what
+    // that server would itself have used.
+    defaultStopMode: agent.defaultStopMode ?? "graceful",
   };
 }
 
@@ -1671,6 +1681,30 @@ export function stopOutcomeText(results) {
  */
 export function stopButtonClass(mode) {
   return mode === "now" ? "agent__stop is-destructive" : "agent__stop";
+}
+
+/**
+ * The row's two stop buttons, DEFAULT FIRST (#415).
+ *
+ * 🛑 THE ORDER IS THE WHOLE MECHANISM. lee ruled on 2026-11-24 that a per-turn
+ * vendor defaults to `now`, and an operator only feels that ruling if the
+ * cheaper stop is the button their hand lands on first.
+ *
+ * 🛑 READS A DECISION, NOT A CAPABILITY. `defaultStopMode` arrives already
+ * resolved from the server's `defaultStopModeFor`, so no vendor map is
+ * hand-typed here and nothing in the browser can drift from the adapters.
+ *
+ * ⚠️ ANYTHING OTHER THAN `now` KEEPS THE SHIPPED ORDER. A cached page or a
+ * server older than this slice sends no field at all, and making an immediate
+ * kill the default on a missing value is the larger claim.
+ *
+ * @param {string|null|undefined} defaultMode
+ */
+export function stopButtonOrder(defaultMode) {
+  const graceful = { label: "Stop", mode: "graceful" };
+  const immediate = { label: "Stop now", mode: "now" };
+
+  return defaultMode === "now" ? [immediate, graceful] : [graceful, immediate];
 }
 
 /**

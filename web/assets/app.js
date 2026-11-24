@@ -55,6 +55,7 @@ import {
   stopAllConfirmText,
   stopAllVisible,
   stopButtonClass,
+  stopButtonOrder,
   stopConfirmText,
   stopOutcomeText,
   gateControlDisplay,
@@ -706,10 +707,16 @@ function agentsSection() {
                   kind: "peer",
                   gauge: a.gauge,
                 }),
-            h("div", { className: "agent__actions" }, [
-              stopButton("Stop", a.handle, "graceful"),
-              stopButton("Stop now", a.handle, "now"),
-            ]),
+            // #415 slice 2 — THE DEFAULT BUTTON COMES FIRST, and which one that
+            // is arrives already resolved as `defaultStopMode`. The labels and
+            // the order live in `stopButtonOrder`, so neither is decided here.
+            h(
+              "div",
+              { className: "agent__actions" },
+              stopButtonOrder(a.defaultStopMode).map((b) =>
+                stopButton(b.label, a.handle, b.mode),
+              ),
+            ),
             // #135 slice 4c — BELOW the stops. A gate change takes effect on
             // the NEXT restart, so it is the quieter control of the two and
             // must not sit above the one that acts now.
