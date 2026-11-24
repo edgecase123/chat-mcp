@@ -213,7 +213,14 @@ test("🛑 the window map is keyed on the DISPLAY NAME, never on the --model id"
   );
 });
 
-test("the real window map is derived from the real table, never written out", () => {
+/**
+ * ⚠️ AGREEMENT, NOT PROVENANCE. This cannot see whether the map is derived or
+ * written out by hand — a literal `{"Composer 2.5 Fast": 200_000}` passes it,
+ * measured at 11 of 11 green. What it does catch is the map and the table
+ * disagreeing, which is the drift that matters. An earlier name here claimed
+ * "never written out" and could not reach it; claude1 measured the overclaim.
+ */
+test("the real window map AGREES with the real table, row for row", () => {
   assert.deepEqual(
     CURSOR_CONTEXT_WINDOWS,
     contextWindowsByDisplayName(CURSOR_MODELS),
