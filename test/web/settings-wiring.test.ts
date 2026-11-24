@@ -125,6 +125,70 @@ test("the dialog opens with showModal(), not a class toggle", () => {
 });
 
 /**
+ * 🛑 THE ACTIVE TAB MUST LIVE IN STATE, NOT ONLY IN THE DOM. Slice 2 moves the
+ * register form in here, and `submitRegistration` has to re-render the panel it
+ * now lives on. With the tab readable only as an `is-active` class, the only
+ * argument it could pass is `null`.
+ *
+ * ⚠️ `null` WOULD WORK TODAY BY COINCIDENCE. It falls back to `tabs[0]`, which
+ * is the tab the form sits on. It breaks the day a tab is inserted before it,
+ * and lee's ruling that a new tab is ONE list entry is what makes that a
+ * supported edit.
+ */
+test("renderSettings records the active tab in state", () => {
+  const body = fnBody("renderSettings");
+
+  assert.match(
+    body,
+    /state\.settingsTab\s*=/,
+    "renderSettings() never records which tab it drew",
+  );
+});
+
+/**
+ * 🛑 THE RESOLVED ID, NEVER THE REQUESTED ONE. `settingsTabSelection` is what
+ * turns an unknown id into a real tab. Storing the raw argument would put a
+ * tab id in state that no tab answers to, and the next caller would pass it
+ * straight back.
+ */
+test("the tab recorded is the RESOLVED id, not the argument", () => {
+  const body = fnBody("renderSettings");
+
+  assert.doesNotMatch(
+    body,
+    /state\.settingsTab\s*=\s*requested\b/,
+    "the raw argument is stored, so an unknown id survives in state",
+  );
+
+  const resolved = body.indexOf("settingsTabSelection(");
+  const stored = body.search(/state\.settingsTab\s*=/);
+
+  assert.notEqual(resolved, -1, "renderSettings() does not resolve the tab");
+  assert.ok(
+    resolved < stored,
+    "the tab is stored before it is resolved, so the stored id is unchecked",
+  );
+});
+
+/**
+ * ⚠️ THE OPENER STILL RESETS, AND THAT IS THIS SLICE'S CHOICE. Reopening on
+ * the last-used tab is a behaviour change nobody asked for, so item 1 adds the
+ * state slot WITHOUT altering what the operator sees.
+ */
+test("the opener still resets to the first tab rather than resuming", () => {
+  const m = APP_CODE.match(
+    /el\.settingsOpen\.addEventListener\([\s\S]*?\n\}\);/,
+  );
+
+  assert.notEqual(m, null, "no click handler on el.settingsOpen");
+  assert.match(
+    m![0],
+    /renderSettings\(null\)/,
+    "the opener resumes a tab instead of resetting, which this slice did not intend",
+  );
+});
+
+/**
  * 🛑 THE WHOLE POINT OF #397. The sidebar is destroyed and rebuilt on every
  * peer event (#399). A settings control reachable from that path is destroyed
  * mid-use, which is the defect this ticket exists to end.
