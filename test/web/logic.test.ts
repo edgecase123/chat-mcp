@@ -397,7 +397,15 @@ test("🛑 a room offers Delete and NEVER Kick", () => {
 });
 
 test("🛑 a peer offers Kick, and never Delete or Leave", () => {
-  assert.deepEqual(texts(PEER), ["Dispatch…", "Alert…", "Copy handle", "Kick"]);
+  assert.deepEqual(texts(PEER), [
+    "Dispatch…",
+    "Alert…",
+    "Copy handle",
+    // #397 slice 3b — a per-agent setting, so it sits with the utilities and
+    // ABOVE the destructive entry, which stays last.
+    "Set Threshold",
+    "Kick",
+  ]);
   assert.ok(!texts(PEER).includes("Delete"), "a peer is not deletable");
   assert.ok(!texts(PEER).includes("Leave"), "a DM is not a membership");
 });

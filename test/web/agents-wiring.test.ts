@@ -369,22 +369,18 @@ test("🛑 both gate controls are built by gateControl, with a denominator", () 
  *     every other code            509 in `web/assets`, all pre-existing
  *     and 14 more outside it, in `scripts/lib/fresh-image.mjs`
  */
-test("🛑 the row's gate editor keys off a binding that exists", () => {
+test("🛑 gateControl reads no binding that was deleted with GLOBAL_GATE_KEY", () => {
   const body = fnBody("gateControl");
 
-  // ⚠️ NOT A BARE `\bkey\b` BAN. The first cut was, and it matched `e.key` in
-  // the keydown handler — so it failed on the FIXED code too and discriminated
-  // nothing. This names the defect's shape instead.
+  // ⚠️ THE POSITIVE HALF NAMED A LINE #397 slice 3b DELETED. The Edit/Done
+  // toggle went with `state.gateEditing`, so the ban is what survives.
   assert.doesNotMatch(
     body,
     /null : key\b/,
     "gateControl reads `key`, which was deleted with GLOBAL_GATE_KEY",
   );
-  assert.match(
-    body,
-    /state\.gateEditing = open \? null : handle;/,
-    "the Edit toggle does not store the row's handle",
-  );
+  // The denominator: this must be reading a real body, not an empty string.
+  assert.match(body, /gateControlDisplay\(/, "fnBody returned nothing useful");
 });
 
 /**
@@ -392,16 +388,25 @@ test("🛑 the row's gate editor keys off a binding that exists", () => {
  * Moving it back would keep the call count at two and red nothing. The sidebar
  * rebuilds on every peer event, which is the whole reason #397 moved it.
  */
-test("the agents section builds no global gate control", () => {
+test("the agents section builds no gate control at all", () => {
   const body = fnBody("agentsSection");
 
-  assert.match(body, /gateControl\(\{/, "the per-row control left too");
+  // ⚠️ WAS "no GLOBAL control" WITH A POSITIVE CONTROL ON THE ROW ONE.
+  // #397 slice 3b moved the row control onto the `⋯` menu too, so the
+  // positive half has nothing left to assert and the claim widened.
   assert.doesNotMatch(
     body,
-    /scope: "global"/,
-    "the global default is back in the sidebar, where a peer event rebuilds it",
+    /gateControl\(\{/,
+    "a gate control is still inline on a row",
   );
   assert.doesNotMatch(body, /state\.gateDefault/);
+  // The positive control moves to the thing that SHOULD still be there: the
+  // row itself, which carries the menu the control moved into.
+  assert.match(
+    body,
+    /sidebarItem\(\{/,
+    "the agent row is gone, so this proves nothing",
+  );
 });
 
 /**
@@ -409,17 +414,27 @@ test("the agents section builds no global gate control", () => {
  * The two handles differ by a suffix, so posting the wrong one reads as
  * correct and comes back 404.
  */
-test("🛑 the per-row gate control is handed the CHILD handle, not the supervisor's", () => {
-  const row = APP_CODE.match(
-    /gateControl\(\{\s*scope: "handle",[\s\S]*?\n {16}\}\)/,
+test("🛑 the threshold is opened on the CHILD handle, not the supervisor's", () => {
+  // ⚠️ THE CONTROL MOVED, THE CLAIM DID NOT. It used to be asserted on the
+  // inline `gateControl` call; #397 slice 3b moved it to the row menu's
+  // handler, and the trap is identical — the two handles differ by a suffix,
+  // so posting the wrong one reads as correct and comes back 404.
+  const row = fnBody("agentsSection");
+  assert.match(
+    row,
+    /target: a\.childHandle/,
+    "the agent row's menu targets the supervisor",
   );
 
-  assert.notEqual(row, null, "the per-row gateControl call site is not found");
-  assert.match(row![0], /handle: a\.childHandle/, "the row posts a.handle");
+  // 🛑 `target`, NEVER `label`. `agentRow` documents `label` as falling back to
+  // the SUPERVISOR handle when no child has bound. They are equal for every row
+  // built today, so `label` would be correct by coincidence.
+  const menu = fnBody("itemMenu");
+  assert.match(menu, /setThreshold: \(\) => openThreshold\(target\)/);
   assert.doesNotMatch(
-    row![0],
-    /handle: a\.handle/,
-    "the row gates the SUPERVISOR",
+    menu,
+    /openThreshold\(label\)/,
+    "the threshold opens on the row's LABEL, which can be the supervisor",
   );
 });
 
