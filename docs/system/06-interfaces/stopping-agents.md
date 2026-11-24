@@ -54,8 +54,11 @@ agents.pid = 41   never refreshed   ->  not consulted at all
   `processPerTurn`.
 - **An unknown vendor keeps `graceful`.** Neither mode is right when the
   process lifetime is unknown, so the shipped answer stands.
-- **The sweep keeps `graceful` whatever the fleet runs.** `all: true` crosses
-  vendors that may differ, so no single per-vendor default fits it.
+- **The sweep resolves the default PER HANDLE too.** `all: true` crosses
+  vendors that may differ, and each agent gets its own answer — there is no
+  single default to pick, because the fan-out already acts per handle.
+- **An explicit `mode` always wins, on a sweep as on one handle.** Resolution
+  applies only when the caller omits it.
 - **`now` skips the graceful notice only.** A container teardown still waits
   out its own grace, so neither mode is instant.
 - **An unknown `mode` is refused with a 400 before anything is sent.** A

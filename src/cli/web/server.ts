@@ -1654,10 +1654,11 @@ const STOP_MODES = new Set(["graceful", "now"]);
  * `all` gives the operator no way to tell a refused stop from an agent that
  * was never running, which is the whole reason this control exists.
  *
- * 🛑 THE DEFAULT MODE IS PER VENDOR, NOT A CONSTANT (#415). `graceful` by
- * lee's ruling of 2026-10-31, except for a vendor running one process per turn
- * — there an idle agent's graceful stop spawns a turn and bills it, so lee
- * ruled `now` on 2026-11-24. `defaultStopModeFor` owns that answer.
+ * 🛑 THE DEFAULT MODE IS PER AGENT, NOT A CONSTANT (#415). `graceful` by lee's
+ * ruling of 2026-10-31, except for a vendor running one process per turn —
+ * there an idle agent's graceful stop spawns a turn and bills it, so lee ruled
+ * `now` on 2026-11-24. `defaultStopModeFor` owns that answer, and a sweep
+ * resolves it for every handle it reaches.
  */
 async function handleStopAgents(
   req: IncomingMessage,
@@ -1680,26 +1681,14 @@ async function handleStopAgents(
   const all = input.all === true;
   const named = typeof input.handle === "string" ? input.handle.trim() : "";
 
-  // #415 — an omitted mode is resolved from THAT agent's vendor, never from a
-  // constant. `defaultStopModeFor`'s header carries the reasoning.
-  //
-  // 🛑 THE SWEEP KEEPS `graceful`. `all` crosses a fleet whose vendors may
-  // differ, so no single per-vendor default is correct for it.
-  //
-  // ⚠️ `AgentRegistration.mode` IS `docker` OR `host`, NOT A STOP MODE. Only
-  // its `vendor` is read here.
-  const mode =
-    input.mode !== undefined
-      ? input.mode
-      : all
-        ? "graceful"
-        : defaultStopModeFor(
-            registrationsOrEmpty().agents[named]?.vendor ?? "",
-          );
+  const asked = input.mode;
 
   // 🛑 VALIDATED BEFORE ANYTHING IS SENT. A 400 returned after a graceful stop
   // has already left is a refusal that stopped the agent anyway.
-  if (typeof mode !== "string" || !STOP_MODES.has(mode)) {
+  if (
+    asked !== undefined &&
+    (typeof asked !== "string" || !STOP_MODES.has(asked))
+  ) {
     return respondJson(res, { error: 'mode must be "graceful" or "now"' }, 400);
   }
 
@@ -1724,6 +1713,24 @@ async function handleStopAgents(
     ? (await listLiveSupervisors()).map((s) => s.handle)
     : [named];
 
+  // #415 — an OMITTED mode is resolved from each agent's own vendor, never from
+  // a constant. `defaultStopModeFor`'s header carries the reasoning.
+  //
+  // 🛑 RESOLVED PER HANDLE, INCLUDING ON A SWEEP. An earlier cut carved the
+  // sweep out on the grounds that no single default fits a mixed fleet; there
+  // is no single default to pick, because this map already acts per handle.
+  //
+  // ⚠️ READ ONCE, NOT PER TARGET. A sweep of N agents must not read
+  // `agents.json` N times.
+  //
+  // ⚠️ `AgentRegistration.mode` IS `docker` OR `host`, NOT A STOP MODE. Only
+  // its `vendor` is read here.
+  const registrations = registrationsOrEmpty();
+  const modeFor = (handle: string): "graceful" | "now" =>
+    asked === undefined
+      ? defaultStopModeFor(registrations.agents[handle]?.vendor ?? "")
+      : (asked as "graceful" | "now");
+
   // 🛑 ONE HOME FOR THE THREE-WAY ACK BRANCH, in `requestSupervisorControl`.
   // The `agents` CLI command interprets the same ack, and the PR #158 fix for
   // the truthy `{ ok: false }` used to exist in both copies.
@@ -1731,7 +1738,7 @@ async function handleStopAgents(
     targets.map((handle) =>
       requestSupervisorControl(
         handle,
-        { kind: "stop", mode: mode as "graceful" | "now" },
+        { kind: "stop", mode: modeFor(handle) },
         ctx.handle,
       ),
     ),

@@ -472,26 +472,70 @@ test("an omitted mode on a CONTINUOUS vendor still reaches as graceful", async (
 });
 
 /**
- * 🛑 THE SWEEP KEEPS `graceful`, EVEN OVER A PER-TURN AGENT. `Stop all`
- * crosses a fleet whose vendors may differ, so no single per-vendor default is
- * correct for it. Decided on #415 rather than overlooked, and pinned here so a
- * later per-handle resolution inside the sweep reds this row instead of
- * shipping quietly.
+ * 🛑 THE SWEEP RESOLVES PER HANDLE, AND A MIXED FLEET IS THE PROOF.
+ *
+ * An earlier cut of this change carved the sweep out and left it on `graceful`,
+ * reasoning that no single per-vendor default fits a fleet. **There is no
+ * single default to pick:** `targets.map` already acts per handle, so each
+ * agent resolves its own. claude2 caught it on PR 438.
+ *
+ * 🛑 ONE AGENT OF EACH KIND IN ONE SWEEP. A fleet of one per-turn agent passes
+ * for a handler that answers a constant `now`, and a fleet of one continuous
+ * agent passes for a constant `graceful`. Only the pair tells them apart.
  */
-test("🛑 an omitted mode on the SWEEP stays graceful, per-turn or not", async () => {
+test("🛑 the SWEEP resolves per handle, so a mixed fleet gets DIFFERENT modes", async () => {
+  const h = await harness();
+  const seen = new Map<string, unknown>();
+  const perTurn = await WakeListener.bind("sweepcursor", (e) => {
+    seen.set("sweepcursor", e.control);
+
+    return { ok: true };
+  });
+  const continuous = await WakeListener.bind("sweepclaude", (e) => {
+    seen.set("sweepclaude", e.control);
+
+    return { ok: true };
+  });
+  const undo = withRegistrations({
+    sweepcursor: { vendor: "cursor", mode: "host" },
+    sweepclaude: { vendor: "claude", mode: "host" },
+  });
+
+  try {
+    await post(h, "/api/agents/stop", { all: true });
+
+    assert.equal(seen.size, 2, "the control: the sweep reached both agents");
+    assert.deepEqual(seen.get("sweepcursor"), { kind: "stop", mode: "now" });
+    assert.deepEqual(seen.get("sweepclaude"), {
+      kind: "stop",
+      mode: "graceful",
+    });
+  } finally {
+    undo();
+    await perTurn.close();
+    await continuous.close();
+    close(h);
+  }
+});
+
+/**
+ * 🛑 AN EXPLICIT MODE STILL WINS ON A SWEEP. Resolution is for an OMITTED
+ * mode, so an operator who asked for `graceful` over a per-turn fleet gets it.
+ */
+test("an explicit mode on the SWEEP is forwarded, not re-resolved", async () => {
   const h = await harness();
   const seen: any[] = [];
-  const l = await WakeListener.bind("sweepable", (e) => {
+  const l = await WakeListener.bind("explicitsweep", (e) => {
     seen.push(e);
 
     return { ok: true };
   });
   const undo = withRegistrations({
-    sweepable: { vendor: "cursor", mode: "host" },
+    explicitsweep: { vendor: "cursor", mode: "host" },
   });
 
   try {
-    await post(h, "/api/agents/stop", { all: true });
+    await post(h, "/api/agents/stop", { all: true, mode: "graceful" });
 
     assert.equal(seen.length, 1, "the control: the sweep reached one agent");
     assert.deepEqual(seen[0].control, { kind: "stop", mode: "graceful" });
