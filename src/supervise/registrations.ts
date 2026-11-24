@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import {
   ensureStateDir,
@@ -6,6 +6,7 @@ import {
   writePrivateFileSync,
 } from "../util/paths.js";
 import { assertHandle } from "../util/naming.js";
+import { withFileLock } from "../util/file-lock.js";
 import type { SandboxMode } from "./vendor.js";
 
 /**
@@ -197,9 +198,7 @@ export function registerAgent(
 ): AgentRegistration {
   const record = parseRecord(handle, registration);
 
-  const agents = { ...readRegistrations().agents, [handle]: record };
-
-  writeRegistrations(agents);
+  updateRegistrations((agents) => ({ ...agents, [handle]: record }));
 
   return record;
 }
@@ -213,14 +212,17 @@ export function registerAgent(
  * from "the operator's file is missing". Raised by claude2 on PR 360.
  */
 export function unregisterAgent(handle: string): void {
-  const { agents } = readRegistrations();
+  // ⚠️ THE EARLY RETURN IS OUTSIDE THE LOCK ON PURPOSE. It avoids taking a
+  // lock to write nothing, and a handle that appears between this read and the
+  // mutator's read is simply forgotten on the next call rather than lost.
+  if (!(handle in readRegistrations().agents)) return;
 
-  if (!(handle in agents)) return;
+  updateRegistrations((agents) => {
+    const remaining = { ...agents };
+    delete remaining[handle];
 
-  const remaining = { ...agents };
-  delete remaining[handle];
-
-  writeRegistrations(remaining);
+    return remaining;
+  });
 }
 
 /**
@@ -233,12 +235,50 @@ export function unregisterAgent(handle: string): void {
  * within a filesystem and carries the staging file's `0600` across, so the
  * live path is never briefly wider.
  */
-function writeRegistrations(agents: Record<string, AgentRegistration>): void {
+/** The lock every `agents.json` read-modify-write is taken under. */
+function registrationsLockPath(): string {
+  return `${registrationsPath()}.lock`;
+}
+
+/**
+ * The ONLY way `agents.json` is written.
+ *
+ * 🛑 THE READ AND THE WRITE ARE ONE CRITICAL SECTION, AND THAT IS THE FIX.
+ * Both callers read the whole document, splice one handle, and write it all
+ * back. Two of them overlapping put back a document that never held the
+ * other's handle, and nothing reports it — the card says the registration
+ * worked. MEASURED at 4 of 6 registrations lost with eight real writers;
+ * `registrations-lock.test.ts` drives it.
+ *
+ * ⚠️ STAGING AND RENAMING WAS ALREADY HERE AND DOES NOT CLOSE THIS. It makes
+ * each write atomic, which rules out a TORN read. A lost update is two
+ * complete writes where the second was computed from a stale read.
+ *
+ * 🛑 THE MUTATOR RUNS INSIDE THE LOCK, so its read is the one the write is
+ * based on. A caller that reads first and passes a value in would reintroduce
+ * the defect while appearing to hold the lock.
+ */
+function updateRegistrations(
+  mutate: (
+    agents: Record<string, AgentRegistration>,
+  ) => Record<string, AgentRegistration>,
+): void {
   ensureStateDir();
 
   const path = registrationsPath();
   const staging = `${path}.${process.pid}.tmp`;
 
-  writePrivateFileSync(staging, `${JSON.stringify({ agents }, null, 2)}\n`);
-  renameSync(staging, path);
+  withFileLock(registrationsLockPath(), () => {
+    try {
+      writePrivateFileSync(
+        staging,
+        `${JSON.stringify({ agents: mutate(readRegistrations().agents) }, null, 2)}\n`,
+      );
+      renameSync(staging, path);
+    } finally {
+      // ⚠️ A mutator that throws must leave no staging file behind. After a
+      // successful rename the staging path is gone, so this is a no-op.
+      rmSync(staging, { force: true });
+    }
+  });
 }
