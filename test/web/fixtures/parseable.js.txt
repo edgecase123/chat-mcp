@@ -1,0 +1,12 @@
+// The POSITIVE half of the control for `web-assets-parse.test.ts`.
+//
+// Byte-for-byte the sibling `unparseable.js.txt` with the dangling ternary tail
+// removed. If the check rejects this too, then rejecting the other one says
+// nothing about brackets.
+function broken() {
+  return [
+    ...[
+      "a",
+    ],
+  ];
+}
