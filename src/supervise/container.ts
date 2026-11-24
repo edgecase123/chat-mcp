@@ -16,7 +16,7 @@ import {
   stateDir,
   writePrivateFileSync,
 } from "../util/paths.js";
-import { isProcessAlive } from "../util/process.js";
+import { withFileLock } from "../util/file-lock.js";
 
 export const IMAGE_TAG = "chat-mcp-agent:local";
 
@@ -184,112 +184,6 @@ function containerLockPath(): string {
 }
 
 /**
- * How long a LIVE holder is waited for before the update is abandoned.
- *
- * A dead holder is never waited for at all — see `acquireContainerLock`.
- */
-const LOCK_WAIT_MS = 2_000;
-
-/** One pause between attempts. */
-const LOCK_POLL_MS = 5;
-
-/**
- * Pause without yielding.
- *
- * 🛑 EVERY FUNCTION ON THIS PATH IS SYNCHRONOUS, down to `readFileSync`, so
- * there is no event loop to await on. `Atomics.wait` on a throwaway buffer is
- * the only sync sleep in Node that does not spin a core.
- */
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/**
- * Whether the process named inside the lock file is still running.
- *
- * 🛑 AN EMPTY OR UNPARSEABLE LOCK READS AS ALIVE, AND THAT IS THE WHOLE
- * CORRECTNESS ARGUMENT. Writing the file is not instantaneous, so a lock
- * caught mid-creation holds no pid yet. Reading that as dead lets two
- * processes break each other's fresh locks, which is a slower version of the
- * defect this lock exists to fix.
- */
-function lockHolderIsAlive(path: string): boolean {
-  const pid = lockHolderPid(path);
-
-  // ⚠️ `null` IS "COULD NOT TELL", AND IT READS AS ALIVE. A lock file that
-  // vanished, is unreadable, or holds no pid yet must never read as dead.
-  if (pid === null) return true;
-
-  return isProcessAlive(pid);
-}
-
-/** The pid named inside a lock file, or `null` if it does not name one. */
-function lockHolderPid(path: string): number | null {
-  let raw: string;
-
-  try {
-    raw = readFileSync(path, "utf8").trim();
-  } catch {
-    return null;
-  }
-
-  const pid = Number.parseInt(raw, 10);
-
-  return Number.isInteger(pid) && pid > 0 ? pid : null;
-}
-
-/**
- * Drop the lock, but only while it is still OURS.
- *
- * 🛑 AN UNCONDITIONAL `rmSync` HERE DELETES A ROBBER'S LIVE LOCK. Breaking a
- * dead holder's lock is not conditional on content, so a slow process can move
- * a lock that has already been replaced by a live one. The robbed holder then
- * reaches this line and, unlinking blindly, lets a THIRD writer in beside the
- * robber.
- */
-function releaseContainerLock(path: string): void {
-  if (lockHolderPid(path) === process.pid) rmSync(path, { force: true });
-}
-
-/**
- * Take the lock, or throw having taken nothing.
- *
- * 🛑 LIVENESS IS CHECKED INSTEAD OF A STALE-AGE BEING GUESSED. A `SIGKILL`ed
- * supervisor leaves its lock behind, and an age threshold has to choose
- * between breaking a slow writer's lock and bricking every spawn until a
- * human deletes a file. `process.kill(pid, 0)` answers it in one syscall, and
- * its failure mode is benign: pid reuse makes a dead holder read as alive, so
- * the caller waits and throws rather than losing a write.
- */
-function acquireContainerLock(): string {
-  const path = containerLockPath();
-  const deadline = Date.now() + LOCK_WAIT_MS;
-
-  for (;;) {
-    try {
-      // 🛑 ONE CALL, NOT `openSync` THEN `writeSync`. Two calls leave the lock
-      // momentarily EMPTY, which is the case the liveness check above has to
-      // treat as alive. `host-grant.ts` writes its grant the same way.
-      writePrivateFileSync(path, `${process.pid}\n`, "wx");
-      return path;
-    } catch (e: unknown) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-    }
-
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `timed out after ${LOCK_WAIT_MS}ms waiting for ${path}. A live process ` +
-          `holds it. If nothing is running, delete that file.`,
-      );
-    }
-
-    // A dead holder is broken immediately and retried with no pause.
-    if (lockHolderIsAlive(path)) sleepSync(LOCK_POLL_MS);
-    else rmSync(path, { force: true });
-  }
-}
-
-/**
  * The ONLY way `container.json` is written.
  *
  * 🛑 THE READ AND THE WRITE ARE ONE CRITICAL SECTION, AND THAT IS THE FIX.
@@ -332,21 +226,21 @@ function updateContainerState(
 
   const path = containerStatePath();
   const staging = `${path}.${process.pid}.tmp`;
-  const lock = acquireContainerLock();
 
-  try {
-    writePrivateFileSync(
-      staging,
-      `${JSON.stringify(mutate(readContainerState()), null, 2)}\n`,
-    );
-    renameSync(staging, path);
-  } finally {
-    // ⚠️ BOTH, AND IN THIS ORDER. A mutator that throws must leave neither the
-    // lock nor a staging file behind. After a successful rename the staging
-    // path is already gone, so the first call is a no-op.
-    rmSync(staging, { force: true });
-    releaseContainerLock(lock);
-  }
+  withFileLock(containerLockPath(), () => {
+    try {
+      writePrivateFileSync(
+        staging,
+        `${JSON.stringify(mutate(readContainerState()), null, 2)}\n`,
+      );
+      renameSync(staging, path);
+    } finally {
+      // ⚠️ INSIDE THE LOCK. A mutator that throws must leave no staging file
+      // behind, and `withFileLock` releases the lock itself. After a
+      // successful rename the staging path is gone, so this is a no-op.
+      rmSync(staging, { force: true });
+    }
+  });
 }
 
 export function dockerfilePath(): string {
