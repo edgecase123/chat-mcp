@@ -80,8 +80,12 @@ ever reaching the bus is the case most in need of one.
 
 ## Changing a gate from the browser
 
-The Agents panel carries the control. Each row shows its agent's gate and the
-layer that answered; the panel footer shows the global default.
+**The two controls live in two places, and #397 is why.**
+
+| control            | where                                | why                                                               |
+| ------------------ | ------------------------------------ | ----------------------------------------------------------------- |
+| a row's own gate   | the sidebar's Agents panel           | a dial turned DURING a run, beside the gauge it reacts to         |
+| the global default | the settings dialog's **Agents** tab | install-time config, and the sidebar rebuilds on every peer event |
 
 ```
 smoke-a                      42%
@@ -91,7 +95,12 @@ Gate 25% · set for this agent      [Edit]
   [ 25 ] %  [Set] [Clear]
   this agent already reports 42% — a gate at or below its spawn fill
   means nothing will restart it, and the supervisor says so once
----------------------------------------------------
+```
+
+And in the settings dialog, under **Agents**:
+
+```
+DEFAULT GATE
 Default gate 35%   [ __ ] % [Set]
 ```
 
@@ -118,9 +127,26 @@ means a gate under current fill may fire at once OR silence the child forever �
 and the copy names the worse one, because it is the one an operator would not
 predict.
 
-⚠️ **The footer renders even with no agents running.** The default applies to
+⚠️ **The default renders even with no agents registered.** It applies to
 agents spawned later, so hiding it on an empty panel hides it exactly when an
 operator is about to start one.
+
+🛑 **ONE GLOBAL SUBMIT MOVES THREE THINGS, so `setGate` repaints BOTH
+surfaces.** A handle with no override of its own resolves THROUGH the global:
+
+|                            | what changes                              |
+| -------------------------- | ----------------------------------------- |
+| the dialog                 | the default's own label                   |
+| every non-overridden row   | its gate number and its `· global` source |
+| every non-overridden gauge | **the fill at which it changes colour**   |
+
+⚠️ **The third one is the easiest to forget.** `contextRampFor` resolves the
+same global, so the colour bands move with it. Repainting only the dialog
+leaves every row behind the modal quoting the old number.
+
+🛑 **A GLOBAL SUBMIT MUST NOT CLEAR `state.gateEditing`.** That key belongs to
+a row's editor in the sidebar, and clearing it from the dialog collapses an
+editor the operator cannot see.
 
 ### Why the default is its own payload field
 
@@ -246,7 +272,7 @@ posts; it no longer drives any colour.
 | `src/shim/context-ramp.ts`       | the quiet bands below the gate, as fractions       |
 | `src/cli/web/server.ts`          | ships the ramp, each gate, and the default         |
 | `web/assets/logic.js`            | `rampBand`, `gateSubmission`, `gateControlDisplay` |
-| `web/assets/app.js`              | `gateControl` — the row and footer controls        |
+| `web/assets/app.js`              | `gateControl` — one builder, two call sites        |
 | `web/assets/style.css`           | the three `--ramp-*` tokens, one set per theme     |
 | `src/supervise/index.ts`         | the trigger, the per-child latch, the restart      |
 | `src/supervise/context-gauge.ts` | the driver's reading, normalised across vendors    |

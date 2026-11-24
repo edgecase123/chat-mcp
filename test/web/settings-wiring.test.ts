@@ -257,11 +257,84 @@ test("a tab with no builder falls back rather than throwing", () => {
  * renderer is correct about tabs and none proved a panel has any content — the
  * same trap this file's header names for the opener.
  */
-test("the agents tab is wired to registrationSection", () => {
+test("the agents tab is wired to agentsPanel", () => {
   const m = APP_CODE.match(/const SETTINGS_PANEL_BUILDERS = \{[\s\S]*?\n\};/);
 
   assert.notEqual(m, null, "no SETTINGS_PANEL_BUILDERS in app.js");
-  assert.match(m![0], /agents:\s*registrationSection\b/);
+  assert.match(m![0], /agents:\s*agentsPanel\b/);
+});
+
+/**
+ * 🛑 THE PANEL HOLDS TWO GROUPS AND THE ORDER IS THE ARGUMENT. The default is
+ * the WEAKEST layer, so it reads after the specifics that override it — the
+ * same order it held in the sidebar.
+ *
+ * ⚠️ A `gateControl` call alone is not enough. `agents-wiring.test.ts` counts
+ * TWO call sites across the file, and a count cannot say which function holds
+ * which one.
+ */
+test("the agents panel renders the registrations, then the global default", () => {
+  const body = fnBody("agentsPanel");
+
+  const registered = body.indexOf("registrationSection()");
+  const gate = body.indexOf("gateControl({");
+
+  assert.notEqual(registered, -1, "the agents panel drops the registrations");
+  assert.notEqual(gate, -1, "the agents panel drops the global gate control");
+  assert.ok(
+    registered < gate,
+    "the default reads above the specifics that override it",
+  );
+  assert.match(
+    body,
+    /scope: "global"/,
+    "the panel builds a row-scoped control",
+  );
+});
+
+/**
+ * 🛑 BOTH SURFACES, FOR EITHER SCOPE, AND THE SIDEBAR IS THE ONE THAT GOES
+ * SILENT. A handle with no override of its own resolves THROUGH the global, so
+ * one global submit moves every inheriting row's number, its source label, and
+ * the fill at which its gauge changes colour.
+ *
+ * ⚠️ REPAINTING ONLY THE DIALOG IS THE SILENT FAILURE. The operator sets a new
+ * default, the dialog updates, and every row behind the modal keeps quoting the
+ * old number until something unrelated rebuilds it.
+ */
+test("setGate repaints the sidebar AND the dialog", () => {
+  const body = fnBody("setGate");
+
+  assert.match(body, /renderSidebar\(\)/, "setGate never repaints the sidebar");
+  assert.match(
+    body,
+    /repaintSettings\(\)/,
+    "setGate never repaints the dialog",
+  );
+});
+
+/**
+ * 🛑 THE CLEAR IS SCOPED, AND THE TWO ASSERTIONS KILL DIFFERENT MUTANTS.
+ * The global control is in the settings dialog; a row's editor is in the
+ * sidebar. An unguarded clear collapses an editor the operator cannot see
+ * behind the modal.
+ *
+ * ⚠️ THE SECOND ASSERTION IS NOT REDUNDANT. A guard ADDED while the bare line
+ * stayed would satisfy the first one and still clear on every submit.
+ */
+test("a global submit leaves a row's open gate editor alone", () => {
+  const body = fnBody("setGate");
+
+  assert.match(
+    body,
+    /if \(!global\) state\.gateEditing = null;/,
+    "setGate clears gateEditing without checking the scope",
+  );
+  assert.doesNotMatch(
+    body,
+    /^\s*state\.gateEditing = null;/m,
+    "an unguarded clear survives alongside the guarded one",
+  );
 });
 
 /**

@@ -67,10 +67,10 @@ that fills its panel. It is the same shape as `SECTION_BUILDERS`, for the same
 reason: the lookup is data, so adding a panel is a row rather than a branch in
 the renderer.
 
-| tab      | panel                                                                                                  |
-| -------- | ------------------------------------------------------------------------------------------------------ |
-| `agents` | `registrationSection()` — the stored pairs, Forget, the register form, and the container plan controls |
-| `rooms`  | no builder yet, so the placeholder                                                                     |
+| tab      | panel                                                                         |
+| -------- | ----------------------------------------------------------------------------- |
+| `agents` | `agentsPanel()` — two groups: the registrations, then the global gate default |
+| `rooms`  | no builder yet, so the placeholder                                            |
 
 🛑 **A tab with no builder is supported, not broken.** The lookup is optional
 (`SETTINGS_PANEL_BUILDERS[active]?.()`) and falls back to the placeholder. A
@@ -89,6 +89,11 @@ forgetRegistration  the tail
 openPlan            the close path, the busy paint, and the tail
 approvePlan         the busy paint, and the tail
 ```
+
+🛑 **`setGate` repaints the dialog AND the sidebar**, for either scope. The
+global default is the layer every non-overridden row resolves through, so a
+change here moves their numbers and their gauge colours too. See
+[context-gate.md](../05-supervision/context-gate.md).
 
 🛑 **The argument is `state.settingsTab`, never `null`.**
 `settingsTabSelection(null)` resolves to the FIRST tab, so a null would pull an
