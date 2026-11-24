@@ -20,11 +20,19 @@ function failEvent(name: string, file: string, line: number, column: number) {
 }
 
 /**
- * Composes the two exported steps the way the reporter does, so a case cannot
- * pass by hand-assembling a shape `classify` would never produce.
+ * Composes `classify` then `verdict`, so a case cannot pass on a shape
+ * `classify` would never produce.
+ *
+ * 🛑 `alsoSeen` PICKS THE BRANCH, so it is REQUIRED. The reporter learns the
+ * files that did NOT fail from their passing events; this helper is handed
+ * failures only. Omitting it would make every seen file a dead one and
+ * silently measure the broken-install branch — now a TS2554, not a comment.
  */
-function verdictFor(events: ReturnType<typeof failEvent>[]): string | null {
-  const filesSeen = new Set(events.map((e) => e.data.file));
+function verdictFor(
+  events: ReturnType<typeof failEvent>[],
+  alsoSeen: string[],
+): string | null {
+  const filesSeen = new Set([...events.map((e) => e.data.file), ...alsoSeen]);
   return verdict({ ...classify(events), filesSeen });
 }
 
@@ -99,22 +107,51 @@ test("🔴 an ordinary assertion failure is NOT a file death", () => {
 });
 
 test("🔴 no file deaths yields NO verdict, so a normal red is unchanged", () => {
-  const v = verdictFor([failEvent("a real test", "/r/test/a.test.ts", 2, 9)]);
+  const v = verdictFor(
+    [failEvent("a real test", "/r/test/a.test.ts", 2, 9)],
+    [],
+  );
 
   assert.equal(v, null);
 });
 
 test("🔴 one dead file names THAT FILE and the re-run that confirms it", () => {
   const dead = "/r/test/web/sidebar.test.ts";
-  const v = verdictFor([
-    failEvent(dead, dead, 1, 1),
-    failEvent("a test that ran fine elsewhere", "/r/test/b.test.ts", 2, 9),
-  ]);
+  const v = verdictFor(
+    [
+      failEvent(dead, dead, 1, 1),
+      failEvent("a test that ran fine elsewhere", "/r/test/b.test.ts", 2, 9),
+    ],
+    [],
+  );
 
   assert.ok(v, "expected a verdict");
   assert.match(v, /sidebar\.test\.ts/);
   assert.match(v, /#427/);
   assert.match(v, /NOT the change under test/);
+});
+
+/**
+ * 🛑 THE BRANCH TURNS ON THE FILES THAT DID *NOT* FAIL, SO A CASE MUST NAME
+ * THEM. The reporter learns them from passing events; this helper is handed
+ * failures only. A case that forgets them silently measures the `npm ci`
+ * branch instead of the per-file one. claude1 found this in review of PR 439.
+ */
+test("🔴 files that DIE beside one that PASSES is #427, not a broken install", () => {
+  const dead = ["/r/test/a.test.ts", "/r/test/b.test.ts"];
+  const v = verdictFor(
+    dead.map((f) => failEvent(f, f, 1, 1)),
+    ["/r/test/passes.test.ts"],
+  );
+
+  assert.ok(v, "expected a verdict");
+  assert.match(v, /#427/);
+  assert.doesNotMatch(
+    v,
+    /npm ci/,
+    "2 dead of 3 seen is NOT a broken install — and with the passing file " +
+      "omitted it would be 2 of 2, which is",
+  );
 });
 
 /**
@@ -124,7 +161,10 @@ test("🔴 one dead file names THAT FILE and the re-run that confirms it", () =>
  */
 test("🔴 EVERY file dead reads as a broken environment, not #427", () => {
   const files = ["/r/test/a.test.ts", "/r/test/b.test.ts"];
-  const v = verdictFor(files.map((f) => failEvent(f, f, 1, 1)));
+  const v = verdictFor(
+    files.map((f) => failEvent(f, f, 1, 1)),
+    [],
+  );
 
   assert.ok(v, "expected a verdict");
   assert.match(v, /npm ci/);
