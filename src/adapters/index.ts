@@ -83,3 +83,32 @@ export function reportsContextFor(vendor: string): boolean | null {
       ?.reportsContext ?? null
   );
 }
+
+/**
+ * Which stop mode `vendor` gets when the caller names none (#415).
+ *
+ * 🛑 `now` FOR A VENDOR THAT RUNS ONE PROCESS PER TURN. lee made `graceful`
+ * the default on 2026-10-31 because a turn cut mid-stream spends its tokens
+ * for nothing. With no turn live that reasoning inverts — graceful queues a
+ * shutdown notice, which SPAWNS a turn and bills it, so it becomes the only
+ * mode that spends anything. Ruled 2026-11-24.
+ *
+ * 🛑 THIS BRANCHES ON A STATIC ADAPTER FLAG, NEVER ON TURN STATE. A
+ * server-reported in-flight field was declined on #415, and nothing here needs
+ * one: `processPerTurn` says a turn CAN be absent, which is all a default has
+ * to know.
+ *
+ * 🛑 NON-THROWING, LIKE `reportsContextFor` AND UNLIKE `spawnFor`. `vendor`
+ * reaches here from operator-edited `agents.json`, so an unknown one is the
+ * workflow rather than an anomaly.
+ *
+ * ⚠️ AN UNKNOWN VENDOR KEEPS `graceful`, WHICH IS TODAY'S BEHAVIOUR. Rejected:
+ * answering `now` there. Neither mode is right when the process lifetime is
+ * unknown, and preserving the shipped answer is the smaller claim.
+ */
+export function defaultStopModeFor(vendor: string): "graceful" | "now" {
+  return REGISTRY.find((a) => a.vendor === vendor && a.spawn)?.spawn
+    ?.processPerTurn
+    ? "now"
+    : "graceful";
+}

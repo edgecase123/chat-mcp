@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RouteContext } from "../../../src/cli/web/server.js";
@@ -22,6 +22,8 @@ const { socketPathFor, ensureSocketDir } =
   await import("../../../src/util/paths.js");
 const { setGlobalContextGate, setHandleContextGate } =
   await import("../../../src/storage/context-gate.js");
+const { registrationsPath } =
+  await import("../../../src/supervise/registrations.js");
 
 const TEST_TOKEN = "test-token-for-stop-routes";
 const COOKIE = `chat_mcp_api=${TEST_TOKEN}`;
@@ -398,6 +400,147 @@ test("a per-handle override on the child beats the global, and says so", async (
     assert.equal(body.agents[0].child.context_gate, 25);
     assert.equal(body.agents[0].child.context_gate_source, "override");
   } finally {
+    await l.close();
+    close(h);
+  }
+});
+
+/**
+ * #415 — an omitted `mode` is resolved from the agent's VENDOR, not from a
+ * constant. `graceful` on a per-turn vendor with no turn live queues a
+ * shutdown notice, which spawns a turn and bills it.
+ *
+ * 🛑 `agents.json` IS WRITTEN AND REMOVED PER TEST. Every other test in this
+ * file reaches the route with no registration at all, and that is the state
+ * they assert against.
+ */
+function withRegistrations(agents: Record<string, unknown>): () => void {
+  writeFileSync(registrationsPath(), JSON.stringify({ agents }));
+
+  return () => rmSync(registrationsPath(), { force: true });
+}
+
+test("an omitted mode on a PER-TURN vendor reaches the supervisor as now", async () => {
+  const h = await harness();
+  const seen: any[] = [];
+  const l = await WakeListener.bind("perturn", (e) => {
+    seen.push(e);
+
+    return { ok: true };
+  });
+  const undo = withRegistrations({
+    perturn: { vendor: "cursor", mode: "host" },
+  });
+
+  try {
+    await post(h, "/api/agents/stop", { handle: "perturn" });
+
+    assert.deepEqual(seen[0].control, { kind: "stop", mode: "now" });
+  } finally {
+    undo();
+    await l.close();
+    close(h);
+  }
+});
+
+/**
+ * 🛑 THE DISCRIMINATOR. Without this row a handler that answered a constant
+ * `now` would pass the test above, and the change would be a different bug
+ * rather than a fix.
+ */
+test("an omitted mode on a CONTINUOUS vendor still reaches as graceful", async () => {
+  const h = await harness();
+  const seen: any[] = [];
+  const l = await WakeListener.bind("continuous", (e) => {
+    seen.push(e);
+
+    return { ok: true };
+  });
+  const undo = withRegistrations({
+    continuous: { vendor: "claude", mode: "host" },
+  });
+
+  try {
+    await post(h, "/api/agents/stop", { handle: "continuous" });
+
+    assert.deepEqual(seen[0].control, { kind: "stop", mode: "graceful" });
+  } finally {
+    undo();
+    await l.close();
+    close(h);
+  }
+});
+
+/**
+ * 🛑 THE SWEEP RESOLVES PER HANDLE, AND A MIXED FLEET IS THE PROOF.
+ *
+ * An earlier cut of this change carved the sweep out and left it on `graceful`,
+ * reasoning that no single per-vendor default fits a fleet. **There is no
+ * single default to pick:** `targets.map` already acts per handle, so each
+ * agent resolves its own. claude2 caught it on PR 438.
+ *
+ * 🛑 ONE AGENT OF EACH KIND IN ONE SWEEP. A fleet of one per-turn agent passes
+ * for a handler that answers a constant `now`, and a fleet of one continuous
+ * agent passes for a constant `graceful`. Only the pair tells them apart.
+ */
+test("🛑 the SWEEP resolves per handle, so a mixed fleet gets DIFFERENT modes", async () => {
+  const h = await harness();
+  const seen = new Map<string, unknown>();
+  const perTurn = await WakeListener.bind("sweepcursor", (e) => {
+    seen.set("sweepcursor", e.control);
+
+    return { ok: true };
+  });
+  const continuous = await WakeListener.bind("sweepclaude", (e) => {
+    seen.set("sweepclaude", e.control);
+
+    return { ok: true };
+  });
+  const undo = withRegistrations({
+    sweepcursor: { vendor: "cursor", mode: "host" },
+    sweepclaude: { vendor: "claude", mode: "host" },
+  });
+
+  try {
+    await post(h, "/api/agents/stop", { all: true });
+
+    assert.equal(seen.size, 2, "the control: the sweep reached both agents");
+    assert.deepEqual(seen.get("sweepcursor"), { kind: "stop", mode: "now" });
+    assert.deepEqual(seen.get("sweepclaude"), {
+      kind: "stop",
+      mode: "graceful",
+    });
+  } finally {
+    undo();
+    await perTurn.close();
+    await continuous.close();
+    close(h);
+  }
+});
+
+/**
+ * 🛑 AN EXPLICIT MODE STILL WINS ON A SWEEP. Resolution is for an OMITTED
+ * mode, so an operator who asked for `graceful` over a per-turn fleet gets it.
+ */
+test("an explicit mode on the SWEEP is forwarded, not re-resolved", async () => {
+  const h = await harness();
+  const seen: any[] = [];
+  const l = await WakeListener.bind("explicitsweep", (e) => {
+    seen.push(e);
+
+    return { ok: true };
+  });
+  const undo = withRegistrations({
+    explicitsweep: { vendor: "cursor", mode: "host" },
+  });
+
+  try {
+    await post(h, "/api/agents/stop", { all: true, mode: "graceful" });
+
+    assert.equal(seen.length, 1, "the control: the sweep reached one agent");
+    assert.deepEqual(seen[0].control, { kind: "stop", mode: "graceful" });
+  } finally {
+    undo();
     await l.close();
     close(h);
   }
