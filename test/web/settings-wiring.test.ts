@@ -168,7 +168,7 @@ test("renderSettings contains an assignment to state.settingsTab", () => {
  * tab id in state that no tab answers to, and the next caller would pass it
  * straight back.
  */
-test("the assignment names the resolved id, not `requested`", () => {
+test("the assignment is not the raw argument, and resolution precedes it", () => {
   const body = fnBody("renderSettings");
 
   assert.doesNotMatch(
