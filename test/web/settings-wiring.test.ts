@@ -125,6 +125,23 @@ test("the dialog opens with showModal(), not a class toggle", () => {
 });
 
 /**
+ * 🛑 THE NEXT TWO TESTS PIN THE SHAPE OF THE ASSIGNMENT AND CANNOT SEE ITS
+ * VALUE. `app.js` runs at import and reaches `document.getElementById`, so
+ * `renderSettings` can never be CALLED from a test. That is #330.
+ *
+ * 🛑 MEASURED SURVIVING MUTANT, so a reader can re-run it:
+ *   `state.settingsTab = active` -> `state.settingsTab = SETTINGS_TABS[0].id`
+ *   tsc exit 0 · this file 9/9 · full suite 2712/2712 · EXIT 0
+ * It is not `requested`, and `settingsTabSelection(` still precedes the store,
+ * so BOTH assertions below hold for a store that is always wrong.
+ *
+ * ⚠️ THE VALUE PROOF BELONGS TO ITEM 3, where `submitRegistration` reads
+ * `state.settingsTab` back and re-renders the panel. A wrong stored value
+ * changes what that call renders, and a test CAN observe that. Until item 3
+ * lands, neither name below is a value guarantee.
+ */
+
+/**
  * 🛑 THE ACTIVE TAB MUST LIVE IN STATE, NOT ONLY IN THE DOM. Slice 2 moves the
  * register form in here, and `submitRegistration` has to re-render the panel it
  * now lives on. With the tab readable only as an `is-active` class, the only
@@ -135,7 +152,7 @@ test("the dialog opens with showModal(), not a class toggle", () => {
  * and lee's ruling that a new tab is ONE list entry is what makes that a
  * supported edit.
  */
-test("renderSettings records the active tab in state", () => {
+test("renderSettings contains an assignment to state.settingsTab", () => {
   const body = fnBody("renderSettings");
 
   assert.match(
@@ -151,7 +168,7 @@ test("renderSettings records the active tab in state", () => {
  * tab id in state that no tab answers to, and the next caller would pass it
  * straight back.
  */
-test("the tab recorded is the RESOLVED id, not the argument", () => {
+test("the assignment names the resolved id, not `requested`", () => {
   const body = fnBody("renderSettings");
 
   assert.doesNotMatch(
