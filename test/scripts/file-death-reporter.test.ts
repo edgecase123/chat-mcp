@@ -177,6 +177,46 @@ test("🔴 the reporter prints the #427 banner for a file that dies at import", 
   assert.match(out, /dies-at-import\.fixture\.ts/);
 });
 
+/**
+ * 🛑 THE GLOB PATH, WHICH IS THE ONE `npm test` USES. Every other end-to-end
+ * case here passes ONE ABSOLUTE path, so `name` arrives absolute and a literal
+ * string comparison would pass. A glob makes Node report a RELATIVE `name`
+ * against an ABSOLUTE `file`, which is the shape that broke the first cut.
+ *
+ * It also proves the diagnosis is SELECTIVE: two files go in, one dies, and
+ * only the dead one is named. claude1's review found this gap.
+ */
+test("🔴 under a GLOB it names the dead file and leaves the live one alone", () => {
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+
+  let out = "";
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        "--test",
+        "--import",
+        "tsx",
+        `--test-reporter=${REPORTER}`,
+        "test/support/fixtures/*.fixture.ts",
+      ],
+      { encoding: "utf8", cwd: process.cwd(), env },
+    );
+    assert.fail("the dying fixture must make the run non-zero");
+  } catch (e) {
+    out = `${(e as { stdout?: string }).stdout ?? ""}`;
+  }
+
+  assert.match(out, /#427/, "the glob path must still diagnose");
+  assert.match(out, /dies-at-import\.fixture\.ts/);
+  assert.doesNotMatch(
+    out,
+    /ordinary-fail\.fixture\.ts/,
+    "the file that merely FAILED must not be named as dead",
+  );
+});
+
 test("🔴 the reporter stays SILENT on an ordinary assertion failure", () => {
   const out = runWithReporter(ORDINARY);
 
