@@ -59,24 +59,42 @@ test("every test that drives `route` builds its server with listenWithRoute", ()
     `the scan must reach ${HARNESS}; it defines the one permitted call site`,
   );
 
-  const drivesRoute = files.filter((rel) => {
+  // 🛑 BOTH HALVES READ `codeOnly`, AND THE ASYMMETRY WAS A HOLE. Filtering
+  // candidates on stripped text while testing adoption on RAW text let a file
+  // pass by naming `listenWithRoute` in a comment. claude1 built that file and
+  // it went green twice.
+  //
+  // 🛑 `createServer(` IS THE OFFENCE, NOT A PARAMETER NAME. An earlier cut
+  // matched `route(req, res`, so `route(request, response, ctx)` walked past
+  // it — a rename defeated the whole guard. Building your own server is the
+  // act; what you call the arguments is not.
+  const buildsOwnServer = files.filter((rel) => {
     if (rel === HARNESS) return false;
 
-    return /\broute\(req,\s*res/.test(
-      codeOnly(readFileSync(join(TEST_ROOT, rel), "utf8")),
-    );
+    const code = codeOnly(readFileSync(join(TEST_ROOT, rel), "utf8"));
+
+    return code.includes("createServer(") && /\broute\(/.test(code);
   });
 
-  // The same control one level down: if nothing drives `route` at all, the
-  // regex has drifted and the assertion below is vacuous.
+  // The same control one level down. Every route test now goes through the
+  // harness, so `buildsOwnServer` is EMPTY on a healthy tree — which makes the
+  // final assertion vacuous unless something separate proves the scan can see
+  // adoption at all.
+  const adopters = files.filter((rel) =>
+    codeOnly(readFileSync(join(TEST_ROOT, rel), "utf8")).includes(
+      "listenWithRoute",
+    ),
+  );
   assert.ok(
-    drivesRoute.length > 0,
-    "no file drives `route(req, res, …)`; the pattern has drifted",
+    adopters.length >= 10,
+    `expected the harness to be adopted widely, saw ${adopters.length} files`,
   );
 
-  const offenders = drivesRoute.filter(
+  const offenders = buildsOwnServer.filter(
     (rel) =>
-      !readFileSync(join(TEST_ROOT, rel), "utf8").includes("listenWithRoute"),
+      !codeOnly(readFileSync(join(TEST_ROOT, rel), "utf8")).includes(
+        "listenWithRoute",
+      ),
   );
 
   assert.deepEqual(
