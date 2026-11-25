@@ -236,6 +236,33 @@ export function overridePathFor(handle: string): string {
   return join(overridesDir(), `${handle}.json`);
 }
 
+/**
+ * Where a detached supervisor's own log lives, one file per handle.
+ *
+ * A child of the state dir, so `assertProjectDirOutsideState`'s `stateDir()`
+ * branch already refuses an overlapping project directory. Same containment as
+ * `profilesDir`, and unlike `manifestDir`, which is a sibling on purpose.
+ */
+export function logDir(): string {
+  return join(stateDir(), "logs");
+}
+
+/** 🛑 The handle becomes a filename a detached start truncates. See the test. */
+export function logPathFor(handle: string): string {
+  assertHandle(handle);
+
+  return join(logDir(), `${handle}.log`);
+}
+
+export function ensureLogDir(): string {
+  ensureStateDir();
+  const dir = logDir();
+  mkdirSync(dir, { recursive: true, mode: STATE_DIR_MODE });
+  chmodVerified(dir, STATE_DIR_MODE);
+
+  return dir;
+}
+
 export function adaptersDir(): string {
   return join(stateDir(), "adapters");
 }
