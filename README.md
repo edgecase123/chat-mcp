@@ -696,11 +696,11 @@ Long-lived agent sessions accumulate context and eventually degrade. The bus tra
 
 **Hysteresis** of 5% under each band prevents chatter at the boundary. A step down cascades as far as the percent warrants, in one report, so 95% to 5% reaches `null` directly rather than one band at a time. Down-shifts are silent. Re-crossing a band re-fires its warning.
 
-🛑 **In practice only the two DM bands have ever fired.** A search of the whole bus returns zero messages for the 85 and 95 copy, because agents here are asked to clear well below 85. **So what a human actually sees is the sidebar colour, not a message.** Treat the room-post and alert rows as implemented and unexercised in the wild.
+🛑 **The 85 and 95 rows have never fired on a real bus.** They are the escalation for an agent that ignores both DMs, and an agent asked to clear below 85 never gets there.
 
-⚠️ **The sidebar colour is NOT these four bands.** It comes from the handle's own context gate, which scales a per-peer ramp — `rampBand` in `web/assets/logic.js`, stateless and with no hysteresis by lee's ruling of 2026-11-18. A peer can therefore show a warning colour without any band having fired, and vice versa.
+⚠️ **The sidebar colour is a different mechanism, not these bands.** It is a per-peer ramp scaled by the handle's own context gate, so a peer can show a warning colour with no band having fired.
 
-**Rendering.** The browser sidebar shows each peer's `%` beside its status, coloured by that ramp. The terminal UI has its own gauge — see [terminal interfaces](docs/system/06-interfaces/terminal-ui.md).
+**Rendering.** The browser sidebar shows each peer's `%` beside its status, coloured by that ramp. The terminal UI has its own — see [terminal interfaces](docs/system/06-interfaces/terminal-ui.md).
 
 **Message copy is client-agnostic** — the bus doesn't know whether the peer's client is Claude Code or Cursor, so warnings suggest "hygiene" without prescribing a specific slash command.
 
