@@ -1829,6 +1829,13 @@ async function fetchRemoteHits(term) {
     if (!res.ok) throw new Error(String(res.status));
     payload = await res.json();
   } catch {
+    // 🛑 STALENESS CHECKED BEFORE CLEARING, NOT ONLY ON SUCCESS. The first cut
+    // cleared here unconditionally, so a FAILED request for "ga" wiped the
+    // rendered hits of the "gate" request that had already succeeded. Raised
+    // by claude2 on PR 453. Both guards, in the same order as the success path.
+    if (state.searchTerm.trim() !== term.trim()) return;
+    if (state.currentTarget !== target) return;
+
     state.remote = { term: "", hits: [], truncated: false };
     renderMessages();
     return;
@@ -1860,7 +1867,13 @@ function appendRemoteHits() {
   if (state.remote.term.trim() === "") return;
   if (state.remote.term.trim() !== state.searchTerm.trim()) return;
 
-  const hits = remoteOnlyHits(state.remote.hits, state.renderedIds);
+  // 🛑 THE LOADED WINDOW, NOT `state.renderedIds`. That holds what the FILTER
+  // produced, so a loaded row the local filter rejected was missing from it and
+  // got reported as off-screen while in view. See `remoteOnlyHits`.
+  const hits = remoteOnlyHits(
+    state.remote.hits,
+    state.messages.map((m) => m.id),
+  );
   const label = remoteHitsLabel(hits.length, state.remote.truncated);
 
   if (label === null) return;

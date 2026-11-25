@@ -1960,6 +1960,13 @@ export function searchRequestUrl(term, target, limit) {
  * plus hrefs while the server reads the raw body — so a markdown-only hit can
  * match remotely and not locally. Dropping it restores the old behaviour for
  * that row, which beats pointing the operator somewhere it is not.
+ *
+ * 🛑 `loadedIds` IS THE LOADED WINDOW, NEVER THE FILTERED ROWS. The first cut
+ * passed `state.renderedIds`, which holds what the filter PRODUCED — so a
+ * loaded row the local filter rejected was absent from it, survived this
+ * filter, and got counted as off-screen while sitting in view. That is the
+ * exact case the paragraph above says it hides. Found answering claude2's
+ * question on PR 453, which is why the wiring test pins the argument.
  */
 export function remoteOnlyHits(hits, loadedIds) {
   const loaded = new Set(loadedIds);
@@ -1969,20 +1976,36 @@ export function remoteOnlyHits(hits, loadedIds) {
 /**
  * The one line that says how much is out of reach (#447).
  *
- * 🛑 NULL AT ZERO, NOT "0 more". An empty-state already says the local filter
- * found nothing, and a second line reading zero adds only noise.
+ * 🛑 A CAPPED LIST STILL SPEAKS AT ZERO. `truncated` describes the list the
+ * SERVER capped; `count` describes what survived dropping the hits already on
+ * screen. A term with more matches than the fetch limit, every one of them in
+ * view, therefore emptied `count` while `truncated` stayed true — and
+ * returning null there rendered exactly like "there is nothing more", the one
+ * answer #447 exists to stop giving. Raised by claude2 on PR 453 and
+ * reproduced against this function before it was believed.
+ *
+ * 🛑 NULL ONLY WHEN THE LIST WAS NEITHER CAPPED NOR LEFT WITH ANYTHING. That
+ * is the single case where silence is true.
+ *
+ * 🛑 IT NEVER SAYS "EARLIER", AND THE FIRST CUT DID. `openHashTarget` replaces
+ * the loaded window with one AROUND an anchor, so a hit outside that window
+ * can be NEWER than everything in view. The direction is not provable from
+ * what the client holds, so the label does not claim one.
  *
  * 🛑 THE `+` IS LOAD-BEARING. `returned === limit` cannot tell an exact count
  * from a cap, which is why the server sends `truncated` beside it — see
  * `handleSearch`. Reporting a capped list as a total understates the history.
  */
 export function remoteHitsLabel(count, truncated) {
-  if (count <= 0) return null;
+  if (count <= 0)
+    return truncated
+      ? "more matches in this conversation than shown here"
+      : null;
 
   const n = truncated ? `${count}+` : `${count}`;
   const noun = count === 1 && !truncated ? "match" : "matches";
 
-  return `${n} more ${noun} earlier in this conversation`;
+  return `${n} more ${noun} in this conversation`;
 }
 
 export function searchFilterEmpty(term, scanned) {

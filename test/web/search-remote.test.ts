@@ -81,6 +81,27 @@ test("no remote hits renders no line at all, rather than a zero", () => {
   assert.equal(remoteHitsLabel(0, false), null);
 });
 
+/**
+ * 🛑 THE CAP SURVIVES THE FILTER EMPTYING THE LIST. Raised by claude2 on PR
+ * 453 and reproduced before accepting: `truncated` describes the list the
+ * SERVER capped, `count` describes what is left after the on-screen hits are
+ * dropped. So a term with more matches than the fetch limit, all of them in
+ * view, rendered NOTHING — identical to "there is nothing more", which is the
+ * one answer #447 exists to stop giving. Reachable on "the" or a handle.
+ */
+test("🛑 a capped list with every hit on screen still says more exists", () => {
+  const label = remoteHitsLabel(0, true);
+
+  assert.ok(label, "a capped result set rendered nothing at all");
+  assert.match(label, /more matches in this conversation/);
+});
+
+/** The control that keeps the zero case silent when the list was NOT capped. */
+test("an uncapped empty result stays silent, so the two cases differ", () => {
+  assert.equal(remoteHitsLabel(0, false), null);
+  assert.notEqual(remoteHitsLabel(0, true), null);
+});
+
 test("one hit is singular and more than one is plural", () => {
   const one = remoteHitsLabel(1, false);
   const three = remoteHitsLabel(3, false);
@@ -90,8 +111,33 @@ test("one hit is singular and more than one is plural", () => {
   // being silenced by a `!`.
   assert.ok(one, "a single hit produced no label");
   assert.ok(three, "three hits produced no label");
-  assert.match(one, /^1 more match earlier/);
-  assert.match(three, /^3 more matches earlier/);
+  assert.match(one, /^1 more match in this conversation/);
+  assert.match(three, /^3 more matches in this conversation/);
+});
+
+/**
+ * 🛑 THE LABEL MUST NOT SAY "EARLIER", BECAUSE THAT IS NOT PROVABLE HERE.
+ * `openHashTarget` replaces the loaded window with one AROUND an anchor, so a
+ * hit outside that window can be NEWER than it. The first cut of this feature
+ * said "earlier in this conversation" and would have been wrong after any
+ * jump from a message link.
+ */
+test("🛑 the label never claims a direction it cannot prove", () => {
+  for (const [count, truncated] of [
+    [1, false],
+    [3, false],
+    [50, true],
+    [0, true],
+  ] as const) {
+    const label = remoteHitsLabel(count, truncated);
+
+    assert.ok(label, `no label for count=${count} truncated=${truncated}`);
+    assert.doesNotMatch(
+      label,
+      /earlier|older|above|below/,
+      `the label claimed a direction: ${label}`,
+    );
+  }
 });
 
 /**
@@ -103,7 +149,7 @@ test("🛑 a truncated result set is marked with a +, not reported as a total", 
   const capped = remoteHitsLabel(50, true);
 
   assert.ok(capped, "a capped result set produced no label");
-  assert.match(capped, /^50\+ more matches earlier/);
+  assert.match(capped, /^50\+ more matches in this conversation/);
   assert.doesNotMatch(capped, /^50 more/);
 });
 

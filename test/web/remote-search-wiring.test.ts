@@ -126,10 +126,19 @@ test("🛑 a hit row reuses the fragment route rather than a second jump path", 
     /href: messageHash\(hit\.id\)/,
     "a hit row does not carry the message fragment, so hashchange cannot route it",
   );
+  // 🛑 THE LOADED WINDOW, NOT `renderedIds`. `renderedIds` holds what the
+  // FILTER produced, so a loaded row the local filter rejected is absent from
+  // it and would be reported as off-screen while sitting in view. The first
+  // cut of this PR passed exactly that.
   assert.match(
     body,
-    /remoteOnlyHits\(state\.remote\.hits, state\.renderedIds\)/,
-    "the rendered hits are not filtered against what is already on screen",
+    /remoteOnlyHits\( state\.remote\.hits, state\.messages\.map\(\(m\) => m\.id\), \)/,
+    "the hits are not filtered against the LOADED window",
+  );
+  assert.doesNotMatch(
+    body,
+    /remoteOnlyHits\([^)]*renderedIds/,
+    "the hits are filtered against the FILTERED rows, not the loaded window",
   );
 });
 
@@ -168,5 +177,42 @@ test("🛑 a reply that lands after the box moved on is discarded", () => {
     body,
     /state\.currentTarget !== target/,
     "no target re-check, so a reply can land in the wrong conversation",
+  );
+});
+
+/**
+ * 🛑 THE ERROR PATH NEEDS THE SAME TWO GUARDS AS THE SUCCESS PATH. A failed
+ * request for "ga" cleared the hits of a "gate" request that had already
+ * rendered, because the catch branch wrote `state.remote` before reaching
+ * them. Raised by claude2 on PR 453.
+ */
+test("🛑 a FAILED stale request does not wipe the current term's hits", () => {
+  const start = FLAT.indexOf("async function fetchRemoteHits(term)");
+  assert.notEqual(start, -1, "fetchRemoteHits is not defined");
+
+  const body = FLAT.slice(
+    start,
+    FLAT.indexOf("function appendRemoteHits", start),
+  );
+  const catchAt = body.indexOf("} catch {");
+  assert.notEqual(catchAt, -1, "no catch branch found");
+
+  const clearAt = body.indexOf("state.remote =", catchAt);
+  const termGuardAt = body.indexOf(
+    "state.searchTerm.trim() !== term.trim()",
+    catchAt,
+  );
+  const targetGuardAt = body.indexOf("state.currentTarget !== target", catchAt);
+
+  assert.notEqual(termGuardAt, -1, "the catch branch has no term guard");
+  assert.notEqual(targetGuardAt, -1, "the catch branch has no target guard");
+  // 🛑 ORDER IS THE WHOLE CLAIM. A guard AFTER the write does nothing.
+  assert.ok(
+    termGuardAt < clearAt,
+    "the catch branch clears state before checking the term",
+  );
+  assert.ok(
+    targetGuardAt < clearAt,
+    "the catch branch clears state before checking the target",
   );
 });
