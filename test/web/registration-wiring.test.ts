@@ -19,6 +19,12 @@ const APP = readFileSync(
   "utf8",
 );
 
+/** `logic.js`, so an "app.js calls X" test has a POSITIVE CONTROL that X is real. */
+const LOGIC = readFileSync(
+  new URL("../../web/assets/logic.js", import.meta.url),
+  "utf8",
+);
+
 /**
  * `app.js` with BOTH comment forms removed, so prose cannot satisfy a code
  * check.
@@ -279,10 +285,86 @@ test("🛑 the panel renders the SERVER's plan text and formats nothing itself",
 test("a request in flight disables that row's controls and no other row's", () => {
   const controls = fnBody("planControls");
 
-  assert.match(controls, /state\.planBusy === handle/);
+  assert.match(controls, /state\.rowBusy === handle/);
   assert.match(
     controls,
     /disabled: busy/,
     "the toggle stays clickable during its own fetch otherwise",
+  );
+});
+
+// ── the Start control (#423 unit B) ───────────────────────────────────────
+
+test("🛑 the Start control is gated on startVisible, never on storedMode alone", () => {
+  const section = fnBody("registrationSection");
+
+  assert.match(
+    section,
+    /startVisible\(/,
+    "the card never calls the visibility rule, so its six tests prove nothing about the surface",
+  );
+
+  // POSITIVE CONTROL for the absence check below: the rule is real and it is
+  // the thing that owns the docker gate.
+  assert.match(
+    LOGIC,
+    /export function startVisible\(/,
+    "POSITIVE CONTROL FAILED: startVisible is not exported from logic.js",
+  );
+  assert.ok(
+    APP_CODE.includes("startVisible"),
+    "app.js has to import the rule, not re-derive the gate",
+  );
+});
+
+test("🛑 the live list is what suppresses Start, and it comes from state.agents", () => {
+  const section = fnBody("registrationSection");
+
+  assert.match(
+    section,
+    /state\.agents\.map\(/,
+    "without the live handles every running agent still offers Start, which 409s already-running",
+  );
+});
+
+test("🛑 the start POST hits /api/agents/start and names the handle", () => {
+  const start = fnBody("startAgent");
+
+  assert.match(start, /"\/api\/agents\/start"/);
+  assert.match(start, /method: "POST"/);
+  assert.match(
+    start,
+    /JSON\.stringify\(\{ handle \}\)/,
+    "the route takes the supervisor handle; a plan or a row would be a different contract",
+  );
+});
+
+test("🛑 Start shares the ROW's busy flag, so one row cannot run two requests", () => {
+  const start = fnBody("startAgent");
+  const control = fnBody("startControl");
+
+  assert.match(start, /state\.rowBusy = handle/);
+  assert.match(start, /state\.rowBusy = null/);
+  assert.match(
+    control,
+    /state\.rowBusy === handle/,
+    "a Start button with its own flag passes the in-flight test while breaking what it means",
+  );
+  assert.ok(
+    !APP_CODE.includes("planBusy"),
+    "planBusy survives somewhere, so two names now gate the same row",
+  );
+});
+
+test("🛑 the live list is re-read after a start, or Start stays on screen", () => {
+  const start = fnBody("startAgent");
+
+  const catchAt = start.indexOf("catch");
+  const refetchAt = start.lastIndexOf("fetchLiveAgents()");
+
+  assert.notEqual(catchAt, -1, "startAgent has no catch");
+  assert.ok(
+    refetchAt > catchAt,
+    "the refresh has to follow the failure path too; startVisible reads the live list and nothing else hides the button",
   );
 });

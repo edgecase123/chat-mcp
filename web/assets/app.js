@@ -52,6 +52,7 @@ import {
   planApproveLabel,
   planVerdictClass,
   planVerdictLabel,
+  startVisible,
   stopAllConfirmText,
   stopAllVisible,
   stopButtonClass,
@@ -234,7 +235,7 @@ const state = {
   planOpen: null,
   // The row with a request in flight, so its two buttons can be disabled
   // without disabling every row's.
-  planBusy: null,
+  rowBusy: null,
 };
 
 const el = {
@@ -2268,7 +2269,7 @@ async function openPlan(handle) {
     return;
   }
 
-  state.planBusy = handle;
+  state.rowBusy = handle;
   repaintSettings();
 
   try {
@@ -2281,7 +2282,7 @@ async function openPlan(handle) {
     state.planOpen = null;
   }
 
-  state.planBusy = null;
+  state.rowBusy = null;
   repaintSettings();
 }
 
@@ -2301,7 +2302,7 @@ async function approvePlan(handle) {
 
   if (shown === undefined) return;
 
-  state.planBusy = handle;
+  state.rowBusy = handle;
   repaintSettings();
 
   try {
@@ -2314,7 +2315,7 @@ async function approvePlan(handle) {
     toast(`Not approved: ${e.message}`, "warn");
   }
 
-  state.planBusy = null;
+  state.rowBusy = null;
 
   try {
     await readPlan(handle);
@@ -2336,7 +2337,7 @@ async function approvePlan(handle) {
  */
 function planControls(handle) {
   const open = state.planOpen === handle;
-  const busy = state.planBusy === handle;
+  const busy = state.rowBusy === handle;
   const plan = state.plans[handle];
 
   return [
@@ -2388,12 +2389,60 @@ function planPanel(handle, plan) {
           {
             className: "registration__plan-approve",
             type: "button",
-            disabled: state.planBusy === handle,
+            disabled: state.rowBusy === handle,
             onclick: () => void approvePlan(handle),
           },
           [approve],
         ),
   ]);
+}
+
+/**
+ * Start a contained agent's supervisor from the card (#423).
+ *
+ * 🛑 THE ROW'S OWN `rowBusy`, NOT A SECOND FLAG. A Start button with its own
+ * flag passes "a request in flight disables that row's controls" while letting
+ * one row run two requests at once.
+ *
+ * 🛑 THE LIVE LIST IS RE-READ AFTER EITHER OUTCOME. `startVisible` hides Start
+ * by reading that list and nothing else does, so a start that worked would
+ * leave the button on screen until the next poll.
+ */
+async function startAgent(handle) {
+  state.rowBusy = handle;
+  repaintSettings();
+
+  try {
+    await api("/api/agents/start", {
+      method: "POST",
+      body: JSON.stringify({ handle }),
+    });
+    toast(`Starting ${handle}`, "info");
+  } catch (e) {
+    // The route's three 409s each name the precondition that failed.
+    // Paraphrasing them here would be a second copy of its rules.
+    toast(`Not started: ${e.message}`, "warn");
+  }
+
+  state.rowBusy = null;
+  await fetchLiveAgents();
+  repaintSettings();
+}
+
+/** The Start affordance on a contained row that has no live supervisor. */
+function startControl(handle) {
+  const busy = state.rowBusy === handle;
+
+  return h(
+    "button",
+    {
+      className: "registration__start",
+      type: "button",
+      disabled: busy,
+      onclick: () => void startAgent(handle),
+    },
+    [busy ? "starting…" : "Start"],
+  );
 }
 
 /**
@@ -2411,6 +2460,10 @@ function registrationSection() {
   const rows = registrationRows(state.registrations, state.capabilities);
   const notice = registrationNotice(state.capabilities);
   const admin = state.capabilities.includes("admin");
+  // 🛑 THE SUPERVISOR HANDLES, WHICH IS THE SAME NAMESPACE A REGISTRATION ROW
+  // USES. `/api/agents/live` keys its rows by the supervisor and appends a
+  // suffix only for the CHILD, so a registration handle compares directly.
+  const liveHandles = state.agents.map((a) => a.handle);
 
   return h("div", { className: "settings__group" }, [
     h("div", { className: "settings__group-heading" }, ["Registered"]),
@@ -2438,6 +2491,9 @@ function registrationSection() {
               [r.mode],
             ),
             ...(r.storedMode === "docker" ? planControls(r.handle) : []),
+            ...(startVisible(r, admin, liveHandles)
+              ? [startControl(r.handle)]
+              : []),
             r.canForget
               ? h(
                   "button",

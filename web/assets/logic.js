@@ -2326,7 +2326,7 @@ export function registrationRows(payload, capabilities = []) {
  * Whether a registered row offers Start (#423).
  *
  * 🛑 DOCKER ONLY, on lee's ruling of 2026-11-25. The asymmetry is not cosmetic:
- * `src/index.ts:695` gates the container plan's confirmation on
+ * the start command gates the container plan's confirmation on
  * `selection.mode === "docker"`, so the HOST path has nothing to approve. A
  * host Start would therefore be one click to an agent holding the operator's
  * whole filesystem and logins, with no consent step anywhere in it.
