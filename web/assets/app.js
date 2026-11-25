@@ -73,6 +73,9 @@ import {
   nextUnreadSince,
   searchableText,
   searchFilterEmpty,
+  searchRequestUrl,
+  remoteOnlyHits,
+  remoteHitsLabel,
   activityEvent,
   nextPulses,
   dotTitle,
@@ -94,6 +97,40 @@ import {
 // the render() function which reconciles by innerHTML-replacing the sidebar
 // + message list. For MVP this is fine — small message counts, simple UI.
 // If we outgrow it we migrate to React + react-window.
+
+// #447 — how many out-of-window hits to ask for. The server caps at its own
+// MAX_LIMIT and reports `truncated`, so this is a display budget, not a bound
+// on the history searched.
+const REMOTE_SEARCH_LIMIT = 50;
+
+// 🛑 TYPING IS NOT A QUERY PER KEYSTROKE. "gate" would otherwise fire four
+// searches over the full transcript and the first three are already stale.
+const REMOTE_SEARCH_DEBOUNCE_MS = 250;
+let remoteSearchTimer = null;
+
+/**
+ * Re-ask the server after the reader stops typing (#447).
+ *
+ * Clearing the box cancels in flight work and drops the hits immediately,
+ * because waiting 250ms to remove a line the reader just dismissed reads as
+ * lag.
+ */
+function scheduleRemoteSearch() {
+  if (remoteSearchTimer !== null) clearTimeout(remoteSearchTimer);
+
+  const term = state.searchTerm;
+
+  if (term.trim() === "") {
+    remoteSearchTimer = null;
+    state.remote = { term: "", hits: [], truncated: false };
+    return;
+  }
+
+  remoteSearchTimer = setTimeout(() => {
+    remoteSearchTimer = null;
+    void fetchRemoteHits(term);
+  }, REMOTE_SEARCH_DEBOUNCE_MS);
+}
 
 const state = {
   handle: null,
@@ -119,6 +156,11 @@ const state = {
   // left on across a room switch hides messages for a reason the reader has
   // forgotten setting.
   searchTerm: "",
+  // #447 — what `/api/search` found BEYOND the loaded window, for the open
+  // conversation only. `term` is the term those hits answer, so a result that
+  // lands after the box has moved on can be dropped instead of shown against
+  // the wrong query.
+  remote: { term: "", hits: [], truncated: false },
   unreadBelow: 0, // messages that arrived while the reader was scrolled up
   unreadSince: null, // when the OLDEST of them arrived (#121), ms, or null
   linkedId: null, // the message a link sent us to (#104), marked until it expires
@@ -1583,7 +1625,7 @@ function renderMessages({ forceBottom = false } = {}) {
     );
     // 🛑 BEFORE the return. /cheat-sheet works with no target selected, and
     // an early return here is what would have swallowed it.
-    appendEphemeral();
+    appendTrailers();
     resetStreamPosition();
     return;
   }
@@ -1592,7 +1634,7 @@ function renderMessages({ forceBottom = false } = {}) {
     el.messages.appendChild(
       h("div", { className: "messages__empty" }, ["No messages yet."]),
     );
-    appendEphemeral();
+    appendTrailers();
     resetStreamPosition();
     return;
   }
@@ -1623,7 +1665,7 @@ function renderMessages({ forceBottom = false } = {}) {
         searchFilterEmpty(term, state.messages.length),
       ]),
     );
-    appendEphemeral();
+    appendTrailers();
     resetStreamPosition();
     return;
   }
@@ -1669,7 +1711,7 @@ function renderMessages({ forceBottom = false } = {}) {
   state.renderedCount = visible.length;
   state.renderedTarget = viewKey;
   state.renderedIds = ids;
-  appendEphemeral();
+  appendTrailers();
 
   // Jump INSTANT, never animated: a smooth scroll on room open reads as the
   // view sliding away on its own. Scrolled up, we hold position instead and
@@ -1757,6 +1799,113 @@ async function writeClipboard(text) {
 /** Client-only panels. Text children or `h()` elements, never `innerHTML`, so
  *  there is nothing to escape — and no server-side markdown pass reaches
  *  these. The `sections` branch renders ELEMENTS; the `text` branch a <pre>. */
+/**
+ * Ask the server what the loaded window cannot show (#447).
+ *
+ * 🛑 SCOPED TO THE OPEN CONVERSATION, which is what lee ruled on 2026-11-25.
+ * `target` makes the server apply the same pair/room scope the message pane
+ * uses, so every hit offered here is one `openHashTarget` can actually open.
+ *
+ * 🛑 THE TERM IS STORED WITH THE RESULT AND RE-CHECKED ON ARRIVAL. Responses
+ * can land out of order, so without this a slow reply to "ga" could overwrite
+ * the hits for "gate" and the count would describe a term nobody typed.
+ *
+ * ⚠️ A FAILURE CLEARS THE HITS RATHER THAN KEEPING STALE ONES. "3 more
+ * earlier" left on screen after the server stopped answering is a worse
+ * answer than no line at all.
+ */
+async function fetchRemoteHits(term) {
+  const target = state.currentTarget;
+  const url = searchRequestUrl(term, target, REMOTE_SEARCH_LIMIT);
+
+  if (url === null) {
+    state.remote = { term: "", hits: [], truncated: false };
+    return;
+  }
+
+  let payload;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(String(res.status));
+    payload = await res.json();
+  } catch {
+    state.remote = { term: "", hits: [], truncated: false };
+    renderMessages();
+    return;
+  }
+
+  // The box or the conversation moved while this was in flight.
+  if (state.searchTerm.trim() !== term.trim()) return;
+  if (state.currentTarget !== target) return;
+
+  state.remote = {
+    term,
+    hits: payload.results ?? [],
+    truncated: payload.truncated === true,
+  };
+  renderMessages();
+}
+
+/**
+ * The line and the jump list for hits outside the loaded window (#447).
+ *
+ * 🛑 A HIT ALREADY ON SCREEN IS DROPPED HERE, NOT COUNTED. See
+ * `remoteOnlyHits` — "earlier in this conversation" has to be true.
+ *
+ * Each row is an ANCHOR carrying the message fragment, because #104 already
+ * made the fragment the route: `hashchange` calls `openHashTarget`, which
+ * fetches the window around the id and reveals it. No second jump path.
+ */
+function appendRemoteHits() {
+  if (state.remote.term.trim() === "") return;
+  if (state.remote.term.trim() !== state.searchTerm.trim()) return;
+
+  const hits = remoteOnlyHits(state.remote.hits, state.renderedIds);
+  const label = remoteHitsLabel(hits.length, state.remote.truncated);
+
+  if (label === null) return;
+
+  el.messages.appendChild(
+    h("div", { className: "messages__remote" }, [
+      h("div", { className: "messages__remote-label" }, [label]),
+      h(
+        "ul",
+        { className: "messages__remote-list" },
+        hits.map((hit) =>
+          h("li", {}, [
+            h(
+              "a",
+              {
+                className: "messages__remote-hit",
+                href: messageHash(hit.id),
+              },
+              [
+                h("span", { className: "messages__remote-from" }, [hit.from]),
+                h("span", { className: "messages__remote-snippet" }, [
+                  hit.snippet,
+                ]),
+              ],
+            ),
+          ]),
+        ),
+      ),
+    ]),
+  );
+}
+
+/**
+ * Everything that renders AFTER the message rows, in one place.
+ *
+ * 🛑 ONE SEAM ON PURPOSE. `renderMessages` returns from four places, and a
+ * trailer added to three of them is invisible in the fourth — which is how
+ * /cheat-sheet was once swallowed by an early return. Adding a trailer now
+ * means editing this function, not finding every exit.
+ */
+function appendTrailers() {
+  appendEphemeral();
+  appendRemoteHits();
+}
+
 function appendEphemeral() {
   for (const e of state.ephemeral) {
     el.messages.appendChild(
@@ -1892,6 +2041,8 @@ async function selectTarget(target) {
   // setting, and an empty-looking room reads as a broken one.
   state.searchTerm = "";
   el.paneSearch.value = "";
+  // #447 — hits scoped to the conversation you just left are not results here.
+  scheduleRemoteSearch();
   state.ephemeral = [];
   renderSidebar();
   renderPaneHeader();
@@ -2968,6 +3119,8 @@ el.paneSearch.addEventListener("input", () => {
   // a position in a list that no longer exists, and the next Enter would jump
   // somewhere the reader never chose.
   state.matchIndex = -1;
+  // #447 — the local filter is the instant path and the server call trails it.
+  scheduleRemoteSearch();
   // 🛑 NOT forceBottom. Filtering while scrolled up must not yank the reader
   // to the newest hit; the jump affordance already offers that.
   renderMessages();
@@ -2981,6 +3134,7 @@ el.paneSearch.addEventListener("keydown", (e) => {
   el.paneSearch.value = "";
   state.searchTerm = "";
   state.matchIndex = -1;
+  scheduleRemoteSearch();
   renderMessages();
 });
 

@@ -316,3 +316,71 @@ test("a non-member sees neither the pre-join nor the post-join message", () => {
     [],
   );
 });
+
+/**
+ * 🛑 A DM TARGET MATCHED EVERY DM THAT PEER TOUCHED, NOT THE PAIR (#447).
+ *
+ * The pane and the search disagreed on what a DM conversation IS.
+ * `recentDmMessages` scopes to `(me,peer)` in both directions; `target` here
+ * scoped to `(to = peer OR from = peer)`. So wiring the operator's search box
+ * to this surface offered hits the pane can never display, and clicking one
+ * would open a conversation the operator was not in.
+ *
+ * `pairedWith` is NOT `caller`. `caller` is an authorization scope for the MCP
+ * tool and still defaults to absent here; this narrows a peer target to one
+ * thread and leaves a room target alone.
+ */
+test("🛑 a DM target paired with a viewer excludes that peer's DMs with a third agent", () => {
+  const db = freshDb();
+  dm(db, "claude2", "lee", "PAIR from claude2");
+  dm(db, "lee", "claude2", "PAIR from lee");
+  dm(db, "claude2", "cursor1", "PAIR with a third party");
+
+  const seen = dao.searchMessages(db, {
+    pattern: "%PAIR%",
+    target: "claude2",
+    pairedWith: "lee",
+    limit: 50,
+  });
+
+  assert.deepEqual(bodies(seen), ["PAIR from claude2", "PAIR from lee"]);
+});
+
+/**
+ * The negative control. Without it, `pairedWith` could be narrowing by
+ * accident — or doing nothing at all while the test above passed for the
+ * wrong reason.
+ */
+test("omitting pairedWith keeps the old peer-wide DM target, which the MCP tool relies on", () => {
+  const db = freshDb();
+  dm(db, "claude2", "lee", "PAIR from claude2");
+  dm(db, "claude2", "cursor1", "PAIR with a third party");
+
+  const seen = dao.searchMessages(db, {
+    pattern: "%PAIR%",
+    target: "claude2",
+    limit: 50,
+  });
+
+  assert.deepEqual(bodies(seen), [
+    "PAIR from claude2",
+    "PAIR with a third party",
+  ]);
+});
+
+/** `pairedWith` is meaningless for a room and must not filter one. */
+test("pairedWith does not narrow a room target", () => {
+  const db = freshDb();
+  dao.joinRoom(db, "#gate", "claude1");
+  dm(db, "claude1", "#gate", "ROOM from claude1");
+  dm(db, "claude2", "#gate", "ROOM from claude2");
+
+  const seen = dao.searchMessages(db, {
+    pattern: "%ROOM%",
+    target: "#gate",
+    pairedWith: "lee",
+    limit: 50,
+  });
+
+  assert.deepEqual(bodies(seen), ["ROOM from claude1", "ROOM from claude2"]);
+});

@@ -1923,6 +1923,68 @@ export function messageMatchesSearch(body, term) {
 }
 
 /** What the message pane says when a filter hides everything. */
+/**
+ * The request that reaches past the loaded window (#447).
+ *
+ * 🛑 NULL ON A BLANK TERM, BECAUSE THE SERVER REFUSES ONE. `/api/search`
+ * answers 400 on an empty `q` on purpose — a blank pattern matches every row,
+ * and the whole transcript is indistinguishable from a search that worked. So
+ * the caller must not fire at all rather than handle a 400 per keystroke.
+ *
+ * 🛑 `encodeURIComponent`, NOT A TEMPLATE JOIN. A term is operator input and
+ * `&limit=1` inside it would otherwise become a second parameter.
+ *
+ * A null target is OMITTED rather than sent blank: `parseSearch` treats an
+ * empty `target` as absent, but sending one states a scope that is not there.
+ */
+export function searchRequestUrl(term, target, limit) {
+  const q = (term ?? "").trim();
+  if (q.length === 0) return null;
+
+  const parts = [`q=${encodeURIComponent(q)}`];
+  if (target) parts.push(`target=${encodeURIComponent(target)}`);
+  parts.push(`limit=${encodeURIComponent(String(limit))}`);
+
+  return `/api/search?${parts.join("&")}`;
+}
+
+/**
+ * The server hits worth offering: the ones not already on screen (#447).
+ *
+ * 🛑 "EARLIER IN THIS CONVERSATION" HAS TO BE TRUE. A hit whose id is in the
+ * loaded window is not earlier, it is in view, so counting it would make the
+ * label lie about where the message is.
+ *
+ * ⚠️ THIS ALSO HIDES A LOADED ROW THE LOCAL FILTER REJECTED, and that is
+ * deliberate. The two match rules differ — `searchableText` reads rendered text
+ * plus hrefs while the server reads the raw body — so a markdown-only hit can
+ * match remotely and not locally. Dropping it restores the old behaviour for
+ * that row, which beats pointing the operator somewhere it is not.
+ */
+export function remoteOnlyHits(hits, loadedIds) {
+  const loaded = new Set(loadedIds);
+  return hits.filter((h) => !loaded.has(h.id));
+}
+
+/**
+ * The one line that says how much is out of reach (#447).
+ *
+ * 🛑 NULL AT ZERO, NOT "0 more". An empty-state already says the local filter
+ * found nothing, and a second line reading zero adds only noise.
+ *
+ * 🛑 THE `+` IS LOAD-BEARING. `returned === limit` cannot tell an exact count
+ * from a cap, which is why the server sends `truncated` beside it — see
+ * `handleSearch`. Reporting a capped list as a total understates the history.
+ */
+export function remoteHitsLabel(count, truncated) {
+  if (count <= 0) return null;
+
+  const n = truncated ? `${count}+` : `${count}`;
+  const noun = count === 1 && !truncated ? "match" : "matches";
+
+  return `${n} more ${noun} earlier in this conversation`;
+}
+
 export function searchFilterEmpty(term, scanned) {
   return `no match for "${term}" in ${scanned} loaded message${scanned === 1 ? "" : "s"}`;
 }

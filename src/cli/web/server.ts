@@ -1789,6 +1789,10 @@ function handleSearch(url: URL, res: ServerResponse, ctx: RouteContext): void {
   const { hits, truncated } = dao.searchMessages(ctx.db, {
     pattern: parsed.pattern,
     target: parsed.target,
+    // 🛑 THE PAIR, NOT THE PEER (#447). A peer target here means "this
+    // conversation" the same way `/api/messages` means it, so the box cannot
+    // offer a hit `recentDmMessages` would refuse to open. Ignored for a room.
+    pairedWith: ctx.handle,
     limit: parsed.limit,
   });
 
