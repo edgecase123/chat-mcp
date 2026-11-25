@@ -4,8 +4,10 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createServer, type Server } from "node:http";
-import { AddressInfo } from "node:net";
+import {
+  listenWithRoute,
+  type RouteServer,
+} from "../../support/route-server.js";
 import type { RouteContext } from "../../../src/cli/web/server.js";
 import type { Capability } from "../../../src/cli/web/credential.js";
 
@@ -52,7 +54,7 @@ const SPAWNABLE = vendorsWithSpawn()[0];
 
 interface Harness {
   readonly db: DatabaseSync;
-  readonly server: Server;
+  readonly listening: RouteServer;
   readonly origin: string;
 }
 
@@ -70,28 +72,18 @@ async function harness(
     token: TOKEN,
     capabilities,
   };
-  // 🛑 THE PRODUCTION CATCH-ALL, MIRRORED FROM `server.ts`'s `createServer`.
-  // Without it a throw out of `route` is an unhandled rejection rather than
-  // the 500 a browser actually receives, so "this stays a 500" would be
-  // untestable here — which is the gap the file-fault test below closes.
-  const server = createServer((req, res) => {
-    void route(req, res, ctx).catch((err: unknown) => {
-      if (res.headersSent) return;
-      res.statusCode = 500;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ error: (err as Error).message }));
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  ctx.port = port;
+  // 🛑 `listenWithRoute` CARRIES PRODUCTION'S CATCH — #426. This file used to
+  // hold its own copy, and that copy CAST rather than coerced: a thrown string
+  // answered `{}` and a thrown null threw again inside the catch. The shared
+  // harness is pinned to production's coercion by its own tests.
+  const listening = await listenWithRoute(route, ctx);
+  ctx.port = listening.port;
 
-  return { db, server, origin: `http://127.0.0.1:${port}` };
+  return { db, listening, origin: listening.origin };
 }
 
 function close(h: Harness): void {
-  h.server.closeAllConnections();
-  h.server.close();
+  h.listening.close();
   h.db.close();
 }
 

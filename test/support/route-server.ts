@@ -44,12 +44,17 @@ export async function listenWithRoute<C>(
 ): Promise<RouteServer> {
   const server = createServer((req, res) => {
     void route(req, res, ctx).catch((err: unknown) => {
+      // 🛑 COERCE, NEVER CAST. `(err as Error).message` is `undefined` for a
+      // thrown string and THROWS for a thrown null — a second throw inside the
+      // catch, which is this ticket's own defect one frame along. This is
+      // production's line from `server.ts:190`, character for character.
+      const msg = err instanceof Error ? err.message : String(err);
       // Production's guard: a route that already started writing cannot be
       // handed a status, and setting one would throw a second time.
       if (res.headersSent) return;
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ error: (err as Error).message }));
+      res.end(JSON.stringify({ error: msg }));
     });
   });
 

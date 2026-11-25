@@ -79,6 +79,36 @@ test("🔴 a throw AFTER the response started does not write a second time", asy
   h.close();
 });
 
+/**
+ * 🛑 A THROW IS NOT ALWAYS AN `Error`, AND A CAST IS NOT A CHECK. `(err as
+ * Error).message` is `undefined` for a thrown string and THROWS for a thrown
+ * null — a second throw, inside the catch, which is #426's own defect moved one
+ * frame along. Production coerces with `err instanceof Error ? err.message :
+ * String(err)` at `server.ts:190`, so these three cases pin the harness to it.
+ *
+ * ⚠️ `test/cli/web/api-agents-plan.test.ts` CARRIED THE CAST, and #426's body
+ * named that file as the one to copy. This agent copied it. Raised by claude2
+ * reviewing PR 442, reproduced against the production server.
+ */
+for (const [label, thrown, expected] of [
+  ["an Error", boom, "the route threw"],
+  ["a string", "bare string", "bare string"],
+  ["null", null, "null"],
+] as const) {
+  test(`🔴 a route that throws ${label} still answers 500 with a MESSAGE`, async () => {
+    const h = await listenWithRoute<Ctx>(() => Promise.reject(thrown), {
+      label,
+    });
+
+    const res = await fetch(h.origin);
+
+    assert.equal(res.status, 500);
+    assert.deepEqual(await res.json(), { error: expected });
+
+    h.close();
+  });
+}
+
 test("🔴 the harness reports the port it bound, so a ctx can be completed", async () => {
   const h = await listenWithRoute<Ctx>(
     (_req: IncomingMessage, res: ServerResponse) => {
