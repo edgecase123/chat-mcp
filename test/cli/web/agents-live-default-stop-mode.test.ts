@@ -4,9 +4,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createServer, type Server } from "node:http";
-import { AddressInfo } from "node:net";
 import type { RouteContext } from "../../../src/cli/web/server.js";
+import {
+  listenWithRoute,
+  type RouteServer,
+} from "../../support/route-server.js";
 
 // 🛑 BEFORE any import that resolves a state path. `registrations.ts` reads
 // `agents.json` out of the state dir, so an import above this line would pin
@@ -39,7 +41,7 @@ const COOKIE = `${COOKIE_NAME}=${TOKEN}`;
 
 interface Harness {
   readonly db: DatabaseSync;
-  readonly server: Server;
+  readonly listening: RouteServer;
   readonly origin: string;
 }
 
@@ -55,19 +57,17 @@ async function harness(): Promise<Harness> {
     token: TOKEN,
     capabilities: ALL_CAPABILITIES,
   };
-  const server = createServer((req, res) => {
-    void route(req, res, ctx);
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  ctx.port = port;
+  // 🛑 `listenWithRoute` MIRRORS PRODUCTION'S CATCH — #426. A bare
+  // `void route(req, res, ctx)` here made a throwing route HANG every test
+  // awaiting a response, with no assertion and no stack.
+  const listening = await listenWithRoute(route, ctx);
+  ctx.port = listening.port;
 
-  return { db, server, origin: `http://127.0.0.1:${port}` };
+  return { db, listening, origin: listening.origin };
 }
 
 function close(h: Harness): void {
-  h.server.closeAllConnections();
-  h.server.close();
+  h.listening.close();
   h.db.close();
 }
 
