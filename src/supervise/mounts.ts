@@ -59,9 +59,6 @@ export function registerMount(
     );
   }
 
-  // 🛑 AN EXTRA MOUNT HAS NO `:ro`, so this is the same hole as a project tree
-  // above the state directory, through a different door. Found by claude2
-  // reviewing a fix that guarded the project surface and stopped there.
   assertProjectDirOutsideState(abs);
 
   const config = readMounts();
