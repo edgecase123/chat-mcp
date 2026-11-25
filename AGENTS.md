@@ -415,6 +415,10 @@ drew two near-identical answers.
 **All six posts were individually correct.** lee reads the SUM of both agents,
 so he paid three times for one answer.
 
+- **A question that NAMES one agent is THAT agent's, and no claim is needed.**
+  lee does this deliberately — _"that's my drop claude1, I need to address you
+  specifically"_. 🛑 **A name that is NEITHER of us is the unnamed branch:
+  claude1 answers first.**
 - **A question the SIBLING asked is THEIRS.** Check that first. It costs
   nothing and it settles most cases.
 - **Otherwise `claim answer-<id>`**, where `<id>` is lee's message id. Both
