@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import {
+  listenWithRoute,
+  type RouteServer,
+} from "../../support/route-server.js";
 import { DatabaseSync } from "node:sqlite";
 import { createServer, request as httpRequest, type Server } from "node:http";
-import { AddressInfo } from "node:net";
 import { migrate } from "../../../src/storage/db.js";
 import * as dao from "../../../src/storage/dao.js";
 import { route, type RouteContext } from "../../../src/cli/web/server.js";
@@ -26,7 +29,7 @@ const COOKIE = `chat_mcp_api=${TEST_TOKEN}`;
 
 interface Harness {
   readonly db: DatabaseSync;
-  readonly server: Server;
+  readonly listening: RouteServer;
   readonly origin: string;
 }
 
@@ -51,21 +54,16 @@ async function harness(handle = "operator"): Promise<Harness> {
     token: TEST_TOKEN,
     capabilities: ALL_CAPABILITIES,
   };
-  const server = createServer((req, res) => {
-    void route(req, res, ctx);
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  ctx.port = port;
+  const listening = await listenWithRoute(route, ctx);
+  ctx.port = listening.port;
 
-  return { db, server, origin: `http://127.0.0.1:${port}` };
+  return { db, listening, origin: listening.origin };
 }
 
 function close(h: Harness): void {
   // ⚠️ close() alone leaves fetch's keep-alive sockets open and the test
   // runner never exits. Measured: the file hung past an 8s per-test timeout.
-  h.server.closeAllConnections();
-  h.server.close();
+  h.listening.close();
   h.db.close();
 }
 

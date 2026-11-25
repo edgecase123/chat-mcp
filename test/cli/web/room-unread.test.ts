@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import {
+  listenWithRoute,
+  type RouteServer,
+} from "../../support/route-server.js";
 import { DatabaseSync } from "node:sqlite";
-import { createServer, type Server } from "node:http";
-import { AddressInfo } from "node:net";
 import { migrate } from "../../../src/storage/db.js";
 import * as dao from "../../../src/storage/dao.js";
 import { route, type RouteContext } from "../../../src/cli/web/server.js";
@@ -20,7 +22,7 @@ const COOKIE = `chat_mcp_api=${TEST_TOKEN}`;
 
 async function harness(
   handle = "me",
-): Promise<{ db: DatabaseSync; server: Server; origin: string }> {
+): Promise<{ db: DatabaseSync; listening: RouteServer; origin: string }> {
   const db = new DatabaseSync(":memory:");
   migrate(db);
   for (const h of [handle, "other"]) {
@@ -41,18 +43,13 @@ async function harness(
     token: TEST_TOKEN,
     capabilities: ALL_CAPABILITIES,
   };
-  const server = createServer((req, res) => {
-    void route(req, res, ctx);
-  });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  const { port } = server.address() as AddressInfo;
-  ctx.port = port;
-  return { db, server, origin: `http://127.0.0.1:${port}` };
+  const listening = await listenWithRoute(route, ctx);
+  ctx.port = listening.port;
+  return { db, listening, origin: listening.origin };
 }
 
-function close(h: { db: DatabaseSync; server: Server }): void {
-  h.server.closeAllConnections();
-  h.server.close();
+function close(h: { db: DatabaseSync; listening: RouteServer }): void {
+  h.listening.close();
   h.db.close();
 }
 

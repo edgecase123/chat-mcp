@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import {
+  listenWithRoute,
+  type RouteServer,
+} from "../../support/route-server.js";
 import { DatabaseSync } from "node:sqlite";
-import { createServer, type Server } from "node:http";
-import { AddressInfo } from "node:net";
 import { migrate } from "../../../src/storage/db.js";
 import * as dao from "../../../src/storage/dao.js";
 import { route, type RouteContext } from "../../../src/cli/web/server.js";
@@ -37,7 +39,7 @@ const COOKIE = `${COOKIE_NAME}=${TOKEN}`;
 
 interface Harness {
   readonly db: DatabaseSync;
-  readonly server: Server;
+  readonly listening: RouteServer;
   readonly origin: string;
 }
 
@@ -65,35 +67,16 @@ async function harness(
     token: TOKEN,
     capabilities,
   };
-  // 🛑 THIS MIRRORS PRODUCTION'S CATCH-ALL ON PURPOSE. `chat-mcp web` wraps
-  // `route` in a try that answers 500, and a bare `void route(...)` here does
-  // not — so a throwing route produced NO RESPONSE and every test awaiting one
-  // HUNG rather than failing. A harness that cannot tell "threw" from "hung"
-  // is a guard that fails open. Found by claude2 on #135 unit 4.
-  const server = createServer((req, res) => {
-    void (async () => {
-      try {
-        await route(req, res, ctx);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        if (!res.headersSent) {
-          res.statusCode = 500;
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ error: msg }));
-        }
-      }
-    })();
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  ctx.port = port;
+  // 🛑 THE CATCH THIS FILE USED TO HAND-COPY NOW LIVES IN THE HARNESS. Its
+  // reasoning, and the throw control below that proves it, are unchanged.
+  const listening = await listenWithRoute(route, ctx);
+  ctx.port = listening.port;
 
-  return { db, server, origin: `http://127.0.0.1:${port}` };
+  return { db, listening, origin: listening.origin };
 }
 
 function close(h: Harness): void {
-  h.server.closeAllConnections();
-  h.server.close();
+  h.listening.close();
   h.db.close();
 }
 

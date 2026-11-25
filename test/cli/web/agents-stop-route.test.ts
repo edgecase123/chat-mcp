@@ -1,8 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import {
+  listenWithRoute,
+  type RouteServer,
+} from "../../support/route-server.js";
 import { DatabaseSync } from "node:sqlite";
-import { createServer, type Server } from "node:http";
-import { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,7 +32,7 @@ const COOKIE = `chat_mcp_api=${TEST_TOKEN}`;
 
 interface Harness {
   readonly db: DatabaseSync;
-  readonly server: Server;
+  readonly listening: RouteServer;
   readonly origin: string;
 }
 
@@ -45,19 +47,14 @@ async function harness(): Promise<Harness> {
     token: TEST_TOKEN,
     capabilities: ALL_CAPABILITIES,
   };
-  const server = createServer((req, res) => {
-    void route(req, res, ctx);
-  });
-  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  const { port } = server.address() as AddressInfo;
-  ctx.port = port;
+  const listening = await listenWithRoute(route, ctx);
+  ctx.port = listening.port;
 
-  return { db, server, origin: `http://127.0.0.1:${port}` };
+  return { db, listening, origin: listening.origin };
 }
 
 function close(h: Harness): void {
-  h.server.closeAllConnections();
-  h.server.close();
+  h.listening.close();
   h.db.close();
 }
 

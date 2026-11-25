@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import {
+  listenWithRoute,
+  type RouteServer,
+} from "../../support/route-server.js";
 import { DatabaseSync } from "node:sqlite";
-import { createServer, type Server, type ServerResponse } from "node:http";
-import { AddressInfo } from "node:net";
+import type { ServerResponse } from "node:http";
 
 import { migrate } from "../../../src/storage/db.js";
 import * as dao from "../../../src/storage/dao.js";
@@ -26,7 +29,7 @@ const COOKIE = `chat_mcp_api=${TEST_TOKEN}`;
 
 interface Harness {
   readonly db: DatabaseSync;
-  readonly server: Server;
+  readonly listening: RouteServer;
   readonly origin: string;
   readonly sseClients: Set<ServerResponse>;
   /** Every frame written to the fake browser, in order. */
@@ -60,20 +63,15 @@ async function harness(): Promise<Harness> {
     token: TEST_TOKEN,
     capabilities: ALL_CAPABILITIES,
   };
-  const server = createServer((req, res) => {
-    void route(req, res, ctx);
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  ctx.port = port;
+  const listening = await listenWithRoute(route, ctx);
+  ctx.port = listening.port;
 
-  return { db, server, origin: `http://127.0.0.1:${port}`, sseClients, frames };
+  return { db, listening, origin: listening.origin, sseClients, frames };
 }
 
 function close(h: Harness): void {
   // close() alone leaves keep-alive sockets open and the runner never exits.
-  h.server.closeAllConnections();
-  h.server.close();
+  h.listening.close();
   h.db.close();
 }
 

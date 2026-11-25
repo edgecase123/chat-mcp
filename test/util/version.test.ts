@@ -1,10 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { listenWithRoute } from "../support/route-server.js";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { migrate } from "../../src/storage/db.js";
 import * as dao from "../../src/storage/dao.js";
 import { route, type RouteContext } from "../../src/cli/web/server.js";
@@ -160,23 +159,18 @@ test("the browser UI reports the package version", async () => {
     token: TEST_TOKEN,
     capabilities: ALL_CAPABILITIES,
   };
-  const server: Server = createServer((req, res) => {
-    void route(req, res, ctx);
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const { port } = server.address() as AddressInfo;
-  ctx.port = port;
+  const listening = await listenWithRoute(route, ctx);
+  ctx.port = listening.port;
 
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/whoami`, {
+    const res = await fetch(`${listening.origin}/api/whoami`, {
       headers: { Cookie: COOKIE },
     });
     const body = (await res.json()) as { version?: string };
     assert.equal(res.status, 200);
     assert.equal(body.version, declaredVersion());
   } finally {
-    server.closeAllConnections();
-    server.close();
+    listening.close();
     db.close();
   }
 });
