@@ -58,7 +58,7 @@ test("🛑 hits already in the loaded window are dropped, so the label cannot cl
   const hits = [{ id: 10 }, { id: 20 }, { id: 30 }];
 
   assert.deepEqual(
-    remoteOnlyHits(hits, [20]).map((h) => h.id),
+    remoteOnlyHits(hits, [20]).map((h: { id: number }) => h.id),
     [10, 30],
   );
 });
@@ -68,7 +68,7 @@ test("an empty loaded window drops no hits", () => {
   const hits = [{ id: 10 }, { id: 20 }];
 
   assert.deepEqual(
-    remoteOnlyHits(hits, []).map((h) => h.id),
+    remoteOnlyHits(hits, []).map((h: { id: number }) => h.id),
     [10, 20],
   );
 });
@@ -82,8 +82,16 @@ test("no remote hits renders no line at all, rather than a zero", () => {
 });
 
 test("one hit is singular and more than one is plural", () => {
-  assert.match(remoteHitsLabel(1, false), /^1 more match earlier/);
-  assert.match(remoteHitsLabel(3, false), /^3 more matches earlier/);
+  const one = remoteHitsLabel(1, false);
+  const three = remoteHitsLabel(3, false);
+
+  // 🛑 NON-NULL ASSERTED, NOT CAST AWAY. The helper returns null at zero on
+  // purpose, so a regression that returned null here must fail rather than
+  // being silenced by a `!`.
+  assert.ok(one, "a single hit produced no label");
+  assert.ok(three, "three hits produced no label");
+  assert.match(one, /^1 more match earlier/);
+  assert.match(three, /^3 more matches earlier/);
 });
 
 /**
@@ -92,10 +100,16 @@ test("one hit is singular and more than one is plural", () => {
  * it here would report a capped list as a total.
  */
 test("🛑 a truncated result set is marked with a +, not reported as a total", () => {
-  assert.match(remoteHitsLabel(50, true), /^50\+ more matches earlier/);
-  assert.doesNotMatch(remoteHitsLabel(50, true), /^50 more/);
+  const capped = remoteHitsLabel(50, true);
+
+  assert.ok(capped, "a capped result set produced no label");
+  assert.match(capped, /^50\+ more matches earlier/);
+  assert.doesNotMatch(capped, /^50 more/);
 });
 
 test("the label names the conversation, because the search is scoped to one", () => {
-  assert.match(remoteHitsLabel(2, false), /in this conversation$/);
+  const label = remoteHitsLabel(2, false);
+
+  assert.ok(label, "two hits produced no label");
+  assert.match(label, /in this conversation$/);
 });
