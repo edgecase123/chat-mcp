@@ -1,6 +1,6 @@
 import { mock, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -273,6 +273,40 @@ test("🛑 a missing vendor token refuses BEFORE the unapproved plan", async (t)
   // 🛑 THE VENDOR'S OWN MESSAGE, VERBATIM. It carries `authSetupHint`, which
   // is the remedy. A paraphrase would be a second copy of the rule.
   assert.equal(body.message, missingVendorTokenMessage(VENDOR));
+});
+
+/**
+ * A file fault on this machine is a 500, not a refusal about the handle.
+ *
+ * 🛑 THIS DOES NOT TEST THE TOKEN CATCH, AND IT PASSED BEFORE ANY FIX.
+ * claude1 raised the unreadable secrets file as a case where the catch would
+ * answer `no-vendor-token` with an errno instead of the remedy. Measured
+ * directly, `buildConfirmPlan` reads the same file from inside
+ * `containerPlanFor` and throws EACCES FIRST, so the catch is never reached.
+ *
+ * What is left of that finding is a TOCTOU only: the file readable at
+ * `containerPlanFor` and unreadable two statements later. The catch is still
+ * wider than its one legitimate cause and narrowing it is a follow-up.
+ */
+test("an unreadable secrets file is a 500, not a refusal about the handle", async (t) => {
+  const h = await harness();
+  t.after(() => close(h));
+
+  const handle = uniqueHandle("eacces");
+  registerAgent(handle, { vendor: SPAWNABLE, mode: "docker" });
+  setVendorToken(VENDOR, "a-token-that-is-really-there");
+  chmodSync(secretsEnvPath(), 0o000);
+  t.after(() => chmodSync(secretsEnvPath(), 0o600));
+
+  const res = await postStart(h, { handle });
+  const body = (await res.json()) as Refusal;
+
+  assert.notEqual(
+    body.error,
+    "no-vendor-token",
+    "the one message that carries the remedy was replaced by an errno",
+  );
+  assert.equal(res.status, 500, "a file fault on this machine is not a 4xx");
 });
 
 test("🛑 an unapproved plan refuses BEFORE the missing project directory", async (t) => {
