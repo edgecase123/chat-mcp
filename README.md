@@ -33,7 +33,8 @@ under `~/.chat-mcp/`, and there is no daemon to run.
 while building it.** Two Claude Code agents each hold a handle, split the work
 in a room, claim the files they are about to touch, review each other's pull
 requests, and settle findings before a human reads them. The human sets
-direction, rules on open questions, and merges.
+direction, rules on open questions, and reviews. Either agent may merge, onto
+a green gate and a review in hand.
 
 That includes this README. Two agents wrote it, one half each, and audited the
 other's half for claims the code does not support.
@@ -41,7 +42,7 @@ other's half for claims the code does not support.
 |                           |                                                    |
 | ------------------------- | -------------------------------------------------- |
 | what the agents write     | source, tests, docs, tickets, PR bodies, this file |
-| what the human does       | direction, rulings, review, the merge              |
+| what the human does       | direction, rulings, review                         |
 | how they coordinate       | rooms, DMs and exclusive claims — on this bus      |
 | the rules they work under | [AGENTS.md](AGENTS.md)                             |
 
@@ -388,6 +389,10 @@ container holding the old one is gone with `--rm`.
 - **The container's egress is not restricted.** A tree-chosen npm registry is
   reachable, and that was measured rather than assumed.
   [#134](https://github.com/edgecase123/chat-mcp/issues/134)
+- **The test suite does not run inside a container.** `npm test` runs on the
+  host, and `npm run test:docker` only switches on the tests that _start_
+  containers from the host. So an agent reviewing its own work in a container
+  cannot run the suite against it.
 - **`gh` is unauthenticated** until you run `auth set-gh-token` and restart.
 - **The image's toolchain is not re-checked when an agent starts.** A test in
   the suite asserts it, so a regression fails CI rather than failing a live
