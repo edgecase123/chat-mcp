@@ -1,6 +1,6 @@
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -16,6 +16,26 @@ import type { Capability } from "../../../src/cli/web/credential.js";
 // at 104 bytes, so the live-supervisor fixture below needs the room.
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "cm-start-"));
 
+const { openSupervisorLog } =
+  await import("../../../src/supervise/detached.js");
+
+// 🛑 THE SPAWN IS MOCKED AND THE REASON IS NOT SPEED. A real
+// `startDetachedSupervisor` reparents to init and OUTLIVES this file, so the
+// happy-path case would leave a supervisor running against a temp state dir
+// and reach for `docker run` with a fake token. `openSupervisorLog` — the half
+// that creates the file this route reports — is asserted for real in
+// `test/supervise/detached-log.test.ts`.
+const started: string[] = [];
+mock.module("../../../src/supervise/detached.js", {
+  namedExports: {
+    startDetachedSupervisor(handle: string): string {
+      started.push(handle);
+
+      return openSupervisorLog(handle).path;
+    },
+  },
+});
+
 const { migrate } = await import("../../../src/storage/db.js");
 const { route } = await import("../../../src/cli/web/server.js");
 const { COOKIE_NAME, ALL_CAPABILITIES, ADMIN_ROUTES } =
@@ -28,7 +48,7 @@ const { buildConfirmPlan } =
   await import("../../../src/supervise/confirmPlan.js");
 const { spawnFor, vendorsWithSpawn } =
   await import("../../../src/adapters/index.js");
-const { missingVendorTokenMessage, setVendorToken } =
+const { missingVendorTokenMessage, secretsEnvPath, setVendorToken } =
   await import("../../../src/supervise/auth.js");
 const { WakeListener } = await import("../../../src/supervise/socket.js");
 const { logPathFor } = await import("../../../src/util/paths.js");
@@ -215,12 +235,12 @@ test("🛑 a handle whose supervisor is already live refuses FIRST", async (t) =
 
   const handle = uniqueHandle("live");
   registerAgent(handle, { vendor: SPAWNABLE, mode: "docker" });
-  // Everything else is left UNSATISFIED on purpose: no token, no confirmed
-  // plan, no project dir. Any of those answered instead would prove the order
-  // is wrong, and would send the operator to fix something that is not the
-  // reason the spawn would refuse.
-  const listener = new WakeListener(handle, async () => ({ ok: true }));
-  await listener.bind();
+  // 🛑 EVERY LATER PRECONDITION IS LEFT UNSATISFIED, INCLUDING THE TOKEN.
+  // Without this `rmSync` the store still held a token from an earlier case,
+  // so the token gate passed and this test stayed green with the liveness
+  // check moved BELOW it — a control that discriminated nothing.
+  rmSync(secretsEnvPath(), { force: true });
+  const listener = await WakeListener.bind(handle, () => ({ ok: true }));
   t.after(async () => void (await listener.close()));
 
   const res = await postStart(h, { handle });
@@ -235,7 +255,9 @@ test("🛑 a missing vendor token refuses BEFORE the unapproved plan", async (t)
 
   const handle = uniqueHandle("notok");
   registerAgent(handle, { vendor: SPAWNABLE, mode: "docker" });
-  setVendorToken(VENDOR, "");
+  // 🛑 THE FILE IS REMOVED, NOT OVERWRITTEN WITH "". `setSecret` refuses an
+  // empty token on purpose, so there is no "unset" through the writer.
+  rmSync(secretsEnvPath(), { force: true });
 
   const res = await postStart(h, { handle });
   const body = (await res.json()) as Refusal;
@@ -311,5 +333,10 @@ test("🛑 a ready handle starts, and its log is the one `logPathFor` names", as
     statSync(logPathFor(handle)).mode & 0o777,
     0o600,
     "the log carries the child's own output, so it is owner-only",
+  );
+  assert.deepEqual(
+    started,
+    [handle],
+    "the route answered 202 without asking for a supervisor at all",
   );
 });

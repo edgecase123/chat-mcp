@@ -79,7 +79,15 @@ import {
 // Static, because `handleWhoami` is synchronous and needs the suffix inverse
 // to look a supervised child's handle up in `agents.json` (#371).
 import { childHandleFor, supervisorHandleFor } from "../../supervise/grant.js";
+import type { VendorSpawn } from "../../supervise/vendor.js";
 import { buildConfirmPlan } from "../../supervise/confirmPlan.js";
+import { refuseIfSupervisorLive } from "../../supervise/socket.js";
+import { dirsFor } from "../../supervise/projects.js";
+import { startDetachedSupervisor } from "../../supervise/detached.js";
+import {
+  missingVendorTokenMessage,
+  readVendorToken,
+} from "../../supervise/auth.js";
 import {
   confirmVerdict,
   describeChanges,
@@ -526,6 +534,8 @@ export async function route(
     return handleAgentPlan(url, res);
   if (path === "/api/agents/confirm" && req.method === "POST")
     return handleConfirmAgentPlan(req, res);
+  if (path === "/api/agents/start" && req.method === "POST")
+    return handleStartAgent(req, res);
   if (path === "/api/search" && req.method === "GET")
     return handleSearch(url, res, ctx);
   if (path === "/api/approvals/answer" && req.method === "POST")
@@ -685,9 +695,21 @@ async function handleForgetAgent(
 interface PlanRefusal {
   readonly error: string;
   readonly status: number;
+  /**
+   * The same refusal as a stable token, for a consumer that branches on it
+   * rather than showing it. `POST /api/agents/start` answers the card, whose
+   * button needs the kind and not the sentence.
+   */
+  readonly code: string;
 }
 
-type PlanLookup = { readonly plan: ContainerPlan } | PlanRefusal;
+type PlanLookup =
+  | {
+      readonly plan: ContainerPlan;
+      /** Resolved once here, so no caller re-derives it from the vendor name. */
+      readonly spawn: VendorSpawn;
+    }
+  | PlanRefusal;
 
 function containerPlanFor(handle: string): PlanLookup {
   const { agents } = readRegistrations();
@@ -698,6 +720,7 @@ function containerPlanFor(handle: string): PlanLookup {
     return {
       error: `"${handle}" has no registration, so there is no plan to approve`,
       status: 404,
+      code: "not-registered",
     };
   }
 
@@ -712,6 +735,7 @@ function containerPlanFor(handle: string): PlanLookup {
         `"${handle}" is registered to run on the host rather than contained, ` +
         "so it has no container plan",
       status: 409,
+      code: "not-docker",
     };
   }
 
@@ -722,7 +746,11 @@ function containerPlanFor(handle: string): PlanLookup {
   } catch (e) {
     // The only throw inside this try, and it names the vendor the operator
     // typed. That is what makes 409 the right answer.
-    return { error: (e as Error).message, status: 409 };
+    return {
+      error: (e as Error).message,
+      status: 409,
+      code: "vendor-unspawnable",
+    };
   }
 
   // 🛑 OUTSIDE THE try, AND THAT IS THE WHOLE POINT. `buildConfirmPlan` reads
@@ -731,7 +759,7 @@ function containerPlanFor(handle: string): PlanLookup {
   // above, a file fault on this machine would answer 409 — a refusal ABOUT THE
   // HANDLE — and send the operator to inspect a registration that is fine.
   // Found by claude2 on PR 376.
-  return { plan: buildConfirmPlan(spawn, handle) };
+  return { plan: buildConfirmPlan(spawn, handle), spawn };
 }
 
 function isRefusal(lookup: PlanLookup): lookup is PlanRefusal {
@@ -854,6 +882,108 @@ async function handleConfirmAgentPlan(
   markConfirmed(body.handle, lookup.plan);
 
   respondJson(res, { handle: body.handle, confirmed: true });
+}
+
+/**
+ * Start the supervisor for one contained handle — #423.
+ *
+ * 🛑 THE FOUR REFUSALS ARE IN `startSupervisor`'s OWN ORDER, AND THAT IS THE
+ * CONTRACT. A route that answered them in a different order would name a
+ * blocker the spawn would not have reached first, so the operator fixes
+ * something that was never the reason and earns a second refusal.
+ *
+ * 🛑 EVERY PRECONDITION IS ANSWERED BEFORE THE SPAWN, because the spawn is
+ * DETACHED. A throw after that point lands in the handle's log file, where
+ * the operator who clicked the button will never see it.
+ *
+ * ⚠️ 202 AND NOT 200. The supervisor is not listening yet when this returns;
+ * it has been handed off, which is a different claim.
+ */
+async function handleStartAgent(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const body = (await readJsonBody(req)) as { handle?: unknown };
+
+  if (typeof body.handle !== "string" || body.handle.length === 0) {
+    return respondJson(
+      res,
+      { error: "bad-handle", message: "handle must be a non-empty string" },
+      400,
+    );
+  }
+
+  const handle = body.handle;
+  // The same resolution `/api/agents/plan` and `/confirm` use, so a handle the
+  // card showed a plan for cannot read as a different kind of row here.
+  const lookup = containerPlanFor(handle);
+
+  if (isRefusal(lookup)) {
+    return respondJson(
+      res,
+      { error: lookup.code, message: lookup.error },
+      lookup.status,
+    );
+  }
+
+  try {
+    await refuseIfSupervisorLive(handle);
+  } catch {
+    // The message is rewritten rather than forwarded: the thrown one names the
+    // socket path, which is a detail of this machine and not of the refusal.
+    return respondJson(
+      res,
+      {
+        error: "already-running",
+        message: `${handle} already has a supervisor`,
+      },
+      409,
+    );
+  }
+
+  if (!readVendorToken(lookup.spawn)) {
+    // 🛑 THE VENDOR'S OWN MESSAGE, VERBATIM. It carries `authSetupHint`, which
+    // is the remedy. A paraphrase here would be a second copy of the rule.
+    return respondJson(
+      res,
+      {
+        error: "no-vendor-token",
+        message: missingVendorTokenMessage(lookup.spawn),
+      },
+      409,
+    );
+  }
+
+  // `legacy` and `changed` are refused with `unseen`, exactly as the spawn
+  // refuses all three. Which one it is belongs on `/api/agents/plan`, whose
+  // whole job is to say so.
+  if (confirmVerdict(handle, lookup.plan).kind !== "confirmed") {
+    return respondJson(
+      res,
+      {
+        error: "plan-unconfirmed",
+        message: "approve the container plan first",
+      },
+      409,
+    );
+  }
+
+  try {
+    dirsFor(handle);
+  } catch {
+    return respondJson(
+      res,
+      {
+        error: "no-project-dir",
+        message: `set a project directory for ${handle}`,
+      },
+      409,
+    );
+  }
+
+  const log = startDetachedSupervisor(handle);
+
+  respondJson(res, { handle, starting: true, log }, 202);
 }
 
 function respondJson(res: ServerResponse, body: unknown, status = 200): void {

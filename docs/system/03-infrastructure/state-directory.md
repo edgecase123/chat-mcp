@@ -51,6 +51,7 @@ importing anything that resolves a path.
 | `tokens/` | `src/supervise/handle-tokens.ts` | Per-handle bus bearer tokens |
 | `mcp/<handle>.json` | `src/util/paths.ts` (`mcpConfigPathFor`) | The MCP client config handed to a supervised child |
 | `adapters/` | `src/util/paths.ts` (`adaptersDir`) | Installed wake-adapter scripts, one per framework and handle |
+| `logs/<handle>.log` | `src/util/paths.ts` (`logPathFor`) | A detached supervisor's own stdout and stderr, opened by `startDetachedSupervisor` when `POST /api/agents/start` hands one off. **Appended, at 0600** — a restart keeps the run before it, and the first lines carry the child's allowed-tool list and its socket path. A CHILD of the state dir, so `assertProjectDirOutsideState`'s `stateDir()` branch already refuses an overlapping project directory — unlike `<stateDir>-manifests`, which is a sibling and owes its own check |
 | `web-url` | `src/cli/web/server.ts` | The running web UI's **plain** url. Unlinked on shutdown |
 | `aliases.sh` | `src/index.ts` (`aliases` command) | A source-able shell alias block |
 | `run/*.pid`, `logs/*.log` | `scripts/lib/procctl.sh` | Written by the operator scripts, not by the CLI |
