@@ -1,3 +1,4 @@
+import type { HostAuth } from "./auth.js";
 import type { SpawnOptions } from "./child.js";
 import type { ChildGrant } from "./grant.js";
 import type { Denial } from "./denial.js";
@@ -165,6 +166,21 @@ export interface VendorSpawn {
    * pointed at the wrong CLI for a key that lives in a web dashboard.
    */
   readonly authSetupHint: string;
+
+  /**
+   * How a HOST child of this vendor obtains its credential. See `HostAuth`.
+   *
+   * 🛑 DECLARED, NOT INFERRED, for the reason `reportsUsage` carries. Here the
+   * inference would be from whether a token happens to be on file, which is a
+   * property of the operator's machine rather than of the CLI.
+   *
+   * ⚠️ A HOST LOGIN IS NOT chat-mcp STATE, AND NOTHING HERE CAN SEE IT. lee's
+   * point of 2026-11-25: one `claude` install can be both an attached client
+   * and a supervised child, sharing one credential store. So the operator
+   * logging OUT of their own attached instance de-authenticates every
+   * `"cli-login"` child, with nothing on this side to point at.
+   */
+  readonly hostAuth: HostAuth;
 
   /**
    * This vendor's CLI reports usage-window state, and its `routeEvent` calls

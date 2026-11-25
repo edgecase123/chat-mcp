@@ -627,30 +627,103 @@ for a child that never ran.
 `cursor-agent mcp enable` needs none, measured, so least privilege applies. A
 test asserts the absence, so a later change cannot widen it silently.
 
-🛑 **EVERY SPAWNED CHILD NEEDS A TOKEN ON FILE, AND THAT INCLUDES CLAUDE.**
-Ruled by lee 2026-11-22: _"If it's a spawn agents it needs to have it, the
-terminal agents are already authorized manually by me."_ A terminal `claude`
-the operator authorised by hand is not spawned by the supervisor and never
-reaches `spawnOnHost`.
+### Who still needs a token on file — narrowed by #449
 
-⚠️ **THIS PROBABLY TIGHTENS SOMETHING THAT WORKED, AND lee KEPT IT ANYWAY.**
+🛑 **~~EVERY SPAWNED CHILD NEEDS A TOKEN ON FILE, AND THAT INCLUDES CLAUDE.~~
+SUPERSEDED FOR THE HOST PATH BY lee, 2026-11-25.** The 2026-11-22 ruling was
+_"If it's a spawn agents it needs to have it, the terminal agents are already
+authorized manually by me."_ **It still stands for docker.**
 
 ```
-MEASURED   on macOS a keychain item named `Claude Code-credentials` exists
-INFERRED   that a spawned host `claude` child reads it, and so needed
-           nothing on file
-UNMEASURED that the child actually reads it. Proving it costs a model turn.
+docker, every vendor   token REQUIRED. requireVendorToken, unconditional
+host,   "cli-login"    token OPTIONAL. The CLI authenticates itself
+host,   "token-required" token REQUIRED. The named refusal, unchanged
 ```
 
-🛑 **THE RULING HOLDS EITHER WAY, WHICH IS WHY THE INFERENCE IS NOT LOAD-BEARING.**
-A credential the supervisor cannot see is one it cannot report on, so an
-unattended child leaning on an interactive login fails exactly the way #396
-failed once that login expires — a clean start and silence. **A token on file is
-a credential the supervisor owns.**
+**The reason for the split is a filesystem one.** A host child inherits `HOME`
+through `spawnOnHost`'s `process.env` spread, so it reaches the credential
+store the operator's own login wrote. A Linux container reads neither the macOS
+Keychain nor `~/.claude`, and #129 decision 3 mounts neither.
 
-⚠️ **DO NOT READ "needed nothing on file" AS AN ESTABLISHED BASELINE.** A later
-reader wanting to relax this rule would be reasoning from the inference above,
-not from a measurement.
+🛑 **WHAT FORCED THE CHANGE: `claude setup-token` SAYS "requires Claude
+subscription".** An account without one, or a machine where only interactive
+browser login is available, had no way to produce the value the refusal
+demanded — so the whole supervised-agent feature was unreachable rather than
+degraded. Rooms, DMs and the web UI kept working, which is what made it easy to
+miss while testing with a subscription account. #449.
+
+#### The `UNMEASURED` line above is now MEASURED, and it came out the other way
+
+**The old version of this section inferred that a spawned host `claude` child
+reads the keychain and called proving it a model turn's cost.** #449 ran it.
+
+```
+claude 2.1.278, browser login present, NO token in the environment
+  claude -p --input-format stream-json          EXIT 0, replied "OK"
+
+the same, plus a BOGUS CLAUDE_CODE_OAUTH_TOKEN
+  EXIT 1, "Failed to authenticate. API Error: 401 OAuth access token
+  is invalid."
+```
+
+🛑 **SO THE ENV VAR OVERRIDES THE LOGIN RATHER THAN FILLING A GAP** — #347's
+Cursor finding, confirmed for Claude Code. **That is why an absent credential
+omits the key entirely instead of setting it empty.** Whether an EMPTY string
+is ignored or overrides was never run, and the bogus result says assume the
+worse one.
+
+⚠️ **THE OLD CONCERN IS REAL AND WAS ACCEPTED, NOT ANSWERED.** A credential the
+supervisor cannot see is one it cannot report on, so a `"cli-login"` child
+leaning on an interactive login fails the way #396 failed once that login
+expires — a clean start and silence. **lee took reachability over that
+guarantee**, because the alternative is that the feature does not exist for the
+operator at all. A token on file still wins when there is one.
+
+🛑 **AND THE HOST REFUSAL IS NOW UNREACHABLE, NOT MERELY NARROWED.** Both
+shipped vendors declare `"cli-login"`, so `"token-required"` is a set with no
+members and the only actor exercising that throw is a test fixture. Raised by
+claude1 reviewing PR #454. **Do not read `resolveHostVendorToken`'s refusal as
+a guarantee the host path still provides.**
+
+```
+token-required vendors in src/   ZERO
+so: no token AND no login        starts clean, answers nothing, no signal
+```
+
+⚠️ **`"cli-login"` ASSERTS A LOGIN ROUTE EXISTS, NEVER THAT ONE IS PRESENT.**
+A pre-spawn check cannot be written — nothing here reads the host credential
+store, and on macOS the Claude one is a Keychain item. **#455 holds the only
+vantage point that can see it: a child that produced zero events before exit.**
+
+⚠️ **AND THE EXPIRY IS NOT ONLY ABOUT TIME.** lee's point of 2026-11-25: one
+`claude` install can be both an attached client and a supervised child, sharing
+one credential store. **Logging out of the attached instance de-authenticates
+every `"cli-login"` child**, with nothing on this side to point at.
+
+#### `hostAuth`, and why it is a vendor field
+
+**Each vendor declares `hostAuth` in its own module** — `claude-spawn.ts` and
+`cursor-spawn.ts` — and `resolveHostVendorToken` in `auth.ts` is the only
+reader. lee, 2026-11-25:
+
+> _"supervised claude instances (dockerized) should act like cursor dockerized
+> instances. That's the whole point of supervised/dockerized agents: The
+> supervisor should be able to treat them the same, with difference abstracted
+> by each's driver."_
+
+🛑 **SO THE CONTAINER PATH MUST NEVER READ IT.** A test asserts `auth.ts` is the
+only file in `src/` that does, and a second one refuses a container with no
+token for BOTH vendors — the actor being a vendor that opted out on the host, so
+the assertion would say nothing otherwise.
+
+⚠️ **CURSOR'S VALUE IS INFERRED, UNLIKE CLAUDE'S.** `cursor-agent login` stores
+a host login and its init event reports `apiKeySource: "login"`, but nobody has
+run `cursor-agent` with that login and no `CURSOR_API_KEY` — one turn costs
+money. **The cost of being wrong is small and self-explaining**: the CLI's own
+error names both routes, measured on #396.
+
+⚠️ **A CONTAINER LOGIN IS #450, AND IT IS PARKED.** Fixing the host path does
+nothing for it, and this section should not read as though it did.
 
 **The remedy is TWO commands for claude, and the doc said one.** The refusal
 prints the second; the first is the vendor's own `authSetupHint`:
@@ -670,7 +743,9 @@ On file is not in the child's environment, which is why the test asserts the
 1. A driver under `src/supervise/drivers/` — the only file naming that CLI's
    flags and event shapes.
 2. A spawn block under `src/adapters/` declaring the three capability booleans,
-   its `authEnvVar`, and the `authSetupHint` naming how to obtain that credential.
+   its `authEnvVar`, the `authSetupHint` naming how to obtain that credential,
+   and **`hostAuth`** — `"cli-login"` only if the CLI authenticates itself from
+   a store a host child inherits, which is a MEASUREMENT and not a guess.
 3. An `Adapter` carrying that spawn block, registered in `src/adapters/index.ts`.
 4. A `cli-<vendor>` stage in `Dockerfile`, plus that vendor in
    `AGENT_VENDORS` — which is what makes every Dockerfile assertion run

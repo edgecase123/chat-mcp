@@ -77,6 +77,13 @@ export const claudeSpawn: VendorSpawn = {
   authEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
   authSetupHint: "run `claude setup-token` on the host",
 
+  // 🛑 MEASURED ON #449, NOT ASSUMED: with a browser login present and no
+  // token anywhere in the environment, `claude -p --input-format stream-json`
+  // exits 0 and replies. `claude setup-token` needs a subscription, so
+  // requiring it here made the whole supervised feature unreachable for an
+  // account without one.
+  hostAuth: "cli-login",
+
   // `routeClaudeEvent` calls both sinks, so both are true here and nowhere
   // else. A vendor that routes neither declares `false` and still starts.
   reportsUsage: true,

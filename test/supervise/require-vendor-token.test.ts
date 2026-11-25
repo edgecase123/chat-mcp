@@ -106,3 +106,67 @@ test("missingVendorTokenMessage is CALLED in one file only, and the scan reached
     "a second site builds the refusal itself instead of calling requireVendorToken",
   );
 });
+
+/**
+ * 🛑 #449. `claude setup-token` needs a subscription, so demanding a stored
+ * token made the whole supervised-agent feature unreachable for an account
+ * without one — not degraded, absent. A vendor whose CLI logs in with a
+ * browser authenticates itself from the store a host child inherits.
+ */
+test("resolveHostVendorToken returns null for a cli-login vendor with nothing on file", async () => {
+  const { resolveHostVendorToken } =
+    await import("../../src/supervise/auth.js");
+
+  assert.equal(
+    resolveHostVendorToken({
+      vendor: "logsitselfin",
+      authEnvVar: "LOGSITSELFIN_API_KEY",
+      authSetupHint: "there is no hint, this vendor is fictional",
+      hostAuth: "cli-login",
+    }),
+    null,
+  );
+});
+
+/**
+ * 🛑 THE FALLBACK lee ASKED FOR, AND IT IS A SEPARATE CLAIM. A fix that simply
+ * stopped reading the store on the host would satisfy the test above and
+ * strand every operator who DOES have a token — the stored value has to keep
+ * winning over the CLI's own login, because that is today's behaviour.
+ */
+test("resolveHostVendorToken still returns a stored token to a cli-login vendor", async () => {
+  const { resolveHostVendorToken, setVendorToken } =
+    await import("../../src/supervise/auth.js");
+
+  const vendor = {
+    vendor: "logsitselfin",
+    authEnvVar: "LOGSITSELFIN_API_KEY",
+    authSetupHint: "there is no hint, this vendor is fictional",
+    hostAuth: "cli-login",
+  } as const;
+
+  setVendorToken(vendor, "stored-beats-the-login");
+
+  assert.equal(resolveHostVendorToken(vendor), "stored-beats-the-login");
+});
+
+/**
+ * 🛑 THE DISCRIMINATOR. Without this arm the two above pass against a
+ * resolver that never throws for anybody, which is #396 shipped a second time
+ * under a new name.
+ */
+test("resolveHostVendorToken still throws for a token-required vendor", async () => {
+  const { resolveHostVendorToken } =
+    await import("../../src/supervise/auth.js");
+
+  assert.throws(
+    () =>
+      resolveHostVendorToken({
+        vendor: "nologinroute",
+        authEnvVar: "NOLOGINROUTE_API_KEY",
+        authSetupHint: "a dashboard key is the only route",
+        hostAuth: "token-required",
+      }),
+    /no NOLOGINROUTE_API_KEY on file/,
+  );
+});

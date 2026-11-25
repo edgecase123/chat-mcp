@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { ChildGrant } from "../../../src/supervise/grant.js";
+import type { VendorSpawn } from "../../../src/supervise/vendor.js";
 
 // 🛑 BEFORE any import that resolves a state path, per AGENTS.md. The token is
 // read from the secrets file under the state dir, which the node runner
@@ -33,6 +34,13 @@ process.env.CHAT_MCP_HOME = mkdtempSync(
  * 🛑 THE ACCEPTANCE SCRIPT'S "a real CURSOR_API_KEY is on file" PASSED
  * THROUGHOUT. On file is not in the child's environment, which is why this
  * asserts the `env` `spawn` RECEIVES rather than the store's contents.
+ *
+ * 🛑 THE REFUSAL IS NOW PER VENDOR, AND NEITHER SHIPPED VENDOR TAKES IT. #449:
+ * a user who cannot mint a long-lived token could not start ANY supervised
+ * agent, while the CLI they already log into with a browser authenticates
+ * itself. `hostAuth` is the declaration, and the fixture below is the only
+ * actor left that refuses — which is why it exists rather than being a tidier
+ * way to say the same thing.
  */
 
 /**
@@ -81,7 +89,7 @@ function fakeChild(): ChildProcessWithoutNullStreams {
   } as unknown as ChildProcessWithoutNullStreams;
 }
 
-test("🛑 the host child is handed its own credential, and no child starts without one", async (t: TestContext) => {
+test("🛑 a host child is handed its own credential, and only a token-required vendor refuses without one", async (t: TestContext) => {
   const spawns: { env?: NodeJS.ProcessEnv }[] = [];
   const approvals: { env?: NodeJS.ProcessEnv }[] = [];
 
@@ -114,6 +122,28 @@ test("🛑 the host child is handed its own credential, and no child starts with
   const { claudeSpawn } = await import("../../../src/adapters/claude-spawn.js");
   const { setVendorToken } = await import("../../../src/supervise/auth.js");
 
+  /**
+   * 🛑 THE ONLY REMAINING ACTOR FOR THE REFUSAL, AND IT IS A FIXTURE BECAUSE
+   * BOTH SHIPPED VENDORS NOW SELF-AUTHENTICATE. A guard whose every live
+   * caller opted out is a guard no test reaches, and #396 is what happens when
+   * nothing reaches it.
+   *
+   * ⚠️ BUILT FROM `cursorSpawn`, SO IT CARRIES A `"file"` GRANT DELIVERY. The
+   * ordering this pins — refuse before the grant writer — is unreachable by a
+   * vendor whose grant costs no filesystem write, which is the hole the
+   * original ungranted-only version of this test had.
+   *
+   * ⚠️ ITS OWN `authEnvVar`, so a token stored for Cursor below cannot satisfy
+   * it. A shared name would make this arm pass for the wrong reason.
+   */
+  const tokenOnly = {
+    ...cursorSpawn,
+    vendor: "tokenonly",
+    authEnvVar: "TOKENONLY_API_KEY",
+    authSetupHint: "this vendor is fictional and has no login",
+    hostAuth: "token-required",
+  } as VendorSpawn;
+
   // 🛑 THE REFUSAL FIRST, WHILE THE STORE IS STILL EMPTY. lee ruled at `#mcp`
   // 16657 that an unauthenticated child must refuse to START, rather than
   // start, take the prompt and exit 1 — the prompt is lost either way, and
@@ -128,12 +158,12 @@ test("🛑 the host child is handed its own credential, and no child starts with
 
   assert.throws(
     () =>
-      spawnOnHost(cursorSpawn, {
+      spawnOnHost(tokenOnly, {
         cwd: refused,
         grant: grantIn(refused),
       }),
-    /no CURSOR_API_KEY on file/,
-    "a cursor child with no token on file was allowed to start",
+    /no TOKENONLY_API_KEY on file/,
+    "a token-required child with no token on file was allowed to start",
   );
 
   // 🛑 AND IT LEFT NOTHING BEHIND. A refusal that came after the writer would
@@ -143,15 +173,6 @@ test("🛑 the host child is handed its own credential, and no child starts with
   assert.ok(
     !existsSync(join(refused, ".cursor")),
     "a refused child left a grant config in the operator's project directory",
-  );
-
-  // 🛑 NOT CURSOR-SPECIFIC. The defect was found on cursor, but the missing
-  // `env` was in `spawnOnHost`, so a fix scoped to one vendor would leave the
-  // other on the same silence.
-  assert.throws(
-    () => spawnOnHost(claudeSpawn, { cwd: process.env.CHAT_MCP_HOME }),
-    /no CLAUDE_CODE_OAUTH_TOKEN on file/,
-    "a claude child with no token on file was allowed to start",
   );
 
   // 🛑 NOTHING SPAWNED AND NOTHING WAS APPROVED. A refusal that happens AFTER
@@ -168,17 +189,70 @@ test("🛑 the host child is handed its own credential, and no child starts with
     "a server was approved for a child that was refused",
   );
 
-  setVendorToken(claudeSpawn, "claude-token-for-the-child");
+  /**
+   * 🛑 #449, AND IT IS THE WHOLE POINT OF THE TICKET. `claude setup-token`
+   * needs a subscription, so a user without one had no way to produce the
+   * value the refusal demanded — and the feature did not exist for them.
+   * Measured on the ticket against `claude` 2.1.278 with a browser login and
+   * no token anywhere in the environment: `claude -p --input-format
+   * stream-json` exits 0 and replies.
+   *
+   * ⚠️ THE PRECONDITION IS ASSERTED, NOT ASSUMED. A runner whose own
+   * environment carries the var would make the absence assertion below
+   * measure the runner rather than this code.
+   */
+  assert.equal(
+    process.env[claudeSpawn.authEnvVar],
+    undefined,
+    "the test runner's own environment carries the credential under test",
+  );
 
   spawnOnHost(claudeSpawn, { cwd: process.env.CHAT_MCP_HOME });
 
   assert.equal(
     spawns.length,
     1,
+    "a self-authenticating claude child with no token on file did not start",
+  );
+
+  /**
+   * 🛑 THE KEY IS ABSENT, NOT EMPTY, AND THE DIFFERENCE IS MEASURED. From the
+   * ticket, against a working browser login:
+   *
+   *   bogus CLAUDE_CODE_OAUTH_TOKEN -> exit 1, "401 OAuth access token is
+   *   invalid"
+   *
+   * So the env var OVERRIDES the login rather than filling a gap, which is
+   * #347's finding for `CURSOR_API_KEY` confirmed for Claude Code. Whether an
+   * EMPTY string is ignored or overrides was never run, so this forbids the
+   * key outright.
+   *
+   * ⚠️ `hasOwn`, NOT `=== undefined`. `{ [k]: undefined }` reads as undefined
+   * and still puts the key in the object, and that is exactly the shape a
+   * one-character fix would produce.
+   */
+  assert.equal(
+    Object.hasOwn(spawns[0]?.env ?? {}, claudeSpawn.authEnvVar),
+    false,
+    "an absent credential was injected as an empty or undefined value",
+  );
+
+  /**
+   * 🛑 THE FALLBACK lee ASKED FOR, AND IT IS NOT IMPLIED BY THE ARM ABOVE. A
+   * fix that simply stopped injecting on the host would pass everything so far
+   * and silently strand every operator who DOES have a token on file.
+   */
+  setVendorToken(claudeSpawn, "claude-token-for-the-child");
+
+  spawnOnHost(claudeSpawn, { cwd: process.env.CHAT_MCP_HOME });
+
+  assert.equal(
+    spawns.length,
+    2,
     "the authenticated claude child did not spawn",
   );
   assert.equal(
-    spawns[0]?.env?.[claudeSpawn.authEnvVar],
+    spawns[1]?.env?.[claudeSpawn.authEnvVar],
     "claude-token-for-the-child",
     "the child's env did not carry its vendor's credential",
   );
@@ -197,6 +271,18 @@ test("🛑 the host child is handed its own credential, and no child starts with
   const granted = mkdtempSync(join(tmpdir(), "chat-mcp-cred-granted-"));
 
   spawnOnHost(cursorSpawn, { cwd: granted, grant: grantIn(granted) });
+
+  /**
+   * ⚠️ NO SPAWN TO ASSERT HERE, AND THAT IS CURSOR'S CONTRACT RATHER THAN A
+   * GAP. `processPerTurn` is true, so `spawnOnHost` returns a lazy launcher
+   * and the first `docker`-free process only starts on a turn. The injection
+   * is pinned on the claude arm above, which is `processPerTurn: false`.
+   */
+  assert.equal(
+    spawns.length,
+    2,
+    "a per-turn vendor spawned a process at wiring time",
+  );
 
   // 🛑 THE APPROVAL EXEC IS DECIDED, NOT OVERLOOKED. lee's 16654 permits the
   // token in a child's `env`; `cursor-agent mcp enable` needs no credential,
