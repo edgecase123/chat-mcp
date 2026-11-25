@@ -113,7 +113,18 @@ export async function openHostBus(childHandle: string): Promise<HostBus> {
   });
 
   // 🛑 AFTER the bind, so a listener that failed to bind leaves no row behind.
-  await registerChildOffline(childHandle);
+  //
+  // 🛑 AND CLOSED BY HAND IF IT THROWS, BECAUSE `listener.close()` IS ONLY
+  // REACHABLE THROUGH THE `HostBus` BELOW. The bind already holds a loopback
+  // port, so a throw between here and the return leaks a listening server for
+  // the life of the process — and `startSupervisor` retries, so each attempt
+  // would leak another.
+  try {
+    await registerChildOffline(childHandle);
+  } catch (err) {
+    await listener.close();
+    throw err;
+  }
 
   return {
     endpoint: { url: listener.url, token: mintToken(childHandle) },
