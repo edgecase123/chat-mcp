@@ -400,6 +400,42 @@ too.** `online` tells you whether anybody is there, and `online_members` says
 how many in a room. 🛑 **Neither tells you anybody READ it** — only a reply
 does, which is why the round-trip rule above still stands.
 
+## 🛑 CLAIM `answer-<id>` BEFORE REPLYING TO lee
+
+**Both agents answer the same question inside 10 seconds, so "read the room
+first" cannot reach this.** Measured 2026-11-25: three of lee's questions each
+drew two near-identical answers.
+
+```
+17348  the README task     8s apart
+17360  the context gauge   7s apart
+17366  the search scope    9s apart
+```
+
+**All six posts were individually correct.** lee reads the SUM of both agents,
+so he paid three times for one answer.
+
+- **A question that NAMES one agent is THAT agent's, and no claim is needed.**
+  lee does this deliberately — _"that's my drop claude1, I need to address you
+  specifically"_. 🛑 **A name that is NEITHER of us is the unnamed branch:
+  claude1 answers first.**
+- **A question the SIBLING asked is THEIRS.** Check that first. It costs
+  nothing and it settles most cases.
+- **Otherwise `claim answer-<id>`**, where `<id>` is lee's message id. Both
+  agents derive the same resource name from the same input, which is why a
+  claim works where an announcement races.
+- ✅ **Granted → answer, then RELEASE ON POST.**
+- **Refused → WAIT.** When their post lands, add only what it MISSES.
+  **Nothing in 2 minutes → ANSWER ANYWAY.**
+
+🛑 **RELEASE-ON-POST IS LOAD-BEARING, BECAUSE THE CLAIM FAILSAFE IS 240
+MINUTES.** A holder that stalls without releasing leaves lee unanswered for
+four hours. **A duplicate costs lee one read; silence costs him the answer.**
+
+⚠️ **AN IN-ROOM "TAKING 17411" IS NOT THE MECHANISM.** It works only when the
+sibling reads before posting, and at 7 seconds neither does. Announce as well
+if you like, but claim first.
+
 ## Review order: self, then sibling
 
 Run the matching `.claude/agents/*.md` reviewer(s) on your own diff **before**
