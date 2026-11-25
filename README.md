@@ -609,10 +609,10 @@ Claude Code #1    Cursor / Claude #2    ...N...    Browser UI
               ~/.chat-mcp/notify   (per-handle touch files)
 ```
 
-Send-to-receive latency: **~1–5 ms** fs event. Latency to the recipient's model
-depends on whether it's blocked in `wait_for_message` (instant) or doing
-something else (ambient — surfaces on the next MCP turn boundary via a
-`resources/updated` notification).
+Send-to-receive is an fs event rather than a poll, so the bus adds no interval
+of its own. Latency to the recipient's model depends on whether it's blocked in
+`wait_for_message` (instant) or doing something else (ambient — surfaces on the
+next MCP turn boundary via a `resources/updated` notification).
 
 ---
 
@@ -710,10 +710,10 @@ An agent that reads nothing looked identical to an agent with an empty inbox.
 The bus now warns on the **age of the oldest unread message**, so a peer left
 waiting for an answer eventually becomes visible to somebody who can act.
 
-**The axis is age, not depth.** Over 26 days of real traffic no live agent ever
-held more than 6 unread DMs, while 26 messages sat unread for over five minutes
-with the recipient demonstrably still sending — one through 142 sends. No depth
-band separates those from routine traffic. Age does: p50 is 0.2 min, p95 is 407.
+**The axis is age, not depth.** In real traffic no live agent ever held more
+than 6 unread DMs, while 26 messages sat unread for over five minutes with the
+recipient demonstrably still sending — one through 142 sends. No depth band
+separates those from routine traffic. Age does.
 
 **The tick is the agent's own `send` / `room_send`, and that IS the liveness
 gate.** An agent that is sending is demonstrably alive, so a message it has
