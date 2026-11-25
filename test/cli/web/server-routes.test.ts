@@ -885,6 +885,72 @@ test("a search does not move any read watermark through the HTTP path either", a
   }
 });
 
+/**
+ * 🛑 A DM TARGET USED TO MATCH EVERY DM THAT PEER TOUCHED (#447).
+ *
+ * The route scopes a peer target to the operator's own thread, so the search
+ * box cannot offer a hit the message pane is unable to open. A room target is
+ * unaffected — see the DAO tests in `search-scoping.test.ts`.
+ */
+test("🛑 a DM-targeted search returns only the operator's own thread with that peer", async () => {
+  const h = await harness();
+  dao.insertMessage(h.db, {
+    from: "peer-a",
+    to: "operator",
+    body: "SCOPED to me",
+    kind: "chat",
+  });
+  dao.insertMessage(h.db, {
+    from: "operator",
+    to: "peer-a",
+    body: "SCOPED from me",
+    kind: "chat",
+  });
+  dao.insertMessage(h.db, {
+    from: "peer-a",
+    to: "peer-b",
+    body: "SCOPED to a third party",
+    kind: "chat",
+  });
+
+  const body = JSON.parse(
+    (await raw(h, { path: "/api/search?q=SCOPED&target=peer-a" })).body,
+  ) as { returned: number; results: Array<{ snippet: string }> };
+
+  assert.equal(body.returned, 2, "expected 2 of 3 — the pair, not the peer");
+  assert.deepEqual(body.results.map((r) => r.snippet).sort(), [
+    "SCOPED from me",
+    "SCOPED to me",
+  ]);
+  close(h);
+});
+
+/** The control: an UNTARGETED search still reads everything, as the UI needs. */
+test("an untargeted search still crosses conversations", async () => {
+  const h = await harness();
+  dao.insertMessage(h.db, {
+    from: "peer-a",
+    to: "operator",
+    body: "SCOPED to me",
+    kind: "chat",
+  });
+  dao.insertMessage(h.db, {
+    from: "peer-a",
+    to: "peer-b",
+    body: "SCOPED to a third party",
+    kind: "chat",
+  });
+
+  const body = JSON.parse(
+    (await raw(h, { path: "/api/search?q=SCOPED" })).body,
+  ) as {
+    returned: number;
+  };
+
+  assert.equal(body.returned, 2);
+  close(h);
+});
+
 test("a rebound GET to /api/search is refused — it reads every room", async () => {
   const h = await harness();
 

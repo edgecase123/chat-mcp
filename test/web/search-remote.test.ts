@@ -1,0 +1,161 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  remoteHitsLabel,
+  remoteOnlyHits,
+  searchRequestUrl,
+} from "../../web/assets/logic.js";
+
+/**
+ * 🛑 THE OPERATOR'S SEARCH BOX FILTERED 200 LOADED ROWS AND NOTHING ELSE
+ * (#447). These helpers are the pure half of reaching the rest: building the
+ * request, dropping the hits already on screen, and counting what is left.
+ *
+ * 🛑 "EARLIER IN THIS CONVERSATION" HAS TO BE TRUE. A server hit whose id is
+ * already loaded is NOT earlier, so `remoteOnlyHits` drops it rather than
+ * letting the label lie. That also hides a loaded row the local filter
+ * rejected, which is the status quo and better than a false location.
+ */
+
+test("a blank or whitespace term builds no URL — the server 400s on one", () => {
+  for (const term of ["", "   ", "\t"])
+    assert.equal(
+      searchRequestUrl(term, "#gate", 50),
+      null,
+      `term ${JSON.stringify(term)} built a URL`,
+    );
+});
+
+/** The control. Without it a helper that ALWAYS returned null would pass. */
+test("a real term builds a URL carrying the term, the target and the limit", () => {
+  const u = searchRequestUrl("gate", "#gate", 50);
+  assert.ok(u, "a real term built no URL");
+  assert.match(u, /^\/api\/search\?/);
+  assert.match(u, /[?&]q=gate(&|$)/);
+  assert.match(u, /[?&]target=%23gate(&|$)/);
+  assert.match(u, /[?&]limit=50(&|$)/);
+});
+
+test("🛑 a term and a target are percent-encoded, so neither can inject a parameter", () => {
+  const u = searchRequestUrl("a&limit=1 b", "peer+a", 50);
+  assert.ok(u);
+  assert.doesNotMatch(
+    u,
+    /q=a&limit=1/,
+    "an & in the term leaked a second parameter",
+  );
+  assert.match(u, /q=a%26limit%3D1%20b/);
+  assert.match(u, /target=peer%2Ba/);
+});
+
+test("an absent target searches across conversations rather than sending a blank one", () => {
+  const u = searchRequestUrl("gate", null, 50);
+  assert.ok(u);
+  assert.doesNotMatch(u, /target=/, "a null target sent an empty target=");
+});
+
+test("🛑 hits already in the loaded window are dropped, so the label cannot claim they are earlier", () => {
+  const hits = [{ id: 10 }, { id: 20 }, { id: 30 }];
+
+  assert.deepEqual(
+    remoteOnlyHits(hits, [20]).map((h: { id: number }) => h.id),
+    [10, 30],
+  );
+});
+
+/** The control: nothing loaded means nothing is dropped. */
+test("an empty loaded window drops no hits", () => {
+  const hits = [{ id: 10 }, { id: 20 }];
+
+  assert.deepEqual(
+    remoteOnlyHits(hits, []).map((h: { id: number }) => h.id),
+    [10, 20],
+  );
+});
+
+test("every hit being on screen leaves nothing to offer", () => {
+  assert.deepEqual(remoteOnlyHits([{ id: 10 }], [10]), []);
+});
+
+test("no remote hits renders no line at all, rather than a zero", () => {
+  assert.equal(remoteHitsLabel(0, false), null);
+});
+
+/**
+ * 🛑 THE CAP SURVIVES THE FILTER EMPTYING THE LIST. Raised by claude2 on PR
+ * 453 and reproduced before accepting: `truncated` describes the list the
+ * SERVER capped, `count` describes what is left after the on-screen hits are
+ * dropped. So a term with more matches than the fetch limit, all of them in
+ * view, rendered NOTHING — identical to "there is nothing more", which is the
+ * one answer #447 exists to stop giving. Reachable on "the" or a handle.
+ */
+test("🛑 a capped list with every hit on screen still says more exists", () => {
+  const label = remoteHitsLabel(0, true);
+
+  assert.ok(label, "a capped result set rendered nothing at all");
+  assert.match(label, /more matches in this conversation/);
+});
+
+/** The control that keeps the zero case silent when the list was NOT capped. */
+test("an uncapped empty result stays silent, so the two cases differ", () => {
+  assert.equal(remoteHitsLabel(0, false), null);
+  assert.notEqual(remoteHitsLabel(0, true), null);
+});
+
+test("one hit is singular and more than one is plural", () => {
+  const one = remoteHitsLabel(1, false);
+  const three = remoteHitsLabel(3, false);
+
+  // 🛑 NON-NULL ASSERTED, NOT CAST AWAY. The helper returns null at zero on
+  // purpose, so a regression that returned null here must fail rather than
+  // being silenced by a `!`.
+  assert.ok(one, "a single hit produced no label");
+  assert.ok(three, "three hits produced no label");
+  assert.match(one, /^1 more match in this conversation/);
+  assert.match(three, /^3 more matches in this conversation/);
+});
+
+/**
+ * 🛑 THE LABEL MUST NOT SAY "EARLIER", BECAUSE THAT IS NOT PROVABLE HERE.
+ * `openHashTarget` replaces the loaded window with one AROUND an anchor, so a
+ * hit outside that window can be NEWER than it. The first cut of this feature
+ * said "earlier in this conversation" and would have been wrong after any
+ * jump from a message link.
+ */
+test("🛑 the label never claims a direction it cannot prove", () => {
+  for (const [count, truncated] of [
+    [1, false],
+    [3, false],
+    [50, true],
+    [0, true],
+  ] as const) {
+    const label = remoteHitsLabel(count, truncated);
+
+    assert.ok(label, `no label for count=${count} truncated=${truncated}`);
+    assert.doesNotMatch(
+      label,
+      /earlier|older|above|below/,
+      `the label claimed a direction: ${label}`,
+    );
+  }
+});
+
+/**
+ * 🛑 A CAPPED COUNT MUST SAY SO. `returned === limit` cannot tell an exact 50
+ * from a cap, and the server already answers that with `truncated` — dropping
+ * it here would report a capped list as a total.
+ */
+test("🛑 a truncated result set is marked with a +, not reported as a total", () => {
+  const capped = remoteHitsLabel(50, true);
+
+  assert.ok(capped, "a capped result set produced no label");
+  assert.match(capped, /^50\+ more matches in this conversation/);
+  assert.doesNotMatch(capped, /^50 more/);
+});
+
+test("the label names the conversation, because the search is scoped to one", () => {
+  const label = remoteHitsLabel(2, false);
+
+  assert.ok(label, "two hits produced no label");
+  assert.match(label, /in this conversation$/);
+});

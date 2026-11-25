@@ -2022,7 +2022,13 @@ export interface SearchResult {
  */
 export function searchMessages(
   db: Db,
-  input: { pattern: string; target?: string; limit: number; caller?: string },
+  input: {
+    pattern: string;
+    target?: string;
+    limit: number;
+    caller?: string;
+    pairedWith?: string;
+  },
 ): SearchResult {
   const clauses: string[] = [];
   const args: (string | number)[] = [input.pattern];
@@ -2042,6 +2048,14 @@ export function searchMessages(
     if (isRoomName(input.target)) {
       clauses.push("AND to_handle = ?");
       args.push(input.target);
+    } else if (input.pairedWith !== undefined) {
+      // 🛑 THE PAIR, NOT THE PEER (#447). `to = peer OR from = peer` also
+      // matches that peer's DMs with a third agent, which the operator's
+      // message pane can never display — it scopes to the pair in both
+      // directions. A search offering unreachable hits is worse than none.
+      clauses.push(`AND ((from_handle = ? AND to_handle = ?)
+                     OR (from_handle = ? AND to_handle = ?))`);
+      args.push(input.target, input.pairedWith, input.pairedWith, input.target);
     } else {
       clauses.push("AND (to_handle = ? OR from_handle = ?)");
       args.push(input.target, input.target);
