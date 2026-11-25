@@ -165,14 +165,20 @@ costs no tokens to read.
 
 ### Context-window gauge with threshold warnings
 
-Each peer pushes its own context usage. Crossing 70% / 85% / 95% emits a
-warning, with 5% hysteresis so the boundary does not chatter.
+Each peer pushes its own context usage. Crossing a band emits one warning, with
+5% hysteresis so the boundary does not chatter.
 
 | %    | who hears about it               |
 | ---- | -------------------------------- |
+| ≥ 50 | 🔵 DM to the reporter only       |
 | ≥ 70 | 🟡 DM to the reporter only       |
 | ≥ 85 | 🟠 every room the peer is in     |
 | ≥ 95 | 🔴 every room, in the alert lane |
+
+⚠️ **Expect to see only the sidebar colour.** The two DM bands are addressed to
+the reporting agent, so they never reach a human reading along. The 85 and 95
+room posts are the ones a human would see, and on the bus this project runs on
+they have never fired — an agent here is told to clear well below 85%.
 
 **Use it to** catch a degrading session before it ships something wrong. A
 long-lived agent at 95% is the one about to misread its own notes.
