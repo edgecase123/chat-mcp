@@ -368,3 +368,37 @@ test("🛑 the live list is re-read after a start, or Start stays on screen", ()
     "the refresh has to follow the failure path too; startVisible reads the live list and nothing else hides the button",
   );
 });
+
+/**
+ * 🛑 ONE FLAG, THREE HANDLERS, SO THE CLEAR HAS TO NAME ITS OWN ROW.
+ *
+ * `openPlan`, `approvePlan` and `startAgent` all hold `state.rowBusy`. A bare
+ * `state.rowBusy = null` clears whichever row happens to be in it, so row A
+ * finishing re-enables row B's controls while B's own request is still in
+ * flight — which is the invariant "and no other row's" already asserts.
+ *
+ * `startAgent` holds the flag across an extra `await fetchLiveAgents()`, so it
+ * widens the window rather than inventing it.
+ */
+test("🛑 a handler clears the busy flag only when the row is still its own", () => {
+  const bare = APP_CODE.match(/^\s*state\.rowBusy = null;/gm) ?? [];
+
+  assert.deepEqual(
+    bare,
+    [],
+    `${bare.length} unguarded clear(s) of state.rowBusy — one row can re-enable another's controls`,
+  );
+
+  // POSITIVE CONTROL: the guarded form is really there, three times, so the
+  // absence check above is not passing on a flag that vanished.
+  const guarded =
+    APP_CODE.match(
+      /if \(state\.rowBusy === handle\) state\.rowBusy = null;/g,
+    ) ?? [];
+
+  assert.equal(
+    guarded.length,
+    3,
+    "openPlan, approvePlan and startAgent each own one guarded clear",
+  );
+});

@@ -236,6 +236,9 @@ const state = {
   // The row with a request in flight, so every control on it can be disabled
   // without disabling another row's. Shared by the plan controls and Start:
   // a per-control flag would let one row run two requests at once.
+  //
+  // 🛑 EVERY CLEAR NAMES ITS OWN ROW. Three handlers hold this one field, so a
+  // bare reset would let row A finishing re-enable row B mid-request.
   rowBusy: null,
 };
 
@@ -2283,7 +2286,7 @@ async function openPlan(handle) {
     state.planOpen = null;
   }
 
-  state.rowBusy = null;
+  if (state.rowBusy === handle) state.rowBusy = null;
   repaintSettings();
 }
 
@@ -2316,7 +2319,7 @@ async function approvePlan(handle) {
     toast(`Not approved: ${e.message}`, "warn");
   }
 
-  state.rowBusy = null;
+  if (state.rowBusy === handle) state.rowBusy = null;
 
   try {
     await readPlan(handle);
@@ -2425,7 +2428,7 @@ async function startAgent(handle) {
     toast(`Not started: ${e.message}`, "warn");
   }
 
-  state.rowBusy = null;
+  if (state.rowBusy === handle) state.rowBusy = null;
   await fetchLiveAgents();
   repaintSettings();
 }
