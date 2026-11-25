@@ -141,3 +141,24 @@ test("🔴 control — argsFor passes no resume flag when there is no session", 
     }
   }
 });
+
+/**
+ * 🛑 #449, PINNED AT THE VENDOR LAYER AND NOT ONLY AT THE DRIVER. lee's day
+ * job has no route to a long-lived token for EITHER CLI: both authenticate
+ * with a browser login from the terminal. Flipping one of these back to
+ * `"token-required"` makes the supervised feature unreachable for him again,
+ * and nothing else in the suite would go red for it.
+ *
+ * ⚠️ IT ASSERTS THE WHOLE SET, NOT `every`. A third vendor landing as
+ * `"token-required"` should force a decision here rather than pass by
+ * satisfying a predicate about the two that already shipped.
+ */
+test("🛑 every shipped vendor can start a host child from its own login", () => {
+  assert.deepEqual(
+    [...vendorsWithSpawn()].sort().map((v) => [v, spawnFor(v).hostAuth]),
+    [
+      ["claude", "cli-login"],
+      ["cursor", "cli-login"],
+    ],
+  );
+});

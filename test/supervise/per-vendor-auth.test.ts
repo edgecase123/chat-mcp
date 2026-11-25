@@ -247,3 +247,90 @@ test("🔴 a mis-pasted Cursor key with an interior space is refused, not stored
   // The refusal must not have cost the operator the credential they had.
   assert.equal(readVendorToken(cursorSpawn), "key_cursor-good");
 });
+
+/**
+ * 🛑 lee's RULING OF 2026-11-25, PINNED SO IT CANNOT ERODE: *"supervised claude
+ * instances (dockerized) should act like cursor dockerized instances. That's
+ * the whole point of supervised/dockerized agents: The supervisor should be
+ * able to treat them the same, with difference abstracted by each's driver."*
+ *
+ * #449 made the HOST credential optional per vendor. The container path must
+ * not inherit that, because the reason is a host one: a child spawned on the
+ * host inherits `HOME` and reaches the store the operator's own login wrote,
+ * and a Linux container reads neither the macOS Keychain nor `~/.claude` —
+ * #129 decision 3 mounts neither.
+ *
+ * ⚠️ THE ACTOR IS THE VENDOR THAT OPTED OUT ON THE HOST. Asserting this with a
+ * `"token-required"` vendor would pass against a container path that honoured
+ * `hostAuth`, and say nothing.
+ */
+test("🛑 docker refuses with no token for BOTH vendors, whatever hostAuth says", () => {
+  assert.equal(
+    claudeSpawn.hostAuth,
+    "cli-login",
+    "the vendor that opted out on the host is the only actor this test has",
+  );
+  assert.equal(cursorSpawn.hostAuth, "cli-login");
+
+  // 🛑 A FRESH `authEnvVar` PER ARM, BECAUSE EARLIER TESTS IN THIS FILE SEED
+  // BOTH REAL TOKENS. Naming the shipped env vars made this pass or fail on
+  // test ORDER, which is the one thing a refusal test must not depend on.
+  for (const [vendor, envVar] of [
+    [claudeSpawn, "CLAUDELIKE_OAUTH_TOKEN"],
+    [cursorSpawn, "CURSORLIKE_API_KEY"],
+  ] as const) {
+    assert.throws(
+      () =>
+        planFor({
+          ...vendor,
+          vendor: `${vendor.vendor}like`,
+          authEnvVar: envVar,
+        }),
+      new RegExp(`no ${envVar} on file`),
+      `a cli-login vendor was handed a container with no credential: ${vendor.vendor}`,
+    );
+  }
+});
+
+/**
+ * 🛑 THE STRUCTURAL HALF, BECAUSE THE TEST ABOVE WOULD STILL PASS IF THE
+ * CONTAINER PATH READ `hostAuth` AND HAPPENED TO REFUSE ANYWAY. The supervisor
+ * treating both vendors the same in docker is a property of the CODE, so this
+ * asserts no container-side file reads the field at all.
+ *
+ * ⚠️ IT PRINTS ITS OWN DENOMINATOR. A traversal that reached nothing would
+ * otherwise report CLEAN, which is the same false green the scan prevents.
+ */
+test("🛑 no container-side file reads hostAuth, so the two vendors cannot diverge in docker", async () => {
+  const { readdirSync, readFileSync, statSync } = await import("node:fs");
+  const { join } = await import("node:path");
+
+  const root = new URL("../../src/", import.meta.url).pathname;
+  const files: string[] = [];
+
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      const path = join(dir, entry);
+
+      if (statSync(path).isDirectory()) walk(path);
+      else if (path.endsWith(".ts")) files.push(path);
+    }
+  };
+
+  walk(root);
+
+  assert.ok(
+    files.length > 40,
+    `the scan reached only ${files.length} files under src/`,
+  );
+
+  const readers = files
+    .filter((path) => /vendor\.hostAuth\b/.test(readFileSync(path, "utf8")))
+    .map((path) => path.slice(root.length));
+
+  assert.deepEqual(
+    readers,
+    ["supervise/auth.ts"],
+    "a second site reads hostAuth; only the host resolver may",
+  );
+});

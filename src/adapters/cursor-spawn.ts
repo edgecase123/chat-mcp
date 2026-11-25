@@ -62,6 +62,14 @@ export const cursorSpawn: VendorSpawn = {
   authSetupHint:
     "create a Cursor API key at https://cursor.com/dashboard/api (a host login cannot be read by a container)",
 
+  // ⚠️ INFERRED, UNLIKE CLAUDE'S. `cursor-agent login` stores a host login and
+  // its init event reports `apiKeySource: "login"`, which is the note on
+  // `authSetupHint` above — but nobody has run `cursor-agent` with that login
+  // and NO `CURSOR_API_KEY`, because one turn costs money. The cost of being
+  // wrong is small and self-explaining: the CLI's own error names both routes
+  // ("run 'agent login' first, or set CURSOR_API_KEY"), measured on #396.
+  hostAuth: "cli-login",
+
   /**
    * 🛑 BOTH FALSE, AND THIS CORRECTS MY OWN MEASUREMENT NOTE ON #317.
    *

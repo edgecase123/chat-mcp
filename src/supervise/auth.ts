@@ -237,6 +237,49 @@ export function requireVendorToken(vendor: {
   return token;
 }
 
+/**
+ * How a HOST child of this vendor obtains its credential.
+ *
+ * `"cli-login"` says the CLI authenticates itself from the credential store
+ * the operator's own login wrote. A host child reaches it because
+ * `spawnOnHost` spreads `process.env`, so the child inherits `HOME`.
+ *
+ * 🛑 A HOST-ONLY DISTINCTION. A Linux container reads neither the macOS
+ * Keychain nor `~/.claude`, and nothing mounts either of them — #129 decision
+ * 3 — so the container path requires the token whatever this says.
+ *
+ * ⚠️ `"cli-login"` MEANS "CAN START WITHOUT ONE", NEVER "IGNORES ONE". A
+ * stored token is still injected when there is one.
+ */
+export type HostAuth = "token-required" | "cli-login";
+
+/**
+ * This vendor's credential for a HOST child: the stored token, `null` when the
+ * vendor authenticates itself, or a throw naming how to obtain one.
+ *
+ * 🛑 `null` MEANS "INJECT NOTHING", AND THE CALLER MUST OMIT THE KEY RATHER
+ * THAN SET IT EMPTY. Measured on #449 against a working browser login, a
+ * BOGUS `CLAUDE_CODE_OAUTH_TOKEN` exits 1 with "401 OAuth access token is
+ * invalid" — so the var OVERRIDES the login rather than filling a gap, which
+ * is #347's Cursor finding confirmed for Claude Code. Whether an EMPTY string
+ * is ignored or overrides was never run, so neither is safe to assume.
+ *
+ * 🛑 THE REFUSAL IS NARROWED, NOT WEAKENED. #396 shipped a host child with no
+ * key that started cleanly and answered nothing, and the named refusal is the
+ * whole remedy. It still fires for a vendor with no login route; what changed
+ * is that the vendor declares which it is instead of the driver assuming.
+ */
+export function resolveHostVendorToken(vendor: {
+  vendor: string;
+  authEnvVar: string;
+  authSetupHint: string;
+  hostAuth: HostAuth;
+}): string | null {
+  if (vendor.hostAuth === "token-required") return requireVendorToken(vendor);
+
+  return readVendorToken(vendor);
+}
+
 export function setGhToken(token: string): void {
   setSecret(GH_TOKEN_KEY, token);
 }

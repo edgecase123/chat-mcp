@@ -8,7 +8,7 @@ import {
 } from "./wiring.js";
 import { wirePerTurnChild } from "./per-turn.js";
 import { approveHostGrantServer, deliverHostGrantFile } from "./host-grant.js";
-import { requireVendorToken } from "../auth.js";
+import { resolveHostVendorToken } from "../auth.js";
 
 /** Spawn a vendor's CLI as a bare host process. */
 export function spawnOnHost(
@@ -32,10 +32,15 @@ export function spawnOnHost(
   // answers nothing is indistinguishable from #348 and from a model that chose
   // not to reply.
   //
+  // 🛑 FOR A `"token-required"` VENDOR ONLY, SINCE #449. One that logs in with
+  // a browser authenticates itself from the store this child inherits, and
+  // demanding a token it cannot mint made the feature unreachable rather than
+  // degraded. `null` here is that case, and it is NOT an error.
+  //
   // ⚠️ BEFORE THE GRANT BLOCK, NOT AFTER. A refusal that came later would
   // leave `.cursor/mcp.json` in the operator's project directory for a child
   // that never ran.
-  const token = requireVendorToken(vendor);
+  const token = resolveHostVendorToken(vendor);
 
   // 🛑 THE DELIVERY ITSELF, FOR A CLI WITH NO CONFIG-PATH FLAG. The guard
   // above only refuses `"none"`; `"file"` passes it by not being that, so
@@ -73,7 +78,15 @@ export function spawnOnHost(
       //
       // ⚠️ NOT WRITTEN INTO `process.env`. That would reach every later child
       // of every vendor, which is #347 arriving by a second route.
-      env: { ...process.env, [vendor.authEnvVar]: token },
+      //
+      // 🛑 THE KEY IS OMITTED WHEN THERE IS NO TOKEN, NEVER SET EMPTY. A bogus
+      // value OVERRIDES a working login rather than filling a gap — measured
+      // on #347 for Cursor and on #449 for Claude Code — and whether an empty
+      // string overrides too was never run.
+      env:
+        token === null
+          ? { ...process.env }
+          : { ...process.env, [vendor.authEnvVar]: token },
     }) as ChildProcessWithoutNullStreams;
 
   if (vendor.processPerTurn) {
