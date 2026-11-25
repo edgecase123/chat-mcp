@@ -11,6 +11,7 @@ import {
   registrationNotice,
   registrationRows,
   registrationsPanelEmpty,
+  startVisible,
 } from "../../web/assets/logic.js";
 
 /**
@@ -304,4 +305,44 @@ test("🛑 a RE-approval says so, so the operator knows which one is being re-ta
       `${verdict} already has a recorded approval behind it`,
     );
   }
+});
+
+// ── Start (#423) ─────────────────────────────────────────────────────────
+
+/**
+ * 🛑 A ROW, NOT A HANDLE. `startVisible` reads `storedMode`, which is null for
+ * a withheld mode — so a caller passing a bare handle would lose the one field
+ * that makes the docker-only ruling enforceable.
+ */
+function row(over: Record<string, unknown> = {}) {
+  return { handle: "a1", storedMode: "docker", ...over };
+}
+
+test("an admin's docker row that is not running offers Start", () => {
+  assert.equal(startVisible(row(), true, []), true);
+});
+
+test("🛑 a host row offers NO Start — lee ruled docker only, 2026-11-25", () => {
+  assert.equal(startVisible(row({ storedMode: "host" }), true, []), false);
+});
+
+test("🛑 a withheld mode fails CLOSED, never as docker", () => {
+  assert.equal(startVisible(row({ storedMode: null }), true, []), false);
+});
+
+test("a non-admin gets no Start, because the route would 403 it", () => {
+  assert.equal(startVisible(row(), false, []), false);
+});
+
+test("a handle whose supervisor is already live offers no Start", () => {
+  assert.equal(startVisible(row(), true, ["a1"]), false);
+});
+
+/**
+ * 🛑 THE DISCRIMINATOR. Without this row, `liveHandles.length > 0` passes
+ * every other test here and hides Start on every card the moment ANY agent
+ * runs.
+ */
+test("🛑 another handle being live does NOT hide this row's Start", () => {
+  assert.equal(startVisible(row(), true, ["someone-else"]), true);
 });
