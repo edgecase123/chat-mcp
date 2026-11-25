@@ -1,0 +1,95 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import type { IncomingMessage, ServerResponse } from "node:http";
+
+import { listenWithRoute } from "./route-server.js";
+
+/**
+ * The shared web-route test harness — #426.
+ *
+ * 🛑 NINE HARNESSES CALLED `void route(req, res, ctx)` WITH NO CATCH. `route`
+ * is async, so a throw became an unhandled rejection and Node killed the whole
+ * test process: a FILE-level failure, no assertion, no stack, and every test
+ * after it in that file silently never ran. A real route defect therefore read
+ * as a broken runner, and a green count could be smaller than it looked.
+ *
+ * 🛑 THE HARNESS TAKES `route` AS AN ARGUMENT AND MUST KEEP DOING SO. Every
+ * caller sets `CHAT_MCP_HOME` to a tmpdir and then `await import`s the server,
+ * because a static import would resolve state paths against the operator's
+ * real files. A harness that imported `route` itself would defeat that.
+ */
+
+type Ctx = { readonly label: string };
+
+const boom = new Error("the route threw");
+
+test("🔴 a route that THROWS answers 500 with the message, not a dead process", async () => {
+  const h = await listenWithRoute<Ctx>(() => Promise.reject(boom), {
+    label: "throws",
+  });
+
+  const res = await fetch(h.origin);
+
+  assert.equal(res.status, 500);
+  assert.deepEqual(await res.json(), { error: "the route threw" });
+
+  h.close();
+});
+
+test("🔴 a route that ANSWERS is left alone, so the catch is not a rewrite", async () => {
+  const h = await listenWithRoute<Ctx>(
+    (_req: IncomingMessage, res: ServerResponse, ctx: Ctx) => {
+      res.statusCode = 201;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ ok: ctx.label }));
+      return Promise.resolve();
+    },
+    { label: "answers" },
+  );
+
+  const res = await fetch(h.origin);
+
+  assert.equal(res.status, 201);
+  assert.deepEqual(await res.json(), { ok: "answers" });
+
+  h.close();
+});
+
+/**
+ * 🛑 THE PAIRED CONTROL FOR THE `headersSent` GUARD. Production checks it, so
+ * a harness without the check would throw a SECOND time inside the catch and
+ * kill the process again — the exact failure the harness exists to stop, moved
+ * one frame along.
+ */
+test("🔴 a throw AFTER the response started does not write a second time", async () => {
+  const h = await listenWithRoute<Ctx>(
+    (_req: IncomingMessage, res: ServerResponse) => {
+      res.statusCode = 200;
+      res.end("already sent");
+      return Promise.reject(boom);
+    },
+    { label: "late throw" },
+  );
+
+  const res = await fetch(h.origin);
+
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), "already sent");
+
+  h.close();
+});
+
+test("🔴 the harness reports the port it bound, so a ctx can be completed", async () => {
+  const h = await listenWithRoute<Ctx>(
+    (_req: IncomingMessage, res: ServerResponse) => {
+      res.end("ok");
+      return Promise.resolve();
+    },
+    { label: "port" },
+  );
+
+  assert.ok(h.port > 0, `expected a bound port, got ${h.port}`);
+  assert.equal(h.origin, `http://127.0.0.1:${h.port}`);
+
+  h.close();
+});
