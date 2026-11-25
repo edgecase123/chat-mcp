@@ -2423,8 +2423,9 @@ async function startAgent(handle) {
     });
     toast(`Starting ${handle}`, "info");
   } catch (e) {
-    // The route's three 409s each name the precondition that failed.
-    // Paraphrasing them here would be a second copy of its rules.
+    // The route names the precondition that failed and carries the remedy
+    // with it. Paraphrasing would be a second copy of its rules, and a count
+    // of its refusals here would drift the day one is added.
     toast(`Not started: ${e.message}`, "warn");
   }
 
