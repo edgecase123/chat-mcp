@@ -32,8 +32,15 @@ export interface HostBus {
  * ⚠️ THE CONTEXT IS TRANSIENT ON PURPOSE. The ROW persists in sqlite; nothing
  * long-lived is held here, so `serverFor` keeps sole ownership of session
  * teardown and there is no second handle for anyone to close.
+ *
+ * 🛑 THE NULL IS CHECKED AND THROWS, BECAUSE DISCARDING IT FAILS OPEN INTO THE
+ * PHANTOM THIS FUNCTION EXISTS TO PREVENT. `clearAgentPid` reports whether it
+ * matched a row. The teardown call sites only LOG a false, which is right for
+ * them — a row already gone is the outcome they wanted. Here the row was
+ * written one statement earlier, so a false means the write did not land and
+ * continuing leaves the supervisor's pid on a handle that reads ONLINE.
  */
-function registerChildOffline(childHandle: string): void {
+async function registerChildOffline(childHandle: string): Promise<void> {
   const ctx = shimContextFor({
     handle: childHandle,
     sandbox: "docker",
@@ -42,9 +49,15 @@ function registerChildOffline(childHandle: string): void {
   });
 
   try {
-    dao.clearAgentPid(ctx.db, childHandle);
+    if (!dao.clearAgentPid(ctx.db, childHandle)) {
+      throw new Error(
+        `registered ${childHandle} and then could not null its pid, so the ` +
+          `handle would read ONLINE with the supervisor's pid and a sibling ` +
+          `would route work to a child that has not started`,
+      );
+    }
   } finally {
-    void ctx.notify.close();
+    await ctx.notify.close();
     ctx.db.close();
   }
 }
@@ -100,7 +113,7 @@ export async function openHostBus(childHandle: string): Promise<HostBus> {
   });
 
   // 🛑 AFTER the bind, so a listener that failed to bind leaves no row behind.
-  registerChildOffline(childHandle);
+  await registerChildOffline(childHandle);
 
   return {
     endpoint: { url: listener.url, token: mintToken(childHandle) },

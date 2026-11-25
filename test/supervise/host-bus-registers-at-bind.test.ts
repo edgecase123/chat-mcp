@@ -43,9 +43,9 @@ test("🚨 a bound host bus registers the child BEFORE any session opens", async
  * 🛑 THE ROW MUST EXIST AND MUST NOT READ AS LIVE. `shimContextFor` writes
  * `pid: process.pid`, which at bind time is the SUPERVISOR's — so a child that
  * never starts would present as online and a sibling would route work to
- * nothing. That is `index.ts:1280`'s recorded failure inverted.
+ * nothing. That is the `clearAgentPid`-on-teardown failure inverted.
  *
- * `dao.ts:1315` prescribes the repair in its own words: *"Nulling the pid is
+ * `clearAgentPid`'s own docblock prescribes the repair: *"Nulling the pid is
  * the whole repair, because `isProcessAlive(null)` is false"*.
  *
  * ⚠️ THE PAIR IS THE POINT. Test one alone passes for an implementation that
