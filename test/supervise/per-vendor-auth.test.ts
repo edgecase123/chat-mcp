@@ -301,7 +301,7 @@ test("🛑 docker refuses with no token for BOTH vendors, whatever hostAuth says
  * ⚠️ IT PRINTS ITS OWN DENOMINATOR. A traversal that reached nothing would
  * otherwise report CLEAN, which is the same false green the scan prevents.
  */
-test("🛑 no container-side file reads hostAuth, so the two vendors cannot diverge in docker", async () => {
+test("🛑 no container-side file mentions hostAuth, so the two vendors cannot diverge in docker", async () => {
   const { readdirSync, readFileSync, statSync } = await import("node:fs");
   const { join } = await import("node:path");
 
@@ -324,13 +324,36 @@ test("🛑 no container-side file reads hostAuth, so the two vendors cannot dive
     `the scan reached only ${files.length} files under src/`,
   );
 
-  const readers = files
-    .filter((path) => /vendor\.hostAuth\b/.test(readFileSync(path, "utf8")))
-    .map((path) => path.slice(root.length));
+  // 🛑 THE BARE IDENTIFIER, NOT `vendor.hostAuth`. Raised by claude1 and
+  // reproduced: the narrow pattern matched 2 of 5 realistic access forms and
+  // walked straight past `const { hostAuth } = vendor`, `v.hostAuth` and
+  // `vendor["hostAuth"]`. The guard's whole job is to stop a LATER edit, and
+  // the later edit is the one free to pick a spelling.
+  const mentions = files
+    .filter((path) => /\bhostAuth\b/.test(readFileSync(path, "utf8")))
+    .map((path) => path.slice(root.length))
+    .sort();
 
+  // 🛑 FAIL-CLOSED, SO THE LIST IS THE FORCING FUNCTION. Three of these only
+  // DECLARE the field; `auth.ts` is the sole reader. A new file touching it at
+  // all turns this red, which makes diverging the vendors in docker a
+  // deliberate edit to this list rather than something that just happens.
   assert.deepEqual(
-    readers,
-    ["supervise/auth.ts"],
-    "a second site reads hostAuth; only the host resolver may",
+    mentions,
+    [
+      "adapters/claude-spawn.ts", // declares "cli-login"
+      "adapters/cursor-spawn.ts", // declares "cli-login"
+      "supervise/auth.ts", // the type, and the ONLY read
+      "supervise/vendor.ts", // the field on the spawn contract
+    ],
+    "a file outside the known set mentions hostAuth; only auth.ts may READ it",
+  );
+
+  // The positive control. A pattern matching nothing would satisfy a
+  // deepEqual against an empty list, so the scan has to be shown to work.
+  assert.match(
+    readFileSync(join(root, "supervise/auth.ts"), "utf8"),
+    /if \(vendor\.hostAuth === "token-required"\)/,
+    "the live read site moved, so this scan is no longer proven to match it",
   );
 });

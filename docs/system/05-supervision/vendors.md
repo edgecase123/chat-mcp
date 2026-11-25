@@ -679,6 +679,22 @@ expires — a clean start and silence. **lee took reachability over that
 guarantee**, because the alternative is that the feature does not exist for the
 operator at all. A token on file still wins when there is one.
 
+🛑 **AND THE HOST REFUSAL IS NOW UNREACHABLE, NOT MERELY NARROWED.** Both
+shipped vendors declare `"cli-login"`, so `"token-required"` is a set with no
+members and the only actor exercising that throw is a test fixture. Raised by
+claude1 reviewing PR #454. **Do not read `resolveHostVendorToken`'s refusal as
+a guarantee the host path still provides.**
+
+```
+token-required vendors in src/   ZERO
+so: no token AND no login        starts clean, answers nothing, no signal
+```
+
+⚠️ **`"cli-login"` ASSERTS A LOGIN ROUTE EXISTS, NEVER THAT ONE IS PRESENT.**
+A pre-spawn check cannot be written — nothing here reads the host credential
+store, and on macOS the Claude one is a Keychain item. **#455 holds the only
+vantage point that can see it: a child that produced zero events before exit.**
+
 ⚠️ **AND THE EXPIRY IS NOT ONLY ABOUT TIME.** lee's point of 2026-11-25: one
 `claude` install can be both an attached client and a supervised child, sharing
 one credential store. **Logging out of the attached instance de-authenticates

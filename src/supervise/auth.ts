@@ -264,10 +264,18 @@ export type HostAuth = "token-required" | "cli-login";
  * is #347's Cursor finding confirmed for Claude Code. Whether an EMPTY string
  * is ignored or overrides was never run, so neither is safe to assume.
  *
- * 🛑 THE REFUSAL IS NARROWED, NOT WEAKENED. #396 shipped a host child with no
- * key that started cleanly and answered nothing, and the named refusal is the
- * whole remedy. It still fires for a vendor with no login route; what changed
- * is that the vendor declares which it is instead of the driver assuming.
+ * 🛑 THE REFUSAL IS UNREACHABLE FOR EVERY VENDOR THAT SHIPS, NOT MERELY
+ * NARROWED. Both `claudeSpawn` and `cursorSpawn` declare `"cli-login"`, so
+ * `"token-required"` is a set with no members and the only actor exercising
+ * this throw is a test fixture. Raised by claude1 in review; the first version
+ * of this comment said "narrowed", which understates it.
+ *
+ * 🛑 SO #396'S SHAPE IS REACHABLE AGAIN ON ONE PATH: a host child with no
+ * stored token AND no CLI login starts cleanly and answers nothing. lee ruled
+ * for reachability over that guarantee on 2026-11-25, knowing the trade. This
+ * declares a login route EXISTS and nothing here can check one is PRESENT —
+ * chat-mcp cannot see the host credential store. Detecting a child that
+ * produced no events is the only side that can see it, and it is a follow-up.
  */
 export function resolveHostVendorToken(vendor: {
   vendor: string;

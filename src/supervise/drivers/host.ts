@@ -32,10 +32,11 @@ export function spawnOnHost(
   // answers nothing is indistinguishable from #348 and from a model that chose
   // not to reply.
   //
-  // 🛑 FOR A `"token-required"` VENDOR ONLY, SINCE #449. One that logs in with
-  // a browser authenticates itself from the store this child inherits, and
-  // demanding a token it cannot mint made the feature unreachable rather than
-  // degraded. `null` here is that case, and it is NOT an error.
+  // 🛑 FOR A `"token-required"` VENDOR ONLY, SINCE #449 — AND NO SHIPPED
+  // VENDOR IS ONE. Both declare `"cli-login"`, so on today's vendor set this
+  // call never throws and the refusal above describes a path nothing takes.
+  // `null` is the live case and it is NOT an error. Do not read the paragraph
+  // above as a guarantee this code still provides.
   //
   // ⚠️ BEFORE THE GRANT BLOCK, NOT AFTER. A refusal that came later would
   // leave `.cursor/mcp.json` in the operator's project directory for a child
