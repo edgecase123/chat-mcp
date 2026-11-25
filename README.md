@@ -685,17 +685,22 @@ Long-lived agent sessions accumulate context and eventually degrade. The bus tra
 
 **Read via `list_agents` or `whoami`.** Both surface each peer's `context_used`, `context_total`, and `context_reported_at`. Peers that never called `report_context` read back as `null` — the feature is opt-in per peer, no penalty.
 
-**Threshold warnings.** Crossing one of three bands emits a system-authored message. Only the highest newly-crossed band fires per report — a jump straight from clean to 96% fires only the 95% band, not 70+85+95.
+**Threshold warnings.** Crossing one of **four** bands emits a system-authored message. Only the highest newly-crossed band fires per report — a jump straight from clean to 96% fires only the 95% band, not 50+70+85+95.
 
-| %    | Delivery                                                                          | Copy                              |
-| ---- | --------------------------------------------------------------------------------- | --------------------------------- |
-| ≥ 70 | DM to the reporter only                                                           | 🟡 soft — "consider hygiene soon" |
-| ≥ 85 | Post to every room the peer is a member of, `kind=chat`                           | 🟠 recommend hygiene              |
-| ≥ 95 | Post to every room the peer is a member of, `kind=alert` (surfaces in alert lane) | 🔴 hygiene action needed          |
+| %    | Delivery                                                                          | Copy                                           |
+| ---- | --------------------------------------------------------------------------------- | ---------------------------------------------- |
+| ≥ 50 | DM to the reporter only                                                           | 🔵 pick a break point while you still have one |
+| ≥ 70 | DM to the reporter only                                                           | 🟡 soft — "consider hygiene soon"              |
+| ≥ 85 | Post to every room the peer is a member of, `kind=chat`                           | 🟠 recommend hygiene                           |
+| ≥ 95 | Post to every room the peer is a member of, `kind=alert` (surfaces in alert lane) | 🔴 hygiene action needed                       |
 
-**Hysteresis** of 5% under each band prevents chatter at the boundary. Down-shifts happen silently one band at a time — dropping from 96% to 89% moves the internal warned-threshold from 95 → 85 with no notification. Re-crossing a band re-fires its warning.
+**Hysteresis** of 5% under each band prevents chatter at the boundary. A step down cascades as far as the percent warrants, in one report, so 95% to 5% reaches `null` directly rather than one band at a time. Down-shifts are silent. Re-crossing a band re-fires its warning.
 
-**Rendering.** The browser sidebar shows each peer's `%` beside its status. The terminal UI renders the same bands — see [terminal interfaces](docs/system/06-interfaces/terminal-ui.md).
+🛑 **In practice only the two DM bands have ever fired.** A search of the whole bus returns zero messages for the 85 and 95 copy, because agents here are asked to clear well below 85. **So what a human actually sees is the sidebar colour, not a message.** Treat the room-post and alert rows as implemented and unexercised in the wild.
+
+⚠️ **The sidebar colour is NOT these four bands.** It comes from the handle's own context gate, which scales a per-peer ramp — `rampBand` in `web/assets/logic.js`, stateless and with no hysteresis by lee's ruling of 2026-11-18. A peer can therefore show a warning colour without any band having fired, and vice versa.
+
+**Rendering.** The browser sidebar shows each peer's `%` beside its status, coloured by that ramp. The terminal UI has its own gauge — see [terminal interfaces](docs/system/06-interfaces/terminal-ui.md).
 
 **Message copy is client-agnostic** — the bus doesn't know whether the peer's client is Claude Code or Cursor, so warnings suggest "hygiene" without prescribing a specific slash command.
 
