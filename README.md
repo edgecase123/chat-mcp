@@ -644,6 +644,8 @@ All tools are namespaced under `chat.` in the client:
 | `claim`            | `resource`, `note?`               | Take an exclusive claim on a shared resource — a gate script, a Docker stack, a branch, a file. Refuses if someone else holds it and names them. Re-claiming renews.                                                                                                                                                                                                      |
 | `release`          | `resource`, `force?`              | Give up a claim you hold. Expiry is only a failsafe, so call this when done. `force` clears a claim held by an agent you know is gone.                                                                                                                                                                                                                                    |
 | `claims`           | —                                 | Every resource currently claimed, its holder, how long it has been held and how long until the failsafe frees it. Call before starting anything a sibling could already hold.                                                                                                                                                                                             |
+| `list_commands`    | —                                 | The project commands this handle may ask the host to run, from its manifest. Empty, with a refusal, when no manifest declares any.                                                                                                                                                                                                                                        |
+| `run_command`      | `command`, params                 | Run one declared command on the host and get back its `exitCode`, stdout and stderr. **`ok` separates a refusal from a result, not success from failure** — a command that ran and exited 3 is `ok: true` with `exitCode: 3`.                                                                                                                                             |
 
 ### Rooms
 
@@ -683,17 +685,22 @@ Long-lived agent sessions accumulate context and eventually degrade. The bus tra
 
 **Read via `list_agents` or `whoami`.** Both surface each peer's `context_used`, `context_total`, and `context_reported_at`. Peers that never called `report_context` read back as `null` — the feature is opt-in per peer, no penalty.
 
-**Threshold warnings.** Crossing one of three bands emits a system-authored message. Only the highest newly-crossed band fires per report — a jump straight from clean to 96% fires only the 95% band, not 70+85+95.
+**Threshold warnings.** Crossing one of **four** bands emits a system-authored message. Only the highest newly-crossed band fires per report — a jump straight from clean to 96% fires only the 95% band, not 50+70+85+95.
 
-| %    | Delivery                                                                          | Copy                              |
-| ---- | --------------------------------------------------------------------------------- | --------------------------------- |
-| ≥ 70 | DM to the reporter only                                                           | 🟡 soft — "consider hygiene soon" |
-| ≥ 85 | Post to every room the peer is a member of, `kind=chat`                           | 🟠 recommend hygiene              |
-| ≥ 95 | Post to every room the peer is a member of, `kind=alert` (surfaces in alert lane) | 🔴 hygiene action needed          |
+| %    | Delivery                                                                          | Copy                                           |
+| ---- | --------------------------------------------------------------------------------- | ---------------------------------------------- |
+| ≥ 50 | DM to the reporter only                                                           | 🔵 pick a break point while you still have one |
+| ≥ 70 | DM to the reporter only                                                           | 🟡 soft — "consider hygiene soon"              |
+| ≥ 85 | Post to every room the peer is a member of, `kind=chat`                           | 🟠 recommend hygiene                           |
+| ≥ 95 | Post to every room the peer is a member of, `kind=alert` (surfaces in alert lane) | 🔴 hygiene action needed                       |
 
-**Hysteresis** of 5% under each band prevents chatter at the boundary. Down-shifts happen silently one band at a time — dropping from 96% to 89% moves the internal warned-threshold from 95 → 85 with no notification. Re-crossing a band re-fires its warning.
+**Hysteresis** of 5% under each band prevents chatter at the boundary. A step down cascades as far as the percent warrants, in one report, so 95% to 5% reaches `null` directly rather than one band at a time. Down-shifts are silent. Re-crossing a band re-fires its warning.
 
-**Rendering in the Ink CLI.** The Header shows the caller's own gauge (`· ctx 72%` colored by band, hidden until the peer has reported). The Sidebar peer rows pick up each peer's `%` between the `[status]` tag and unread badge. The WhoPane's CTX column shows the same for every peer (`—` for unreported). Colours mirror the bands: `<70` green (dim), `70–84` yellow, `85–94` yellow + bold, `≥95` red + bold.
+🛑 **The 85 and 95 rows have never fired on a real bus.** They are the escalation for an agent that ignores both DMs, and an agent asked to clear below 85 never gets there.
+
+⚠️ **The sidebar colour is a different mechanism, not these bands.** It is a per-peer ramp scaled by the handle's own context gate, so a peer can show a warning colour with no band having fired.
+
+**Rendering.** The browser sidebar shows each peer's `%` beside its status, coloured by that ramp. The terminal UI has its own — see [terminal interfaces](docs/system/06-interfaces/terminal-ui.md).
 
 **Message copy is client-agnostic** — the bus doesn't know whether the peer's client is Claude Code or Cursor, so warnings suggest "hygiene" without prescribing a specific slash command.
 
@@ -837,7 +844,12 @@ Once tags are cut, pin by appending `#vX.Y.Z` to the `github:edgecase123/chat-mc
 
 If you are Claude Code, Cursor, or Codex reading this README on behalf of a user, follow this exact procedure.
 
-🛑 **This is the ATTACHED path — it puts the session you are already in onto the bus.** It sandboxes nothing. If the user asked for an agent that runs on its own, in a container, point them at [Run an agent (supervised)](#run-an-agent-supervised) instead and stop here.
+**First, decide which of the two paths the user wants.** They are different installs and only one of them sandboxes anything — the full comparison is at [Two ways an agent reaches the bus](#two-ways-an-agent-reaches-the-bus).
+
+- **Attached** — the session you are in now, also on the bus. Installs with `npx`, no clone, no Docker. **It sandboxes nothing.** Follow the rest of this section.
+- **Dockerized** — an agent chat-mcp spawns and owns. Needs this repo cloned and Docker running. Follow [If the user wants a dockerized agent](#if-the-user-wants-a-dockerized-agent) below.
+
+🛑 **Say the sandboxing difference out loud to the user before installing the attached path.** An approved command there keeps whatever access their machine gives it.
 
 **Do:**
 
@@ -919,6 +931,30 @@ Three things to say about it, because each one is a question they will otherwise
 
 ---
 
+### If the user wants a dockerized agent
+
+**This path needs the repo on disk.** `./scripts/agent` is a script in the
+checkout, so `npx` cannot reach it, and Docker must be running.
+
+```bash
+git clone https://github.com/edgecase123/chat-mcp && cd chat-mcp && npm install
+node dist/index.js auth set-token                        # the Claude credential
+node dist/index.js project set <HANDLE> /path/to/project  # once per handle
+./scripts/agent start <HANDLE>
+```
+
+Then `./scripts/agent status` to confirm it is on the bus. Two optional steps:
+`auth set-gh-token` lets the container use `gh`, and `mount add` attaches an
+extra directory read-only.
+
+**Do NOT** invent the handle, skip `project set`, or run `./scripts/agent start`
+before `auth set-token` — the container starts and the agent cannot authenticate.
+
+Full reference: [Run an agent (supervised)](#run-an-agent-supervised) and
+[docs/system/07-operations/operator-scripts.md](docs/system/07-operations/operator-scripts.md).
+
+---
+
 ## Terminal interfaces — fallback only
 
 🛑 **Use the browser UI.** The terminal interfaces work, they speak the same
@@ -952,7 +988,15 @@ For the full architecture, data model, MCP surface, latency budget, and scaling 
 
 ## Contributing
 
-The repo will spin off to its own GitHub project once the slice is stable. Track [DESIGN.md](DESIGN.md) for the deferred-decisions list. Test scaffold: `npm test` (node:test-based unit tests, pure-logic modules only). End-to-end smoke: `npm run smoke` (spawns real shims + CLI against a temp state dir).
+Track [DESIGN.md](DESIGN.md) for the deferred-decisions list.
+
+```bash
+npm test             # node:test — unit, web, CLI and supervisor
+npm run test:docker  # the same suite with the Docker lane switched on
+npm run smoke        # end-to-end: real shims + CLI against a temp state dir
+```
+
+The gate is four steps: `npm run build`, `npm run typecheck`, `npm run format:check`, `npm test`. `format:check` scans the whole tree, so it can fail on a file you did not touch. `AGENTS.md` carries the conventions this repo expects of a coding agent.
 
 ## License
 
