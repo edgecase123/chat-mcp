@@ -7,11 +7,14 @@ import { listenWithRoute } from "./route-server.js";
 /**
  * The shared web-route test harness — #426.
  *
- * 🛑 NINE HARNESSES CALLED `void route(req, res, ctx)` WITH NO CATCH. `route`
- * is async, so a throw became an unhandled rejection and Node killed the whole
- * test process: a FILE-level failure, no assertion, no stack, and every test
- * after it in that file silently never ran. A real route defect therefore read
- * as a broken runner, and a green count could be smaller than it looked.
+ * 🛑 EVERY WEB-ROUTE HARNESS CALLED `void route(req, res, ctx)` WITH NO CATCH,
+ * and the unmigrated ones still do. `route` is async, so a throw became an
+ * unhandled rejection: the request went unanswered, the awaiting `fetch` never
+ * resolved, and that file's server was never closed, so the RUN HUNG instead
+ * of reporting.
+ *
+ * ⚠️ IT DID NOT KILL THE PROCESS. The failing test is still named and still
+ * carries a stack, and later tests in the file still run.
  *
  * 🛑 THE HARNESS TAKES `route` AS AN ARGUMENT AND MUST KEEP DOING SO. Every
  * caller sets `CHAT_MCP_HOME` to a tmpdir and then `await import`s the server,
@@ -58,7 +61,7 @@ test("🔴 a route that ANSWERS is left alone, so the catch is not a rewrite", a
 /**
  * 🛑 THE PAIRED CONTROL FOR THE `headersSent` GUARD. Production checks it, so
  * a harness without the check would throw a SECOND time inside the catch and
- * kill the process again — the exact failure the harness exists to stop, moved
+ * hang the run again — the exact failure the harness exists to stop, moved
  * one frame along.
  */
 test("🔴 a throw AFTER the response started does not write a second time", async () => {

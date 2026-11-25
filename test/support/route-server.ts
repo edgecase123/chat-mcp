@@ -10,10 +10,13 @@ import type { AddressInfo } from "node:net";
  * One listening HTTP server for a web-route test, wrapping `route` in the SAME
  * catch production uses — #426.
  *
- * 🛑 A BARE `void route(req, res, ctx)` KILLS THE TEST PROCESS. `route` is
- * async, so a throw is an unhandled rejection: Node reports a FILE-level
- * failure with no assertion and no stack, and every test after it in that file
- * never runs. A real route defect then reads as a broken runner.
+ * 🛑 A BARE `void route(req, res, ctx)` HANGS THE RUN. `route` is async, so a
+ * throw is an unhandled rejection: the request is never answered, the awaiting
+ * `fetch` never resolves, and the caller's `close()` never runs, so the open
+ * server holds the event loop and the process never exits.
+ *
+ * ⚠️ IT DOES NOT KILL THE PROCESS. Node fails the ACTIVE test with a real
+ * stack, and later tests in the file still run. What is lost is the exit.
  *
  * 🛑 `route` IS AN ARGUMENT, NOT AN IMPORT, AND MUST STAY ONE. Callers set
  * `CHAT_MCP_HOME` to a tmpdir and only then `await import` the server, because
