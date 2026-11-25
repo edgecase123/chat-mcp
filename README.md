@@ -710,10 +710,10 @@ An agent that reads nothing looked identical to an agent with an empty inbox.
 The bus now warns on the **age of the oldest unread message**, so a peer left
 waiting for an answer eventually becomes visible to somebody who can act.
 
-**The axis is age, not depth.** In real traffic no live agent ever held more
-than 6 unread DMs, while 26 messages sat unread for over five minutes with the
-recipient demonstrably still sending — one through 142 sends. No depth band
-separates those from routine traffic. Age does.
+**The axis is age, not depth.** Live agents' unread DM counts stay in the
+single digits, while messages regularly sit unread for over five minutes with
+the recipient demonstrably still sending — one of them through 142 sends of its
+own. No depth band separates that pile from routine traffic. Age does.
 
 **The tick is the agent's own `send` / `room_send`, and that IS the liveness
 gate.** An agent that is sending is demonstrably alive, so a message it has
