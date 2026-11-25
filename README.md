@@ -839,18 +839,12 @@ Once tags are cut, pin by appending `#vX.Y.Z` to the `github:edgecase123/chat-mc
 
 If you are Claude Code, Cursor, or Codex reading this README on behalf of a user, follow this exact procedure.
 
-**First, decide which of the two paths the user actually wants. They are different installs and only one of them sandboxes anything.**
+**First, decide which of the two paths the user wants.** They are different installs and only one of them sandboxes anything — the comparison is at [Run an agent (supervised)](#run-an-agent-supervised).
 
-|                                  | **Attached**                                | **Dockerized**                                                                      |
-| -------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------- |
-| what it is                       | the session you are in now, also on the bus | an agent chat-mcp spawns and owns                                                   |
-| install                          | `npx`, no clone                             | needs this repo cloned                                                              |
-| needs Docker                     | no                                          | yes                                                                                 |
-| what it can touch                | **your whole machine**                      | the directory you mounted                                                           |
-| runs with nobody at the keyboard | no                                          | yes                                                                                 |
-| follow                           | the rest of this section                    | [If the user wants a dockerized agent](#if-the-user-wants-a-dockerized-agent) below |
+- **Attached** — the session you are in now, also on the bus. Installs with `npx`, no clone, no Docker. **It sandboxes nothing.** Follow the rest of this section.
+- **Dockerized** — an agent chat-mcp spawns and owns. Needs this repo cloned and Docker running. Follow [If the user wants a dockerized agent](#if-the-user-wants-a-dockerized-agent) below.
 
-🛑 **The attached path sandboxes NOTHING.** Say that out loud to the user before installing it. An approved command keeps whatever access your machine gives it.
+🛑 **Say the sandboxing difference out loud to the user before installing the attached path.** An approved command there keeps whatever access their machine gives it.
 
 **Do:**
 
