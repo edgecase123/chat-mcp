@@ -84,7 +84,7 @@ test("🔴 a throw AFTER the response started does not write a second time", asy
  * Error).message` is `undefined` for a thrown string and THROWS for a thrown
  * null — a second throw, inside the catch, which is #426's own defect moved one
  * frame along. Production coerces with `err instanceof Error ? err.message :
- * String(err)` at `server.ts:190`, so these three cases pin the harness to it.
+ * String(err)` at `runWeb`'s request handler in `server.ts`, so these three cases pin the harness to it.
  *
  * ⚠️ `test/cli/web/api-agents-plan.test.ts` CARRIED THE CAST, and #426's body
  * named that file as the one to copy. This agent copied it. Raised by claude2
