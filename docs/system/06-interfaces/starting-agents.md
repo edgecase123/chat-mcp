@@ -1,3 +1,12 @@
+---
+title: Starting a contained agent
+updated: 2026-11-25
+covers:
+  - src/supervise/detached.ts
+  - src/cli/web/server.ts
+  - src/cli/web/credential.ts
+---
+
 # Starting a contained agent
 
 How an operator starts a supervised agent from the browser dashboard, why the
@@ -31,11 +40,13 @@ point. A route that answered a different order would name a blocker the spawn
 would not have reached first — so the operator fixes something that was never
 the reason, and earns a second refusal.
 
+`startSupervisor` in `src/supervise/index.ts` calls them in this order:
+
 ```
-src/supervise/index.ts:293  refuseIfSupervisorLive   409 already-running
-                      :356  requireVendorToken       409 no-vendor-token
-                      :364  confirmVerdict           409 plan-unconfirmed
-                      :392  dirsFor                  409 no-project-dir
+refuseIfSupervisorLive   ->  409 already-running
+requireVendorToken       ->  409 no-vendor-token      | inside the
+confirmVerdict           ->  409 plan-unconfirmed     | isContainerSpawn branch
+dirsFor                  ->  409 no-project-dir
 ```
 
 | `error`              | status | `message`                                         |

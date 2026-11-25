@@ -61,11 +61,13 @@ const { logPathFor } = await import("../../../src/util/paths.js");
  * different one would name a blocker the spawn would not have hit first, so
  * the operator fixes the wrong thing and earns a second refusal.
  *
+ * `startSupervisor` calls them in this order:
+ *
  * ```
- * src/supervise/index.ts:293  refuseIfSupervisorLive   already-running
- *                       :356  requireVendorToken       no-vendor-token
- *                       :364  confirmVerdict           plan-unconfirmed
- *                       :392  dirsFor                  no-project-dir
+ * refuseIfSupervisorLive   already-running
+ * requireVendorToken       no-vendor-token
+ * confirmVerdict           plan-unconfirmed
+ * dirsFor                  no-project-dir
  * ```
  */
 

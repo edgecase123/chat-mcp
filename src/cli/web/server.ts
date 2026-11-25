@@ -84,10 +84,7 @@ import { buildConfirmPlan } from "../../supervise/confirmPlan.js";
 import { refuseIfSupervisorLive } from "../../supervise/socket.js";
 import { dirsFor } from "../../supervise/projects.js";
 import { startDetachedSupervisor } from "../../supervise/detached.js";
-import {
-  missingVendorTokenMessage,
-  readVendorToken,
-} from "../../supervise/auth.js";
+import { requireVendorToken } from "../../supervise/auth.js";
 import {
   confirmVerdict,
   describeChanges,
@@ -941,15 +938,17 @@ async function handleStartAgent(
     );
   }
 
-  if (!readVendorToken(lookup.spawn)) {
-    // 🛑 THE VENDOR'S OWN MESSAGE, VERBATIM. It carries `authSetupHint`, which
-    // is the remedy. A paraphrase here would be a second copy of the rule.
+  try {
+    // 🛑 THE VENDOR'S OWN THROW, FORWARDED. Its message carries
+    // `authSetupHint`, which is the remedy. Calling
+    // `missingVendorTokenMessage` here instead built the refusal a second
+    // time, which `require-vendor-token.test.ts` refuses BY NAME — the token
+    // read and the sentence it produces stay in one file.
+    requireVendorToken(lookup.spawn);
+  } catch (e) {
     return respondJson(
       res,
-      {
-        error: "no-vendor-token",
-        message: missingVendorTokenMessage(lookup.spawn),
-      },
+      { error: "no-vendor-token", message: (e as Error).message },
       409,
     );
   }
