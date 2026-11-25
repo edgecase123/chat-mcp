@@ -9,8 +9,10 @@ alone means you personally carry context, judgment and progress between tools.
 chat-mcp closes that loop: **every agent gets a stable handle on a shared local
 bus, they message each other directly, and you watch from the browser.**
 
-Nothing leaves the machine. State is one SQLite file plus one notify file, both
-under `~/.chat-mcp/`, and there is no daemon to run.
+The bus keeps nothing on the wire. State is one SQLite file plus one notify
+file, both under `~/.chat-mcp/`, and there is no daemon to run. **Your agents
+are a different matter — they send what they read to their model vendor.** See
+[Local, and owner-only](#local-and-owner-only).
 
 ### What people use it for
 
@@ -219,10 +221,21 @@ hand-off right up until the review never arrives.
 
 ### Local, and owner-only
 
-Nothing leaves the machine. State is `~/.chat-mcp/chat.db` plus a notify file,
-the directory `0700` and the database `0600`. **On macOS and Linux chat-mcp
-reads the mode back after setting it and refuses to start** rather than run
-without that guarantee.
+**The bus keeps nothing on the wire, and it is only half the story.** State is
+`~/.chat-mcp/chat.db` plus a notify file, the directory `0700` and the database
+`0600`. **On macOS and Linux chat-mcp reads the mode back after setting it and
+refuses to start** rather than run without that guarantee. Its one outbound
+request goes to its own web UI, and there is no telemetry and no update check.
+
+🛑 **THE AGENTS READING THE BUS DO PHONE HOME.** `inbox` and
+`room_inbox` return message bodies into an agent's context, and that agent's
+next turn sends its context to a model vendor. That is what the agent is for,
+so it is not a leak to be fixed — but it means **anything you put in a channel
+should be treated as sent to whichever vendors your peers run.**
+
+⚠️ **A sandboxed agent's outbound network is not restricted either.** Full
+outbound internet is the only option today, which is
+[#134](https://github.com/edgecase123/chat-mcp/issues/134).
 
 🛑 **Loopback is not a containment boundary.** A supervisor's MCP listener and
 the browser UI each bind `127.0.0.1`, and a container reaches a host
@@ -230,6 +243,9 @@ the browser UI each bind `127.0.0.1`, and a container reaches a host
 callers**, not the bind address.
 
 **Use it to** put real branch names, ticket numbers and code in the channel.
+That is no more exposed than typing the same thing into the agent's own prompt,
+which is where it ends up either way. **It is not a reason to put a secret
+there.**
 
 ---
 
@@ -461,7 +477,9 @@ The shim writes new-mail notifications to `~/.chat-mcp/notify/<handle>` — but 
 npx -y github:edgecase123/chat-mcp install <framework> --handle <HANDLE>
 ```
 
-Currently supported: **`claude-code`** only. Cursor, Codex, and Gemini CLI can register on the bus and their agents can call every `chat.*` tool, but they do not expose a way for an external file event to poke an idle inference loop the way Claude Code's `Monitor` does — so no wake adapter ships for them today. See [Client support](#client-support) below. `chat-mcp list-adapters` prints the current set.
+Three adapters ship: **`claude-code`**, **`claude-code-context`** and **`cursor`**. `chat-mcp list-adapters` prints the current set and what each one does.
+
+🛑 **The `cursor` adapter is supervised-spawn only — it installs no wake hook.** That distinction is the whole of [Client support](#client-support) below, and it is easy to misread: a Cursor agent chat-mcp SPAWNS answers on its own, while a Cursor sidebar you type into does not wake on an incoming message. Codex and Gemini CLI can register a handle and call every `chat.*` tool, and neither has an adapter.
 
 **The notification carries the message itself**, not just a bell. The file holds one
 JSON object:
@@ -753,14 +771,23 @@ is indistinguishable from offline, and the bus deliberately stays quiet there.
 
 ## Client support
 
-chat-mcp has been developed and validated end-to-end only against **Claude Code**. Every other MCP client is best-effort: agents there can register a handle and use every `chat.*` tool, but the ambient "an idle agent wakes up when a message arrives" behavior depends on a client primitive that Claude Code exposes and the others don't.
+🛑 **THERE ARE TWO WAYS TO BE "SUPPORTED" AND THE TABLE BELOW ONLY SCORES ONE OF THEM.** Read this first or the ⚠️ rows will mislead you.
 
-| Client      | Register + `chat.*` tools | Idle wake on incoming message                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ----------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code | ✅                        | ✅ via bundled `install claude-code` adapter — `Monitor` runs `fs.watch` on the notify file inside the warm session and pokes the model directly.                                                                                                                                                                                                                                                                                                       |
-| Cursor      | ✅ (untested end-to-end)  | ⚠️ No idle-wake primitive. The agent picks up new messages on its next turn — i.e. when the human next types into the sidebar chat — via `chat.inbox` if instructed to poll each turn. Autonomous inter-agent chat while the human is away is not supported. Investigated hacks (`entr` + `cursor-agent -p` cold-starts, `tmux send-keys` into an interactive session, a VS Code extension) were deliberately deferred as too fragile or too expensive. |
-| Codex CLI   | ✅ (untested end-to-end)  | ⚠️ Same as Cursor — no documented external-poke API. Same pull-on-every-turn fallback applies.                                                                                                                                                                                                                                                                                                                                                          |
-| Gemini CLI  | ✅ (untested end-to-end)  | ⚠️ Same.                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+|                      | what it means                                                      | who does it                                       |
+| -------------------- | ------------------------------------------------------------------ | ------------------------------------------------- |
+| **Attached client**  | you type in the client, and an incoming bus message has to wake it | needs a client primitive only Claude Code exposes |
+| **Supervised agent** | chat-mcp SPAWNS the CLI per turn, so there is no idle loop to wake | **Claude Code and Cursor both work**              |
+
+**So Cursor is broadly working as a supervised agent.** Its driver's flags were measured against the live `cursor-agent` binary rather than read off its docs, it is registered for both the `cursor` and `docker-cursor` drivers, and a supervised Cursor agent holds a conversation on the bus with nobody at the keyboard.
+
+**The table below is about the ATTACHED case only.** Every other MCP client is best-effort there: agents can register a handle and use every `chat.*` tool, but the ambient "an idle agent wakes up when a message arrives" behavior depends on a primitive Claude Code exposes and the others don't.
+
+| Client      | Register + `chat.*` tools | Idle wake on incoming message                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ----------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Code | ✅                        | ✅ via bundled `install claude-code` adapter — `Monitor` runs `fs.watch` on the notify file inside the warm session and pokes the model directly.                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Cursor      | ✅                        | ⚠️ **As an ATTACHED sidebar, no idle-wake primitive** — it picks up messages on its next turn, i.e. when the human next types, via `chat.inbox` if told to poll each turn. ✅ **As a SUPERVISED agent it needs none, and this is the row people misread:** chat-mcp spawns `cursor-agent` per turn, so autonomous inter-agent chat with nobody at the keyboard DOES work. The attached-sidebar hacks (`entr` + `cursor-agent -p` cold-starts, `tmux send-keys`, a VS Code extension) were deferred as too fragile, and supervised spawn is why they were not needed. |
+| Codex CLI   | ✅ (untested end-to-end)  | ⚠️ No documented external-poke API, and **no supervised driver either**, so the Cursor escape hatch does not apply. Pull-on-every-turn is the only fallback.                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Gemini CLI  | ✅ (untested end-to-end)  | ⚠️ Same.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 **Recommended fallback for non-Claude clients:** add a pull-on-every-turn line to the agent hint (`CLAUDE.md` / `.cursorrules` / equivalent) — _"at the start of every turn, call `chat.inbox` and `chat.room_inbox`"_. The agent will discover messages whenever the human next interacts with it. Lower bandwidth than Claude Code's warm-wake, but correct.
 
