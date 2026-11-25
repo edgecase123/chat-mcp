@@ -52,6 +52,7 @@ import {
   planApproveLabel,
   planVerdictClass,
   planVerdictLabel,
+  startVisible,
   stopAllConfirmText,
   stopAllVisible,
   stopButtonClass,
@@ -232,9 +233,17 @@ const state = {
   // Which row's panel is open, at most one: the plan is seven lines and the
   // sidebar is narrow.
   planOpen: null,
-  // The row with a request in flight, so its two buttons can be disabled
-  // without disabling every row's.
-  planBusy: null,
+  // The row with a request in flight, so every control on it can be disabled
+  // without disabling another row's. Shared by the plan controls and Start:
+  // a per-control flag would let one row run two requests at once.
+  //
+  // 🛑 EVERY CLEAR NAMES ITS OWN ROW. Three handlers hold this one field, so a
+  // bare reset would let row A finishing re-enable row B mid-request.
+  rowBusy: null,
+  // Handles whose start was accepted but whose supervisor is not listening
+  // yet. `/api/agents/start` answers 202 — handed off, not bound — so the live
+  // list cannot name them and Start would otherwise still be offered.
+  starting: new Set(),
 };
 
 const el = {
@@ -2268,7 +2277,7 @@ async function openPlan(handle) {
     return;
   }
 
-  state.planBusy = handle;
+  state.rowBusy = handle;
   repaintSettings();
 
   try {
@@ -2281,7 +2290,7 @@ async function openPlan(handle) {
     state.planOpen = null;
   }
 
-  state.planBusy = null;
+  if (state.rowBusy === handle) state.rowBusy = null;
   repaintSettings();
 }
 
@@ -2301,7 +2310,7 @@ async function approvePlan(handle) {
 
   if (shown === undefined) return;
 
-  state.planBusy = handle;
+  state.rowBusy = handle;
   repaintSettings();
 
   try {
@@ -2314,7 +2323,7 @@ async function approvePlan(handle) {
     toast(`Not approved: ${e.message}`, "warn");
   }
 
-  state.planBusy = null;
+  if (state.rowBusy === handle) state.rowBusy = null;
 
   try {
     await readPlan(handle);
@@ -2336,7 +2345,7 @@ async function approvePlan(handle) {
  */
 function planControls(handle) {
   const open = state.planOpen === handle;
-  const busy = state.planBusy === handle;
+  const busy = state.rowBusy === handle;
   const plan = state.plans[handle];
 
   return [
@@ -2388,12 +2397,98 @@ function planPanel(handle, plan) {
           {
             className: "registration__plan-approve",
             type: "button",
-            disabled: state.planBusy === handle,
+            disabled: state.rowBusy === handle,
             onclick: () => void approvePlan(handle),
           },
           [approve],
         ),
   ]);
+}
+
+/**
+ * How long Start stays hidden while a supervisor binds, at most.
+ *
+ * 🛑 BOUNDED BECAUSE THE SUPERVISOR MAY REFUSE AT ITS OWN BIND. An unbounded
+ * wait on a handle that never appears hides Start forever, which leaves the
+ * operator no remedy in the browser at all.
+ */
+const START_POLL_ATTEMPTS = 10;
+const START_POLL_MS = 400;
+
+/**
+ * Hold Start back until the live list names the handle, or the bound expires.
+ *
+ * 🛑 THE CLEAR IS UNCONDITIONAL. A supervisor that refuses at its bind never
+ * reaches the live list, so a clear on the success path only would strand the
+ * row. Start coming back is the honest answer there — the refusal itself is in
+ * the handle's log, which the 202 named.
+ */
+async function awaitSupervisor(handle) {
+  for (let attempt = 0; attempt < START_POLL_ATTEMPTS; attempt += 1) {
+    await new Promise((done) => setTimeout(done, START_POLL_MS));
+    await fetchLiveAgents();
+
+    if (state.agents.some((a) => a.handle === handle)) break;
+  }
+
+  state.starting.delete(handle);
+  repaintSettings();
+}
+
+/**
+ * Start a contained agent's supervisor from the card (#423).
+ *
+ * 🛑 THE ROW'S OWN `rowBusy`, NOT A SECOND FLAG. A Start button with its own
+ * flag passes "a request in flight disables that row's controls" while letting
+ * one row run two requests at once.
+ *
+ * 🛑 THE LIVE LIST IS RE-READ AFTER EITHER OUTCOME. `startVisible` hides Start
+ * by reading that list and nothing else does, so a start that worked would
+ * leave the button on screen until the next poll.
+ */
+async function startAgent(handle) {
+  state.rowBusy = handle;
+  repaintSettings();
+
+  try {
+    await api("/api/agents/start", {
+      method: "POST",
+      body: JSON.stringify({ handle }),
+    });
+    // 🛑 MARKED BEFORE ANY REPAINT. A 202 means the socket is not bound yet,
+    // so the next render would offer Start again on a handle that is starting.
+    state.starting.add(handle);
+    toast(`Starting ${handle}`, "info");
+  } catch (e) {
+    // The route names the precondition that failed and carries the remedy
+    // with it. Paraphrasing would be a second copy of its rules, and a count
+    // of its refusals here would drift the day one is added.
+    toast(`Not started: ${e.message}`, "warn");
+  }
+
+  if (state.rowBusy === handle) state.rowBusy = null;
+  // Re-read on BOTH outcomes. An `already-running` refusal means our list was
+  // stale, which is why Start was offered at all.
+  await fetchLiveAgents();
+  repaintSettings();
+
+  if (state.starting.has(handle)) void awaitSupervisor(handle);
+}
+
+/** The Start affordance on a contained row that has no live supervisor. */
+function startControl(handle) {
+  const busy = state.rowBusy === handle;
+
+  return h(
+    "button",
+    {
+      className: "registration__start",
+      type: "button",
+      disabled: busy,
+      onclick: () => void startAgent(handle),
+    },
+    [busy ? "starting…" : "Start"],
+  );
 }
 
 /**
@@ -2411,6 +2506,13 @@ function registrationSection() {
   const rows = registrationRows(state.registrations, state.capabilities);
   const notice = registrationNotice(state.capabilities);
   const admin = state.capabilities.includes("admin");
+  // 🛑 THE SUPERVISOR HANDLES, WHICH IS THE SAME NAMESPACE A REGISTRATION ROW
+  // USES. `/api/agents/live` keys its rows by the supervisor and appends a
+  // suffix only for the CHILD, so a registration handle compares directly.
+  // A handle that is starting is hidden for the same reason a live one is:
+  // clicking Start again spawns a second detached child that dies at its own
+  // bind, in a log nobody is reading.
+  const suppressed = [...state.agents.map((a) => a.handle), ...state.starting];
 
   return h("div", { className: "settings__group" }, [
     h("div", { className: "settings__group-heading" }, ["Registered"]),
@@ -2438,6 +2540,9 @@ function registrationSection() {
               [r.mode],
             ),
             ...(r.storedMode === "docker" ? planControls(r.handle) : []),
+            ...(startVisible(r, admin, suppressed)
+              ? [startControl(r.handle)]
+              : []),
             r.canForget
               ? h(
                   "button",

@@ -1491,9 +1491,10 @@ body {
   background: var(--bg-inset);
 }
 
-/* The container plan, in place on the row (#132 slice 4b). */
+/* The container plan and the Start control, in place on the row. */
 .registration__plan-toggle,
-.registration__plan-approve {
+.registration__plan-approve,
+.registration__start {
   padding: 2px 8px;
   margin-top: 4px;
   border: 1px solid var(--border);
@@ -1505,11 +1506,13 @@ body {
   cursor: pointer;
 }
 .registration__plan-toggle:hover,
-.registration__plan-approve:hover {
+.registration__plan-approve:hover,
+.registration__start:hover {
   background: var(--bg-inset);
 }
 .registration__plan-toggle[disabled],
-.registration__plan-approve[disabled] {
+.registration__plan-approve[disabled],
+.registration__start[disabled] {
   cursor: default;
   opacity: 0.6;
 }

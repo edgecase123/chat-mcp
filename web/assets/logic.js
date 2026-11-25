@@ -2323,6 +2323,43 @@ export function registrationRows(payload, capabilities = []) {
 }
 
 /**
+ * Whether a registered row offers Start (#423).
+ *
+ * 🛑 DOCKER ONLY, on lee's ruling of 2026-11-25. The asymmetry is not cosmetic:
+ * the start command gates the container plan's confirmation on
+ * `selection.mode === "docker"`, so the HOST path has nothing to approve. A
+ * host Start would therefore be one click to an agent holding the operator's
+ * whole filesystem and logins, with no consent step anywhere in it.
+ *
+ * 🛑 KEYED ON `storedMode`, WHICH IS NULL FOR A WITHHELD MODE. Reading the
+ * label instead would let an unreadable mode render as docker, which is the
+ * failure `registrationRows` already refuses one field up.
+ *
+ * 🛑 AN AFFORDANCE, NOT A PRECONDITION — the same shape as `stopAllVisible`.
+ * `refuseIfSupervisorLive` rejects a second supervisor cross-process, so a
+ * handle that goes live between this render and the click is answered with a
+ * 409 rather than started twice. Hiding the button is courtesy; the route is
+ * the guard.
+ *
+ * 🛑 THE THIRD ARGUMENT IS EVERY HANDLE START IS SUPPRESSED FOR, NOT ONLY THE
+ * LIVE ONES. `/api/agents/start` answers 202, so a handle whose supervisor is
+ * still binding is absent from the live list and must be passed in too.
+ *
+ * @param {{handle: string, storedMode: string|null}} row
+ * @param {boolean} admin
+ * @param {readonly string[]} suppressedHandles live, or still starting
+ */
+export function startVisible(row, admin, suppressedHandles = []) {
+  // The capability, not the row, for the same reason as `canForget`:
+  // `POST /api/agents/start` is `admin`, so a lower tier would be offered a
+  // control the route answers with a 403.
+  if (admin !== true) return false;
+  if (row?.storedMode !== "docker") return false;
+
+  return !suppressedHandles.includes(row.handle);
+}
+
+/**
  * What the card says when nothing is registered.
  *
  * 🛑 NOT A BLANK, for the same reason as the claims panel: an empty card and

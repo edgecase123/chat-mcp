@@ -19,6 +19,12 @@ const APP = readFileSync(
   "utf8",
 );
 
+/** `logic.js`, so an "app.js calls X" test has a POSITIVE CONTROL that X is real. */
+const LOGIC = readFileSync(
+  new URL("../../web/assets/logic.js", import.meta.url),
+  "utf8",
+);
+
 /**
  * `app.js` with BOTH comment forms removed, so prose cannot satisfy a code
  * check.
@@ -279,10 +285,186 @@ test("🛑 the panel renders the SERVER's plan text and formats nothing itself",
 test("a request in flight disables that row's controls and no other row's", () => {
   const controls = fnBody("planControls");
 
-  assert.match(controls, /state\.planBusy === handle/);
+  assert.match(controls, /state\.rowBusy === handle/);
   assert.match(
     controls,
     /disabled: busy/,
     "the toggle stays clickable during its own fetch otherwise",
+  );
+});
+
+// ── the Start control (#423 unit B) ───────────────────────────────────────
+
+test("🛑 the Start control is gated on startVisible, never on storedMode alone", () => {
+  const section = fnBody("registrationSection");
+
+  assert.match(
+    section,
+    /startVisible\(/,
+    "the card never calls the visibility rule, so its six tests prove nothing about the surface",
+  );
+
+  // POSITIVE CONTROL for the absence check below: the rule is real and it is
+  // the thing that owns the docker gate.
+  assert.match(
+    LOGIC,
+    /export function startVisible\(/,
+    "POSITIVE CONTROL FAILED: startVisible is not exported from logic.js",
+  );
+  assert.ok(
+    APP_CODE.includes("startVisible"),
+    "app.js has to import the rule, not re-derive the gate",
+  );
+});
+
+test("🛑 the live list is what suppresses Start, and it comes from state.agents", () => {
+  const section = fnBody("registrationSection");
+
+  assert.match(
+    section,
+    /state\.agents\.map\(/,
+    "without the live handles every running agent still offers Start, which 409s already-running",
+  );
+});
+
+test("🛑 the start POST hits /api/agents/start and names the handle", () => {
+  const start = fnBody("startAgent");
+
+  assert.match(start, /"\/api\/agents\/start"/);
+  assert.match(start, /method: "POST"/);
+  assert.match(
+    start,
+    /JSON\.stringify\(\{ handle \}\)/,
+    "the route takes the supervisor handle; a plan or a row would be a different contract",
+  );
+});
+
+test("🛑 Start shares the ROW's busy flag, so one row cannot run two requests", () => {
+  const start = fnBody("startAgent");
+  const control = fnBody("startControl");
+
+  assert.match(start, /state\.rowBusy = handle/);
+  assert.match(start, /state\.rowBusy = null/);
+  assert.match(
+    control,
+    /state\.rowBusy === handle/,
+    "a Start button with its own flag passes the in-flight test while breaking what it means",
+  );
+  assert.ok(
+    !APP_CODE.includes("planBusy"),
+    "planBusy survives somewhere, so two names now gate the same row",
+  );
+});
+
+test("🛑 the live list is re-read after a start, or Start stays on screen", () => {
+  const start = fnBody("startAgent");
+
+  const catchAt = start.indexOf("catch");
+  const refetchAt = start.lastIndexOf("fetchLiveAgents()");
+
+  assert.notEqual(catchAt, -1, "startAgent has no catch");
+  assert.ok(
+    refetchAt > catchAt,
+    "the refresh has to follow the failure path too; startVisible reads the live list and nothing else hides the button",
+  );
+});
+
+/**
+ * 🛑 ONE FLAG, THREE HANDLERS, SO THE CLEAR HAS TO NAME ITS OWN ROW.
+ *
+ * `openPlan`, `approvePlan` and `startAgent` all hold `state.rowBusy`. A bare
+ * `state.rowBusy = null` clears whichever row happens to be in it, so row A
+ * finishing re-enables row B's controls while B's own request is still in
+ * flight — which is the invariant "and no other row's" already asserts.
+ *
+ * `startAgent` holds the flag across an extra `await fetchLiveAgents()`, so it
+ * widens the window rather than inventing it.
+ */
+test("🛑 a handler clears the busy flag only when the row is still its own", () => {
+  const bare = APP_CODE.match(/^\s*state\.rowBusy = null;/gm) ?? [];
+
+  assert.deepEqual(
+    bare,
+    [],
+    `${bare.length} unguarded clear(s) of state.rowBusy — one row can re-enable another's controls`,
+  );
+
+  // POSITIVE CONTROL: the guarded form is really there, three times, so the
+  // absence check above is not passing on a flag that vanished.
+  const guarded =
+    APP_CODE.match(
+      /if \(state\.rowBusy === handle\) state\.rowBusy = null;/g,
+    ) ?? [];
+
+  assert.equal(
+    guarded.length,
+    3,
+    "openPlan, approvePlan and startAgent each own one guarded clear",
+  );
+});
+
+// ── the 202 gap: a started supervisor is not live yet (#423) ───────────────
+
+/**
+ * 🛑 THE ROUTE ANSWERS 202, WHICH MEANS HANDED OFF AND NOT LISTENING.
+ *
+ * The supervisor binds its socket after the response, so the live list cannot
+ * contain it yet. `startVisible` reads that list and nothing else, so without
+ * a second input Start stays on screen and invites a second click — which
+ * spawns a second detached child that dies at its own bind, in a log nobody
+ * is reading.
+ */
+test("🛑 a handle that was just started is hidden from Start, not only a live one", () => {
+  const section = fnBody("registrationSection");
+
+  assert.match(
+    section,
+    /state\.starting/,
+    "the render reads only the live list, so a 202 leaves Start on screen",
+  );
+});
+
+test("🛑 a 202 marks the handle starting BEFORE the live list is re-read", () => {
+  const start = fnBody("startAgent");
+
+  const markAt = start.indexOf("state.starting.add(handle)");
+  const awaitAt = start.indexOf("awaitSupervisor(handle)");
+
+  assert.notEqual(markAt, -1, "startAgent never marks the handle as starting");
+  assert.notEqual(awaitAt, -1, "startAgent never waits for the supervisor");
+  assert.ok(
+    markAt < awaitAt,
+    "marking after the wait leaves a window where Start is still offered",
+  );
+});
+
+/**
+ * 🛑 THE CLEAR IS UNCONDITIONAL, AND THAT IS THE WHOLE POINT.
+ *
+ * A supervisor can refuse at its own bind, so the handle may never appear in
+ * the live list. A clear reached only on success would hide Start forever and
+ * leave the operator with no remedy in the browser at all.
+ */
+test("🛑 the starting mark always clears, even when the supervisor never appears", () => {
+  const wait = fnBody("awaitSupervisor");
+
+  const breakAt = wait.lastIndexOf("break");
+  const clearAt = wait.indexOf("state.starting.delete(handle)");
+
+  assert.notEqual(
+    breakAt,
+    -1,
+    "awaitSupervisor does not stop early on success",
+  );
+  assert.notEqual(clearAt, -1, "awaitSupervisor never clears the mark");
+  assert.ok(
+    clearAt > breakAt,
+    "the clear sits inside the loop, so a supervisor that never binds hides Start forever",
+  );
+
+  assert.match(
+    wait,
+    /START_POLL_ATTEMPTS/,
+    "an unbounded poll against a supervisor that never binds never stops",
   );
 });
