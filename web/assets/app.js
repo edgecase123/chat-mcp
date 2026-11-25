@@ -233,8 +233,9 @@ const state = {
   // Which row's panel is open, at most one: the plan is seven lines and the
   // sidebar is narrow.
   planOpen: null,
-  // The row with a request in flight, so its two buttons can be disabled
-  // without disabling every row's.
+  // The row with a request in flight, so every control on it can be disabled
+  // without disabling another row's. Shared by the plan controls and Start:
+  // a per-control flag would let one row run two requests at once.
   rowBusy: null,
 };
 
