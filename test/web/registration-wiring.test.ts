@@ -402,3 +402,69 @@ test("🛑 a handler clears the busy flag only when the row is still its own", (
     "openPlan, approvePlan and startAgent each own one guarded clear",
   );
 });
+
+// ── the 202 gap: a started supervisor is not live yet (#423) ───────────────
+
+/**
+ * 🛑 THE ROUTE ANSWERS 202, WHICH MEANS HANDED OFF AND NOT LISTENING.
+ *
+ * The supervisor binds its socket after the response, so the live list cannot
+ * contain it yet. `startVisible` reads that list and nothing else, so without
+ * a second input Start stays on screen and invites a second click — which
+ * spawns a second detached child that dies at its own bind, in a log nobody
+ * is reading.
+ */
+test("🛑 a handle that was just started is hidden from Start, not only a live one", () => {
+  const section = fnBody("registrationSection");
+
+  assert.match(
+    section,
+    /state\.starting/,
+    "the render reads only the live list, so a 202 leaves Start on screen",
+  );
+});
+
+test("🛑 a 202 marks the handle starting BEFORE the live list is re-read", () => {
+  const start = fnBody("startAgent");
+
+  const markAt = start.indexOf("state.starting.add(handle)");
+  const awaitAt = start.indexOf("awaitSupervisor(handle)");
+
+  assert.notEqual(markAt, -1, "startAgent never marks the handle as starting");
+  assert.notEqual(awaitAt, -1, "startAgent never waits for the supervisor");
+  assert.ok(
+    markAt < awaitAt,
+    "marking after the wait leaves a window where Start is still offered",
+  );
+});
+
+/**
+ * 🛑 THE CLEAR IS UNCONDITIONAL, AND THAT IS THE WHOLE POINT.
+ *
+ * A supervisor can refuse at its own bind, so the handle may never appear in
+ * the live list. A clear reached only on success would hide Start forever and
+ * leave the operator with no remedy in the browser at all.
+ */
+test("🛑 the starting mark always clears, even when the supervisor never appears", () => {
+  const wait = fnBody("awaitSupervisor");
+
+  const breakAt = wait.lastIndexOf("break");
+  const clearAt = wait.indexOf("state.starting.delete(handle)");
+
+  assert.notEqual(
+    breakAt,
+    -1,
+    "awaitSupervisor does not stop early on success",
+  );
+  assert.notEqual(clearAt, -1, "awaitSupervisor never clears the mark");
+  assert.ok(
+    clearAt > breakAt,
+    "the clear sits inside the loop, so a supervisor that never binds hides Start forever",
+  );
+
+  assert.match(
+    wait,
+    /START_POLL_ATTEMPTS/,
+    "an unbounded poll against a supervisor that never binds never stops",
+  );
+});

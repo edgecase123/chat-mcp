@@ -240,6 +240,10 @@ const state = {
   // 🛑 EVERY CLEAR NAMES ITS OWN ROW. Three handlers hold this one field, so a
   // bare reset would let row A finishing re-enable row B mid-request.
   rowBusy: null,
+  // Handles whose start was accepted but whose supervisor is not listening
+  // yet. `/api/agents/start` answers 202 — handed off, not bound — so the live
+  // list cannot name them and Start would otherwise still be offered.
+  starting: new Set(),
 };
 
 const el = {
@@ -2402,6 +2406,36 @@ function planPanel(handle, plan) {
 }
 
 /**
+ * How long Start stays hidden while a supervisor binds, at most.
+ *
+ * 🛑 BOUNDED BECAUSE THE SUPERVISOR MAY REFUSE AT ITS OWN BIND. An unbounded
+ * wait on a handle that never appears hides Start forever, which leaves the
+ * operator no remedy in the browser at all.
+ */
+const START_POLL_ATTEMPTS = 10;
+const START_POLL_MS = 400;
+
+/**
+ * Hold Start back until the live list names the handle, or the bound expires.
+ *
+ * 🛑 THE CLEAR IS UNCONDITIONAL. A supervisor that refuses at its bind never
+ * reaches the live list, so a clear on the success path only would strand the
+ * row. Start coming back is the honest answer there — the refusal itself is in
+ * the handle's log, which the 202 named.
+ */
+async function awaitSupervisor(handle) {
+  for (let attempt = 0; attempt < START_POLL_ATTEMPTS; attempt += 1) {
+    await new Promise((done) => setTimeout(done, START_POLL_MS));
+    await fetchLiveAgents();
+
+    if (state.agents.some((a) => a.handle === handle)) break;
+  }
+
+  state.starting.delete(handle);
+  repaintSettings();
+}
+
+/**
  * Start a contained agent's supervisor from the card (#423).
  *
  * 🛑 THE ROW'S OWN `rowBusy`, NOT A SECOND FLAG. A Start button with its own
@@ -2421,6 +2455,9 @@ async function startAgent(handle) {
       method: "POST",
       body: JSON.stringify({ handle }),
     });
+    // 🛑 MARKED BEFORE ANY REPAINT. A 202 means the socket is not bound yet,
+    // so the next render would offer Start again on a handle that is starting.
+    state.starting.add(handle);
     toast(`Starting ${handle}`, "info");
   } catch (e) {
     // The route names the precondition that failed and carries the remedy
@@ -2430,8 +2467,12 @@ async function startAgent(handle) {
   }
 
   if (state.rowBusy === handle) state.rowBusy = null;
+  // Re-read on BOTH outcomes. An `already-running` refusal means our list was
+  // stale, which is why Start was offered at all.
   await fetchLiveAgents();
   repaintSettings();
+
+  if (state.starting.has(handle)) void awaitSupervisor(handle);
 }
 
 /** The Start affordance on a contained row that has no live supervisor. */
@@ -2468,7 +2509,10 @@ function registrationSection() {
   // 🛑 THE SUPERVISOR HANDLES, WHICH IS THE SAME NAMESPACE A REGISTRATION ROW
   // USES. `/api/agents/live` keys its rows by the supervisor and appends a
   // suffix only for the CHILD, so a registration handle compares directly.
-  const liveHandles = state.agents.map((a) => a.handle);
+  // A handle that is starting is hidden for the same reason a live one is:
+  // clicking Start again spawns a second detached child that dies at its own
+  // bind, in a log nobody is reading.
+  const suppressed = [...state.agents.map((a) => a.handle), ...state.starting];
 
   return h("div", { className: "settings__group" }, [
     h("div", { className: "settings__group-heading" }, ["Registered"]),
@@ -2496,7 +2540,7 @@ function registrationSection() {
               [r.mode],
             ),
             ...(r.storedMode === "docker" ? planControls(r.handle) : []),
-            ...(startVisible(r, admin, liveHandles)
+            ...(startVisible(r, admin, suppressed)
               ? [startControl(r.handle)]
               : []),
             r.canForget

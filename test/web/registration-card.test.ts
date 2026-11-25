@@ -339,7 +339,7 @@ test("a handle whose supervisor is already live offers no Start", () => {
 });
 
 /**
- * 🛑 THE DISCRIMINATOR. Without this row, `liveHandles.length > 0` passes
+ * 🛑 THE DISCRIMINATOR. Without this row, `suppressedHandles.length > 0` passes
  * every other test here and hides Start on every card the moment ANY agent
  * runs.
  */

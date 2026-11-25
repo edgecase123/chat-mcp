@@ -2341,18 +2341,22 @@ export function registrationRows(payload, capabilities = []) {
  * 409 rather than started twice. Hiding the button is courtesy; the route is
  * the guard.
  *
+ * 🛑 THE THIRD ARGUMENT IS EVERY HANDLE START IS SUPPRESSED FOR, NOT ONLY THE
+ * LIVE ONES. `/api/agents/start` answers 202, so a handle whose supervisor is
+ * still binding is absent from the live list and must be passed in too.
+ *
  * @param {{handle: string, storedMode: string|null}} row
  * @param {boolean} admin
- * @param {readonly string[]} liveHandles
+ * @param {readonly string[]} suppressedHandles live, or still starting
  */
-export function startVisible(row, admin, liveHandles = []) {
+export function startVisible(row, admin, suppressedHandles = []) {
   // The capability, not the row, for the same reason as `canForget`:
   // `POST /api/agents/start` is `admin`, so a lower tier would be offered a
   // control the route answers with a 403.
   if (admin !== true) return false;
   if (row?.storedMode !== "docker") return false;
 
-  return !liveHandles.includes(row.handle);
+  return !suppressedHandles.includes(row.handle);
 }
 
 /**
