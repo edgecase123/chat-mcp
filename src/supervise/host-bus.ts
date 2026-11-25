@@ -1,4 +1,5 @@
 import { buildServer, shimContextFor } from "../shim/index.js";
+import * as dao from "../storage/dao.js";
 import type { BusEndpoint } from "./child.js";
 import { authenticateToken, mintToken, revokeToken } from "./handle-tokens.js";
 import { McpHttpListener } from "./mcp-listener.js";
@@ -7,6 +8,45 @@ export interface HostBus {
   /** What the child is configured with. */
   readonly endpoint: BusEndpoint;
   close(): Promise<void>;
+}
+
+/**
+ * Give the child a bus row before it has run, reading as OFFLINE.
+ *
+ * 🛑 A HOST CHILD REGISTERS AT PROCESS START AND A CONTAINERIZED ONE DID NOT
+ * REGISTER AT ALL. The host path runs the shim as its own process. A container
+ * reaches `shimContextFor` only through `serverFor`, which needs a SESSION, and
+ * `cursor-agent` opens one lazily on its first chat tool call — so a turn that
+ * needed only `Read` left no row and the sidebar row was never clickable.
+ *
+ * 🛑 `shimContextFor` RATHER THAN A HAND-BUILT UPSERT. Its own docblock records
+ * why: the host bus once built the other four fields by hand and missed the
+ * registration. Two copies of a five-step construction is how a step goes
+ * missing.
+ *
+ * 🛑 THEN NULL THE PID, WHICH IS THE WHOLE REASON THIS IS SAFE. The pid written
+ * is `process.pid` — the SUPERVISOR's, not the child's — so leaving it would
+ * make a child that never starts read as online and route a sibling's work to
+ * nothing. `dao.clearAgentPid`'s docblock prescribes exactly this.
+ *
+ * ⚠️ THE CONTEXT IS TRANSIENT ON PURPOSE. The ROW persists in sqlite; nothing
+ * long-lived is held here, so `serverFor` keeps sole ownership of session
+ * teardown and there is no second handle for anyone to close.
+ */
+function registerChildOffline(childHandle: string): void {
+  const ctx = shimContextFor({
+    handle: childHandle,
+    sandbox: "docker",
+    adapterStatus: { installed: true, framework: null, hint: null },
+    force: true,
+  });
+
+  try {
+    dao.clearAgentPid(ctx.db, childHandle);
+  } finally {
+    void ctx.notify.close();
+    ctx.db.close();
+  }
 }
 
 /**
@@ -58,6 +98,9 @@ export async function openHostBus(childHandle: string): Promise<HostBus> {
       };
     },
   });
+
+  // 🛑 AFTER the bind, so a listener that failed to bind leaves no row behind.
+  registerChildOffline(childHandle);
 
   return {
     endpoint: { url: listener.url, token: mintToken(childHandle) },
