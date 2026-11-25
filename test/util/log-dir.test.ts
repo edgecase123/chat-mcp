@@ -7,13 +7,8 @@ import { join } from "node:path";
 // 🛑 BEFORE any import that resolves a state path.
 process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-log-dir-"));
 
-const {
-  STATE_DIR_MODE,
-  ensureLogDir,
-  logDir,
-  logPathFor,
-  stateDir,
-} = await import("../../src/util/paths.js");
+const { STATE_DIR_MODE, ensureLogDir, logDir, logPathFor, stateDir } =
+  await import("../../src/util/paths.js");
 const { realContains } = await import("../../src/supervise/containment.js");
 
 /**
