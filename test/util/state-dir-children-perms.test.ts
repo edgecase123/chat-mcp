@@ -18,9 +18,11 @@ process.env.CHAT_MCP_HOME = join(
 
 const {
   ensureAdaptersDir,
+  ensureLogDir,
   ensureMcpConfigDir,
   ensureNotifyDir,
   adaptersDir,
+  logDir,
   mcpConfigDir,
   mcpConfigPathFor,
   notifyDir,
@@ -57,6 +59,9 @@ const DIRS: ReadonlyArray<[string, () => string, () => string]> = [
   ["mcp config", ensureMcpConfigDir, mcpConfigDir],
   ["notify", ensureNotifyDir, notifyDir],
   ["adapters", ensureAdaptersDir, adaptersDir],
+  // A detached supervisor's log carries the child's own output, so an install
+  // that predates the log dir must be tightened rather than trusted (#423).
+  ["log", ensureLogDir, logDir],
 ];
 
 for (const [label, ensure, path] of DIRS) {

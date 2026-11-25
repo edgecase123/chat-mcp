@@ -92,6 +92,9 @@ export const ADMIN_ROUTES: ReadonlySet<string> = new Set([
   "/api/agents/confirm",
   "/api/agents/forget",
   "/api/agents/plan",
+  // 🛑 ADMIN, NOT write. It runs an agent CLI on this machine, which is a
+  // larger grant than any message a `write` credential can send.
+  "/api/agents/start",
   "/api/agents/stop",
   "/api/approvals/answer",
   "/api/context-gate",

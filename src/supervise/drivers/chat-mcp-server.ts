@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
  * no `../index.js`, and the TypeScript entry needs a loader or the child exits
  * immediately — which looks exactly like the bug above.
  */
-function resolveChatMcpEntry(): { command: string; args: string[] } {
+export function resolveChatMcpEntry(): { command: string; args: string[] } {
   // 🚨 THESE ARE RELATIVE TO drivers/, AND THEY WERE OFF BY ONE LEVEL.
   // `../index.ts` from `src/supervise/drivers/` is `src/supervise/index.ts`
   // — the SUPERVISOR, not the CLI. The child's MCP server launched the
