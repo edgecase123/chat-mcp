@@ -1,4 +1,5 @@
 import { buildServer, shimContextFor } from "../shim/index.js";
+import * as dao from "../storage/dao.js";
 import type { BusEndpoint } from "./child.js";
 import { authenticateToken, mintToken, revokeToken } from "./handle-tokens.js";
 import { McpHttpListener } from "./mcp-listener.js";
@@ -7,6 +8,58 @@ export interface HostBus {
   /** What the child is configured with. */
   readonly endpoint: BusEndpoint;
   close(): Promise<void>;
+}
+
+/**
+ * Give the child a bus row before it has run, reading as OFFLINE.
+ *
+ * 🛑 A HOST CHILD REGISTERS AT PROCESS START AND A CONTAINERIZED ONE DID NOT
+ * REGISTER AT ALL. The host path runs the shim as its own process. A container
+ * reaches `shimContextFor` only through `serverFor`, which needs a SESSION, and
+ * `cursor-agent` opens one lazily on its first chat tool call — so a turn that
+ * needed only `Read` left no row and the sidebar row was never clickable.
+ *
+ * 🛑 `shimContextFor` RATHER THAN A HAND-BUILT UPSERT. Its own docblock records
+ * why: the host bus once built the other four fields by hand and missed the
+ * registration. Two copies of a five-step construction is how a step goes
+ * missing.
+ *
+ * 🛑 THEN NULL THE PID, WHICH IS THE WHOLE REASON THIS IS SAFE. The pid written
+ * is `process.pid` — the SUPERVISOR's, not the child's — so leaving it would
+ * make a child that never starts read as online and route a sibling's work to
+ * nothing. `dao.clearAgentPid`'s docblock prescribes exactly this.
+ *
+ * ⚠️ THE CONTEXT IS TRANSIENT ON PURPOSE. The ROW persists in sqlite; nothing
+ * long-lived is held here, so `serverFor` keeps sole ownership of session
+ * teardown and there is no second handle for anyone to close.
+ *
+ * 🛑 THE NULL IS CHECKED AND THROWS, BECAUSE DISCARDING IT FAILS OPEN INTO THE
+ * PHANTOM THIS FUNCTION EXISTS TO PREVENT. `clearAgentPid` reports whether it
+ * matched a row. The teardown call sites only LOG a false, which is right for
+ * them — a row already gone is the outcome they wanted. Here the row was
+ * written one statement earlier, so a false means the write did not land and
+ * continuing leaves the supervisor's pid on a handle that reads ONLINE.
+ */
+async function registerChildOffline(childHandle: string): Promise<void> {
+  const ctx = shimContextFor({
+    handle: childHandle,
+    sandbox: "docker",
+    adapterStatus: { installed: true, framework: null, hint: null },
+    force: true,
+  });
+
+  try {
+    if (!dao.clearAgentPid(ctx.db, childHandle)) {
+      throw new Error(
+        `registered ${childHandle} and then could not null its pid, so the ` +
+          `handle would read ONLINE with the supervisor's pid and a sibling ` +
+          `would route work to a child that has not started`,
+      );
+    }
+  } finally {
+    await ctx.notify.close();
+    ctx.db.close();
+  }
 }
 
 /**
@@ -58,6 +111,20 @@ export async function openHostBus(childHandle: string): Promise<HostBus> {
       };
     },
   });
+
+  // 🛑 AFTER the bind, so a listener that failed to bind leaves no row behind.
+  //
+  // 🛑 AND CLOSED BY HAND IF IT THROWS, BECAUSE `listener.close()` IS ONLY
+  // REACHABLE THROUGH THE `HostBus` BELOW. The bind already holds a loopback
+  // port, so a throw between here and the return leaks a listening server for
+  // the life of the process — and `startSupervisor` retries, so each attempt
+  // would leak another.
+  try {
+    await registerChildOffline(childHandle);
+  } catch (err) {
+    await listener.close();
+    throw err;
+  }
 
   return {
     endpoint: { url: listener.url, token: mintToken(childHandle) },
