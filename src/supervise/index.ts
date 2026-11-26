@@ -479,26 +479,36 @@ export async function startSupervisor(
   const childCwd = resolveCwd(opts.cwd, dirs);
 
   /**
-   * The handoff pointer, once per fresh session.
+   * The handoff pointer: its OWN prompt, once per fresh session.
    *
-   * 🛑 GATED ON `resumeSessionId` AND NOT ON THE MODE, which is where this
-   * differs from `mountBannerPrefix` directly above. A host agent has a
-   * handoff too — copying that gate would have left the host arm silent with
-   * a green suite, and `handoff-prefix.test.ts` pins both arms for that
-   * reason. A resumed child still holds the turn where it was told.
+   * 🛑 NOT A PREFIX ON AN INBOUND PROMPT, AND `mountBannerPrefix` ABOVE IS THE
+   * WRONG PRECEDENT TO COPY. Shipped as a prefix it broke two invariants the
+   * gate caught in one assertion:
    *
-   * 🛑 `childCwd`, NOT `opts.cwd`. The requested value may be undefined and
-   * `resolveCwd` is what turns it into a real, contained, realpath'd
-   * directory — so the agent is handed the path it will actually be sitting
-   * in rather than the one somebody typed.
+   *   the `alert` banner stopped being FIRST, so a BLOCKING message opened
+   *   with a paragraph about a file — the urgency the banner exists to carry
+   *
+   *   it displaced the body out of `excerptForLog`'s window, which is the
+   *   exact defect `LOG_EXCERPT_LIMIT` was raised from 80 to 200 to fix
+   *
+   * The mount banner is a few short lines and survives both. This is a
+   * paragraph, and a paragraph has to be its own turn.
+   *
+   * 🛑 GATED ON `resumeSessionId` AND NOT ON THE MODE. A host agent has a
+   * project directory and therefore a handoff — copying the mount banner's
+   * container-only gate would leave the host arm silent with a green suite.
+   *
+   * 🛑 `childCwd`, NOT `opts.cwd`. The requested value may be undefined, and
+   * `resolveCwd` is what makes it real, contained and realpath'd — so the
+   * agent is handed the directory it is actually sitting in.
    */
-  let needsHandoffPointer = !opts.resumeSessionId;
+  const offerHandoffPointer = (): void => {
+    if (opts.resumeSessionId) return;
 
-  const handoffPrefix = (): string => {
-    if (!needsHandoffPointer) return "";
-    needsHandoffPointer = false;
-
-    return `${handoffPreamble(handoffPathFor(selection.mode, childCwd))}\n\n`;
+    queue.offer({
+      text: handoffPreamble(handoffPathFor(selection.mode, childCwd)),
+      messageIds: [],
+    });
   };
   // Injected in tests; the real one is the shared bus database the web UI
   // already reads.
@@ -1511,6 +1521,7 @@ export async function startSupervisor(
   }
 
   wireChild();
+  offerHandoffPointer();
 
   /**
    * Take the outgoing child offline on the bus and stop its activity dot.
@@ -1965,7 +1976,7 @@ export async function startSupervisor(
     const rendered = formatPrompt(envelope, childCanSend());
 
     const prompt = {
-      text: `${mountBannerPrefix()}${handoffPrefix()}${rendered.text}`,
+      text: `${mountBannerPrefix()}${rendered.text}`,
       messageIds: envelope.id > 0 ? [envelope.id] : [],
       ...(rendered.owedTo ? { owedTo: rendered.owedTo } : {}),
     };

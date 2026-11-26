@@ -88,3 +88,28 @@ test("⚠️ the preamble does not claim the file exists", () => {
   // an agent that reports a fault instead of starting work.
   assert.match(text, /if it (is )?(there|present|exists)/i);
 });
+
+/**
+ * 🔴 THE CLAIM THIS PREAMBLE SHIPPED ONCE AND THAT WAS FALSE. It ended
+ * *"because nothing else can write it for you"*, argued from `docker cp`
+ * having zero hits in this codebase.
+ *
+ * 🛑 THE PREMISE IS TRUE AND THE CONCLUSION DOES NOT FOLLOW. `/work` is a
+ * READ-WRITE bind of the host project directory, so anything on the host
+ * writing `<projectDir>/HANDOFF.md` reaches the container with no `docker cp`
+ * involved. Raised by claude2 on PR 469 and verified in source.
+ *
+ * ⚠️ WHY IT MATTERS TO THE AGENT, WHICH IS WHO READS THIS STRING: told it is
+ * the only writer, an agent has no reason to expect the file to have changed
+ * under it — and operator seeding is what #463's own item 2 asked for.
+ */
+test("🔴 the preamble does not claim the agent is the EXCLUSIVE writer", () => {
+  const text = handoffPreamble(handoffPathFor("docker", "/ignored"));
+
+  assert.doesNotMatch(text, /nothing else can write/i);
+
+  // The paired positive: the ask to write survives, because dropping the
+  // false half must not drop the half the feature needs.
+  assert.match(text, /write your own state back/i);
+  assert.match(text, /can change between your turns/i);
+});
