@@ -3,6 +3,7 @@ title: Inbound Prompt
 updated: 2026-11-26
 covers:
   - src/supervise/index.ts
+  - src/supervise/handoff.ts
 ---
 
 # Inbound Prompt
@@ -60,6 +61,50 @@ to answer a room post aimed elsewhere without being told to, so the renderer
 looked correct for as long as Claude Code was the only driver. A bare
 `cursor-agent` carries no such instruction, and the first live Cursor agent on
 a shared room exposed it within three messages.
+
+## Two one-shot prefixes ride the FIRST prompt
+
+`formatPrompt`'s output is not always the whole string. Two prefixes are
+prepended once per child and then never again, both as closures that clear
+their own flag on first use.
+
+| prefix          | gate                              | what it says                                                    |
+| --------------- | --------------------------------- | --------------------------------------------------------------- |
+| mount banner    | containerized AND a fresh session | the extra directories this agent has, and where each is mounted |
+| handoff pointer | a fresh session, EITHER mode      | the path of this agent's own handoff file                       |
+
+🛑 **THE TWO GATES ARE NOT THE SAME, AND COPYING ONE WOULD BREAK THE OTHER.**
+The mount banner is container-only, because a host agent has no mounts. The
+handoff pointer is NOT, because a host agent has a project directory and
+therefore a handoff. `test/supervise/handoff-prefix.test.ts` pins both arms.
+
+### The handoff file
+
+lee ruled on 2026-11-26 that an agent keeps its own continuity in a file it
+both reads and writes:
+
+| mode     | the path the agent is given                                           |
+| -------- | --------------------------------------------------------------------- |
+| `docker` | `/work/HANDOFF.md` — derived from the project bind, never spelled out |
+| `host`   | `HANDOFF.md` inside the agent's resolved project directory            |
+
+**The agent writes it. Nothing else can.** There is no `docker cp` anywhere in
+this codebase, so the host cannot place a file into a running container.
+
+🛑 **TWO EARLIER DESIGNS FOR THE SAME FEATURE ARE CLOSED. Do not revive
+either.**
+
+| rejected                            | why it cannot work                                      |
+| ----------------------------------- | ------------------------------------------------------- |
+| a mounted `local-context` directory | unreachable from inside the container                   |
+| the container's own `/tmp`          | `docker run --rm` destroys it when the supervisor stops |
+
+`/work` is a bind of the host project directory, so a handoff written there
+survives a clear, a container rebuild and a supervisor restart.
+
+⚠️ **THE POINTER RIDES AN INBOUND BUS PROMPT, so an agent that is never woken
+is never told.** That is the same limitation the mount banner has had since it
+shipped, and it is recorded rather than fixed here.
 
 ## Severity and addressing are orthogonal, but not independent
 

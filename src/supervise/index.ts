@@ -35,6 +35,7 @@ import {
 } from "./silent-reply.js";
 import { dirsFor } from "./projects.js";
 import { allowlistWith, resolveCwd } from "./allowlist.js";
+import { handoffPathFor, handoffPreamble } from "./handoff.js";
 import { commandFromGrant, grantFor, grantVariants } from "./denial.js";
 import { writeClaudeMcpConfig } from "./drivers/claude.js";
 import {
@@ -476,6 +477,29 @@ export async function startSupervisor(
   };
 
   const childCwd = resolveCwd(opts.cwd, dirs);
+
+  /**
+   * The handoff pointer, once per fresh session.
+   *
+   * 🛑 GATED ON `resumeSessionId` AND NOT ON THE MODE, which is where this
+   * differs from `mountBannerPrefix` directly above. A host agent has a
+   * handoff too — copying that gate would have left the host arm silent with
+   * a green suite, and `handoff-prefix.test.ts` pins both arms for that
+   * reason. A resumed child still holds the turn where it was told.
+   *
+   * 🛑 `childCwd`, NOT `opts.cwd`. The requested value may be undefined and
+   * `resolveCwd` is what turns it into a real, contained, realpath'd
+   * directory — so the agent is handed the path it will actually be sitting
+   * in rather than the one somebody typed.
+   */
+  let needsHandoffPointer = !opts.resumeSessionId;
+
+  const handoffPrefix = (): string => {
+    if (!needsHandoffPointer) return "";
+    needsHandoffPointer = false;
+
+    return `${handoffPreamble(handoffPathFor(selection.mode, childCwd))}\n\n`;
+  };
   // Injected in tests; the real one is the shared bus database the web UI
   // already reads.
   const approvalsDb = opts.db ?? openDb();
@@ -1941,7 +1965,7 @@ export async function startSupervisor(
     const rendered = formatPrompt(envelope, childCanSend());
 
     const prompt = {
-      text: `${mountBannerPrefix()}${rendered.text}`,
+      text: `${mountBannerPrefix()}${handoffPrefix()}${rendered.text}`,
       messageIds: envelope.id > 0 ? [envelope.id] : [],
       ...(rendered.owedTo ? { owedTo: rendered.owedTo } : {}),
     };
