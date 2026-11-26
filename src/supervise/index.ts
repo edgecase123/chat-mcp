@@ -18,6 +18,7 @@ import {
 } from "./socket.js";
 import { RateLimitGate } from "./rate-limit.js";
 import { openDb } from "../storage/db.js";
+import { notifyPeer } from "../notify/bus.js";
 import * as dao from "../storage/dao.js";
 import {
   availableBuiltins,
@@ -177,8 +178,11 @@ export interface Supervisor {
   onStopped(cb: () => void): void;
 }
 
-/** How an arriving message is presented to the agent. */
-export function formatPrompt(envelope: WakeEnvelope): string {
+/** How an arriving message is presented to the agent, and who is owed a reply. */
+export function formatPrompt(
+  envelope: WakeEnvelope,
+  canSend: boolean,
+): { text: string; owedTo?: string } {
   const from = envelope.from || "unknown";
   const body = envelope.body?.trim();
   const inRoom = envelope.to.startsWith("#");
@@ -199,10 +203,38 @@ export function formatPrompt(envelope: WakeEnvelope): string {
     // 🛑 No body means this came through the FALLBACK file path, which
     // overwrites and carries no payload. Say so rather than inventing one —
     // the agent must know to go and read the bus itself.
-    return `${banner}[chat-mcp] ${from}${where} sent you something (id ${envelope.id}). The wake carried no body, so read your inbox.`;
+    return {
+      text: `${banner}[chat-mcp] ${from}${where} sent you something (id ${envelope.id}). The wake carried no body, so read your inbox.`,
+    };
   }
 
-  return `${banner}[chat-mcp] ${from}${where}:\n\n${body}${roomClause(inRoom, envelope.kind)}`;
+  // 🛑 ONE EXPRESSION DECIDES BOTH THE CLAUSE AND THE NOTICE. They were
+  // computed apart, so a `--no-reply` DM was told nothing about replying and
+  // still had its silence reported — an accusation over a reply nobody asked
+  // for, which is #417's class and the one #472 named avoiding.
+  //
+  // 🛑 BELOW THE BODYLESS RETURN ON PURPOSE. That return is the only place
+  // the body precondition lives; repeating it here read as a guard and killed
+  // no mutant.
+  //
+  // 🛑 `system` IS EXCLUDED. Its context nudge is a DM, so a notice owed to it
+  // was addressed back to `system` and reached nobody. Measured on a live turn.
+  const owed =
+    !inRoom &&
+    canSend &&
+    !!envelope.from &&
+    envelope.from !== dao.SYSTEM_HANDLE;
+
+  const clause = inRoom
+    ? roomClause(inRoom, envelope.kind)
+    : owed
+      ? directClause()
+      : "";
+
+  return {
+    text: `${banner}[chat-mcp] ${from}${where}:\n\n${body}${clause}`,
+    ...(owed ? { owedTo: envelope.from } : {}),
+  };
 }
 
 /**
@@ -252,6 +284,29 @@ function roomClause(inRoom: boolean, kind: WakeEnvelope["kind"]): string {
     "\n\n⚠️ This is a ROOM post. Every member received it, so it may not be " +
     "addressed to you. Reply only if it concerns you — silence is a valid " +
     "response."
+  );
+}
+
+/**
+ * Told to a DM reader: an answer is owed, and prose is not one.
+ *
+ * 🛑 A DM USED TO CARRY NOTHING, SO IT WAS INSTRUCTED LESS THAN A ROOM POST.
+ * Measured 2026-11-26: a supervised `cursor-agent` was DM'd "Are you
+ * available?", reasoned *"No tools are needed"*, answered in prose, and the
+ * sender received nothing. Both transcripts read as a completed turn.
+ *
+ * 🛑 IT NAMES `send`, AND ONLY A VERB THE CHILD HAS — `allowlist.ts` grants
+ * `mcp__chat__send`. Naming a tool no allowlist grants buys a denial instead
+ * of a reply, which is the trap this file records for `claim`.
+ *
+ * ⚠️ NOT APPENDED TO A ROOM POST. `roomClause` already tells a room reader
+ * that silence is allowed, and saying both would be a contradiction the
+ * reader resolves however it likes.
+ */
+function directClause(): string {
+  return (
+    "\n\n⚠️ This was sent to you directly, so an answer is owed. Deliver it " +
+    "with `send` — prose alone stays in your own transcript and reaches nobody."
   );
 }
 
@@ -630,6 +685,19 @@ export async function startSupervisor(
   const childBusHandle = () =>
     currentGrant?.handle ?? childHandleFor(opts.handle);
 
+  /**
+   * Whether the child holds the one tool the DM clause names.
+   *
+   * 🛑 READ IT, DO NOT CACHE IT, for `childBusHandle`'s reason. A server-wide
+   * `mcp__chat` counts, because it grants every tool under that server — an
+   * exact-match-only test would read such a grant as no-send.
+   */
+  const childCanSend = () =>
+    !!currentGrant &&
+    currentGrant.allowed.some(
+      (t) => t === "mcp__chat__send" || t === "mcp__chat",
+    );
+
   // 🛑 SAID OUT LOUD, both ways. A doorbell that cannot answer and a child
   // holding a bus identity are both things an operator must be able to see in
   // the log rather than deduce from a flag they did not pass.
@@ -651,7 +719,17 @@ export async function startSupervisor(
    * that would trade a cost problem for a correctness one. These are released
    * the moment a rate-limit event says there is room.
    */
-  const held: { text: string; messageIds: number[] }[] = [];
+  const held: { text: string; messageIds: number[]; owedTo?: string }[] = [];
+
+  /**
+   * Who to tell if this turn answers nobody, or `null`.
+   *
+   * 🛑 A SEPARATE BINDING FROM `turn`, BECAUSE `newTurn` TAKES A BOOLEAN. The
+   * detector decides WHETHER a reply was lost and must not also know who was
+   * asking — that is this file's wiring. Reassigned in lockstep with `turn`
+   * so the two can never describe different turns.
+   */
+  let owedTo: string | null = null;
 
   /** Observers of the child finishing a turn. See `Supervisor.onTurnEnd`. */
   const turnEndListeners: (() => void)[] = [];
@@ -696,6 +774,7 @@ export async function startSupervisor(
       // An inbound bus message carries its id; every internal prompt offers
       // `messageIds: []`. That list IS "is a peer waiting for this".
       turn = newTurn(prompt.messageIds.length > 0);
+      owedTo = prompt.owedTo ?? null;
       child.send(prompt.text);
       for (const cb of sendListeners) cb(prompt);
     },
@@ -1069,6 +1148,49 @@ export async function startSupervisor(
       }),
     );
 
+    /**
+     * Put the lost-reply verdict in front of the peer who is waiting for it.
+     *
+     * 🛑 `SYSTEM_HANDLE` IS THE SENDER, NEVER THE AGENT'S HANDLE. Sending as the
+     * agent puts words in its mouth, and a DM from a handle the supervisor is
+     * driving can re-enter its own wake path — one lost reply becoming a loop.
+     *
+     * 🛑 THE VERDICT TEXT IS `silentReplyWarning`'s, NOT A SECOND COPY. Its two
+     * branches are the whole discrimination between a reply that reached nobody
+     * and one whose delivery is UNKNOWN, and a paraphrase here is where that
+     * distinction drifts into an accusation. #417.
+     *
+     * ⚠️ IT MUST NOT THROW INTO THE TURN. A send that cannot land is worth a log
+     * line and nothing more — the turn itself completed.
+     */
+    function tellSenderNobodyAnswered(peer: string, verdict: string): void {
+      const body = `⚠️ ${childBusHandle()} answered your message inside its own transcript only — ${verdict}.`;
+
+      try {
+        const result = dao.insertMessage(approvalsDb, {
+          from: dao.SYSTEM_HANDLE,
+          to: peer,
+          body,
+          kind: "chat",
+        });
+
+        notifyPeer(peer, {
+          id: result.id,
+          to: peer,
+          from: dao.SYSTEM_HANDLE,
+          ts: result.sent_at,
+          body,
+          kind: "chat",
+        });
+      } catch (e) {
+        log(
+          `⚠️ lost-reply notice undelivered to ${peer}: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    }
+
     child.onTurnEnd(
       ifCurrent("onTurnEnd", () => {
         turnEndCount++;
@@ -1079,6 +1201,13 @@ export async function startSupervisor(
         const lost = silentReplyWarning(turn);
 
         if (lost) log(`⚠️ ${lost}`);
+
+        // 🛑 THE LOG LINE WAS THE ONLY OUTPUT AND THE PERSON WAITING READS
+        // CHAT. The detector got lee's cursor1 turn right on the first try and
+        // he still had to diagnose it by hand. #472.
+        if (lost && owedTo) tellSenderNobodyAnswered(owedTo, lost);
+
+        owedTo = null;
 
         turn = newTurn(false);
 
@@ -1806,9 +1935,15 @@ export async function startSupervisor(
       return { ok: true, queued: "sent" };
     }
 
+    // 🛑 ONE CALL YIELDS BOTH, so the prompt that says a reply is owed is
+    // exactly the prompt whose silence is reported back. Computing `owedTo`
+    // here from its own test is what let the two disagree.
+    const rendered = formatPrompt(envelope, childCanSend());
+
     const prompt = {
-      text: `${mountBannerPrefix()}${formatPrompt(envelope)}`,
+      text: `${mountBannerPrefix()}${rendered.text}`,
       messageIds: envelope.id > 0 ? [envelope.id] : [],
+      ...(rendered.owedTo ? { owedTo: rendered.owedTo } : {}),
     };
 
     const verdict = gate.verdict();

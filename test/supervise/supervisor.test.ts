@@ -181,7 +181,10 @@ test("the same message delivered twice is reported as a duplicate, not re-sent",
 });
 
 test("a payload-less wake tells the agent to read its inbox rather than inventing a body", () => {
-  const prompt = formatPrompt({ id: 3, to: "claude2", from: "claude1", ts: 1 });
+  const prompt = formatPrompt(
+    { id: 3, to: "claude2", from: "claude1", ts: 1 },
+    true,
+  ).text;
 
   assert.match(prompt, /read your inbox/);
   assert.match(prompt, /no body/);
@@ -189,7 +192,10 @@ test("a payload-less wake tells the agent to read its inbox rather than inventin
 
 test("a room message names the room", () => {
   assert.match(
-    formatPrompt({ id: 1, to: "#gate", from: "claude1", ts: 1, body: "x" }),
+    formatPrompt(
+      { id: 1, to: "#gate", from: "claude1", ts: 1, body: "x" },
+      true,
+    ).text,
     /in #gate/,
   );
 });
@@ -205,13 +211,16 @@ test("a room message names the room", () => {
  * the renderer looked correct for as long as one vendor was the only consumer.
  */
 test("a room post tells the agent a reply is optional", () => {
-  const prompt = formatPrompt({
-    id: 1,
-    to: "#gate",
-    from: "claude1",
-    ts: 1,
-    body: "claude2 — please re-run the gate",
-  });
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "#gate",
+      from: "claude1",
+      ts: 1,
+      body: "claude2 — please re-run the gate",
+    },
+    true,
+  ).text;
 
   assert.match(prompt, /may not be addressed to you/i);
   assert.match(prompt, /silence is a valid response/i);
@@ -223,13 +232,16 @@ test("a room post tells the agent a reply is optional", () => {
  * Without this, moving it above the body is a silent mutation.
  */
 test("the room clause comes AFTER the body, not before it", () => {
-  const prompt = formatPrompt({
-    id: 1,
-    to: "#gate",
-    from: "claude1",
-    ts: 1,
-    body: "UNIQUEBODYMARKER",
-  });
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "#gate",
+      from: "claude1",
+      ts: 1,
+      body: "UNIQUEBODYMARKER",
+    },
+    true,
+  ).text;
 
   assert.ok(
     prompt.indexOf("UNIQUEBODYMARKER") <
@@ -239,26 +251,131 @@ test("the room clause comes AFTER the body, not before it", () => {
 });
 
 test("🛑 a DIRECT message does NOT say a reply is optional", () => {
-  const prompt = formatPrompt({
-    id: 1,
-    to: "claude2",
-    from: "claude1",
-    ts: 1,
-    body: "please re-run the gate",
-  });
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "claude2",
+      from: "claude1",
+      ts: 1,
+      body: "please re-run the gate",
+    },
+    true,
+  ).text;
 
   assert.doesNotMatch(prompt, /may not be addressed to you/i);
   assert.doesNotMatch(prompt, /silence is a valid response/i);
 });
 
+/**
+ * 🛑 A DM CARRIED NO REPLY INSTRUCTION AT ALL, SO IT WAS INSTRUCTED LESS THAN
+ * A ROOM POST. Measured 2026-11-26: lee DM'd a supervised `cursor-agent` "Are
+ * you available?", the child's own thinking said *"No tools are needed"*, it
+ * answered in prose, and the supervisor recorded the turn as having reached
+ * nobody.
+ *
+ * ⚠️ A CLAUDE CHILD HIDES THIS for the same reason it hides the room case —
+ * its own context carries a standing answer-in-chat rule that this bus does
+ * not ship.
+ *
+ * 🛑 IT NAMES `send`, AND ONLY A VERB THE CHILD HAS. `DEFAULT_ALLOWED` grants
+ * `send`; naming a tool no allowlist grants would buy a denial instead of a
+ * reply, which is the trap `roomClause` records for `claim`.
+ */
+test("🛑 a DIRECT message names the tool that delivers the reply", () => {
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "cursor1",
+      from: "leejenkins",
+      ts: 1,
+      body: "Are you available?",
+    },
+    true,
+  ).text;
+
+  assert.match(prompt, /\bsend\b/, "it does not name the tool");
+  assert.match(
+    prompt,
+    /prose alone/i,
+    "it does not say that answering in prose reaches nobody",
+  );
+});
+
+/**
+ * 🛑 THE POSITION IS A CLAIM, SO IT IS ASSERTED — the same reason the room
+ * clause has its own position test. A turn acts on the end of its prompt.
+ */
+test("the DM reply clause comes AFTER the body, not before it", () => {
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "cursor1",
+      from: "leejenkins",
+      ts: 1,
+      body: "UNIQUEDMBODYMARKER",
+    },
+    true,
+  ).text;
+
+  const body = prompt.indexOf("UNIQUEDMBODYMARKER");
+  const clause = prompt.search(/prose alone/i);
+
+  assert.notEqual(body, -1, "the body is gone");
+  assert.notEqual(clause, -1, "the clause is gone");
+  assert.ok(body < clause, "the clause must be the last thing the agent reads");
+});
+
+/**
+ * 🛑 THE TWO CLAUSES ARE EXCLUSIVE, AND THIS IS THE CONTROL THAT SAYS SO.
+ * A room post already carries its own clause; appending the DM one too would
+ * tell the reader both that answering is optional and that it is owed.
+ */
+test("a room post does NOT get the DM reply clause", () => {
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "#gate",
+      from: "claude1",
+      ts: 1,
+      body: "x",
+    },
+    true,
+  ).text;
+
+  assert.match(prompt, /silence is a valid response/i, "control: room clause");
+  assert.doesNotMatch(prompt, /prose alone/i);
+});
+
+/**
+ * 🛑 A PAYLOAD-LESS WAKE ALREADY TELLS THE AGENT TO GO AND READ ITS INBOX, SO
+ * IT MUST NOT ALSO BE TOLD TO ANSWER A BODY IT WAS NEVER GIVEN.
+ */
+test("a payload-less DM wake does NOT get the reply clause", () => {
+  const prompt = formatPrompt(
+    {
+      id: 3,
+      to: "cursor1",
+      from: "leejenkins",
+      ts: 1,
+    },
+    true,
+  ).text;
+
+  assert.match(prompt, /read your inbox/, "control: the fallback text");
+  assert.doesNotMatch(prompt, /prose alone/i);
+});
+
 test("the room clause does not displace the room name or the body", () => {
-  const prompt = formatPrompt({
-    id: 1,
-    to: "#gate",
-    from: "claude1",
-    ts: 1,
-    body: "the exact body text",
-  });
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "#gate",
+      from: "claude1",
+      ts: 1,
+      body: "the exact body text",
+    },
+    true,
+  ).text;
 
   assert.match(prompt, /in #gate/);
   assert.match(prompt, /the exact body text/);
@@ -271,14 +388,17 @@ test("the room clause does not displace the room name or the body", () => {
  * banners unreachable in exactly the case that needs both.
  */
 test("an alert in a room keeps the alert banner AND is still told it is a room post", () => {
-  const prompt = formatPrompt({
-    id: 1,
-    to: "#gate",
-    from: "claude1",
-    ts: 1,
-    kind: "alert",
-    body: "claude2 — the gate is red",
-  });
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "#gate",
+      from: "claude1",
+      ts: 1,
+      kind: "alert",
+      body: "claude2 — the gate is red",
+    },
+    true,
+  ).text;
 
   assert.match(prompt, /ALERT/);
   assert.match(prompt, /ROOM post/i);
@@ -295,41 +415,50 @@ test("an alert in a room keeps the alert banner AND is still told it is a room p
  * agent, answered by every member.
  */
 test("🛑 a room DISPATCH is never told that silence is valid", () => {
-  const prompt = formatPrompt({
-    id: 1,
-    to: "#gate",
-    from: "claude1",
-    ts: 1,
-    kind: "dispatch",
-    body: "take the gate, I am out",
-  });
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "#gate",
+      from: "claude1",
+      ts: 1,
+      kind: "dispatch",
+      body: "take the gate, I am out",
+    },
+    true,
+  ).text;
 
   assert.match(prompt, /DISPATCH/);
   assert.doesNotMatch(prompt, /silence is a valid response/i);
 });
 
 test("🛑 a room ALERT is never told that silence is valid", () => {
-  const prompt = formatPrompt({
-    id: 1,
-    to: "#gate",
-    from: "claude1",
-    ts: 1,
-    kind: "alert",
-    body: "claude2 — the gate is red",
-  });
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "#gate",
+      from: "claude1",
+      ts: 1,
+      kind: "alert",
+      body: "claude2 — the gate is red",
+    },
+    true,
+  ).text;
 
   assert.doesNotMatch(prompt, /silence is a valid response/i);
 });
 
 test("a room dispatch still says who it may be for, and refuses the bystander assumption", () => {
-  const prompt = formatPrompt({
-    id: 1,
-    to: "#gate",
-    from: "claude1",
-    ts: 1,
-    kind: "dispatch",
-    body: "take the gate, I am out",
-  });
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "#gate",
+      from: "claude1",
+      ts: 1,
+      kind: "dispatch",
+      body: "take the gate, I am out",
+    },
+    true,
+  ).text;
 
   assert.match(prompt, /names someone else/i);
   assert.match(prompt, /say in the room that you are not/i);
@@ -348,27 +477,33 @@ test("a room dispatch still says who it may be for, and refuses the bystander as
  * obeyed. Saying so in the room is observable AND allowed.
  */
 test("🛑 the escalation clause does not tell the child to claim, which it cannot", () => {
-  const prompt = formatPrompt({
-    id: 1,
-    to: "#gate",
-    from: "claude1",
-    ts: 1,
-    kind: "dispatch",
-    body: "take the gate, I am out",
-  });
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "#gate",
+      from: "claude1",
+      ts: 1,
+      kind: "dispatch",
+      body: "take the gate, I am out",
+    },
+    true,
+  ).text;
 
   assert.doesNotMatch(prompt, /\bclaim\b/i);
 });
 
 test("a plain room CHAT keeps the permission to stay silent", () => {
-  const prompt = formatPrompt({
-    id: 1,
-    to: "#gate",
-    from: "claude1",
-    ts: 1,
-    kind: "chat",
-    body: "claude2 — please re-run the gate",
-  });
+  const prompt = formatPrompt(
+    {
+      id: 1,
+      to: "#gate",
+      from: "claude1",
+      ts: 1,
+      kind: "chat",
+      body: "claude2 — please re-run the gate",
+    },
+    true,
+  ).text;
 
   assert.match(prompt, /silence is a valid response/i);
 });
@@ -379,7 +514,10 @@ test("a plain room CHAT keeps the permission to stay silent", () => {
  * answering a question that path does not ask.
  */
 test("a bodyless room wake still says read your inbox and adds no clause", () => {
-  const prompt = formatPrompt({ id: 3, to: "#gate", from: "claude1", ts: 1 });
+  const prompt = formatPrompt(
+    { id: 3, to: "#gate", from: "claude1", ts: 1 },
+    true,
+  ).text;
 
   assert.match(prompt, /read your inbox/);
   assert.doesNotMatch(prompt, /silence is a valid response/i);
@@ -412,14 +550,17 @@ test("a non-JSON line on stdout is dropped, not fatal", () => {
 });
 
 test("an ALERT escalates in the prompt text, not in a field the agent may not read", () => {
-  const p = formatPrompt({
-    id: 1,
-    to: "claude2",
-    from: "claude1",
-    ts: 1,
-    body: "prod is down",
-    kind: "alert",
-  });
+  const p = formatPrompt(
+    {
+      id: 1,
+      to: "claude2",
+      from: "claude1",
+      ts: 1,
+      body: "prod is down",
+      kind: "alert",
+    },
+    true,
+  ).text;
 
   assert.match(p, /🚨 ALERT — BLOCKING/);
   assert.match(p, /handle it before anything queued behind it/);
@@ -427,28 +568,34 @@ test("an ALERT escalates in the prompt text, not in a field the agent may not re
 });
 
 test("a DISPATCH is marked as a hand-off, distinctly from an alert", () => {
-  const p = formatPrompt({
-    id: 1,
-    to: "claude2",
-    from: "claude1",
-    ts: 1,
-    body: "take bug 7",
-    kind: "dispatch",
-  });
+  const p = formatPrompt(
+    {
+      id: 1,
+      to: "claude2",
+      from: "claude1",
+      ts: 1,
+      body: "take bug 7",
+      kind: "dispatch",
+    },
+    true,
+  ).text;
 
   assert.match(p, /📋 DISPATCH/);
   assert.ok(!/ALERT/.test(p), "a dispatch must not read as an alert");
 });
 
 test("a plain chat gets NO banner", () => {
-  const p = formatPrompt({
-    id: 1,
-    to: "claude2",
-    from: "claude1",
-    ts: 1,
-    body: "hi",
-    kind: "chat",
-  });
+  const p = formatPrompt(
+    {
+      id: 1,
+      to: "claude2",
+      from: "claude1",
+      ts: 1,
+      body: "hi",
+      kind: "chat",
+    },
+    true,
+  ).text;
 
   assert.ok(!/ALERT/.test(p));
   assert.ok(!/DISPATCH/.test(p));
@@ -456,13 +603,16 @@ test("a plain chat gets NO banner", () => {
 
 test("a missing kind is treated as chat, not as an alert", () => {
   // Fail quiet, not loud: an absent field must not manufacture urgency.
-  const p = formatPrompt({
-    id: 1,
-    to: "claude2",
-    from: "claude1",
-    ts: 1,
-    body: "hi",
-  });
+  const p = formatPrompt(
+    {
+      id: 1,
+      to: "claude2",
+      from: "claude1",
+      ts: 1,
+      body: "hi",
+    },
+    true,
+  ).text;
 
   assert.ok(!/ALERT/.test(p));
 });
@@ -470,13 +620,16 @@ test("a missing kind is treated as chat, not as an alert", () => {
 test("an alert with NO body still escalates AND still says to read the inbox", () => {
   // The fallback file path carries no body. An alert must not lose its
   // urgency just because it arrived that way.
-  const p = formatPrompt({
-    id: 9,
-    to: "#gate",
-    from: "claude1",
-    ts: 1,
-    kind: "alert",
-  });
+  const p = formatPrompt(
+    {
+      id: 9,
+      to: "#gate",
+      from: "claude1",
+      ts: 1,
+      kind: "alert",
+    },
+    true,
+  ).text;
 
   assert.match(p, /🚨 ALERT — BLOCKING/);
   assert.match(p, /read your inbox/);
@@ -1121,4 +1274,84 @@ test("a RESTART into an undeclared child surfaces the error and does not leave a
   } finally {
     await s.stop();
   }
+});
+
+/**
+ * The clause and the reply notice are ONE decision.
+ *
+ * 🛑 They were computed apart, so a DM that was told nothing about replying
+ * still had its silence reported to the sender. Each test below names one
+ * precondition and asserts BOTH halves, because a fix that moves the
+ * divergence rather than removing it keeps one half green.
+ */
+test("a bodyless DM owes nobody a reply, and says nothing about replying", () => {
+  const p = formatPrompt(
+    { id: 3, to: "claude2", from: "claude1", ts: 1 },
+    true,
+  );
+
+  assert.equal(p.owedTo, undefined);
+  assert.doesNotMatch(p.text, /an answer is owed/);
+});
+
+test("a DM the child cannot answer owes nobody a reply", () => {
+  const p = formatPrompt(
+    { id: 3, to: "claude2", from: "claude1", ts: 1, body: "are you there?" },
+    false,
+  );
+
+  assert.equal(p.owedTo, undefined);
+  assert.doesNotMatch(p.text, /an answer is owed/);
+  assert.match(p.text, /are you there\?/);
+});
+
+test("a DM the child CAN answer owes the sender, and names send", () => {
+  const p = formatPrompt(
+    { id: 3, to: "claude2", from: "claude1", ts: 1, body: "are you there?" },
+    true,
+  );
+
+  assert.equal(p.owedTo, "claude1");
+  assert.match(p.text, /an answer is owed/);
+  assert.match(p.text, /`send`/);
+});
+
+test("a room post owes nobody a reply even when the child can answer", () => {
+  const p = formatPrompt(
+    { id: 1, to: "#gate", from: "claude1", ts: 1, body: "x" },
+    true,
+  );
+
+  assert.equal(p.owedTo, undefined);
+  assert.doesNotMatch(p.text, /an answer is owed/);
+});
+
+test("a DM from an unnamed sender owes nobody, because there is nobody to tell", () => {
+  const p = formatPrompt(
+    { id: 3, to: "claude2", from: "", ts: 1, body: "x" },
+    true,
+  );
+
+  assert.equal(p.owedTo, undefined);
+});
+
+/**
+ * 🛑 MEASURED ON A LIVE TURN, not reasoned. The context nudge arrives as a DM
+ * from `system`, so the notice was addressed back to `system` and reached
+ * nobody — bus id 17873, `system -> system`.
+ */
+test("a DM from system owes nobody, because system is not waiting on a reply", () => {
+  const p = formatPrompt(
+    {
+      id: 9,
+      to: "cursor1-agent",
+      from: "system",
+      ts: 1,
+      body: "you are at 57%",
+    },
+    true,
+  );
+
+  assert.equal(p.owedTo, undefined);
+  assert.doesNotMatch(p.text, /an answer is owed/);
 });

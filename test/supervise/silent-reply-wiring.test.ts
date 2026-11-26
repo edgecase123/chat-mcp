@@ -15,6 +15,18 @@ const { startSupervisor } = await import("../../src/supervise/index.js");
 const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
 import { supervisorOptions } from "../support/supervisor-options.js";
+const dao = await import("../../src/storage/dao.js");
+
+/** Every system DM waiting for `peer`. */
+function systemDms(
+  db: InstanceType<typeof DatabaseSync>,
+  peer: string,
+): string[] {
+  return dao
+    .pendingInbox(db, { to: peer })
+    .filter((m) => m.from_handle === dao.SYSTEM_HANDLE)
+    .map((m) => m.body);
+}
 import type { UnnamedToolCall } from "../../src/supervise/child.js";
 
 /**
@@ -84,7 +96,14 @@ function text(t: string): Record<string, unknown> {
   };
 }
 
-async function supervisor(h: ReturnType<typeof harness>, tag: string) {
+async function supervisor(
+  h: ReturnType<typeof harness>,
+  tag: string,
+  // 🛑 THE GRANT HAS TO BE SETTABLE FROM A TEST, because `childCanSend` reads
+  // it and nothing else in this file could vary it. `reply: false` is the
+  // no-grant arm; `allowedTools` is the has-a-grant-but-no-send arm.
+  extra: Partial<Parameters<typeof supervisorOptions>[0]> = {},
+) {
   const db = new DatabaseSync(":memory:");
   migrate(db);
   const handle = `${tag}-${process.pid}`;
@@ -96,10 +115,11 @@ async function supervisor(h: ReturnType<typeof harness>, tag: string) {
       extraDirs: [process.cwd()],
       spawnChild: h.spawnChild,
       log: (line: string) => h.lines.push(line),
+      ...extra,
     }),
   );
 
-  return { sup, handle };
+  return { sup, handle, db };
 }
 
 function envelope(handle: string, id: number) {
@@ -112,6 +132,135 @@ function envelope(handle: string, id: number) {
     body: `question ${id}`,
   };
 }
+
+/**
+ * 🛑 THE WARNING WENT TO A LOG FILE AND THE PERSON WAITING READ CHAT. That is
+ * the second half of #472, and it is why lee had to debug a working detector:
+ * `silentReplyWarning` got the diagnosis right on the first turn and its only
+ * output was `log()`.
+ *
+ * 🛑 `SYSTEM_HANDLE` IS THE SENDER, NOT THE AGENT'S HANDLE. Sending as the
+ * agent would put words in its mouth and could re-wake it, turning one lost
+ * reply into a loop.
+ */
+test("🛑 the peer who is waiting is TOLD the reply never arrived", async () => {
+  const h = harness();
+  const { sup, handle, db } = await supervisor(h, "tellsdr");
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    h.emit(text("Here is the answer."));
+    h.endTurn();
+
+    const dms = systemDms(db, "lee");
+
+    assert.equal(
+      dms.length,
+      1,
+      `lee was told nothing; got ${JSON.stringify(dms)}`,
+    );
+    assert.match(dms[0] ?? "", /nobody received it/);
+    assert.match(
+      dms[0] ?? "",
+      new RegExp(handle),
+      "it does not name the agent",
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+test("a turn that called send tells the peer nothing", async () => {
+  const h = harness();
+  const { sup, handle, db } = await supervisor(h, "nodm");
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    h.emit(text("Here is the answer."));
+    h.toolCall("mcp__chat__send");
+    h.endTurn();
+
+    assert.deepEqual(systemDms(db, "lee"), []);
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🛑 UNKNOWN IS A THIRD STATE AND THE MESSAGE MUST KEEP IT. A call the driver
+ * could not name may have BEEN the send, so telling the peer "nobody received
+ * it" would accuse the agent of a silence that may not have happened. #417.
+ */
+test("🛑 an unnameable tool call tells the peer UNKNOWN, never lost", async () => {
+  const h = harness();
+  const { sup, handle, db } = await supervisor(h, "unkdm");
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    h.emit(text("Here is the answer."));
+    h.toolCall(null, "unnamed-mcp");
+    h.endTurn();
+
+    const dms = systemDms(db, "lee");
+
+    assert.equal(dms.length, 1, "the peer was told nothing at all");
+    assert.match(dms[0] ?? "", /UNKNOWN/);
+    assert.doesNotMatch(
+      dms[0] ?? "",
+      /nobody received it/,
+      "it must not claim a silence it cannot know about",
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🛑 A ROOM POST IS NOT THIS DEFECT AND MUST NOT BE ANNOUNCED. `roomClause`
+ * tells a room reader in so many words that silence is a valid response, so
+ * DMing every room about an unanswered room post would contradict the
+ * instruction the bus itself gave.
+ */
+test("a silent reply to a ROOM post notifies nobody", async () => {
+  const h = harness();
+  const { sup, handle, db } = await supervisor(h, "roomdm");
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 1,
+      to: "#gate",
+      from: "lee",
+      ts: Date.now(),
+      kind: "chat" as const,
+      body: "anyone free?",
+    });
+
+    h.emit(text("Here is the answer."));
+    h.endTurn();
+
+    assert.equal(h.warnings().length, 1, "control: the log line still fires");
+    assert.deepEqual(systemDms(db, "lee"), []);
+  } finally {
+    await sup.stop();
+  }
+});
+
+test("prose with no inbound message notifies nobody", async () => {
+  const h = harness();
+  const { sup, db } = await supervisor(h, "unowdm");
+
+  try {
+    h.emit(text("Thinking out loud, nobody asked."));
+    h.endTurn();
+
+    assert.deepEqual(systemDms(db, "lee"), []);
+  } finally {
+    await sup.stop();
+  }
+});
 
 test("a reply owed to a peer, with no send, is reported at turn end", async () => {
   const h = harness();
@@ -274,6 +423,102 @@ test("an unknown tool SHAPE still reaches the confident line", async () => {
       h.warnings().length,
       1,
       "an unknown shape softened the warning",
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🔴 THE CLAUSE IS WIRED THROUGH `childCanSend`, AND NOTHING HELD THAT SEAM.
+ *
+ * Every `owedTo` arm in `supervisor.test.ts` calls `formatPrompt` directly and
+ * passes the boolean itself, so the PURE function was guarded and the function
+ * that COMPUTES the boolean was not. Replacing it with `() => true` left
+ * `tests 2896 · pass 2896 · fail 0` — measured, not reasoned. Raised by
+ * claude1 on PR 473.
+ *
+ * 🛑 ONE ARM PER CLAUSE. `childCanSend` is a two-clause expression and its
+ * second clause has two accepted spellings, so a single no-send arm would let
+ * three separate mutants live.
+ */
+
+/** The clause only a child that can actually answer should ever be told. */
+const OWED = /an answer is owed/;
+
+test("🔴 a DM to a child with NO GRANT is not told an answer is owed", async () => {
+  const h = harness();
+  // `reply: false` is the only way `buildGrant` returns undefined, which is
+  // what makes this the `!!currentGrant` clause and not the `.some()` one.
+  const { sup, handle } = await supervisor(h, "nogrant", { reply: false });
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    assert.doesNotMatch(
+      h.sent[0] ?? "",
+      OWED,
+      `a child with no grant was told to deliver a reply:\n${h.sent[0]}`,
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+test("🔴 a DM to a child whose grant LACKS send is not told an answer is owed", async () => {
+  const h = harness();
+  // A grant exists, so this arm pins the `.some()` clause alone.
+  const { sup, handle } = await supervisor(h, "nosend", {
+    allowedTools: ["Read", "Bash"],
+  });
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    assert.doesNotMatch(
+      h.sent[0] ?? "",
+      OWED,
+      `a child that cannot send was told to deliver a reply:\n${h.sent[0]}`,
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+test("✅ a DM to a child granted mcp__chat__send IS told an answer is owed", async () => {
+  const h = harness();
+  const { sup, handle } = await supervisor(h, "cansend", {
+    allowedTools: ["mcp__chat__send"],
+  });
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    assert.match(
+      h.sent[0] ?? "",
+      OWED,
+      `a child that CAN send was not asked to:\n${h.sent[0]}`,
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+test("✅ a SERVER-WIDE mcp__chat grant also counts as being able to send", async () => {
+  const h = harness();
+  // 🛑 A server-wide grant allows every tool under it, so an exact-match-only
+  // reading of the grant would call this child unable to answer.
+  const { sup, handle } = await supervisor(h, "chatsrv", {
+    allowedTools: ["mcp__chat"],
+  });
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    assert.match(
+      h.sent[0] ?? "",
+      OWED,
+      `a server-wide grant was read as no-send:\n${h.sent[0]}`,
     );
   } finally {
     await sup.stop();

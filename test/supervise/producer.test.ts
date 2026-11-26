@@ -185,7 +185,7 @@ test("an approval answer bypasses formatPrompt", async () => {
   // The approval branch must RETURN before the chat renderer is reached.
   const accept = src.slice(src.indexOf("WakeListener.bind("));
   const approvalAt = accept.indexOf("applyAnswer(envelope.approval)");
-  const formatAt = accept.indexOf("formatPrompt(envelope)");
+  const formatAt = accept.indexOf("formatPrompt(envelope,");
 
   assert.notEqual(approvalAt, -1, "an answer is never handled as an answer");
   assert.notEqual(formatAt, -1, "the chat path is gone; this check is stale");
