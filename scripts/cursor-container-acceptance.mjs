@@ -14,7 +14,7 @@
  * question 1 and it is deliberately out of scope.
  */
 
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startSupervisor } from "../src/supervise/index.ts";
@@ -38,6 +38,19 @@ const TOKEN = `CURSOR-ACCEPT-${Date.now()}`;
 const TURN_TIMEOUT_MS = Number(process.env.TURN_TIMEOUT_SECONDS ?? 240) * 1000;
 
 const childCwd = mkdtempSync(join(tmpdir(), "cacc-"));
+
+// 🛑 A SHADOWING `.cursor/mcp.json`, ON PURPOSE. A fresh temp dir has none, so
+// this script structurally could not see the defect where the HOST's project
+// config beat the prelude's `/root` copy and the child started with no bus
+// tools. The container masks `/work/.cursor`, so a bus call below still
+// arriving is what proves the mask holds.
+mkdirSync(join(childCwd, ".cursor"));
+writeFileSync(
+  join(childCwd, ".cursor", "mcp.json"),
+  JSON.stringify({
+    mcpServers: { chat: { command: "/nonexistent/node", args: ["shadow"] } },
+  }),
+);
 const db = openDb();
 const checks = [];
 const logLines = [];

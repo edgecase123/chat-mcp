@@ -37,6 +37,8 @@ const {
   NO_LOCK_HASH_WARNING,
   CONTAINER_GH_TOKEN_ENV,
   CONTAINER_PROJECT_DIR,
+  CONTAINER_CURSOR_CONFIG_DIR,
+  CONTAINER_OWNED_PATHS,
   CONTAINER_MCP_CONFIG_ENV,
   CONTAINER_RELAY_ENTRY,
   containerPathFor,
@@ -470,6 +472,227 @@ test("🚨 a read-only path that collides with the node_modules volume REFUSES t
       }),
     /node_modules/,
   );
+});
+
+/**
+ * 🔴 A HOST `.cursor/mcp.json` IS THE CONFIG THAT WINS INSIDE THE CONTAINER,
+ * AND EVERY PATH IN IT IS A HOST PATH. `cursor-agent mcp --help` documents
+ * `.cursor/mcp.json or ~/.cursor/mcp.json`, the project file first; `/work`
+ * IS the container's cwd; and the host arm writes that file with
+ * `command: process.execPath`. So the container read an nvm `node` path that
+ * does not exist in the image, and the correct config the prelude wrote to
+ * `/root/.cursor/mcp.json` was never consulted.
+ *
+ * The symptom was an agent that started, answered in its own transcript, and
+ * had NO `send` tool. `mcp list` said only "Connection failed", which reads
+ * as a network fault and cost two sessions; `mcp list-tools chat` named the
+ * real cause as `spawn …/bin/node ENOENT`.
+ *
+ * ⚠️ A tmpfs rather than a volume, because a volume's copy-up has semantics to
+ * reason about and a tmpfs is empty by construction. Nothing needs to persist
+ * here: the mask exists only so the container's own `/root` copy wins.
+ */
+test("🔴 a tmpfs masks /work/.cursor, so the host's project mcp.json cannot shadow the prelude's", () => {
+  setToken("sk-ant-oat-x");
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
+  const masked = args.flatMap((a, n) => (a === "--tmpfs" ? [args[n + 1]] : []));
+
+  assert.deepEqual(masked, [
+    `${CONTAINER_PROJECT_DIR}/${CONTAINER_CURSOR_CONFIG_DIR}`,
+  ]);
+});
+
+/**
+ * 🚨 THE MASK MUST NAME NO HOST PATH AT ALL, for the reason the `node_modules`
+ * overlay must not: a `host:/work/.cursor` spec is a second door onto a host
+ * directory, and `deliverHostGrantFile` writes a bus token into that very
+ * directory on the host arm.
+ *
+ * ⚠️ THIS ONE PASSED BEFORE THE FIX, AND THAT IS ITS JOB. An absent mask names
+ * no host path either. It constrains the SHAPE of the fix; the test above is
+ * what detects the fix's absence.
+ */
+test("🚨 the /work/.cursor mask names no host path, so it is not a second door onto the host", () => {
+  setToken("sk-ant-oat-x");
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
+  const dest = `${CONTAINER_PROJECT_DIR}/${CONTAINER_CURSOR_CONFIG_DIR}`;
+
+  assert.ok(
+    !args.some((a) => a.includes(`:${dest}`)),
+    `a bind spec targets the mask destination: ${args.join(" ")}`,
+  );
+});
+
+/**
+ * 🛑 UNCONDITIONAL, NOT GATED ON THE CURSOR VENDOR. A host `.cursor/mcp.json`
+ * holds host paths and a stdio spawn shape, which is wrong inside EVERY
+ * vendor's container — and a vendor branch here is a second thing to drift
+ * from the one that decides the prelude's config path.
+ *
+ * ⚠️ MASKING THE WHOLE DIRECTORY COSTS NOTHING TRACKED: `.gitignore` excludes
+ * `.cursor/` in this repo, precisely because the host arm writes a token into
+ * it, so no committed project rules live there to be hidden.
+ */
+test("🛑 both vendors get the /work/.cursor mask, because a host config is wrong in either container", () => {
+  setToken("sk-ant-oat-x");
+  setVendorToken(cursorSpawn, "key-x");
+  const dest = `${CONTAINER_PROJECT_DIR}/${CONTAINER_CURSOR_CONFIG_DIR}`;
+
+  for (const vendor of [claudeSpawn, cursorSpawn]) {
+    const { args } = dockerRunPlan(vendor, {
+      cwd: PROJECT_DIR,
+      supervisorHandle: "claude1",
+    });
+
+    assert.ok(
+      args.includes(dest),
+      `${vendor.vendor} container is unmasked: ${args.join(" ")}`,
+    );
+  }
+});
+
+/**
+ * 🛑 THE LITERAL, NOT THE CONSTANT. Every other mask test builds its expected
+ * destination from `CONTAINER_CURSOR_CONFIG_DIR`, so a wrong constant is
+ * invisible to all of them — MEASURED, by renaming it to `.Cursor` and
+ * watching three of them stay green. `cursor-agent` reads one exact path, and
+ * nothing but this literal says which.
+ */
+test("🛑 the mask destination is the literal /work/.cursor that cursor-agent reads", () => {
+  setToken("sk-ant-oat-x");
+  const args = dockerArgsFor({ cwd: PROJECT_DIR, supervisorHandle: "claude1" });
+  const masked = args.flatMap((a, n) => (a === "--tmpfs" ? [args[n + 1]] : []));
+
+  assert.deepEqual(masked, ["/work/.cursor"]);
+});
+
+/**
+ * ⚠️ PINS WHAT THE COMPARISON ASSUMES. The declared segment is lowercased
+ * before the match, so an owned path carrying a capital would never fire and
+ * would silently stop being refused.
+ *
+ * The length assertion prints its own denominator, so a list that lost an
+ * entry cannot read as a list where every entry is lowercase.
+ */
+test("🛑 every container-owned path is lowercase, because the comparison lowercases the declared one", () => {
+  assert.deepEqual(
+    CONTAINER_OWNED_PATHS.filter(({ dir }) => dir !== dir.toLowerCase()),
+    [],
+  );
+  assert.ok(
+    CONTAINER_OWNED_PATHS.length >= 2,
+    `only ${CONTAINER_OWNED_PATHS.length} container-owned paths`,
+  );
+});
+
+/**
+ * 🛑 THE INSTALL CONTAINER IS **NOT** MASKED, AND THAT IS lee's RULING OF
+ * 2026-11-14: "exactly two mounts on the install", the project bind and the
+ * `node_modules` volume, nothing else.
+ *
+ * The install reads no config directory, so a third mount there buys nothing.
+ * This test exists because the obvious home for the mask is the SHARED
+ * `projectMountArgs`, which feeds both argvs — and that spelling silently
+ * makes the install's count three.
+ *
+ * ⚠️ THE MOUNT COUNT IS ASSERTED, NOT JUST THE TMPFS'S ABSENCE. A count that
+ * drifts for any other reason breaks the same ruling.
+ */
+test("🛑 the install container is NOT masked, because its mount list is exactly two", () => {
+  setToken("sk-ant-oat-x");
+  const { args } = dockerInstallPlan(claudeSpawn, {
+    cwd: PROJECT_DIR,
+    supervisorHandle: "claude1",
+  });
+
+  assert.equal(
+    args.filter((a) => a === "--tmpfs").length,
+    0,
+    `the install carries a mask: ${args.join(" ")}`,
+  );
+  assert.equal(
+    args.filter((a) => a === "-v").length,
+    2,
+    `the install's mount count is not two: ${args.join(" ")}`,
+  );
+});
+
+/**
+ * 🚨 A DECLARED READ-ONLY PATH AT `.cursor` PASSES EVERY CONTAINMENT CHECK —
+ * it is relative, colon-free and inside the project — and then lands on the
+ * mask's destination. Docker refuses a duplicate destination and names
+ * neither mount, so without this the symptom is a spawn that dies in the
+ * daemon with no line connecting it to the manifest that caused it.
+ *
+ * Both spellings are pinned: the directory itself, and a path beneath it.
+ *
+ * 🛑 THE **REASON** IS ASSERTED, NOT THE PATH. The message interpolates the
+ * declared entry, so `.cursor` is already in the string before `owned` is read
+ * — and a mutant resolving `owned` to the `node_modules` entry printed "the
+ * container installs its own" and still matched a `/\.cursor/` regex. MEASURED
+ * by claude1 on review, which is why both directions are pinned here: the
+ * tmpfs reason present, and the install reason absent.
+ */
+test("🚨 a read-only path that collides with the .cursor mask REFUSES the spawn, naming the tmpfs", () => {
+  setToken("sk-ant-oat-x");
+  // The declared path has to EXIST or `checkedProjectPath` refuses first, for
+  // a reason that has nothing to do with the collision.
+  const dir = mkdtempSync(join(tmpdir(), "chat-mcp-docker-cursor-"));
+  mkdirSync(join(dir, ".cursor"));
+  writeFileSync(join(dir, ".cursor", "mcp.json"), "{}");
+
+  for (const declared of [".cursor", ".cursor/mcp.json"]) {
+    let thrown: unknown;
+
+    try {
+      dockerArgsFor({
+        cwd: dir,
+        supervisorHandle: "claude1",
+        readOnlyPaths: [declared],
+      });
+    } catch (err) {
+      thrown = err;
+    }
+
+    assert.ok(thrown instanceof Error, `'${declared}' was accepted`);
+
+    const message = thrown.message;
+
+    assert.match(message, /\.cursor/, `'${declared}': no path in ${message}`);
+    assert.match(message, /tmpfs/, `'${declared}': no reason in ${message}`);
+    assert.doesNotMatch(
+      message,
+      /installs its own/,
+      `'${declared}': the node_modules reason in ${message}`,
+    );
+  }
+});
+
+/**
+ * 🛑 THE SAME ASSERTION FROM THE OTHER SIDE, so neither entry's reason can be
+ * served for the other's path. A single shared message is what this pair
+ * replaced.
+ */
+test("🚨 a node_modules collision still names the INSTALL, not the tmpfs", () => {
+  setToken("sk-ant-oat-x");
+  const dir = mkdtempSync(join(tmpdir(), "chat-mcp-docker-nm-reason-"));
+  mkdirSync(join(dir, "node_modules"));
+
+  let thrown: unknown;
+
+  try {
+    dockerArgsFor({
+      cwd: dir,
+      supervisorHandle: "claude1",
+      readOnlyPaths: ["node_modules"],
+    });
+  } catch (err) {
+    thrown = err;
+  }
+
+  assert.ok(thrown instanceof Error, "a node_modules path was accepted");
+  assert.match(thrown.message, /installs its own/);
+  assert.doesNotMatch(thrown.message, /tmpfs/);
 });
 
 test("a registered extra mount appears at /mnt/<key>", () => {

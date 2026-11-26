@@ -1,6 +1,6 @@
 ---
 title: Container Isolation
-updated: 2026-11-15
+updated: 2026-11-26
 covers:
   - src/supervise/drivers/containerized.ts
   - src/supervise/index.ts
@@ -27,6 +27,7 @@ credentials, and why the dependency install is not one of them.
              -v <project>:/work
              -v <volume>:/work/node_modules
              -v <each mounts.json dir>:ro
+             --tmpfs /work/.cursor
              sh -c '(write mcp config) && exec "$@"'
 ```
 
@@ -55,6 +56,54 @@ nothing else.
 The agent's extra `mounts.json` directories do not come here. The only one
 configured in practice is the whole local-context store, and an install script
 has no business in it.
+
+🛑 **THE `/work/.cursor` MASK IS THE AGENT'S ALONE, FOR THAT RULING.** The
+install reads no config directory, so a third mount there buys nothing. It is
+emitted by `configMaskArgs`, not by the shared `projectMountArgs`, and the
+install's mount count is asserted as two so the shared spelling cannot creep
+back.
+
+## The `/work/.cursor` mask, and the shadowing it stops
+
+**A vendor CLI reads the PROJECT config directory before the one in its home
+directory. `/work` is the container's cwd, so the host's copy wins — and every
+path in the host's copy is a host path.**
+
+```
+what the prelude writes   /root/.cursor/mcp.json   http + bus token   CORRECT
+what the host arm writes  <project>/.cursor/mcp.json  stdio + nvm node path
+what the container read   /work/.cursor/mcp.json   <- the SAME host file
+```
+
+`deliverHostGrantFile` writes the host arm's file with
+`command: process.execPath`. Inside the container that nvm `node` does not
+exist, so the load failed with `spawn …/bin/node ENOENT` and the agent started
+with no bus tools at all. It answered in its own transcript and could not
+`send`.
+
+⚠️ **`mcp list` IS NOT THE INSTRUMENT.** It reports only
+`chat: Error: Connection failed`, which reads as a network fault and sent two
+sessions after connectivity. `mcp list-tools chat` names the real cause.
+
+🛑 **A CONFIG BEING CORRECT PROVES NOTHING UNTIL YOU KNOW IT IS THE CONFIG THAT
+WINS.** The correct file sat unread in `/root` the whole time, and every check
+that read only that file reported healthy.
+
+**Why a tmpfs rather than a volume.** Nothing needs to persist — the mask
+exists only so the `/root` copy wins — and a tmpfs is empty by construction,
+with none of a volume's copy-up semantics to reason about. Nothing prunes named
+volumes either.
+
+**Why it is unconditional rather than gated on the Cursor vendor.** A host
+config directory holds host paths inside every vendor's container, and a vendor
+branch here is a second thing to drift from the one that decides the prelude's
+config path. `.gitignore` excludes `.cursor/`, so no committed project rules
+are hidden by the mask.
+
+**A declared read-only path at `.cursor` is REFUSED.** It passes every
+containment check and then lands on the mask's destination, which the daemon
+rejects while naming neither mount. `CONTAINER_OWNED_PATHS` carries the reason
+beside each path, so a `.cursor` collision does not report `node_modules`.
 
 ## What has to happen before the first container starts
 
