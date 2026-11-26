@@ -400,6 +400,13 @@ export function menuEntriesFor(kind, label) {
 const MENTION_BODY = /[A-Za-z0-9._-]/;
 
 /**
+ * Whatever may precede a tag and still leave it the OPENING of the post:
+ * nothing, whitespace, or a run of already-completed addressee tags, because
+ * a post may address several. One word of prose ends the run.
+ */
+const TAG_RUN = /^\s*(?:#[A-Za-z0-9._-]+:\s*)*$/;
+
+/**
  * 🛑 "#" IS THE ONLY NAME TRIGGER. "@" is reserved for relative file paths.
  * A peer and a room share one pool, because a name is a name to the person
  * typing it.
@@ -436,11 +443,31 @@ export function mentionTokenAt(value, caret) {
 }
 
 /**
- * The peer or room completion for the token under the caret.
+ * The everyone tag, offered beside real names because addressing a room is
+ * the broadcast form of addressing a person.
  *
- * A room name already carries its own "#" and keeps it. A peer handle does
- * not, so the "#" was only a trigger and is dropped on accept. A bare "#"
- * lists everything, so it is a name picker.
+ * 🛑 NOTHING IN THE CODE RESERVES IT. `assertRoomName` accepts "#here", so a
+ * real room could take the name. Leading the picker is the whole reservation.
+ */
+export const HERE_TAG = "#here";
+
+/**
+ * The peer, room or everyone-tag completion for the token under the caret.
+ *
+ * 🛑 EVERY COMPLETION KEEPS THE "#". It is a name prefix, not a throwaway
+ * trigger. While a peer's completion dropped it, a fully typed "#claude1"
+ * could never equal the bare `item.name`, so `enterShouldSend` re-accepted
+ * forever instead of sending.
+ *
+ * 🛑 AN ADDRESSEE ALSO GETS A COLON; A ROOM REFERENCE DOES NOT. That is the
+ * only thing telling "addressed to #gate" from "see #gate", so a picker that
+ * emitted the bare form would make the non-compliant spelling the easy one.
+ *
+ * 🛑 AND ONLY WHERE THE TAG OPENS THE POST. A colon is an address, and
+ * "ask #claude1: about it" addresses nobody. Mid-sentence the same token is
+ * an ordinary mention.
+ *
+ * A bare "#" lists everything, so it is also a name picker.
  *
  * @param {string} value
  * @param {number} caret
@@ -457,19 +484,45 @@ export function mentionSuggestionsFor(value, caret, ctx) {
   const pad = /^\s/.test(tail) ? "" : " ";
 
   const sorted = (xs) => [...xs].sort((a, b) => a.localeCompare(b));
-  // Rooms first, then peers. Deterministic inside each group so the top item
-  // does not depend on bus join order.
-  const items = [...new Set([...sorted(ctx.rooms), ...sorted(ctx.peers)])]
-    .filter((h) => bareName(h).toLowerCase().startsWith(q))
-    .map((h) => {
-      const head = value.slice(0, token.start) + h + pad;
+  // The everyone tag leads, then rooms, then peers. A peer gains the "#" here
+  // so the rest of this function never has to ask which pool a name came from.
+  const pool = [
+    { name: HERE_TAG, desc: "everyone", addressee: true },
+    ...sorted(ctx.rooms).map((r) => ({
+      name: r,
+      desc: "room",
+      addressee: false,
+    })),
+    ...sorted(ctx.peers).map((p) => ({
+      name: `#${p}`,
+      desc: "peer",
+      addressee: true,
+    })),
+  ];
+
+  // Keyed on the INSERTED text, not the name. A room genuinely called "#here"
+  // and the everyone tag share a name and insert different things, so they are
+  // two choices and collapsing them would hide one.
+  // Opening the post makes a tag an address; anywhere else it is a mention.
+  const opensPost = TAG_RUN.test(value.slice(0, token.start));
+
+  const byInsert = new Map();
+  for (const entry of pool) {
+    const text = entry.addressee && opensPost ? `${entry.name}:` : entry.name;
+    if (!byInsert.has(text)) byInsert.set(text, { ...entry, text });
+  }
+
+  const items = [...byInsert.values()]
+    .filter((e) => bareName(e.name).toLowerCase().startsWith(q))
+    .map((e) => {
+      const head = value.slice(0, token.start) + e.text + pad;
 
       return {
         insert: head + tail,
         caret: head.length,
-        name: h,
+        name: e.name,
         arg: "",
-        desc: h.startsWith("#") ? "room" : "peer",
+        desc: e.desc,
       };
     });
 

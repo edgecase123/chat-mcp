@@ -702,15 +702,53 @@ test('🛑 a "#" inside a word does not open the list', () => {
   assert.equal(mentionTokenAt("issue3#4", 8), null);
 });
 
-test('"#" alone lists every room and every peer', () => {
+test('"#" alone lists the everyone tag, every room and every peer', () => {
   assert.deepEqual(accept("#", 1)!.names, [
+    "#here",
     "#gate",
     "#leagues",
-    "claude1",
-    "claude2",
-    "gatebot",
-    "leejenkins",
+    "#claude1",
+    "#claude2",
+    "#gatebot",
+    "#leejenkins",
   ]);
+});
+
+test('\u{1f6d1} "#here" IS ALWAYS OFFERED AND IT SORTS FIRST', () => {
+  // lee's addressing rule: a room post names its addressee, and "#here" is
+  // the everyone tag. It is not a room, so it cannot arrive via ctx.rooms.
+  const first = accept("#", 1)!.names[0];
+  assert.equal(first, "#here", "the everyone tag leads the picker");
+
+  assert.deepEqual(
+    accept("#he", 3)!.names,
+    ["#here"],
+    "a prefix reaches it like any other name",
+  );
+});
+
+test('\u{1f6d1} "#here" is labelled "everyone", NOT "room"', () => {
+  const s = mentionSuggestionsFor("#he", 3, MENTION_CTX)!;
+  assert.equal(
+    s.items[0].desc,
+    "everyone",
+    'calling it a room is the wrong mental model -- room_join("#here") would ' +
+      "make a real room and nothing in the code reserves the name",
+  );
+});
+
+test('"#here" keeps its "#" like any other name', () => {
+  assert.equal(accept("#he", 3)!.insert, "#here: ", "opening the post");
+  assert.equal(accept("tell #he", 8)!.insert, "tell #here ", "mid-sentence");
+});
+
+test('\u{1f6d1} "#here" is offered even when ctx carries NO rooms at all', () => {
+  const s = mentionSuggestionsFor("#", 1, { peers: ["claude1"], rooms: [] })!;
+  assert.deepEqual(
+    s.items.map((i) => i.name),
+    ["#here", "#claude1"],
+    "it is a reserved tag, not a membership lookup",
+  );
 });
 
 test("the order does not depend on bus join order", () => {
@@ -720,16 +758,16 @@ test("the order does not depend on bus join order", () => {
   })!;
   assert.deepEqual(
     a.items.map((i) => i.name),
-    ["#y", "#z", "a", "b"],
-    "rooms first, each group sorted",
+    ["#here", "#y", "#z", "#a", "#b"],
+    "the everyone tag, then rooms, then peers, each group sorted",
   );
 });
 
 test("a prefix narrows across both pools", () => {
-  assert.deepEqual(accept("#clau", 5)!.names, ["claude1", "claude2"]);
+  assert.deepEqual(accept("#clau", 5)!.names, ["#claude1", "#claude2"]);
   assert.deepEqual(
     accept("#gat", 4)!.names,
-    ["#gate", "gatebot"],
+    ["#gate", "#gatebot"],
     "a room and a peer can both match",
   );
 });
@@ -738,27 +776,27 @@ test("a prefix that matches nothing returns null, not an empty list", () => {
   assert.equal(accept("#zzz", 4), null);
 });
 
-test('🛑 a room keeps its own "#", and a peer does NOT gain one', () => {
+test('🛑 BOTH keep the "#". Only the ADDRESSEE gains the colon.', () => {
   assert.equal(
     accept("#gat", 4)!.insert,
     "#gate ",
-    "the # is part of the room name",
+    "a room is referenced, not addressed",
   );
   assert.equal(
     accept("#clau", 5)!.insert,
-    "claude1 ",
-    "the # was only a trigger",
+    "#claude1: ",
+    "a peer is addressed, so the tag is complete",
   );
 });
 
 test("🛑 accepting mid-token consumes the WHOLE word, leaving no orphan letters", () => {
   // Caret sits inside "clau", between the a and the u.
-  assert.equal(accept("tell #clau now", 9)!.insert, "tell claude1 now");
+  assert.equal(accept("tell #clau now", 9)!.insert, "tell #claude1 now");
 });
 
 test("🛑 completing before an existing space does not leave two spaces", () => {
   const r = accept("tell #clau now", 10)!;
-  assert.equal(r.insert, "tell claude1 now");
+  assert.equal(r.insert, "tell #claude1 now");
   assert.ok(!r.insert.includes("  "), "a doubled space is the bug this guards");
 });
 
@@ -766,21 +804,21 @@ test("the caret lands after the inserted name, not at the end of the line", () =
   const r = accept("tell #clau now", 10)!;
   assert.equal(
     r.caret,
-    "tell claude1".length,
+    "tell #claude1".length,
     "so you can keep typing where you were",
   );
-  assert.equal(r.insert.slice(0, r.caret), "tell claude1");
+  assert.equal(r.insert.slice(0, r.caret), "tell #claude1");
 });
 
 test("a trailing space is added when the name ends the line", () => {
-  assert.equal(accept("tell #clau", 10)!.insert, "tell claude1 ");
+  assert.equal(accept("tell #clau", 10)!.insert, "tell #claude1 ");
 });
 
 test("🛑 a completed name no longer offers itself, so the popover closes", () => {
   assert.equal(
-    mentionTokenAt("tell claude1 ", 13),
+    mentionTokenAt("tell #claude1 ", 14),
     null,
-    "no trigger left in the line",
+    "the caret is past the completed word",
   );
   assert.equal(accept("tell #gate ", 11), null, "the caret is past the word");
 });
@@ -819,12 +857,12 @@ test("duplicate handles are listed once", () => {
   });
   assert.deepEqual(
     s!.items.map((i) => i.name),
-    ["claude1"],
+    ["#claude1"],
   );
 });
 
 test("a caret past the end of the value does not throw", () => {
-  assert.equal(accept("#clau", 999)!.insert, "claude1 ");
+  assert.equal(accept("#clau", 999)!.insert, "#claude1: ");
   assert.equal(mentionTokenAt("", 5), null);
 });
 
@@ -851,21 +889,86 @@ test("Enter ACCEPTS a half-typed name", () => {
   );
 });
 
-test('🛑 A FULLY TYPED PEER STILL COMPLETES, because its "#" must come off', () => {
-  // The defect this pins: comparing the BARE name made "#gate" send with a
-  // stray "#" when gate was a peer, while "#clau" completed to "claude1" with
-  // none. How much you had typed decided what got sent.
+test('\u{1f6d1} A PEER KEEPS THE "#" ON ACCEPT, same as a room', () => {
+  // lee, 2026-11-26. The "#" stopped being only a trigger: the addressing
+  // rule makes "#claude1" the form you want in the line, not "claude1".
+  assert.equal(accept("#clau", 5)!.insert, "#claude1: ");
+  assert.equal(accept("tell #clau now", 9)!.insert, "tell #claude1 now");
+});
+
+test('the popover SHOWS a peer with its "#", so it matches what lands', () => {
+  assert.deepEqual(accept("#clau", 5)!.names, ["#claude1", "#claude2"]);
+});
+
+test("\u{1f6d1} A FULLY TYPED PEER NOW SENDS \u2014 THE ASYMMETRY IS GONE", () => {
+  // This is the defect keeping the "#" actually fixes. enterShouldSend
+  // compares `typed` (which always carries the "#") to `item.name`. While a
+  // peer's name was bare, a fully typed "#gate" could never equal "gate", so
+  // Enter re-accepted instead of sending.
   const ctx = { peers: ["gate"], rooms: [] };
   const s = mentionSuggestionsFor("#gate", 5, ctx)!;
-  assert.equal(s.items[0].insert, "gate ", "the completion drops the trigger");
+  assert.equal(s.items[0].insert, "#gate: ", "the trigger is kept");
   assert.equal(
     enterShouldSend(s, "#gate"),
-    false,
-    "so there IS something left to do",
+    true,
+    "nothing is left to complete, so Enter must send",
   );
 });
 
-test("a room and a peer of the same name diverge, and both are right", () => {
+test("\u{1f6d1} AN ADDRESSEE GETS THE COLON. A ROOM REFERENCE DOES NOT.", () => {
+  // AGENTS.md: the trailing colon is what tells a tag from a room, "which is
+  // why it is not optional". A picker that emits the colon-less form would
+  // make the easy path the non-compliant one.
+  assert.equal(accept("#he", 3)!.insert, "#here: ");
+  assert.equal(accept("#clau", 5)!.insert, "#claude1: ");
+  assert.equal(accept("#lea", 3)!.insert, "#leagues ", "a room is a reference");
+});
+
+test("\U0001f6d1 THE COLON NEEDS POSITION TOO: ONLY WHEN THE TAG OPENS THE POST", () => {
+  // claude2 caught this. lee's objection to "#mcp: " mid-sentence applies to a
+  // peer just as hard: "ask #claude1 about it" must not become
+  // "ask #claude1: about it". A colon mid-sentence addresses nobody.
+  assert.equal(accept("#clau", 5)!.insert, "#claude1: ", "it opens the post");
+  assert.equal(
+    accept("ask #clau about it", 9)!.insert,
+    "ask #claude1 about it",
+    "mid-sentence is a MENTION, so no colon",
+  );
+});
+
+test("\u{1f6d1} A SECOND ADDRESSEE TAG KEEPS ITS COLON TOO", () => {
+  // claude2 caught this. AGENTS.md says "several addressees get several tags",
+  // so a run of completed tags is still the opening of the post -- not prose
+  // that turns the next one into a mention.
+  assert.equal(accept("#claude1: #clau", 15)!.insert, "#claude1: #claude1: ");
+  assert.equal(
+    accept("#claude1: #claude2: #cla", 24)!.insert,
+    "#claude1: #claude2: #claude1: ",
+    "any number of them",
+  );
+});
+
+test("\u{1f6d1} ONE WORD OF PROSE ENDS THE TAG RUN", () => {
+  // The negative control. Without it, "tags and whitespace only" could be
+  // satisfied by anything and the test above would pass vacuously.
+  assert.equal(
+    accept("#claude1: ask #clau", 19)!.insert,
+    "#claude1: ask #claude1 ",
+    "prose intervened, so this is a mention",
+  );
+});
+
+test("a room tag does NOT open a tag run, since it never gained a colon", () => {
+  assert.equal(accept("#mcp #clau", 10)!.insert, "#mcp #claude1 ");
+});
+
+test("leading whitespace still counts as opening the post", () => {
+  assert.equal(accept("  #clau", 7)!.insert, "  #claude1: ");
+});
+
+test("a room and a peer of the same name diverge ON THE COLON", () => {
+  // They used to diverge on whether the "#" survived. Now the "#" always
+  // survives and the COLON carries the distinction, which is what it is for.
   const asRoom = mentionSuggestionsFor("#gate", 5, {
     peers: [],
     rooms: ["#gate"],
@@ -874,15 +977,20 @@ test("a room and a peer of the same name diverge, and both are right", () => {
     peers: ["gate"],
     rooms: [],
   })!;
-  assert.equal(
-    enterShouldSend(asRoom, "#gate"),
-    true,
-    "the # is part of the room name",
-  );
-  assert.equal(
-    enterShouldSend(asPeer, "#gate"),
-    false,
-    "the # was only a trigger",
+  assert.equal(asRoom.items[0].insert, "#gate ", "a reference");
+  assert.equal(asPeer.items[0].insert, "#gate: ", "an addressee");
+});
+
+test('\u{1f6d1} THE EVERYONE TAG AND A ROOM CALLED "#here" ARE BOTH LISTED', () => {
+  // They insert different text, so collapsing them would hide a real choice.
+  const s = mentionSuggestionsFor("#here", 5, { peers: [], rooms: ["#here"] })!;
+  assert.deepEqual(
+    s.items.map((i) => [i.desc, i.insert]),
+    [
+      ["everyone", "#here: "],
+      ["room", "#here "],
+    ],
+    "the tag leads, the room follows",
   );
 });
 
