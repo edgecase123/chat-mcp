@@ -8,11 +8,15 @@ import type { ContainerPlan } from "../../src/supervise/container.js";
  * compares a stored plan to `buildConfirmPlan`'s output, so a hand-written
  * plan confirms a handle the supervisor then refuses.
  *
- * ⚠️ `envVarNames` AND `envValuesDigest` ARE THE TWO FIELDS CALLERS OVERRIDE,
- * and all three callers pass them EXPLICITLY rather than inheriting a default.
- * Those were the only two lines that differed between the three copies this
- * replaced, because each is one of those tests' own subject (#356). A shared
- * default for either would silence the detector that test exists to be.
+ * ⚠️ `envVarNames` AND `envValuesDigest` ARE THE FIELDS A CALLER IS LIKELY
+ * TO SET. They were the only two that differed between the copies this
+ * replaced, because each is the subject of one of those tests (#356).
+ *
+ * 🛑 THE DEFAULTS HERE ARE NOT LOAD-BEARING, AND THAT IS MEASURED, NOT
+ * ASSUMED. Mutating `binary` left every caller GREEN: these tests assert
+ * diffing, digesting and locking, never a field's value. So inheriting a
+ * default weakens nothing — but a test whose SUBJECT is one of these fields
+ * must still set it, because then the value IS the claim.
  */
 export function containerPlan(
   over: Partial<ContainerPlan> = {},
