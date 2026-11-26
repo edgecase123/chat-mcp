@@ -464,6 +464,74 @@ has no reserved list, so `room_join("#here")` would create a real room called
 `#here`. **Nothing enforces this rule — if that matters, the guard still has to
 be written.**
 
+## 🛑 DO NOT ACKNOWLEDGE UNNECESSARILY.
+
+**lee, 2026-11-26, naming the minimum an agent must be told:**
+_"don't unnecessarily acknowledge chat messages."_
+
+**An acknowledgement that changes nothing for the reader still costs the reader
+a message.** Silence already means received.
+
+```
+17992  Ack 17989.  Arc + blocker in HANDOFF.
+17994  Ack claude1 arc. HANDOFF updated.
+17995  Ack: arc/counts from 17990 only.
+17996  Ack: 17989 = worktrees; 17990 = tickets.
+```
+
+**Four posts in 20 seconds, from one agent, carrying one fact between them.**
+
+- **Send it only when your reply CHANGES something** — it corrects a fact,
+  names what you will now do differently, or hands over a resource.
+- ⚠️ **"I understood you" is not a change.** Neither is restating the message
+  back in your own words.
+- 🛑 **A HANDOVER IS NOT AN ACK AND MUST STILL BE SENT.** `DONE <artifact>`
+  and `release` tell a sibling they may proceed; dropping those to look terse
+  is the opposite failure and it deadlocks.
+
+⚠️ **This rule is DELIVERED to supervised agents, not just filed here.**
+`src/supervise/etiquette.ts` carries it with an `anchor` pinned to this
+heading, and `etiquette-agents-md.test.ts` goes red if the heading is reworded.
+**Change the heading and you change a test.**
+
+## 🛑 POST ONLY WHEN YOU ARE NAMED, or you hold what the reader cannot get elsewhere.
+
+**lee, 2026-11-26, after watching a supervised agent answer every relay:**
+_"I noticed you do a lot of churning with messages coming into the room."_
+
+**Every member receives every room post, so a relay arriving is not a request
+for your reply.**
+
+```
+cursor1-agent, ~/.chat-mcp/logs/cursor1.log, measured 2026-11-26
+  78  turns completed
+  45  turns whose output reached NOBODY       = 58%
+  25  room-post wakes
+   9  wakes that actually named cursor1
+```
+
+- **Named, or you hold information nobody else can supply.** Those are the two
+  reasons to post. There is no third.
+- 🛑 **ONE SHORT POST, NEVER A THREAD.** Four posts carrying one fact cost the
+  reader four reads. A second post is justified only when its FIRST LINE names
+  what it CHANGES about the first.
+- ⚠️ **Do not post to say you are staying silent.** That is the churn with an
+  extra step.
+
+🛑 **THIS RULE CANNOT RECOVER THE WAKE, AND SAYING SO IS THE POINT.** The 58%
+above was spent before the agent chose anything — `index.ts` relays every room
+post to every supervised agent. **The rule reduces OUTBOUND noise; only a
+delivery filter reduces the intake.** Filed separately.
+
+## 🛑 THE HANDOFF FILE IS FOR STATE THAT MUST SURVIVE A RESTART.
+
+**Not a running log, and not a copy of what the room already holds.** Write it
+when you are mid-way through something a replacement would have to resume, and
+when you are told to externalize before a restart.
+
+- ⚠️ **A handoff rewritten on every turn is the same churn in a file.** The
+  write costs a turn's attention and the next reader gains nothing.
+
 ## 🛑 CLAIM `answer-<id>` BEFORE REPLYING TO lee
 
 **Both agents answer the same question inside 10 seconds, so "read the room

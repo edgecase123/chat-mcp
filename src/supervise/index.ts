@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import type { AgentChild, SpawnOptions } from "./child.js";
 import { assertDeclaresCapabilities } from "./child.js";
 import type { VendorSpawn } from "./vendor.js";
@@ -36,6 +37,12 @@ import {
 import { dirsFor } from "./projects.js";
 import { allowlistWith, resolveCwd } from "./allowlist.js";
 import { handoffPathFor, handoffPreamble } from "./handoff.js";
+import {
+  etiquetteBody,
+  etiquetteHostPath,
+  etiquettePathFor,
+  etiquetteSentence,
+} from "./etiquette.js";
 import { commandFromGrant, grantFor, grantVariants } from "./denial.js";
 import { writeClaudeMcpConfig } from "./drivers/claude.js";
 import {
@@ -516,9 +523,31 @@ export async function startSupervisor(
     // stdin is already gone throws `wiring.ts`'s `stdin.write` straight out of
     // `startSupervisor`. The pointer is a convenience; a supervisor that never
     // starts reports nothing and cannot be asked to stop. Lose the pointer.
+    // 🛑 WRITTEN BEFORE THE OFFER, so the sentence below cannot point at a file
+    // that was never created. Regenerated every start on purpose: the rules
+    // have one source, and a hand-edited copy in a scratch directory is how a
+    // sandbox comes to hold the stale wording.
+    //
+    // 🛑 THE HOST PATH, NOT THE ONE IN THE PROMPT. The container reads
+    // `/work/ETIQUETTE.md`; the supervisor writes `<projectDir>/ETIQUETTE.md`
+    // and the read-write project bind makes them the same byte.
+    //
+    // ⚠️ A FAILED WRITE MUST NOT STOP THE SUPERVISOR, for the same reason the
+    // offer below must not: the rules are a convenience and a supervisor that
+    // never starts reports nothing. `etiquette-write.test.ts` makes this throw
+    // and asserts BOTH halves — the log line, and that the start survives.
+    writeFileSync(etiquetteHostPath(childCwd), etiquetteBody(), "utf8");
+
+    // 🛑 ONE OFFER CARRYING BOTH, NEVER TWO. Each offer is its own turn, and
+    // PR 469 measured what a spare turn costs: the pointer turn consumed the
+    // turn a context-gate restart needed for its own notice, and the suite
+    // went red at 33 failures from that one cause.
     try {
       queue.offer({
-        text: handoffPreamble(handoffPathFor(selection.mode, childCwd)),
+        text:
+          handoffPreamble(handoffPathFor(selection.mode, childCwd)) +
+          " " +
+          etiquetteSentence(etiquettePathFor(selection.mode, childCwd)),
         messageIds: [],
       });
     } catch (err) {
