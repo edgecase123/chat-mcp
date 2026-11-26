@@ -17,16 +17,18 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-bus-guard-"));
  * guard C  `openHostBus`'s hand-written `catch`, which closes the listener
  *           it bound one statement earlier before that throw propagates
  *
- * 🛑 ITS OWN FILE, NOT TWO MORE TESTS IN THE HAPPY-PATH ONE. `t.mock.module`
- * leaves the mocked `host-bus.js` in this process's module cache, so an
- * unmocked assertion in the same file reads the fake too. Recorded precedent:
- * the closing note in `confirm-plan-floor-sourcing.test.ts`.
+ * 🛑 ITS OWN FILE, NOT TWO MORE TESTS IN THE HAPPY-PATH ONE. `host-bus.js`
+ * itself is never mocked — its DEPENDENCIES are, and it stays cached LINKED to
+ * them after the mock reverts. So an unmocked assertion in the same file reads
+ * the fakes too. Recorded precedent: the closing note in
+ * `confirm-plan-floor-sourcing.test.ts`.
  *
  * 🛑 AND ONE TEST, NOT TWO, FOR THE SAME REASON ONE LEVEL DOWN. The mock
  * reverts with the TEST context while the importer stays cached, so a second
  * test here would meet an already-linked `host-bus.js` and measure whichever
- * `dao` won the race. Both guards fire on one `openHostBus` call, so one
- * recording answers both.
+ * `dao` the FIRST link captured. That is deterministic, not a race, which
+ * makes it worse. Both guards fire on one `openHostBus` call, so one recording
+ * answers both.
  *
  * ⚠️ WHAT GUARD C's ASSERTION DOES NOT COVER, because the next reader will
  * ask: with `mcp-listener.js` faked, this proves `host-bus` CALLS `close()`.
@@ -87,10 +89,15 @@ test("🛑 a bus whose pid-null never lands refuses, and releases the listener i
     "a clearAgentPid that matched no row left the supervisor's pid on the handle",
   );
 
-  // 🛑 ASSERTED AFTER THE REJECTION SURFACED, which is what makes the ordering
-  // part of the claim. `listener.close()` is reachable only through the
-  // `HostBus` a throw never returns, so without the hand-written catch this
-  // array is empty and the port is held for the life of the process.
+  // 🛑 THE CALL IS THE CLAIM, AND THE `await` IS NOT. `listener.close()` is
+  // reachable only through the `HostBus` a throw never returns, so without the
+  // hand-written catch this array is empty and the port is held for the life
+  // of the process.
+  //
+  // ⚠️ DROPPING THAT `await` LEAVES THIS GREEN, MEASURED. The fake's `close`
+  // has no `await` of its own, so the push lands at call time. A fake that
+  // resolved late would pin microtask ordering instead, which is a flaky test
+  // wearing a strict one's clothes.
   assert.deepEqual(
     closed,
     ["listener"],
