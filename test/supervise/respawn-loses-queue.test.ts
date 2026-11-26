@@ -40,6 +40,8 @@ import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
  * one.
  */
 
+import { releasePointerTurn } from "../support/handoff-pointer.js";
+
 const DIRS = [process.cwd()];
 
 interface FakeChild {
@@ -112,6 +114,7 @@ function spawnFailingOn(failCalls: readonly number[], children: FakeChild[]) {
 async function supervisorFor(
   handle: string,
   spawnChild: (o: SpawnOptions) => AgentChild,
+  children: FakeChild[],
 ) {
   const db = new DatabaseSync(":memory:");
   migrate(db);
@@ -124,6 +127,9 @@ async function supervisorFor(
     spawnChild,
     log: () => undefined,
   });
+
+  // The handoff pointer holds the child's first turn; see `releasePointerTurn`.
+  releasePointerTurn(children[0]!.sent, children[0]);
 
   return { sup, db };
 }
@@ -181,6 +187,7 @@ test("🚨 a throwing respawn on an APPROVAL does not lose the queued prompts", 
   const { sup, db } = await supervisorFor(
     handle,
     spawnFailingOn([2], children),
+    children,
   );
 
   try {
@@ -205,6 +212,10 @@ test("🚨 a throwing respawn on an APPROVAL does not lose the queued prompts", 
       revived,
       "no child was ever spawned again, so the queue cannot be read",
     );
+
+    // The replacement is fresh, so it gets a pointer FIRST and the carried
+    // prompt waits behind it. See `releasePointerTurn`.
+    releasePointerTurn(revived.sent, revived);
     assert.ok(
       revived.sent.some((t) => t.includes("QUEUED WORK")),
       `the failed respawn discarded the queued prompt (the new child got ${JSON.stringify(revived.sent)})`,
@@ -221,6 +232,7 @@ test("🚨 a throwing respawn on an operator RESTART does not lose the queued pr
   const { sup, db } = await supervisorFor(
     handle,
     spawnFailingOn([2], children),
+    children,
   );
 
   try {
@@ -239,6 +251,8 @@ test("🚨 a throwing respawn on an operator RESTART does not lose the queued pr
       revived,
       "no child was ever spawned again, so the queue cannot be read",
     );
+
+    releasePointerTurn(revived.sent, revived);
     assert.ok(
       revived.sent.some((t) => t.includes("QUEUED WORK")),
       `the failed restart discarded the queued prompt (the new child got ${JSON.stringify(revived.sent)})`,
@@ -262,7 +276,11 @@ test("🚨 a throwing respawn on an operator RESTART does not lose the queued pr
 test("🚨 a respawn that SUCCEEDS still carries the queued prompt to the replacement", async () => {
   const children: FakeChild[] = [];
   const handle = `rt-${process.pid}-success`;
-  const { sup, db } = await supervisorFor(handle, spawnFailingOn([], children));
+  const { sup, db } = await supervisorFor(
+    handle,
+    spawnFailingOn([], children),
+    children,
+  );
 
   try {
     await withOnePromptQueued(handle, children);
@@ -271,6 +289,8 @@ test("🚨 a respawn that SUCCEEDS still carries the queued prompt to the replac
 
     const replacement = children[1];
     assert.ok(replacement, "the restart spawned no replacement");
+
+    releasePointerTurn(replacement.sent, replacement);
     assert.ok(
       replacement.sent.some((t) => t.includes("QUEUED WORK")),
       `the respawn discarded the queued prompt (the replacement got ${JSON.stringify(replacement.sent)})`,
@@ -416,6 +436,7 @@ test("🚨 a late turn-end from the KILLED child does not dispatch a parked prom
   const { sup, db } = await supervisorFor(
     handle,
     spawnFailingOn([2], children),
+    children,
   );
 
   try {
@@ -442,6 +463,9 @@ test("🚨 a late turn-end from the KILLED child does not dispatch a parked prom
 
     // And the work is still there for a child that exists.
     await deliver(handle, { id: 4, control: { kind: "restart", mode: "now" } });
+
+    releasePointerTurn(children[1]!.sent, children[1]);
+
     assert.ok(
       children[1]?.sent.some((t) => t.includes("QUEUED WORK")),
       "the parked prompt did not survive to the revived child",
