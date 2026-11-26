@@ -58,6 +58,51 @@ export const CONTAINER_RELAY_ENTRY = `${CONTAINER_CHAT_MCP_DIR}/dist/relay/bin.j
  */
 export const CONTAINER_NODE_MODULES_DIR = "node_modules";
 
+/**
+ * The project-relative config directory a vendor CLI reads before the one in
+ * its home directory, masked so the home copy is the one that wins.
+ *
+ * 🛑 THE HOST'S COPY OF THIS DIRECTORY IS ACTIVELY WRONG INSIDE A CONTAINER.
+ * `deliverHostGrantFile` writes `<cwd>/.cursor/mcp.json` for the HOST arm, with
+ * `command: process.execPath` and an nvm `node` path. `/work` is the
+ * container's cwd, `cursor-agent` reads the project file before
+ * `~/.cursor/mcp.json`, so the container resolved a host path and failed with
+ * `spawn …/bin/node ENOENT` while the correct config sat unread in `/root`.
+ */
+export const CONTAINER_CURSOR_CONFIG_DIR = ".cursor";
+
+/**
+ * Every project-relative path the container owns, with the reason a collision
+ * refusal prints.
+ *
+ * 🛑 THE REASON TRAVELS WITH THE PATH. One hardcoded message named
+ * `node_modules` and said "the container installs its own" — and for
+ * `.cursor` every clause of that is false, because nothing installs it and it
+ * is a tmpfs rather than a volume. A `.cursor` collision reporting
+ * `node_modules` sends the reader to the wrong mount.
+ *
+ * ⚠️ EVERY ENTRY IS LOWERCASE, AND A TEST PINS THAT. The comparison lowercases
+ * the declared segment, so a case-insensitive host filesystem cannot slip
+ * `NODE_MODULES` past it — and an entry carrying a capital would therefore
+ * never fire at all.
+ */
+export const CONTAINER_OWNED_PATHS: readonly {
+  readonly dir: string;
+  readonly reason: string;
+}[] = [
+  {
+    dir: CONTAINER_NODE_MODULES_DIR,
+    reason:
+      "the container installs its own, so it cannot also be mounted from the host",
+  },
+  {
+    dir: CONTAINER_CURSOR_CONFIG_DIR,
+    reason:
+      "the container masks it with an empty tmpfs so its own MCP config wins, " +
+      "so a host mount here restores the shadowing the mask exists to stop",
+  },
+];
+
 /** Carries the whole MCP config, token included, so none of it is in argv. */
 export const CONTAINER_MCP_CONFIG_ENV = "CHAT_MCP_MCP_CONFIG";
 
@@ -426,6 +471,25 @@ function projectMountArgs(
 }
 
 /**
+ * The flag that hides the host's project config directory from the agent, so
+ * the prelude's own copy in `/root` is the one its CLI reads.
+ *
+ * 🛑 THE AGENT CONTAINER ONLY, AND NOT `projectMountArgs`. lee's ruling of
+ * 2026-11-14 is "exactly two mounts on the install", and the install reads no
+ * config directory, so putting this in the shared emitter would make it three
+ * for no gain. The shared emitter exists because the install WRITES the volume
+ * the agent READS; nothing here is coupled that way.
+ *
+ * 🛑 A tmpfs, NOT A VOLUME. Nothing needs to persist — the mask exists only so
+ * the container's own `/root` config wins — and a tmpfs is empty by
+ * construction, with none of a volume's copy-up semantics to reason about.
+ * ⚠️ Nothing prunes a named volume either, as `nodeModulesVolumeFor` says.
+ */
+function configMaskArgs(): string[] {
+  return ["--tmpfs", `${CONTAINER_PROJECT_DIR}/${CONTAINER_CURSOR_CONFIG_DIR}`];
+}
+
+/**
  * The image this spawn will actually run: the handle's override, or the
  * vendor's own tag.
  *
@@ -721,6 +785,9 @@ export function dockerRunPlan(
     // two argvs agreeing is a correctness requirement rather than a tidiness
     // one.
     ...projectMountArgs(supervisorHandle, projectDir),
+    // 🛑 THE AGENT'S ALONE. See `configMaskArgs` for why the install container
+    // does not get it.
+    ...configMaskArgs(),
   ];
 
   // 🛑 NAMED ONLY WHEN THERE IS ONE, because `-e NAME` with no `=` copies
@@ -763,16 +830,14 @@ export function dockerRunPlan(
     // so the symptom without this is a spawn that dies in the daemon with no
     // line connecting it to the manifest that caused it.
     const segment = inner.toLowerCase();
+    const owned = CONTAINER_OWNED_PATHS.find(
+      ({ dir }) => segment === dir || segment.startsWith(`${dir}/`),
+    );
 
-    if (
-      segment === CONTAINER_NODE_MODULES_DIR ||
-      segment.startsWith(`${CONTAINER_NODE_MODULES_DIR}/`)
-    ) {
+    if (owned) {
       throw new Error(
         `read-only path '${entry}' collides with the container-owned ` +
-          `${CONTAINER_NODE_MODULES_DIR} volume at ` +
-          `${CONTAINER_PROJECT_DIR}/${CONTAINER_NODE_MODULES_DIR}; the container installs its ` +
-          "own, so it cannot also be mounted from the host",
+          `${owned.dir} at ${CONTAINER_PROJECT_DIR}/${owned.dir}; ${owned.reason}`,
       );
     }
 
