@@ -178,11 +178,15 @@ test("⚠️ a RESUMED session is not handed the pointer at all", async () => {
       to: handle,
       from: "lee",
       ts: Date.now(),
-      body: "hi",
+      body: "resume-body-marker",
     });
 
     assert.equal(sent.length, 1);
-    assert.match(sent[0] ?? "", /hi/);
+
+    // ⚠️ A DISTINCTIVE BODY. `/hi/` stood here and it also matches "t(hi)s is
+    // a fresh start" inside the pointer, so the same assertion in
+    // `mount-banner.test.ts` passed while reading the pointer instead.
+    assert.match(sent[0] ?? "", /resume-body-marker/);
     assert.doesNotMatch(sent[0] ?? "", /HANDOFF\.md/);
   } finally {
     await sup.stop();

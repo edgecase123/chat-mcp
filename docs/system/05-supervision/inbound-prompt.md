@@ -87,6 +87,18 @@ INVARIANTS AT ONCE.** Both were caught by a single assertion in
 **The mount banner is a few short lines and survives both. A paragraph has to
 be its own turn.**
 
+🛑 **THE POINTER TURN HOLDS THE QUEUE, SO THE FIRST BUS MESSAGE WAITS ONE TURN.**
+The pointer is dispatched before any message arrives, and the queue runs one
+turn at a time — so a message delivered to a fresh child is held, then sent as
+its own prompt with its banner intact once the pointer's turn ends.
+
+⚠️ **THAT SHIFTS EVERY POSITIONAL ASSERTION IN A TEST BY ONE**, and one of them
+went GREEN on the shift rather than red: `/hi/` matched "t(hi)s is a fresh
+start" inside the pointer's own text, so a mount-banner test reported a clean
+banner on a prompt it never read. **A test that indexes `sent` must drop the
+pointer and ASSERT what it dropped**, which is what `mount-banner.test.ts`'s
+`releasePointer` does.
+
 🛑 **THE GATES ARE ALSO NOT THE SAME, AND COPYING ONE BREAKS THE OTHER.** The
 mount banner is container-only, because a host agent has no mounts. The handoff
 pointer is not, because a host agent has a project directory and therefore a

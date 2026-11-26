@@ -42,6 +42,52 @@ function fakeChild(sent: string[]) {
   };
 }
 
+/**
+ * 🛑 THE HANDOFF POINTER TURN HOLDS THE FIRST SLOT, SO EVERY TEST HERE RELEASES
+ * IT BEFORE READING `sent`.
+ *
+ * `offerHandoffPointer` queues the pointer as its OWN turn at spawn, per lee's
+ * ruling of 2026-11-26, and it is dispatched before any inbound message. An
+ * index into `sent` taken without releasing it names the pointer, not the
+ * prompt this file is about.
+ *
+ * 🔴 AND THAT IS NOT A HYPOTHETICAL: `/hi/` MATCHED "t(hi)s is a fresh start"
+ * INSIDE THE POINTER'S OWN TEXT. The bare-host test below read the pointer and
+ * reported a clean mount banner, so it went GREEN on a prompt it never saw.
+ * Its body is distinctive now for that reason.
+ */
+function spawner(sent: string[]) {
+  const children: ReturnType<typeof fakeChild>[] = [];
+
+  return {
+    spawnChild: () => {
+      const c = fakeChild(sent);
+      children.push(c);
+      return c;
+    },
+
+    /**
+     * Drop the pointer turn out of `sent` and release it, so every index below
+     * names an INBOUND prompt.
+     *
+     * 🛑 IT ASSERTS WHAT IT DROPS. A bare `shift()` would silently eat the
+     * operator's first prompt the day the pointer stops being offered, and the
+     * banner assertions would read the SECOND prompt and still pass.
+     */
+    releasePointer: () => {
+      const first = sent.shift() ?? "";
+      assert.match(
+        first,
+        /HANDOFF\.md/,
+        `the first send was not the handoff pointer:\n${first}`,
+      );
+      children[0]?.finishTurn();
+    },
+
+    finishTurn: () => children[0]?.finishTurn(),
+  };
+}
+
 test("a fresh container spawn prepends the mount banner to the FIRST prompt only", async () => {
   const db = new DatabaseSync(":memory:");
   migrate(db);
@@ -57,7 +103,7 @@ test("a fresh container spawn prepends the mount banner to the FIRST prompt only
   confirmHandle(handle);
 
   const sent: string[] = [];
-  const children: ReturnType<typeof fakeChild>[] = [];
+  const { spawnChild, releasePointer, finishTurn } = spawner(sent);
   const sup = await startSupervisor(
     supervisorOptions({
       handle,
@@ -66,15 +112,12 @@ test("a fresh container spawn prepends the mount banner to the FIRST prompt only
       driver: "docker-claude",
       container: true,
       log: () => undefined,
-      spawnChild: () => {
-        const c = fakeChild(sent);
-        children.push(c);
-        return c;
-      },
+      spawnChild,
     }),
   );
 
   try {
+    releasePointer();
     await deliverToSupervisor(handle, {
       id: 1,
       to: handle,
@@ -87,7 +130,7 @@ test("a fresh container spawn prepends the mount banner to the FIRST prompt only
       /Mounted directories:.*"local-context" -> \/mnt\/local-context/s,
     );
 
-    children[0]?.finishTurn();
+    finishTurn();
     await deliverToSupervisor(handle, {
       id: 2,
       to: handle,
@@ -126,6 +169,7 @@ test("the docker-claude driver gets the mount banner even without an explicit co
   confirmHandle(handle);
 
   const sent: string[] = [];
+  const { spawnChild, releasePointer, finishTurn } = spawner(sent);
   const sup = await startSupervisor(
     supervisorOptions({
       handle,
@@ -133,11 +177,12 @@ test("the docker-claude driver gets the mount banner even without an explicit co
       extraDirs: DIRS,
       driver: "docker-claude",
       log: () => undefined,
-      spawnChild: () => fakeChild(sent),
+      spawnChild,
     }),
   );
 
   try {
+    releasePointer();
     await deliverToSupervisor(handle, {
       id: 1,
       to: handle,
@@ -161,26 +206,33 @@ test("a non-container (bare host) spawn never gets a mount banner", async () => 
   const handle = `mb-bare-${process.pid}`;
 
   const sent: string[] = [];
+  const { spawnChild, releasePointer, finishTurn } = spawner(sent);
   const sup = await startSupervisor(
     supervisorOptions({
       handle,
       db,
       extraDirs: DIRS,
       log: () => undefined,
-      spawnChild: () => fakeChild(sent),
+      spawnChild,
     }),
   );
 
   try {
+    releasePointer();
     await deliverToSupervisor(handle, {
       id: 1,
       to: handle,
       from: "lee",
       ts: Date.now(),
-      body: "hi",
+      body: "no-mounts-expected-here",
     });
     assert.equal(sent.length, 1, "the prompt must actually have been sent");
-    assert.match(sent[0] ?? "", /hi/);
+
+    // 🔴 A DISTINCTIVE BODY, AND THE POINTER EXCLUDED BY NAME. `/hi/` used to
+    // stand here and it matched "t(hi)s is a fresh start" in the handoff
+    // pointer, so this test reported a clean banner on a prompt it never read.
+    assert.match(sent[0] ?? "", /no-mounts-expected-here/);
+    assert.doesNotMatch(sent[0] ?? "", /HANDOFF\.md/);
     assert.doesNotMatch(sent[0] ?? "", /Mounted directories:/);
   } finally {
     await sup.stop();
@@ -213,6 +265,7 @@ test("🔴 a mount key containing a comma and a space stays ONE entry of two", a
   confirmHandle(handle);
 
   const sent: string[] = [];
+  const { spawnChild, releasePointer, finishTurn } = spawner(sent);
   const sup = await startSupervisor(
     supervisorOptions({
       handle,
@@ -220,11 +273,12 @@ test("🔴 a mount key containing a comma and a space stays ONE entry of two", a
       extraDirs: DIRS,
       container: true,
       log: () => undefined,
-      spawnChild: () => fakeChild(sent),
+      spawnChild,
     }),
   );
 
   try {
+    releasePointer();
     await deliverToSupervisor(handle, {
       id: 1,
       to: handle,
