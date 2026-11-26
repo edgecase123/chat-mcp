@@ -12,6 +12,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(
 const { migrate } = await import("../../src/storage/db.js");
 const { startSupervisor } = await import("../../src/supervise/index.js");
 import { supervisorOptions } from "../support/supervisor-options.js";
+import { releasePointerTurn } from "../support/handoff-pointer.js";
 
 const DIRS = [process.cwd()];
 
@@ -61,7 +62,7 @@ async function supervisorFor(
 ) {
   const db = new DatabaseSync(":memory:");
   migrate(db);
-  return startSupervisor(
+  const sup = await startSupervisor(
     supervisorOptions({
       handle,
       db,
@@ -71,6 +72,11 @@ async function supervisorFor(
       shutdownGraceSeconds,
     }),
   );
+
+  // The handoff pointer holds the child's first turn; see `releasePointerTurn`.
+  releasePointerTurn(children[0]!.sent, children[0]);
+
+  return sup;
 }
 
 test("stop() with no mode kills immediately and sends no notice", async () => {

@@ -512,10 +512,18 @@ export async function startSupervisor(
   const offerHandoffPointer = (freshChild: boolean): void => {
     if (!freshChild) return;
 
-    queue.offer({
-      text: handoffPreamble(handoffPathFor(selection.mode, childCwd)),
-      messageIds: [],
-    });
+    // 🛑 THE OFFER DISPATCHES SYNCHRONOUSLY ON AN IDLE QUEUE, so a child whose
+    // stdin is already gone throws `wiring.ts`'s `stdin.write` straight out of
+    // `startSupervisor`. The pointer is a convenience; a supervisor that never
+    // starts reports nothing and cannot be asked to stop. Lose the pointer.
+    try {
+      queue.offer({
+        text: handoffPreamble(handoffPathFor(selection.mode, childCwd)),
+        messageIds: [],
+      });
+    } catch (err) {
+      log(`FAILED to offer the handoff pointer: ${String(err)}`);
+    }
   };
   // Injected in tests; the real one is the shared bus database the web UI
   // already reads.

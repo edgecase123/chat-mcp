@@ -19,6 +19,7 @@ const { setHandleContextGate } =
 const { deadPid } = await import("../support/dead-pid.js");
 import type { ContextSnapshot } from "../../src/supervise/context-gauge.js";
 import { supervisorOptions } from "../support/supervisor-options.js";
+import { releasePointerTurn } from "../support/handoff-pointer.js";
 
 /**
  * #135 unit 3a — the automatic trigger on the restart gate.
@@ -135,6 +136,12 @@ async function harness(
       log: (line: string) => lines.push(line),
     }),
   );
+
+  // 🛑 THE HANDOFF POINTER IS DISPATCHED AT SPAWN AS ITS OWN TURN, so the
+  // child's first `finishTurn` would release the POINTER rather than the turn
+  // a test means to end. Released here so every count in this file counts the
+  // child's WORK turns.
+  releasePointerTurn(children[0]!.sent, children[0]);
 
   return { db, handle, childHandle, children, lines, sup };
 }
@@ -378,6 +385,12 @@ test("the replacement child's spawn fill is measured again, not inherited", asyn
 
     assert.equal(h.children.length, 2, "the first child was never restarted");
 
+    // 🛑 RELEASED, OR THE TWO ABSENCES BELOW ARE FREE. The replacement is
+    // handed its own pointer, and a notice queued behind that open turn never
+    // reaches `sent` — so a deleted floor reset would pass on an empty array
+    // it never earned. That is the mutant this test's own header names.
+    releasePointerTurn(h.children[1]!.sent, h.children[1]);
+
     // Child two spawns ABOVE the same gate — a different model or tool set
     // moves the floor. Inheriting 5% here restarts it, and its replacement,
     // forever.
@@ -403,6 +416,9 @@ test("the replacement child gets its own gate, because the window started over",
     h.children[0]?.finishTurn();
 
     assert.equal(h.children.length, 2, "no replacement child was spawned");
+
+    // The replacement is handed its own pointer; see `releasePointerTurn`.
+    releasePointerTurn(h.children[1]!.sent, h.children[1]);
 
     // 🛑 THE LATCH IS PER CHILD, NOT PER PROCESS. A process-lifetime latch
     // restarts the first child and then lets every one after it fill to 100%

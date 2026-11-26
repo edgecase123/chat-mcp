@@ -11,6 +11,7 @@ const { migrate } = await import("../../src/storage/db.js");
 const { startSupervisor } = await import("../../src/supervise/index.js");
 const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 import { supervisorOptions } from "../support/supervisor-options.js";
+import { releasePointerTurn } from "../support/handoff-pointer.js";
 
 const DIRS = [process.cwd()];
 
@@ -79,7 +80,7 @@ function recordingChild(children: FakeChild[]) {
 async function supervisorFor(handle: string, children: FakeChild[]) {
   const db = new DatabaseSync(":memory:");
   migrate(db);
-  return startSupervisor(
+  const sup = await startSupervisor(
     supervisorOptions({
       handle,
       db,
@@ -88,6 +89,11 @@ async function supervisorFor(handle: string, children: FakeChild[]) {
       log: () => undefined,
     }),
   );
+
+  // The handoff pointer holds the child's first turn; see `releasePointerTurn`.
+  releasePointerTurn(children[0]!.sent, children[0]);
+
+  return sup;
 }
 
 async function settle(): Promise<void> {
