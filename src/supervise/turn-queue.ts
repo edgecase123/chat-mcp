@@ -24,6 +24,14 @@ export interface QueuedPrompt {
   readonly text: string;
   /** Bus message ids this prompt covers, for de-duplication. */
   readonly messageIds: readonly number[];
+  /**
+   * The peer owed a reply, when one DM'd this agent directly.
+   *
+   * 🛑 A DM ONLY, AND `undefined` FOR A ROOM POST. `roomClause` tells a room
+   * reader that silence is a valid response, so announcing an unanswered room
+   * post would contradict the instruction the bus itself gave. #472.
+   */
+  readonly owedTo?: string;
 }
 
 export interface TurnQueueEvents {

@@ -15,6 +15,18 @@ const { startSupervisor } = await import("../../src/supervise/index.js");
 const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
 import { supervisorOptions } from "../support/supervisor-options.js";
+const dao = await import("../../src/storage/dao.js");
+
+/** Every system DM waiting for `peer`. */
+function systemDms(
+  db: InstanceType<typeof DatabaseSync>,
+  peer: string,
+): string[] {
+  return dao
+    .pendingInbox(db, { to: peer })
+    .filter((m) => m.from_handle === dao.SYSTEM_HANDLE)
+    .map((m) => m.body);
+}
 import type { UnnamedToolCall } from "../../src/supervise/child.js";
 
 /**
@@ -99,7 +111,7 @@ async function supervisor(h: ReturnType<typeof harness>, tag: string) {
     }),
   );
 
-  return { sup, handle };
+  return { sup, handle, db };
 }
 
 function envelope(handle: string, id: number) {
@@ -112,6 +124,135 @@ function envelope(handle: string, id: number) {
     body: `question ${id}`,
   };
 }
+
+/**
+ * 🛑 THE WARNING WENT TO A LOG FILE AND THE PERSON WAITING READ CHAT. That is
+ * the second half of #472, and it is why lee had to debug a working detector:
+ * `silentReplyWarning` got the diagnosis right on the first turn and its only
+ * output was `log()`.
+ *
+ * 🛑 `SYSTEM_HANDLE` IS THE SENDER, NOT THE AGENT'S HANDLE. Sending as the
+ * agent would put words in its mouth and could re-wake it, turning one lost
+ * reply into a loop.
+ */
+test("🛑 the peer who is waiting is TOLD the reply never arrived", async () => {
+  const h = harness();
+  const { sup, handle, db } = await supervisor(h, "tellsdr");
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    h.emit(text("Here is the answer."));
+    h.endTurn();
+
+    const dms = systemDms(db, "lee");
+
+    assert.equal(
+      dms.length,
+      1,
+      `lee was told nothing; got ${JSON.stringify(dms)}`,
+    );
+    assert.match(dms[0] ?? "", /nobody received it/);
+    assert.match(
+      dms[0] ?? "",
+      new RegExp(handle),
+      "it does not name the agent",
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+test("a turn that called send tells the peer nothing", async () => {
+  const h = harness();
+  const { sup, handle, db } = await supervisor(h, "nodm");
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    h.emit(text("Here is the answer."));
+    h.toolCall("mcp__chat__send");
+    h.endTurn();
+
+    assert.deepEqual(systemDms(db, "lee"), []);
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🛑 UNKNOWN IS A THIRD STATE AND THE MESSAGE MUST KEEP IT. A call the driver
+ * could not name may have BEEN the send, so telling the peer "nobody received
+ * it" would accuse the agent of a silence that may not have happened. #417.
+ */
+test("🛑 an unnameable tool call tells the peer UNKNOWN, never lost", async () => {
+  const h = harness();
+  const { sup, handle, db } = await supervisor(h, "unkdm");
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    h.emit(text("Here is the answer."));
+    h.toolCall(null, "unnamed-mcp");
+    h.endTurn();
+
+    const dms = systemDms(db, "lee");
+
+    assert.equal(dms.length, 1, "the peer was told nothing at all");
+    assert.match(dms[0] ?? "", /UNKNOWN/);
+    assert.doesNotMatch(
+      dms[0] ?? "",
+      /nobody received it/,
+      "it must not claim a silence it cannot know about",
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🛑 A ROOM POST IS NOT THIS DEFECT AND MUST NOT BE ANNOUNCED. `roomClause`
+ * tells a room reader in so many words that silence is a valid response, so
+ * DMing every room about an unanswered room post would contradict the
+ * instruction the bus itself gave.
+ */
+test("a silent reply to a ROOM post notifies nobody", async () => {
+  const h = harness();
+  const { sup, handle, db } = await supervisor(h, "roomdm");
+
+  try {
+    await deliverToSupervisor(handle, {
+      id: 1,
+      to: "#gate",
+      from: "lee",
+      ts: Date.now(),
+      kind: "chat" as const,
+      body: "anyone free?",
+    });
+
+    h.emit(text("Here is the answer."));
+    h.endTurn();
+
+    assert.equal(h.warnings().length, 1, "control: the log line still fires");
+    assert.deepEqual(systemDms(db, "lee"), []);
+  } finally {
+    await sup.stop();
+  }
+});
+
+test("prose with no inbound message notifies nobody", async () => {
+  const h = harness();
+  const { sup, db } = await supervisor(h, "unowdm");
+
+  try {
+    h.emit(text("Thinking out loud, nobody asked."));
+    h.endTurn();
+
+    assert.deepEqual(systemDms(db, "lee"), []);
+  } finally {
+    await sup.stop();
+  }
+});
 
 test("a reply owed to a peer, with no send, is reported at turn end", async () => {
   const h = harness();

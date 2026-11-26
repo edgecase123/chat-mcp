@@ -251,6 +251,93 @@ test("🛑 a DIRECT message does NOT say a reply is optional", () => {
   assert.doesNotMatch(prompt, /silence is a valid response/i);
 });
 
+/**
+ * 🛑 A DM CARRIED NO REPLY INSTRUCTION AT ALL, SO IT WAS INSTRUCTED LESS THAN
+ * A ROOM POST. Measured 2026-11-26: lee DM'd a supervised `cursor-agent` "Are
+ * you available?", the child's own thinking said *"No tools are needed"*, it
+ * answered in prose, and the supervisor recorded the turn as having reached
+ * nobody.
+ *
+ * ⚠️ A CLAUDE CHILD HIDES THIS for the same reason it hides the room case —
+ * its own context carries a standing answer-in-chat rule that this bus does
+ * not ship.
+ *
+ * 🛑 IT NAMES `send`, AND ONLY A VERB THE CHILD HAS. `DEFAULT_ALLOWED` grants
+ * `send`; naming a tool no allowlist grants would buy a denial instead of a
+ * reply, which is the trap `roomClause` records for `claim`.
+ */
+test("🛑 a DIRECT message names the tool that delivers the reply", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "cursor1",
+    from: "leejenkins",
+    ts: 1,
+    body: "Are you available?",
+  });
+
+  assert.match(prompt, /\bsend\b/, "it does not name the tool");
+  assert.match(
+    prompt,
+    /prose alone/i,
+    "it does not say that answering in prose reaches nobody",
+  );
+});
+
+/**
+ * 🛑 THE POSITION IS A CLAIM, SO IT IS ASSERTED — the same reason the room
+ * clause has its own position test. A turn acts on the end of its prompt.
+ */
+test("the DM reply clause comes AFTER the body, not before it", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "cursor1",
+    from: "leejenkins",
+    ts: 1,
+    body: "UNIQUEDMBODYMARKER",
+  });
+
+  const body = prompt.indexOf("UNIQUEDMBODYMARKER");
+  const clause = prompt.search(/prose alone/i);
+
+  assert.notEqual(body, -1, "the body is gone");
+  assert.notEqual(clause, -1, "the clause is gone");
+  assert.ok(body < clause, "the clause must be the last thing the agent reads");
+});
+
+/**
+ * 🛑 THE TWO CLAUSES ARE EXCLUSIVE, AND THIS IS THE CONTROL THAT SAYS SO.
+ * A room post already carries its own clause; appending the DM one too would
+ * tell the reader both that answering is optional and that it is owed.
+ */
+test("a room post does NOT get the DM reply clause", () => {
+  const prompt = formatPrompt({
+    id: 1,
+    to: "#gate",
+    from: "claude1",
+    ts: 1,
+    body: "x",
+  });
+
+  assert.match(prompt, /silence is a valid response/i, "control: room clause");
+  assert.doesNotMatch(prompt, /prose alone/i);
+});
+
+/**
+ * 🛑 A PAYLOAD-LESS WAKE ALREADY TELLS THE AGENT TO GO AND READ ITS INBOX, SO
+ * IT MUST NOT ALSO BE TOLD TO ANSWER A BODY IT WAS NEVER GIVEN.
+ */
+test("a payload-less DM wake does NOT get the reply clause", () => {
+  const prompt = formatPrompt({
+    id: 3,
+    to: "cursor1",
+    from: "leejenkins",
+    ts: 1,
+  });
+
+  assert.match(prompt, /read your inbox/, "control: the fallback text");
+  assert.doesNotMatch(prompt, /prose alone/i);
+});
+
 test("the room clause does not displace the room name or the body", () => {
   const prompt = formatPrompt({
     id: 1,
