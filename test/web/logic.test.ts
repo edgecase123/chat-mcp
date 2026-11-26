@@ -702,8 +702,9 @@ test('🛑 a "#" inside a word does not open the list', () => {
   assert.equal(mentionTokenAt("issue3#4", 8), null);
 });
 
-test('"#" alone lists every room and every peer', () => {
+test('"#" alone lists the everyone tag, every room and every peer', () => {
   assert.deepEqual(accept("#", 1)!.names, [
+    "#here",
     "#gate",
     "#leagues",
     "claude1",
@@ -713,6 +714,42 @@ test('"#" alone lists every room and every peer', () => {
   ]);
 });
 
+test('\u{1f6d1} "#here" IS ALWAYS OFFERED AND IT SORTS FIRST', () => {
+  // lee's addressing rule: a room post names its addressee, and "#here" is
+  // the everyone tag. It is not a room, so it cannot arrive via ctx.rooms.
+  const first = accept("#", 1)!.names[0];
+  assert.equal(first, "#here", "the everyone tag leads the picker");
+
+  assert.deepEqual(
+    accept("#he", 3)!.names,
+    ["#here"],
+    "a prefix reaches it like any other name",
+  );
+});
+
+test('\u{1f6d1} "#here" is labelled "everyone", NOT "room"', () => {
+  const s = mentionSuggestionsFor("#he", 3, MENTION_CTX)!;
+  assert.equal(
+    s.items[0].desc,
+    "everyone",
+    'calling it a room is the wrong mental model -- room_join("#here") would ' +
+      "make a real room and nothing in the code reserves the name",
+  );
+});
+
+test('"#here" keeps its own "#" on accept, like a room does', () => {
+  assert.equal(accept("tell #he", 8)!.insert, "tell #here ");
+});
+
+test('\u{1f6d1} "#here" is offered even when ctx carries NO rooms at all', () => {
+  const s = mentionSuggestionsFor("#", 1, { peers: ["claude1"], rooms: [] })!;
+  assert.deepEqual(
+    s.items.map((i) => i.name),
+    ["#here", "claude1"],
+    "it is a reserved tag, not a membership lookup",
+  );
+});
+
 test("the order does not depend on bus join order", () => {
   const a = mentionSuggestionsFor("#", 1, {
     peers: ["b", "a"],
@@ -720,8 +757,8 @@ test("the order does not depend on bus join order", () => {
   })!;
   assert.deepEqual(
     a.items.map((i) => i.name),
-    ["#y", "#z", "a", "b"],
-    "rooms first, each group sorted",
+    ["#here", "#y", "#z", "a", "b"],
+    "the everyone tag, then rooms, then peers, each group sorted",
   );
 });
 

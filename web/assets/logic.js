@@ -436,7 +436,16 @@ export function mentionTokenAt(value, caret) {
 }
 
 /**
- * The peer or room completion for the token under the caret.
+ * The everyone tag, offered beside real names because addressing a room is
+ * the broadcast form of addressing a person.
+ *
+ * 🛑 NOTHING IN THE CODE RESERVES IT. `assertRoomName` accepts "#here", so a
+ * real room could take the name. Leading the picker is the whole reservation.
+ */
+export const HERE_TAG = "#here";
+
+/**
+ * The peer, room or everyone-tag completion for the token under the caret.
  *
  * A room name already carries its own "#" and keeps it. A peer handle does
  * not, so the "#" was only a trigger and is dropped on accept. A bare "#"
@@ -459,7 +468,11 @@ export function mentionSuggestionsFor(value, caret, ctx) {
   const sorted = (xs) => [...xs].sort((a, b) => a.localeCompare(b));
   // Rooms first, then peers. Deterministic inside each group so the top item
   // does not depend on bus join order.
-  const items = [...new Set([...sorted(ctx.rooms), ...sorted(ctx.peers)])]
+  // HERE_TAG leads, and its position in the Set is what dedupes a real
+  // "#here" room down to this one entry rather than a second row.
+  const items = [
+    ...new Set([HERE_TAG, ...sorted(ctx.rooms), ...sorted(ctx.peers)]),
+  ]
     .filter((h) => bareName(h).toLowerCase().startsWith(q))
     .map((h) => {
       const head = value.slice(0, token.start) + h + pad;
@@ -469,7 +482,7 @@ export function mentionSuggestionsFor(value, caret, ctx) {
         caret: head.length,
         name: h,
         arg: "",
-        desc: h.startsWith("#") ? "room" : "peer",
+        desc: h === HERE_TAG ? "everyone" : h.startsWith("#") ? "room" : "peer",
       };
     });
 

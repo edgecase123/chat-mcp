@@ -442,6 +442,9 @@ both. `#lee:` is the form he uses.
 **The trailing colon is what tells them apart, which is why it is not
 optional.**
 
+✅ **The web composer offers `#here` first in its `#` picker**, labelled
+`everyone`, so the tag is discoverable without reading this file.
+
 🛑 **`#here` IS RESERVED BY CONVENTION ONLY. THE CODE RESERVES NOTHING.**
 `#here` matches the room-name pattern in `util/naming.ts`, and `assertRoomName`
 has no reserved list, so `room_join("#here")` would create a real room called
