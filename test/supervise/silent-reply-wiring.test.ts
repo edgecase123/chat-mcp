@@ -96,7 +96,14 @@ function text(t: string): Record<string, unknown> {
   };
 }
 
-async function supervisor(h: ReturnType<typeof harness>, tag: string) {
+async function supervisor(
+  h: ReturnType<typeof harness>,
+  tag: string,
+  // 🛑 THE GRANT HAS TO BE SETTABLE FROM A TEST, because `childCanSend` reads
+  // it and nothing else in this file could vary it. `reply: false` is the
+  // no-grant arm; `allowedTools` is the has-a-grant-but-no-send arm.
+  extra: Partial<Parameters<typeof supervisorOptions>[0]> = {},
+) {
   const db = new DatabaseSync(":memory:");
   migrate(db);
   const handle = `${tag}-${process.pid}`;
@@ -108,6 +115,7 @@ async function supervisor(h: ReturnType<typeof harness>, tag: string) {
       extraDirs: [process.cwd()],
       spawnChild: h.spawnChild,
       log: (line: string) => h.lines.push(line),
+      ...extra,
     }),
   );
 
@@ -415,6 +423,102 @@ test("an unknown tool SHAPE still reaches the confident line", async () => {
       h.warnings().length,
       1,
       "an unknown shape softened the warning",
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+/**
+ * 🔴 THE CLAUSE IS WIRED THROUGH `childCanSend`, AND NOTHING HELD THAT SEAM.
+ *
+ * Every `owedTo` arm in `supervisor.test.ts` calls `formatPrompt` directly and
+ * passes the boolean itself, so the PURE function was guarded and the function
+ * that COMPUTES the boolean was not. Replacing it with `() => true` left
+ * `tests 2896 · pass 2896 · fail 0` — measured, not reasoned. Raised by
+ * claude1 on PR 473.
+ *
+ * 🛑 ONE ARM PER CLAUSE. `childCanSend` is a two-clause expression and its
+ * second clause has two accepted spellings, so a single no-send arm would let
+ * three separate mutants live.
+ */
+
+/** The clause only a child that can actually answer should ever be told. */
+const OWED = /an answer is owed/;
+
+test("🔴 a DM to a child with NO GRANT is not told an answer is owed", async () => {
+  const h = harness();
+  // `reply: false` is the only way `buildGrant` returns undefined, which is
+  // what makes this the `!!currentGrant` clause and not the `.some()` one.
+  const { sup, handle } = await supervisor(h, "nogrant", { reply: false });
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    assert.doesNotMatch(
+      h.sent[0] ?? "",
+      OWED,
+      `a child with no grant was told to deliver a reply:\n${h.sent[0]}`,
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+test("🔴 a DM to a child whose grant LACKS send is not told an answer is owed", async () => {
+  const h = harness();
+  // A grant exists, so this arm pins the `.some()` clause alone.
+  const { sup, handle } = await supervisor(h, "nosend", {
+    allowedTools: ["Read", "Bash"],
+  });
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    assert.doesNotMatch(
+      h.sent[0] ?? "",
+      OWED,
+      `a child that cannot send was told to deliver a reply:\n${h.sent[0]}`,
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+test("✅ a DM to a child granted mcp__chat__send IS told an answer is owed", async () => {
+  const h = harness();
+  const { sup, handle } = await supervisor(h, "cansend", {
+    allowedTools: ["mcp__chat__send"],
+  });
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    assert.match(
+      h.sent[0] ?? "",
+      OWED,
+      `a child that CAN send was not asked to:\n${h.sent[0]}`,
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+test("✅ a SERVER-WIDE mcp__chat grant also counts as being able to send", async () => {
+  const h = harness();
+  // 🛑 A server-wide grant allows every tool under it, so an exact-match-only
+  // reading of the grant would call this child unable to answer.
+  const { sup, handle } = await supervisor(h, "chatsrv", {
+    allowedTools: ["mcp__chat"],
+  });
+
+  try {
+    await deliverToSupervisor(handle, envelope(handle, 1));
+
+    assert.match(
+      h.sent[0] ?? "",
+      OWED,
+      `a server-wide grant was read as no-send:\n${h.sent[0]}`,
     );
   } finally {
     await sup.stop();
