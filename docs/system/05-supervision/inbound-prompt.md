@@ -124,6 +124,29 @@ instead of a reply.
 ⚠️ **The bodyless fallback still gets nothing.** It already says "read your
 inbox", so telling it to answer a body it was never handed would be wrong.
 
+🛑 **A child started with `--no-reply` gets no clause at all.** `buildGrant`
+returns `undefined` for it, so there is no `send` to name and the clause would
+be an instruction the child cannot follow.
+
+### The clause and the notice are ONE decision
+
+`formatPrompt` returns `{ text, owedTo }`. One expression sets both, so a
+prompt that was never told to reply can never have its silence reported.
+
+```
+owed = not a room post
+       AND the child holds `send`
+       AND the sender is named
+       AND the sender is not `system`
+```
+
+`system` is excluded because its context nudge arrives as a DM, so a notice
+owed to it was addressed back to `system` and reached nobody.
+
+The body precondition is NOT in that expression. It lives in the bodyless
+early return above, which returns before `owed` is computed — repeating it
+read as a guard and killed no mutant.
+
 ## When the reply is lost anyway, the SENDER is told
 
 `silentReplyWarning` in `src/supervise/silent-reply.ts` already detected this
@@ -139,12 +162,14 @@ to     the peer who sent the DM
 body   "<agent> answered your message inside its own transcript only — <verdict>"
 ```
 
-| decision                                        | why                                                                                                       |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `SYSTEM_HANDLE` is the sender                   | sending as the agent puts words in its mouth, and a DM from a handle the supervisor drives can re-wake it |
-| the verdict text is `silentReplyWarning`'s      | its two branches ARE the discrimination; a paraphrase is where "UNKNOWN" drifts into an accusation        |
-| **a room post notifies nobody**                 | the room clause told that reader silence was valid, so announcing its silence contradicts the bus         |
-| a send that cannot land is logged, never thrown | the turn itself completed; a failed notice must not fail it                                               |
+| decision                                         | why                                                                                                                               |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `SYSTEM_HANDLE` is the sender                    | sending as the agent puts words in its mouth, and a DM from a handle the supervisor drives can re-wake it                         |
+| the verdict text is `silentReplyWarning`'s       | its two branches ARE the discrimination; a paraphrase is where "UNKNOWN" drifts into an accusation                                |
+| **a room post notifies nobody**                  | the room clause told that reader silence was valid, so announcing its silence contradicts the bus                                 |
+| **a DM the child cannot answer notifies nobody** | with no `send` granted the child was never told to reply, so reporting its silence is an accusation over a reply nobody asked for |
+| **a bodyless DM notifies nobody**                | the fallback prompt says "read your inbox" and asks for no answer                                                                 |
+| a send that cannot land is logged, never thrown  | the turn itself completed; a failed notice must not fail it                                                                       |
 
 🛑 **UNKNOWN stays a third state.** A tool call the driver could not name may
 have BEEN the send, so that case says delivery is UNKNOWN rather than claiming

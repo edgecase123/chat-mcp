@@ -178,8 +178,11 @@ export interface Supervisor {
   onStopped(cb: () => void): void;
 }
 
-/** How an arriving message is presented to the agent. */
-export function formatPrompt(envelope: WakeEnvelope): string {
+/** How an arriving message is presented to the agent, and who is owed a reply. */
+export function formatPrompt(
+  envelope: WakeEnvelope,
+  canSend: boolean,
+): { text: string; owedTo?: string } {
   const from = envelope.from || "unknown";
   const body = envelope.body?.trim();
   const inRoom = envelope.to.startsWith("#");
@@ -200,12 +203,38 @@ export function formatPrompt(envelope: WakeEnvelope): string {
     // 🛑 No body means this came through the FALLBACK file path, which
     // overwrites and carries no payload. Say so rather than inventing one —
     // the agent must know to go and read the bus itself.
-    return `${banner}[chat-mcp] ${from}${where} sent you something (id ${envelope.id}). The wake carried no body, so read your inbox.`;
+    return {
+      text: `${banner}[chat-mcp] ${from}${where} sent you something (id ${envelope.id}). The wake carried no body, so read your inbox.`,
+    };
   }
 
-  const clause = inRoom ? roomClause(inRoom, envelope.kind) : directClause();
+  // 🛑 ONE EXPRESSION DECIDES BOTH THE CLAUSE AND THE NOTICE. They were
+  // computed apart, so a `--no-reply` DM was told nothing about replying and
+  // still had its silence reported — an accusation over a reply nobody asked
+  // for, which is #417's class and the one #472 named avoiding.
+  //
+  // 🛑 BELOW THE BODYLESS RETURN ON PURPOSE. That return is the only place
+  // the body precondition lives; repeating it here read as a guard and killed
+  // no mutant.
+  //
+  // 🛑 `system` IS EXCLUDED. Its context nudge is a DM, so a notice owed to it
+  // was addressed back to `system` and reached nobody. Measured on a live turn.
+  const owed =
+    !inRoom &&
+    canSend &&
+    !!envelope.from &&
+    envelope.from !== dao.SYSTEM_HANDLE;
 
-  return `${banner}[chat-mcp] ${from}${where}:\n\n${body}${clause}`;
+  const clause = inRoom
+    ? roomClause(inRoom, envelope.kind)
+    : owed
+      ? directClause()
+      : "";
+
+  return {
+    text: `${banner}[chat-mcp] ${from}${where}:\n\n${body}${clause}`,
+    ...(owed ? { owedTo: envelope.from } : {}),
+  };
 }
 
 /**
@@ -655,6 +684,19 @@ export async function startSupervisor(
    */
   const childBusHandle = () =>
     currentGrant?.handle ?? childHandleFor(opts.handle);
+
+  /**
+   * Whether the child holds the one tool the DM clause names.
+   *
+   * 🛑 READ IT, DO NOT CACHE IT, for `childBusHandle`'s reason. A server-wide
+   * `mcp__chat` counts, because it grants every tool under that server — an
+   * exact-match-only test would read such a grant as no-send.
+   */
+  const childCanSend = () =>
+    !!currentGrant &&
+    currentGrant.allowed.some(
+      (t) => t === "mcp__chat__send" || t === "mcp__chat",
+    );
 
   // 🛑 SAID OUT LOUD, both ways. A doorbell that cannot answer and a child
   // holding a bus identity are both things an operator must be able to see in
@@ -1893,13 +1935,15 @@ export async function startSupervisor(
       return { ok: true, queued: "sent" };
     }
 
+    // 🛑 ONE CALL YIELDS BOTH, so the prompt that says a reply is owed is
+    // exactly the prompt whose silence is reported back. Computing `owedTo`
+    // here from its own test is what let the two disagree.
+    const rendered = formatPrompt(envelope, childCanSend());
+
     const prompt = {
-      text: `${mountBannerPrefix()}${formatPrompt(envelope)}`,
+      text: `${mountBannerPrefix()}${rendered.text}`,
       messageIds: envelope.id > 0 ? [envelope.id] : [],
-      // 🛑 A DM ONLY. `inRoom` is the same test `formatPrompt` uses for the
-      // clause, so the prompt that says a reply is owed is exactly the prompt
-      // whose silence is reported back. #472.
-      owedTo: envelope.to.startsWith("#") ? undefined : envelope.from,
+      ...(rendered.owedTo ? { owedTo: rendered.owedTo } : {}),
     };
 
     const verdict = gate.verdict();
