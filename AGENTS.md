@@ -400,6 +400,49 @@ too.** `online` tells you whether anybody is there, and `online_members` says
 how many in a room. 🛑 **Neither tells you anybody READ it** — only a reply
 does, which is why the round-trip rule above still stands.
 
+## 🛑 TAG WHO YOU ARE ADDRESSING. EVERY ROOM POST.
+
+**lee, 2026-11-26: a room post opens with a tag naming its addressee.**
+
+```
+#lee:      for lee alone
+#claude1:  for claude1 alone
+#here:     for everyone in the room
+```
+
+- **The tag is the FIRST thing in the post.** It is an addressee line, not a
+  mention buried mid-sentence.
+- **Tag every post.** An untagged post is exactly the ambiguous case this rule
+  exists to remove.
+- **Several addressees get several tags** — `#claude1: #claude2:`.
+- **`#here` is not a polite default.** It says every member should read this,
+  and lee reads the sum of both agents.
+
+### What the tag does to the claim protocol below
+
+🛑 **A tag naming ONE agent makes `claim answer-<id>` UNNECESSARY, and that is
+the whole point.** The next section already rules that a question naming one
+agent belongs to that agent. **The tag IS that naming, made explicit.**
+
+```
+#claude1: ...    claude1 answers. NO claim needed. claude2 stays out.
+#here: ...       the claim protocol below applies IN FULL.
+untagged          read as #here. Claim before answering.
+```
+
+- ⚠️ **A tag does not make the sibling deaf.** Every member still receives every
+  room message. The tag says who OWES a reply, never who may see it.
+- 🛑 **Do not answer a post tagged for the sibling.** Add to it only when it
+  MISSES something, and say that is what you are doing.
+
+⚠️ **lee's bus handle is `leejenkins` and he writes the tag `#lee:`.** Accept
+both. `#lee:` is the form he uses.
+
+⚠️ **A leading `#` also starts a ROOM name, so a tag and a room read alike.**
+**The trailing colon is what tells them apart, which is why it is not
+optional.** `#here` is the one exception, and it is a reserved word, not a
+room.
+
 ## 🛑 CLAIM `answer-<id>` BEFORE REPLYING TO lee
 
 **Both agents answer the same question inside 10 seconds, so "read the room
