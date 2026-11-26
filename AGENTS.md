@@ -440,8 +440,13 @@ both. `#lee:` is the form he uses.
 
 ⚠️ **A leading `#` also starts a ROOM name, so a tag and a room read alike.**
 **The trailing colon is what tells them apart, which is why it is not
-optional.** `#here` is the one exception, and it is a reserved word, not a
-room.
+optional.**
+
+🛑 **`#here` IS RESERVED BY CONVENTION ONLY. THE CODE RESERVES NOTHING.**
+`#here` matches the room-name pattern in `util/naming.ts`, and `assertRoomName`
+has no reserved list, so `room_join("#here")` would create a real room called
+`#here`. **Nothing enforces this rule — if that matters, the guard still has to
+be written.**
 
 ## 🛑 CLAIM `answer-<id>` BEFORE REPLYING TO lee
 
