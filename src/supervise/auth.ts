@@ -193,9 +193,11 @@ export function readToken(): string | null {
  * `dockerRunPlan` each carried their own copy of this sentence, and both
  * copies named Claude. A second vendor made them wrong in two places at once.
  *
- * ⚠️ PREFER `requireVendorToken` BELOW. This export exists for a caller that
- * needs the sentence without the read — there is one, `startSupervisor`'s
- * pre-check, and it discards the value.
+ * ⚠️ PREFER `requireVendorToken` BELOW, AND IN `src/` THERE IS NO ALTERNATIVE.
+ * This is exported for the TESTS: one asserts the start route forwards the
+ * sentence verbatim, which it cannot do by rebuilding it.
+ * `require-vendor-token.test.ts` ratchets the `src/` call-site list to this
+ * file alone, so a second production caller goes red instead of drifting.
  */
 export function missingVendorTokenMessage(vendor: {
   vendor: string;
