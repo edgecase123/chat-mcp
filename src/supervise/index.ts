@@ -494,16 +494,23 @@ export async function startSupervisor(
    * The mount banner is a few short lines and survives both. This is a
    * paragraph, and a paragraph has to be its own turn.
    *
-   * 🛑 GATED ON `resumeSessionId` AND NOT ON THE MODE. A host agent has a
-   * project directory and therefore a handoff — copying the mount banner's
+   * 🛑 GATED ON A FRESH CHILD AND NOT ON THE MODE. A host agent has a project
+   * directory and therefore a handoff — copying the mount banner's
    * container-only gate would leave the host arm silent with a green suite.
+   *
+   * 🛑 THE CALLER DECIDES WHAT FRESH MEANS, AND `opts.resumeSessionId` IS NOT
+   * IT. `doRestart` spawns with `resumeSessionId: undefined`, so a supervisor
+   * STARTED as a resume still hands its RESTARTED child a clean slate —
+   * reading the option here silenced the pointer for exactly the agents most
+   * likely to be restarted. `needsMountBanner` drops the same term at the
+   * restart, for the same reason.
    *
    * 🛑 `childCwd`, NOT `opts.cwd`. The requested value may be undefined, and
    * `resolveCwd` is what makes it real, contained and realpath'd — so the
    * agent is handed the directory it is actually sitting in.
    */
-  const offerHandoffPointer = (): void => {
-    if (opts.resumeSessionId) return;
+  const offerHandoffPointer = (freshChild: boolean): void => {
+    if (!freshChild) return;
 
     queue.offer({
       text: handoffPreamble(handoffPathFor(selection.mode, childCwd)),
@@ -1521,7 +1528,7 @@ export async function startSupervisor(
   }
 
   wireChild();
-  offerHandoffPointer();
+  offerHandoffPointer(!opts.resumeSessionId);
 
   /**
    * Take the outgoing child offline on the bus and stop its activity dot.
@@ -1855,6 +1862,7 @@ export async function startSupervisor(
     }
 
     wireChild();
+    offerHandoffPointer(true);
     replacingChild = false;
 
     for (const p of unsent) queue.reoffer(p);

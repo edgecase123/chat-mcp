@@ -15,6 +15,7 @@ const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 const { setToken } = await import("../../src/supervise/auth.js");
 const { registerMount } = await import("../../src/supervise/mounts.js");
 import { supervisorOptions } from "../support/supervisor-options.js";
+import { releasePointerTurn } from "../support/handoff-pointer.js";
 import { confirmHandle } from "../support/confirm-plan.js";
 
 const DIRS = [process.cwd()];
@@ -66,23 +67,7 @@ function spawner(sent: string[]) {
       return c;
     },
 
-    /**
-     * Drop the pointer turn out of `sent` and release it, so every index below
-     * names an INBOUND prompt.
-     *
-     * 🛑 IT ASSERTS WHAT IT DROPS. A bare `shift()` would silently eat the
-     * operator's first prompt the day the pointer stops being offered, and the
-     * banner assertions would read the SECOND prompt and still pass.
-     */
-    releasePointer: () => {
-      const first = sent.shift() ?? "";
-      assert.match(
-        first,
-        /HANDOFF\.md/,
-        `the first send was not the handoff pointer:\n${first}`,
-      );
-      children[0]?.finishTurn();
-    },
+    releasePointer: () => releasePointerTurn(sent, children[0]),
 
     finishTurn: () => children[0]?.finishTurn(),
   };

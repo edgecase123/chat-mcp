@@ -72,7 +72,7 @@ prefix at all — it is the supervisor's own first queued prompt.
 | ----- | -------------------------------------------------- | -------------------------------------- |
 | shape | a prefix on the first inbound prompt               | its own queued prompt                  |
 | when  | the first bus message that wakes a fresh container | at child start, before any bus message |
-| gate  | containerized AND a fresh session                  | a fresh session, EITHER mode           |
+| gate  | containerized AND a fresh session                  | a fresh child, EITHER mode             |
 
 🛑 **THE HANDOFF POINTER SHIPPED AS A PREFIX FOR ONE GATE RUN, AND IT BROKE TWO
 INVARIANTS AT ONCE.** Both were caught by a single assertion in
@@ -104,6 +104,24 @@ mount banner is container-only, because a host agent has no mounts. The handoff
 pointer is not, because a host agent has a project directory and therefore a
 handoff. `test/supervise/handoff-pointer.test.ts` pins both arms, plus a resume
 control and the alert-banner regression above.
+
+🛑 **A RESTART IS A FRESH CHILD, AND "FRESH" IS NOT `opts.resumeSessionId`.**
+`doRestart` spawns with `resumeSessionId: undefined` and re-arms the mount
+banner for that reason. The pointer is offered there too, and the caller passes
+the decision in — reading the supervisor's own option would silence the pointer
+for a `--resume` supervisor that later restarts, which is the agent most likely
+to want a handoff.
+
+| `wireChild()` call site | mount banner | handoff pointer |
+| ----------------------- | ------------ | --------------- |
+| the initial start       | armed        | offered         |
+| `doRestart`             | RE-armed     | offered         |
+| `replaceChild`          | not re-armed | not offered     |
+
+⚠️ **`replaceChild` is the deliberate exception.** It swaps a grant or a model
+mid-session and keeps the session, so neither banner belongs there. **The mount
+banner's own re-arm is the discriminator between the two paths** — copy that,
+not the call site count.
 
 ### The handoff file
 

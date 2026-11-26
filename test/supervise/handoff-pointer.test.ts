@@ -249,3 +249,126 @@ test("🔴 an ALERT prompt still OPENS with its banner once the pointer exists",
     await sup.stop();
   }
 });
+
+/* ==========================================================================
+ * 🔴 A RESTART IS A CLEAN SLATE AND IT WAS GETTING NO POINTER AT ALL.
+ *
+ * `doRestart` spawns its replacement with `resumeSessionId: undefined` — its
+ * own comment calls that the clean slate — and re-arms `needsMountBanner` for
+ * the same reason. The pointer was offered at the initial start and nowhere
+ * else, so the one case the ticket's title names came back knowing nothing.
+ *
+ * 🛑 AND THE GATE CANNOT BE `opts.resumeSessionId` HERE. A supervisor STARTED
+ * as a resume still hands its RESTARTED child a clean slate, so reading the
+ * supervisor's own option would silence the pointer for exactly the agents
+ * most likely to be restarted. `needsMountBanner` drops that term at the
+ * restart for the same reason; the second test below is the control.
+ *
+ * ⚠️ `replaceChild` DELIBERATELY DOES NOT OFFER IT. That path swaps a grant or
+ * a model mid-session, keeps the session, and does not re-arm the mount banner
+ * either. Found by claude2 on PR 469.
+ * ========================================================================== */
+
+/** One recording array PER child, so a replacement's sends are its own. */
+function perChildSpawner() {
+  const sends: string[][] = [];
+  const children: ReturnType<typeof fakeChild>[] = [];
+
+  return {
+    sends,
+    children,
+    spawnChild: () => {
+      const own: string[] = [];
+      sends.push(own);
+      const c = fakeChild(own);
+      children.push(c);
+      return c;
+    },
+  };
+}
+
+test("🔴 a RESTARTED child is handed the pointer again, because a restart is a clean slate", async () => {
+  const db = new DatabaseSync(":memory:");
+  migrate(db);
+  const handle = `ho-restart-${process.pid}`;
+  const h = perChildSpawner();
+
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: DIRS,
+      log: () => undefined,
+      spawnChild: h.spawnChild,
+    }),
+  );
+
+  try {
+    // The denominator: the FIRST child got one, so a missing second one is
+    // the restart path and not the feature being off.
+    assert.equal(h.sends.length, 1);
+    assert.match(h.sends[0]?.[0] ?? "", /HANDOFF\.md/);
+
+    await deliverToSupervisor(handle, {
+      id: 1,
+      to: handle,
+      from: "cli",
+      ts: Date.now(),
+      control: { kind: "restart", mode: "now" },
+    });
+
+    assert.equal(h.sends.length, 2, "no replacement child was spawned");
+    assert.match(
+      h.sends[1]?.[0] ?? "",
+      /HANDOFF\.md/,
+      "a restarted agent was never told where its own continuity lives",
+    );
+  } finally {
+    await sup.stop();
+  }
+});
+
+test("🛑 a supervisor STARTED as a resume still hands its RESTARTED child the pointer", async () => {
+  const db = new DatabaseSync(":memory:");
+  migrate(db);
+  const handle = `ho-rs-${process.pid}`;
+  const h = perChildSpawner();
+
+  const sup = await startSupervisor(
+    supervisorOptions({
+      handle,
+      db,
+      extraDirs: DIRS,
+      resumeSessionId: "sess-earlier",
+      log: () => undefined,
+      spawnChild: h.spawnChild,
+    }),
+  );
+
+  try {
+    // The control arm: the resume itself is still silent.
+    assert.equal(h.sends[0]?.length, 0, "a resume must not spend a turn on it");
+
+    await deliverToSupervisor(handle, {
+      id: 1,
+      to: handle,
+      from: "cli",
+      ts: Date.now(),
+      control: { kind: "restart", mode: "now" },
+    });
+
+    assert.equal(h.sends.length, 2, "no replacement child was spawned");
+    assert.equal(
+      h.children[1]?.opts,
+      undefined,
+      "the fake records no opts; the clean slate is pinned in restart.test.ts",
+    );
+    assert.match(
+      h.sends[1]?.[0] ?? "",
+      /HANDOFF\.md/,
+      "the pointer was gated on the SUPERVISOR's resume, not the CHILD's",
+    );
+  } finally {
+    await sup.stop();
+  }
+});
