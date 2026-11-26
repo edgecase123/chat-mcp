@@ -29,12 +29,15 @@ import { supervisorOptions } from "../support/supervisor-options.js";
 function harness() {
   const lines: string[] = [];
   let emit: ((event: Record<string, unknown>) => void) | undefined;
+  let endTurn: (() => void) | undefined;
 
   const spawnChild = (_opts: SpawnOptions): AgentChild => ({
     reportsUsage: false,
     reportsContext: true,
     send: () => undefined,
-    onTurnEnd: () => undefined,
+    onTurnEnd: (cb) => {
+      endTurn = cb as () => void;
+    },
     onContext: () => undefined,
     onUsage: () => undefined,
     onDenial: () => undefined,
@@ -48,7 +51,12 @@ function harness() {
     kill: () => undefined,
   });
 
-  return { lines, spawnChild, emitted: () => emit };
+  return {
+    lines,
+    spawnChild,
+    emitted: () => emit,
+    finishTurn: () => endTurn?.(),
+  };
 }
 
 test("the supervisor logs the text the child produced", async () => {
@@ -194,6 +202,12 @@ test("the prompt log carries the message BODY, not just the banner", async () =>
   );
 
   try {
+    // 🛑 THE HANDOFF POINTER IS DISPATCHED AT SPAWN AS ITS OWN TURN, per lee's
+    // ruling of 2026-11-26, so it holds the first slot and the alert is queued
+    // behind it. Released here; `handoff-pointer.test.ts` is what pins the
+    // pointer itself, and this test is about the EXCERPT.
+    h.finishTurn();
+
     await deliverToSupervisor(handle, {
       id: 1,
       to: handle,
@@ -205,16 +219,19 @@ test("the prompt log carries the message BODY, not just the banner", async () =>
 
     const prompts = h.lines.filter((l) => l.startsWith("→ child:"));
 
+    // ⚠️ THE DENOMINATOR, AND IT NAMES BOTH. A bare `at(-1)` would read the
+    // pointer and still match nothing the day the alert stops being dispatched.
     assert.equal(
       prompts.length,
-      1,
-      `no prompt was logged; lines were ${JSON.stringify(h.lines)}`,
+      2,
+      `expected the pointer then the alert; lines were ${JSON.stringify(h.lines)}`,
     );
+    assert.match(prompts[0]!, /HANDOFF\.md/, "the pointer turn is missing");
 
     // ⚠️ AN ALERT ON PURPOSE. The banner is what pushed the body past 80.
-    assert.match(prompts[0]!, /ALERT/, "the alert banner is missing");
+    assert.match(prompts[1]!, /ALERT/, "the alert banner is missing");
     assert.match(
-      prompts[0]!,
+      prompts[1]!,
       /the gate is red on main/,
       "THE BODY WAS CUT OFF AGAIN",
     );

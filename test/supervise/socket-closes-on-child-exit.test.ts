@@ -19,6 +19,7 @@ const { startSupervisor } = await import("../../src/supervise/index.js");
 const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 const { claudeSpawn } = await import("../../src/adapters/claude-spawn.js");
 import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
+import { releasePointerTurn } from "../support/handoff-pointer.js";
 
 /**
  * 🛑 A SUPERVISOR WHOSE CHILD HAS EXITED STILL ANSWERS `queued: 'sent'`.
@@ -40,6 +41,7 @@ import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
 
 interface FakeChild {
   readonly sent: string[];
+  finishTurn: () => void;
   fireExit: () => void;
 }
 
@@ -64,10 +66,12 @@ interface TeardownChild extends FakeChild {
 function recordingChild(children: FakeChild[], exitOnKill = false) {
   return (_opts: SpawnOptions): AgentChild => {
     const sent: string[] = [];
+    let endTurn: (() => void) | undefined;
     let onExit: ((c: number | null, s: string | null) => void) | undefined;
 
     children.push({
       sent,
+      finishTurn: () => endTurn?.(),
       fireExit: () => onExit?.(243, null),
     });
 
@@ -75,7 +79,9 @@ function recordingChild(children: FakeChild[], exitOnKill = false) {
       reportsUsage: false,
       reportsContext: true,
       send: (t) => sent.push(t),
-      onTurnEnd: () => undefined,
+      onTurnEnd: (cb) => {
+        endTurn = cb;
+      },
       onContext: () => undefined,
       onUsage: () => undefined,
       onDenial: () => undefined,
@@ -107,6 +113,9 @@ async function supervisorFor(
     spawnChild: recordingChild(children, exitOnKill),
     log: () => undefined,
   });
+
+  // The handoff pointer holds the child's first turn; see `releasePointerTurn`.
+  releasePointerTurn(children[0]!.sent, children[0]);
 
   return { sup, db };
 }
@@ -237,6 +246,7 @@ test("🚨 a stop does not let the child exit close the socket before the teardo
     extraDirs: [process.cwd()],
     spawnChild: (_opts: SpawnOptions): AgentChild => {
       const sent: string[] = [];
+      let endTurn: (() => void) | undefined;
       let onExit: ((c: number | null, s: string | null) => void) | undefined;
       const teardown = new Promise<void>((resolve) => {
         releaseTeardown = resolve;
@@ -244,6 +254,7 @@ test("🚨 a stop does not let the child exit close the socket before the teardo
 
       children.push({
         sent,
+        finishTurn: () => endTurn?.(),
         fireExit: () => onExit?.(0, "SIGTERM"),
         finishTeardown: () => releaseTeardown?.(),
       });
@@ -252,7 +263,9 @@ test("🚨 a stop does not let the child exit close the socket before the teardo
         reportsUsage: false,
         reportsContext: true,
         send: (t) => sent.push(t),
-        onTurnEnd: () => undefined,
+        onTurnEnd: (cb) => {
+          endTurn = cb;
+        },
         onContext: () => undefined,
         onUsage: () => undefined,
         onDenial: () => undefined,

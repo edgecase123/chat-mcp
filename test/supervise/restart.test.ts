@@ -11,6 +11,7 @@ const { migrate } = await import("../../src/storage/db.js");
 const { startSupervisor } = await import("../../src/supervise/index.js");
 const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 import { supervisorOptions } from "../support/supervisor-options.js";
+import { releasePointerTurn } from "../support/handoff-pointer.js";
 
 const DIRS = [process.cwd()];
 
@@ -86,6 +87,12 @@ test("--now restarts immediately with no notice sent", async () => {
     assert.equal(ack?.ok, true);
     assert.equal(children[0]?.killed, true);
     assert.equal(children.length, 2, "no replacement child was spawned");
+
+    // 🛑 THE REPLACEMENT IS HANDED THE HANDOFF POINTER, and a restart is the
+    // case that exists for. Dropping it here is what leaves the original
+    // claim — no NOTICE — readable, and `releasePointerTurn` asserts that the
+    // one send really was the pointer rather than a notice under another name.
+    releasePointerTurn(children[1]!.sent, children[1]);
     assert.equal(
       children[1]?.sent.length,
       0,
@@ -102,6 +109,9 @@ test("graceful restart sends the externalize notice and waits for its reply befo
   const sup = await supervisorFor(handle, children);
 
   try {
+    // The pointer holds the first child's first turn; see `releasePointerTurn`.
+    releasePointerTurn(children[0]!.sent, children[0]);
+
     const ackPromise = deliverToSupervisor(handle, {
       id: 2,
       to: handle,
@@ -146,6 +156,9 @@ test("graceful restart requested mid-turn is NOT killed on the in-flight turn's 
   const sup = await supervisorFor(handle, children);
 
   try {
+    // The pointer holds the first child's first turn; see `releasePointerTurn`.
+    releasePointerTurn(children[0]!.sent, children[0]);
+
     await deliverToSupervisor(handle, {
       id: 1,
       to: handle,

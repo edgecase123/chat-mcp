@@ -3,6 +3,7 @@ title: Inbound Prompt
 updated: 2026-11-26
 covers:
   - src/supervise/index.ts
+  - src/supervise/handoff.ts
 ---
 
 # Inbound Prompt
@@ -60,6 +61,105 @@ to answer a room post aimed elsewhere without being told to, so the renderer
 looked correct for as long as Claude Code was the only driver. A bare
 `cursor-agent` carries no such instruction, and the first live Cursor agent on
 a shared room exposed it within three messages.
+
+## One prefix rides the first prompt; the handoff gets its own turn
+
+`formatPrompt`'s output is not always the whole string. The mount banner is
+prepended once per child and then never again. The handoff pointer is NOT a
+prefix at all — it is the supervisor's own first queued prompt.
+
+|       | mount banner                                       | handoff pointer                        |
+| ----- | -------------------------------------------------- | -------------------------------------- |
+| shape | a prefix on the first inbound prompt               | its own queued prompt                  |
+| when  | the first bus message that wakes a fresh container | at child start, before any bus message |
+| gate  | containerized AND a fresh session                  | a fresh child, EITHER mode             |
+
+🛑 **THE HANDOFF POINTER SHIPPED AS A PREFIX FOR ONE GATE RUN, AND IT BROKE TWO
+INVARIANTS AT ONCE.** Both were caught by a single assertion in
+`child-output-logged.test.ts`:
+
+- **The `alert` banner stopped being first.** A turn is handed ONE string, and
+  the banner is the only thing carrying "handle this before anything queued
+  behind it" — so a BLOCKING message opened with a paragraph about a file.
+- **It displaced the message body out of `excerptForLog`'s window**, which is
+  the exact defect `LOG_EXCERPT_LIMIT` was raised from 80 to 200 to fix.
+
+**The mount banner is a few short lines and survives both. A paragraph has to
+be its own turn.**
+
+🛑 **THE POINTER TURN HOLDS THE QUEUE, SO THE FIRST BUS MESSAGE WAITS ONE TURN.**
+The pointer is dispatched before any message arrives, and the queue runs one
+turn at a time — so a message delivered to a fresh child is held, then sent as
+its own prompt with its banner intact once the pointer's turn ends.
+
+⚠️ **THAT SHIFTS EVERY POSITIONAL ASSERTION IN A TEST BY ONE**, and one of them
+went GREEN on the shift rather than red: `/hi/` matched "t(hi)s is a fresh
+start" inside the pointer's own text, so a mount-banner test reported a clean
+banner on a prompt it never read. **A test that indexes `sent` must drop the
+pointer and ASSERT what it dropped**, which is what `mount-banner.test.ts`'s
+`releasePointer` does.
+
+🛑 **THE GATES ARE ALSO NOT THE SAME, AND COPYING ONE BREAKS THE OTHER.** The
+mount banner is container-only, because a host agent has no mounts. The handoff
+pointer is not, because a host agent has a project directory and therefore a
+handoff. `test/supervise/handoff-pointer.test.ts` pins both arms, plus a resume
+control and the alert-banner regression above.
+
+🛑 **A RESTART IS A FRESH CHILD, AND "FRESH" IS NOT `opts.resumeSessionId`.**
+`doRestart` spawns with `resumeSessionId: undefined` and re-arms the mount
+banner for that reason. The pointer is offered there too, and the caller passes
+the decision in — reading the supervisor's own option would silence the pointer
+for a `--resume` supervisor that later restarts, which is the agent most likely
+to want a handoff.
+
+| `wireChild()` call site | mount banner | handoff pointer |
+| ----------------------- | ------------ | --------------- |
+| the initial start       | armed        | offered         |
+| `doRestart`             | RE-armed     | offered         |
+| `replaceChild`          | not re-armed | not offered     |
+
+⚠️ **`replaceChild` is the deliberate exception.** It swaps a grant or a model
+mid-session and keeps the session, so neither banner belongs there. **The mount
+banner's own re-arm is the discriminator between the two paths** — copy that,
+not the call site count.
+
+### The handoff file
+
+lee ruled on 2026-11-26 that an agent keeps its own continuity in a file it
+both reads and writes:
+
+| mode     | the path the agent is given                                           |
+| -------- | --------------------------------------------------------------------- |
+| `docker` | `/work/HANDOFF.md` — derived from the project bind, never spelled out |
+| `host`   | `HANDOFF.md` inside the agent's resolved project directory            |
+
+**The agent is the routine writer, not the only one.** `/work` is a read-write
+bind of the host project directory, so anything on the host that writes
+`<projectDir>/HANDOFF.md` reaches the container immediately — an operator can
+seed a handoff, which is what #463's own item 2 asked for.
+
+🛑 **AN EARLIER VERSION OF THIS PAGE SAID "NOTHING ELSE CAN", AND THAT WAS
+FALSE.** It argued from `docker cp` having zero hits in `src/`, which is true
+and does not imply exclusivity — a bind mount needs no `docker cp`. The prompt
+the agent reads no longer claims it either, because an agent told it is the
+only writer has no reason to expect the file to have changed under it.
+Raised by claude2 on PR 469.
+
+🛑 **TWO EARLIER DESIGNS FOR THE SAME FEATURE ARE CLOSED. Do not revive
+either.**
+
+| rejected                            | why it cannot work                                      |
+| ----------------------------------- | ------------------------------------------------------- |
+| a mounted `local-context` directory | unreachable from inside the container                   |
+| the container's own `/tmp`          | `docker run --rm` destroys it when the supervisor stops |
+
+`/work` is a bind of the host project directory, so a handoff written there
+survives a clear, a container rebuild and a supervisor restart.
+
+⚠️ **THE POINTER IS STILL NOT HANDED TO THE CHILD AT SPAWN.** It is the
+supervisor's first queued prompt, so every child that starts gets it — but
+closing the gap properly means telling the child at spawn time rather than
+spending a turn on it. **That is its own ticket, not this one.**
 
 ## Severity and addressing are orthogonal, but not independent
 

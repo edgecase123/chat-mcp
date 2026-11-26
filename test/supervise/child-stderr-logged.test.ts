@@ -125,7 +125,14 @@ test("🚨 a multi-line stderr chunk is logged line by line", async () => {
   try {
     h.emit()!("first\nsecond\n");
 
-    assert.equal(h.lines.filter((l) => /first|second/.test(l)).length, 2);
+    // 🛑 THE POINTER'S OWN LINE IS EXCLUDED, NOT THE MATCH NARROWED. The
+    // handoff pointer logs `→ child: ... Read it first if it is there`, so it
+    // matches /first/ and inflates this count by one.
+    assert.equal(
+      h.lines.filter((l) => !l.startsWith("→ child:") && /first|second/.test(l))
+        .length,
+      2,
+    );
   } finally {
     await sup.stop();
     db.close();

@@ -35,6 +35,7 @@ import {
 } from "./silent-reply.js";
 import { dirsFor } from "./projects.js";
 import { allowlistWith, resolveCwd } from "./allowlist.js";
+import { handoffPathFor, handoffPreamble } from "./handoff.js";
 import { commandFromGrant, grantFor, grantVariants } from "./denial.js";
 import { writeClaudeMcpConfig } from "./drivers/claude.js";
 import {
@@ -476,6 +477,54 @@ export async function startSupervisor(
   };
 
   const childCwd = resolveCwd(opts.cwd, dirs);
+
+  /**
+   * The handoff pointer: its OWN prompt, once per fresh session.
+   *
+   * 🛑 NOT A PREFIX ON AN INBOUND PROMPT, AND `mountBannerPrefix` ABOVE IS THE
+   * WRONG PRECEDENT TO COPY. Shipped as a prefix it broke two invariants the
+   * gate caught in one assertion:
+   *
+   *   the `alert` banner stopped being FIRST, so a BLOCKING message opened
+   *   with a paragraph about a file — the urgency the banner exists to carry
+   *
+   *   it displaced the body out of `excerptForLog`'s window, which is the
+   *   exact defect `LOG_EXCERPT_LIMIT` was raised from 80 to 200 to fix
+   *
+   * The mount banner is a few short lines and survives both. This is a
+   * paragraph, and a paragraph has to be its own turn.
+   *
+   * 🛑 GATED ON A FRESH CHILD AND NOT ON THE MODE. A host agent has a project
+   * directory and therefore a handoff — copying the mount banner's
+   * container-only gate would leave the host arm silent with a green suite.
+   *
+   * 🛑 THE CALLER DECIDES WHAT FRESH MEANS, AND `opts.resumeSessionId` IS NOT
+   * IT. `doRestart` spawns with `resumeSessionId: undefined`, so a supervisor
+   * STARTED as a resume still hands its RESTARTED child a clean slate —
+   * reading the option here silenced the pointer for exactly the agents most
+   * likely to be restarted. `needsMountBanner` drops the same term at the
+   * restart, for the same reason.
+   *
+   * 🛑 `childCwd`, NOT `opts.cwd`. The requested value may be undefined, and
+   * `resolveCwd` is what makes it real, contained and realpath'd — so the
+   * agent is handed the directory it is actually sitting in.
+   */
+  const offerHandoffPointer = (freshChild: boolean): void => {
+    if (!freshChild) return;
+
+    // 🛑 THE OFFER DISPATCHES SYNCHRONOUSLY ON AN IDLE QUEUE, so a child whose
+    // stdin is already gone throws `wiring.ts`'s `stdin.write` straight out of
+    // `startSupervisor`. The pointer is a convenience; a supervisor that never
+    // starts reports nothing and cannot be asked to stop. Lose the pointer.
+    try {
+      queue.offer({
+        text: handoffPreamble(handoffPathFor(selection.mode, childCwd)),
+        messageIds: [],
+      });
+    } catch (err) {
+      log(`FAILED to offer the handoff pointer: ${String(err)}`);
+    }
+  };
   // Injected in tests; the real one is the shared bus database the web UI
   // already reads.
   const approvalsDb = opts.db ?? openDb();
@@ -1487,6 +1536,7 @@ export async function startSupervisor(
   }
 
   wireChild();
+  offerHandoffPointer(!opts.resumeSessionId);
 
   /**
    * Take the outgoing child offline on the bus and stop its activity dot.
@@ -1820,6 +1870,7 @@ export async function startSupervisor(
     }
 
     wireChild();
+    offerHandoffPointer(true);
     replacingChild = false;
 
     for (const p of unsent) queue.reoffer(p);

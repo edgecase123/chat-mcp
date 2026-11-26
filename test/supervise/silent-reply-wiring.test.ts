@@ -15,6 +15,7 @@ const { startSupervisor } = await import("../../src/supervise/index.js");
 const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 import type { AgentChild, SpawnOptions } from "../../src/supervise/child.js";
 import { supervisorOptions } from "../support/supervisor-options.js";
+import { releasePointerTurn } from "../support/handoff-pointer.js";
 const dao = await import("../../src/storage/dao.js");
 
 /** Every system DM waiting for `peer`. */
@@ -118,6 +119,9 @@ async function supervisor(
       ...extra,
     }),
   );
+
+  // The handoff pointer holds the child's first turn; see `releasePointerTurn`.
+  releasePointerTurn(h.sent, { finishTurn: h.endTurn });
 
   return { sup, handle, db };
 }

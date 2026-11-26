@@ -17,6 +17,7 @@ import type { RateLimitSnapshot } from "../../src/supervise/rate-limit.js";
 const { parseClaudeRateLimit: parseRateLimitEvent } =
   await import("../../src/supervise/drivers/claude-events.js");
 import { supervisorOptions } from "../support/supervisor-options.js";
+import { releasePointerTurn } from "../support/handoff-pointer.js";
 
 /**
  * 🛑 DIRECTORIES ARE DECLARED, NOT INFERRED. The chat spawns the agent now,
@@ -74,8 +75,8 @@ function fakeChild(): {
   };
 }
 
-const start = (handle: string, f: ReturnType<typeof fakeChild>) =>
-  startSupervisor(
+const start = async (handle: string, f: ReturnType<typeof fakeChild>) => {
+  const sup = await startSupervisor(
     supervisorOptions({
       extraDirs: SUPERVISOR_TEST_DIRS,
       handle,
@@ -83,6 +84,12 @@ const start = (handle: string, f: ReturnType<typeof fakeChild>) =>
       log: () => undefined,
     }),
   );
+
+  // The handoff pointer holds the child's first turn; see `releasePointerTurn`.
+  releasePointerTurn(f.sent, f);
+
+  return sup;
+};
 
 const env = (id: number, body?: string, to = "sup") => ({
   id,
@@ -664,6 +671,9 @@ test("the gate is WIRED, not just built: a full window HOLDS the message", async
     }),
   );
 
+  // The handoff pointer holds the child's first turn; see `releasePointerTurn`.
+  releasePointerTurn(f.sent, f);
+
   try {
     await deliverToSupervisor("gated", env(1, "first"));
     f.finishTurn();
@@ -695,6 +705,9 @@ test("a held message is RELEASED when the window reports room, never dropped", a
       utilizationCeiling: 0.9,
     }),
   );
+
+  // The handoff pointer holds the child's first turn; see `releasePointerTurn`.
+  releasePointerTurn(f.sent, f);
 
   try {
     f.emitEvent(rl(0.95));
@@ -848,6 +861,9 @@ test('a driver that reports NO usage is UNMETERED and says so, not "unknown" for
     }),
   );
 
+  // The handoff pointer holds the child's first turn; see `releasePointerTurn`.
+  releasePointerTurn(sent, { finishTurn: () => endTurn?.() });
+
   try {
     // It still dispatches — unmetered is a CHOICE, not a refusal.
     assert.equal(
@@ -948,6 +964,9 @@ test("a driver that reports NO context announces the blank at startup and still 
       }),
     }),
   );
+
+  // The handoff pointer holds the child's first turn; see `releasePointerTurn`.
+  releasePointerTurn(sent, { finishTurn: () => endTurn?.() });
 
   try {
     // It still dispatches. A blank gauge is announced, never a refusal.
