@@ -12,6 +12,8 @@ import type {
 } from "../../src/supervise/container.js";
 import { claudeSpawn } from "../../src/adapters/claude-spawn.js";
 import { containerPlan } from "../support/container-plan.js";
+import { readFileSync } from "node:fs";
+import { oneLine } from "../support/source-text.js";
 
 /**
  * #359 — the containerized start sequence used to live in the commander
@@ -271,5 +273,54 @@ test("buildConfirmPlan is handed the vendor and the handle, and nothing else", a
     call.args.length,
     2,
     "a third argument would be a second read of the override, which is the race PR 409 fixed",
+  );
+});
+
+/**
+ * The ONE thing this seam cannot prove by calling itself: that `src/index.ts`
+ * acts on the `aborted` outcome.
+ *
+ * 🛑 THIS IS A SOURCE-TEXT GUARD, AND #359 REJECTED ONE FOR THE ARGUMENTS. The
+ * objection there is that a grep over a call site greens on a docblock written
+ * beside the call. It does not apply to this claim: the pattern is the
+ * EXPRESSION `=== "aborted"`, which no prose contains, and the assertion below
+ * prints its own denominator so a second occurrence goes RED rather than
+ * silently widening the window.
+ *
+ * ⚠️ IT PROVES TEXT AND ORDER, NOT EXECUTION. `src/index.ts` runs the CLI at
+ * import, so nothing in this process can call that action. Deleting the guard
+ * reddens this; making it unreachable some other way would not.
+ *
+ * 🛑 ORDERED BY STRING INDEX, NEVER BY LINE. Prettier moves lines, and
+ * `oneLine` exists so a reflow cannot change the answer.
+ */
+test("the action acts on an ABORT before it reaches startSupervisor", () => {
+  const src = oneLine(
+    readFileSync(new URL("../../src/index.ts", import.meta.url), "utf8"),
+  );
+
+  const count = (pat: string): number => src.split(pat).length - 1;
+
+  assert.equal(
+    count('=== "aborted"'),
+    1,
+    "the window is defined by ONE comparison; find them all before trusting this",
+  );
+
+  const callAt = src.indexOf("await prepareContainerStart(");
+  const abortAt = src.indexOf('if (outcome === "aborted") return;');
+  const supervisorAt = src.indexOf("const { startSupervisor } = await import(");
+
+  assert.ok(callAt >= 0, "the seam is not called from the action");
+  assert.ok(abortAt >= 0, "the abort outcome is not acted on");
+  assert.ok(supervisorAt >= 0, "startSupervisor is not imported in the action");
+
+  assert.ok(
+    abortAt > callAt,
+    "the abort check must read the outcome the seam returned",
+  );
+  assert.ok(
+    supervisorAt > abortAt,
+    "an operator who declined the plan must not get the container started anyway",
   );
 });

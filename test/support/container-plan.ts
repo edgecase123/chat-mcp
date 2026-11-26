@@ -8,10 +8,11 @@ import type { ContainerPlan } from "../../src/supervise/container.js";
  * compares a stored plan to `buildConfirmPlan`'s output, so a hand-written
  * plan confirms a handle the supervisor then refuses.
  *
- * ⚠️ `envVarNames` AND `envValuesDigest` ARE THE TWO FIELDS CALLERS OVERRIDE.
- * Three test files carried their own copy of this factory and those were the
- * only two lines that differed between them, because they are each one of
- * those tests' subject (#356).
+ * ⚠️ `envVarNames` AND `envValuesDigest` ARE THE TWO FIELDS CALLERS OVERRIDE,
+ * and all three callers pass them EXPLICITLY rather than inheriting a default.
+ * Those were the only two lines that differed between the three copies this
+ * replaced, because each is one of those tests' own subject (#356). A shared
+ * default for either would silence the detector that test exists to be.
  */
 export function containerPlan(
   over: Partial<ContainerPlan> = {},
