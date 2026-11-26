@@ -625,8 +625,15 @@ test("🛑 the install container is NOT masked, because its mount list is exactl
  * daemon with no line connecting it to the manifest that caused it.
  *
  * Both spellings are pinned: the directory itself, and a path beneath it.
+ *
+ * 🛑 THE **REASON** IS ASSERTED, NOT THE PATH. The message interpolates the
+ * declared entry, so `.cursor` is already in the string before `owned` is read
+ * — and a mutant resolving `owned` to the `node_modules` entry printed "the
+ * container installs its own" and still matched a `/\.cursor/` regex. MEASURED
+ * by claude1 on review, which is why both directions are pinned here: the
+ * tmpfs reason present, and the install reason absent.
  */
-test("🚨 a read-only path that collides with the .cursor mask REFUSES the spawn", () => {
+test("🚨 a read-only path that collides with the .cursor mask REFUSES the spawn, naming the tmpfs", () => {
   setToken("sk-ant-oat-x");
   // The declared path has to EXIST or `checkedProjectPath` refuses first, for
   // a reason that has nothing to do with the collision.
@@ -635,17 +642,57 @@ test("🚨 a read-only path that collides with the .cursor mask REFUSES the spaw
   writeFileSync(join(dir, ".cursor", "mcp.json"), "{}");
 
   for (const declared of [".cursor", ".cursor/mcp.json"]) {
-    assert.throws(
-      () =>
-        dockerArgsFor({
-          cwd: dir,
-          supervisorHandle: "claude1",
-          readOnlyPaths: [declared],
-        }),
-      /\.cursor/,
-      `'${declared}' was accepted`,
+    let thrown: unknown;
+
+    try {
+      dockerArgsFor({
+        cwd: dir,
+        supervisorHandle: "claude1",
+        readOnlyPaths: [declared],
+      });
+    } catch (err) {
+      thrown = err;
+    }
+
+    assert.ok(thrown instanceof Error, `'${declared}' was accepted`);
+
+    const message = thrown.message;
+
+    assert.match(message, /\.cursor/, `'${declared}': no path in ${message}`);
+    assert.match(message, /tmpfs/, `'${declared}': no reason in ${message}`);
+    assert.doesNotMatch(
+      message,
+      /installs its own/,
+      `'${declared}': the node_modules reason in ${message}`,
     );
   }
+});
+
+/**
+ * 🛑 THE SAME ASSERTION FROM THE OTHER SIDE, so neither entry's reason can be
+ * served for the other's path. A single shared message is what this pair
+ * replaced.
+ */
+test("🚨 a node_modules collision still names the INSTALL, not the tmpfs", () => {
+  setToken("sk-ant-oat-x");
+  const dir = mkdtempSync(join(tmpdir(), "chat-mcp-docker-nm-reason-"));
+  mkdirSync(join(dir, "node_modules"));
+
+  let thrown: unknown;
+
+  try {
+    dockerArgsFor({
+      cwd: dir,
+      supervisorHandle: "claude1",
+      readOnlyPaths: ["node_modules"],
+    });
+  } catch (err) {
+    thrown = err;
+  }
+
+  assert.ok(thrown instanceof Error, "a node_modules path was accepted");
+  assert.match(thrown.message, /installs its own/);
+  assert.doesNotMatch(thrown.message, /tmpfs/);
 });
 
 test("a registered extra mount appears at /mnt/<key>", () => {
