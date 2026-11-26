@@ -21,23 +21,11 @@ const {
 const { registerMount } = await import("../../src/supervise/mounts.js");
 
 import type { ContainerPlan } from "../../src/supervise/container.js";
+import { containerPlan } from "../support/container-plan.js";
 
-function plan(over: Partial<ContainerPlan> = {}): ContainerPlan {
-  return {
-    mountPaths: ["/work"],
-    envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
-    // #356 — no override in this factory, so one stable digest serves it.
-    envValuesDigest: envValuesDigest(undefined),
-    binary: "claude",
-    networkMode: "bridge",
-    image: "chat-mcp-agent:local",
-    memory: null,
-    cpus: null,
-    installMemory: null,
-    installCpus: null,
-    ...over,
-  };
-}
+const plan = (over: Partial<ContainerPlan> = {}): ContainerPlan =>
+  // #356 — no override in this factory, so one stable digest serves it.
+  containerPlan({ envValuesDigest: envValuesDigest(undefined), ...over });
 
 function statePath(): string {
   return join(process.env.CHAT_MCP_HOME!, "container.json");

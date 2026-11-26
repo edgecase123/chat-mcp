@@ -19,7 +19,7 @@ process.env.CHAT_MCP_HOME = mkdtempSync(join(tmpdir(), "chat-mcp-state-lock-"));
 
 const { markConfirmed } = await import("../../src/supervise/container.js");
 
-import type { ContainerPlan } from "../../src/supervise/container.js";
+import { containerPlan as plan } from "../support/container-plan.js";
 import { deadPid } from "../support/dead-pid.js";
 import { isProcessAlive } from "../../src/util/process.js";
 
@@ -47,22 +47,6 @@ const LOCK = `${STATE}.lock`;
 /** The repo root, so a spawned child resolves the fixture and its imports. */
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const FIXTURE = "test/support/fixtures/container-state-writer.ts";
-
-function plan(over: Partial<ContainerPlan> = {}): ContainerPlan {
-  return {
-    mountPaths: ["/work"],
-    envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN"],
-    envValuesDigest: "0".repeat(64),
-    binary: "claude",
-    networkMode: "bridge",
-    image: "chat-mcp-agent:local",
-    memory: null,
-    cpus: null,
-    installMemory: null,
-    installCpus: null,
-    ...over,
-  };
-}
 
 /** Whatever is on disk right now, or the empty shape if nothing is. */
 function onDisk(path = STATE): {

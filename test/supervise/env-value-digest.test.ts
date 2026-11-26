@@ -28,6 +28,7 @@ const {
 } = await import("../../src/supervise/container.js");
 
 import type { ContainerPlan } from "../../src/supervise/container.js";
+import { containerPlan } from "../support/container-plan.js";
 
 /**
  * #356 — the consent gate stored env var NAMES only.
@@ -42,21 +43,12 @@ import type { ContainerPlan } from "../../src/supervise/container.js";
 const SECRET = "hunter2-the-original-value";
 const ROTATED = "hunter3-somebody-changed-it";
 
-function plan(over: Partial<ContainerPlan> = {}): ContainerPlan {
-  return {
-    mountPaths: ["/work"],
+const plan = (over: Partial<ContainerPlan> = {}): ContainerPlan =>
+  containerPlan({
     envVarNames: ["CLAUDE_CODE_OAUTH_TOKEN", "MY_VAR"],
     envValuesDigest: envValuesDigest({ MY_VAR: SECRET }),
-    binary: "claude",
-    networkMode: "bridge",
-    image: "chat-mcp-agent:local",
-    memory: null,
-    cpus: null,
-    installMemory: null,
-    installCpus: null,
     ...over,
-  };
-}
+  });
 
 /* ==========================================================================
  * The defect itself.

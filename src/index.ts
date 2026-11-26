@@ -693,87 +693,48 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       // just been told to start. Keyed on the mode, a future alias is covered
       // the day it is added to `ALIASES`.
       if (selection.mode === "docker") {
-        const {
-          prepareAgentImage,
-          confirmVerdict,
-          markConfirmed,
-          describePlan,
-          describeChanges,
-        } = await import("./supervise/container.js");
-        const { buildConfirmPlan } = await import("./supervise/confirmPlan.js");
         const { execSync } = await import("node:child_process");
+        const { createInterface } = await import("node:readline/promises");
+        const { prepareContainerStart } =
+          await import("./supervise/containerStart.js");
+        const container = await import("./supervise/container.js");
+        const { buildConfirmPlan } = await import("./supervise/confirmPlan.js");
 
-        // 🛑 CONSENT BEFORE THE BUILD. The build is minutes of docker, and
-        // spending it before asking leaves an operator who answers "n" having
-        // paid for an image they refused.
-        const plan = buildConfirmPlan(vendor, handle);
-        const verdict = confirmVerdict(handle, plan);
-
-        if (verdict.kind !== "confirmed") {
-          // 🛑 THE RE-PROMPT NAMES WHAT CHANGED. "the plan changed, approve
-          // it again" makes the operator diff two banners by eye, and the
-          // field that matters is the one they are least likely to spot.
-          if (verdict.kind === "changed") {
-            console.log(
-              `the container plan for "${handle}" changed since you approved it:`,
-            );
-            console.log(describeChanges(verdict.changes));
-            console.log("");
-          }
-          if (verdict.kind === "legacy") {
-            console.log(
-              `"${handle}" was approved before the plan was recorded, so there ` +
-                "is nothing to compare it against. Approving it again records it.",
-            );
-          }
-
-          console.log(describePlan(plan));
-
-          // 🛑 REFUSES RATHER THAN READING EOF AS "no". `rl.question` resolves
-          // to `''` with no terminal attached, which failed the `y` test and
-          // took the abort path below — printing one word and exiting 0. A
-          // scripted start of a new containerized agent reported success and
-          // started nothing.
-          if (!process.stdin.isTTY) {
-            throw new Error(
-              `the container plan for "${handle}" needs a terminal to confirm, ` +
-                `and this process has no stdin. Run this same command once from ` +
-                `a terminal and answer the prompt, then start it from a script.`,
-            );
-          }
-
-          const { createInterface } = await import("node:readline/promises");
-          const rl = createInterface({
-            input: process.stdin,
-            output: process.stdout,
-          });
-          const answer = await rl.question("Proceed? [y/N] ");
-          rl.close();
-          if (!/^y(es)?$/i.test(answer.trim())) {
-            console.log("aborted");
-            return;
-          }
-          markConfirmed(handle, plan);
-        }
-
-        // 🛑 THE PLAN'S IMAGE, SO THE BUILD AND THE LATER INSPECT AGREE.
-        // `buildConfirmPlan` resolved it through `effectiveImage`, which is
-        // also what `runDependencyInstall` inspects. Passing `vendor.image`
-        // here, or resolving the override a second time, is how a handle came
-        // to pay for a full build of an image it would then be refused for.
-        // 🛑 THE VENDOR IS NAMED ONLY WHEN THE PLAN RUNS THE VENDOR'S OWN
-        // IMAGE. An operator override resolves to a tag this project cannot
-        // build, and naming a vendor for it would tag a build of THIS project
-        // with somebody else's image name.
-        prepareAgentImage(
-          () => execSync("npm run build", { stdio: "inherit" }),
+        const outcome = await prepareContainerStart(
+          vendor,
+          handle,
           {
-            image: plan.image,
-            ...(plan.image === vendor.image
-              ? { buildVendor: vendor.vendor }
-              : {}),
+            log: (line) => console.log(line),
+            isTty: () => Boolean(process.stdin.isTTY),
+            ask: async (question) => {
+              const rl = createInterface({
+                input: process.stdin,
+                output: process.stdout,
+              });
+              try {
+                return await rl.question(question);
+              } finally {
+                rl.close();
+              }
+            },
+            compile: () => {
+              execSync("npm run build", { stdio: "inherit" });
+            },
+          },
+          {
+            buildConfirmPlan,
+            confirmVerdict: container.confirmVerdict,
+            markConfirmed: container.markConfirmed,
+            describePlan: container.describePlan,
+            describeChanges: container.describeChanges,
+            prepareAgentImage: container.prepareAgentImage,
           },
         );
+
+        // 🛑 AN ABORT MUST NOT FALL THROUGH TO `startSupervisor`. The operator
+        // declined this plan, and starting it anyway runs the container they
+        // refused. Inline, this was a bare `return` from the action.
+        if (outcome === "aborted") return;
       }
 
       const { startSupervisor } = await import("./supervise/index.js");
