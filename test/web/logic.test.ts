@@ -936,6 +936,32 @@ test("\U0001f6d1 THE COLON NEEDS POSITION TOO: ONLY WHEN THE TAG OPENS THE POST"
   );
 });
 
+test("\u{1f6d1} A SECOND ADDRESSEE TAG KEEPS ITS COLON TOO", () => {
+  // claude2 caught this. AGENTS.md says "several addressees get several tags",
+  // so a run of completed tags is still the opening of the post -- not prose
+  // that turns the next one into a mention.
+  assert.equal(accept("#claude1: #clau", 15)!.insert, "#claude1: #claude1: ");
+  assert.equal(
+    accept("#claude1: #claude2: #cla", 24)!.insert,
+    "#claude1: #claude2: #claude1: ",
+    "any number of them",
+  );
+});
+
+test("\u{1f6d1} ONE WORD OF PROSE ENDS THE TAG RUN", () => {
+  // The negative control. Without it, "tags and whitespace only" could be
+  // satisfied by anything and the test above would pass vacuously.
+  assert.equal(
+    accept("#claude1: ask #clau", 19)!.insert,
+    "#claude1: ask #claude1 ",
+    "prose intervened, so this is a mention",
+  );
+});
+
+test("a room tag does NOT open a tag run, since it never gained a colon", () => {
+  assert.equal(accept("#mcp #clau", 10)!.insert, "#mcp #claude1 ");
+});
+
 test("leading whitespace still counts as opening the post", () => {
   assert.equal(accept("  #clau", 7)!.insert, "  #claude1: ");
 });

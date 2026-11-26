@@ -400,6 +400,13 @@ export function menuEntriesFor(kind, label) {
 const MENTION_BODY = /[A-Za-z0-9._-]/;
 
 /**
+ * Whatever may precede a tag and still leave it the OPENING of the post:
+ * nothing, whitespace, or a run of already-completed addressee tags, because
+ * a post may address several. One word of prose ends the run.
+ */
+const TAG_RUN = /^\s*(?:#[A-Za-z0-9._-]+:\s*)*$/;
+
+/**
  * 🛑 "#" IS THE ONLY NAME TRIGGER. "@" is reserved for relative file paths.
  * A peer and a room share one pool, because a name is a name to the person
  * typing it.
@@ -496,9 +503,8 @@ export function mentionSuggestionsFor(value, caret, ctx) {
   // Keyed on the INSERTED text, not the name. A room genuinely called "#here"
   // and the everyone tag share a name and insert different things, so they are
   // two choices and collapsing them would hide one.
-  // Nothing but whitespace before the token means the tag OPENS the post, so
-  // it is an address rather than a mention.
-  const opensPost = value.slice(0, token.start).trim() === "";
+  // Opening the post makes a tag an address; anywhere else it is a mention.
+  const opensPost = TAG_RUN.test(value.slice(0, token.start));
 
   const byInsert = new Map();
   for (const entry of pool) {
