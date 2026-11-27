@@ -1042,7 +1042,7 @@ export async function startSupervisor(
   let gateRestartRequested = false;
 
   /**
-   * This child's first reading, which is as close to its spawn fill as the
+   * This child's LOWEST reading, which is as close to its spawn fill as the
    * driver reports. `null` until one arrives.
    *
    * 🛑 A GATE AT OR BELOW IT IS AN INFINITE RESTART LOOP, AND EVERY GATE FROM
@@ -1126,8 +1126,17 @@ export async function startSupervisor(
     if (childFloor >= gate) {
       if (!warnedGateUnderFloor) {
         warnedGateUnderFloor = true;
+
+        // 🛑 SO THE OPPOSITE TRANSITION CAN SPEAK AGAIN. Each latch
+        // clears the other, which makes each CROSSING log once rather than
+        // each STATE logging once for the child's whole life. An operator who
+        // lowers the gate after a withdrawal would otherwise be left with
+        // "the gate is reachable again" as the last thing they read, about a
+        // child nothing can restart. Raised by claude1 on PR 487.
+        withdrewGateUnderFloor = false;
+
         log(
-          `restart gate of ${gate}% is at or below ${childHandle}'s spawn fill of ${childFloor.toFixed(1)}%; ` +
+          `restart gate of ${gate}% is at or below ${childHandle}'s lowest reading of ${childFloor.toFixed(1)}%; ` +
             `a restart cannot reclaim that, so NOTHING will restart this child — raise the gate`,
         );
       }
@@ -1140,8 +1149,12 @@ export async function startSupervisor(
     // operator read above no longer holds.
     if (warnedGateUnderFloor && !withdrewGateUnderFloor) {
       withdrewGateUnderFloor = true;
+
+      // See the warning above: each latch clears the other.
+      warnedGateUnderFloor = false;
+
       log(
-        `${childHandle} now reads a floor of ${childFloor.toFixed(1)}%, under its restart gate of ${gate}% — ` +
+        `${childHandle} now reads a lowest reading of ${childFloor.toFixed(1)}%, under its restart gate of ${gate}% — ` +
           `the earlier warning is withdrawn and the gate is reachable again`,
       );
     }

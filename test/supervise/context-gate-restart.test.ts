@@ -572,7 +572,7 @@ test("a reading with no window cannot set the floor", async () => {
     );
     assert.equal(h.children.length, 1);
     assert.ok(
-      h.lines.find((l) => /spawn fill/i.test(l)),
+      h.lines.find((l) => /lowest reading/i.test(l)),
       `the gate was not reported as unreachable; got ${JSON.stringify(h.lines)}`,
     );
   } finally {
@@ -772,6 +772,44 @@ test("a replacement child can be warned and retracted on its own account", async
       before + 1,
       "the replacement child was never told its gate came back",
     );
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("a gate LOWERED after the retraction warns again, so the last line is true", async () => {
+  // 🛑 EACH CROSSING LOGS ONCE, NOT EACH STATE ONCE EVER. Both latches are
+  // per-child, so without them clearing each other the operator who lowers the
+  // gate after a withdrawal is left reading "the gate is reachable again"
+  // about a child nothing can restart. The floor only falls, but the GATE
+  // moves — `resolveContextGate` is read on every reading, which
+  // `a gate changed mid-run is honoured by the NEXT reading` already pins.
+  // Raised by claude1 reviewing PR 487.
+  const h = await harness("fredo", 40);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+    h.children[0]?.report(at(REAL_FILL));
+
+    assert.equal(
+      h.lines.filter((l) => /is reachable again/i.test(l)).length,
+      1,
+      "the withdrawal never happened, so this test proves nothing",
+    );
+
+    // The operator lowers the gate under the floor the child now reads.
+    setHandleContextGate(h.db, h.childHandle, 20);
+    h.children[0]?.report(at(REAL_FILL));
+
+    const warns = h.lines.filter((l) => /NOTHING will restart/i.test(l));
+
+    assert.equal(
+      warns.length,
+      2,
+      `the child became unrestartable in silence; got ${JSON.stringify(h.lines)}`,
+    );
+    // The SECOND warning carries the new gate, not the old one.
+    assert.match(warns[1]!, /20/);
   } finally {
     await h.sup.stop();
   }
