@@ -59,11 +59,21 @@ node --import tsx src/index.ts --help   # proves the module graph actually boots
                                          # tsc --noEmit cannot see an import cycle
 ```
 
-🛑 **`npm test` IS NOT THE GATE. CI ALSO RUNS `npm run format:check`**, which
-is `prettier --check .` over the whole tree. Running `prettier --write` on the
-files you happened to name passes locally and still fails CI, so run
-`npm run format:check` before you push. One missed test file cost a red check
-on PR 296 with a green local suite.
+🛑 **`npm test` IS NOT THE GATE. RUN `npm run gate`.**
+
+```
+npm run gate     # build + typecheck + format:check + test, one exit code
+```
+
+It exists because `npm test` passes while the tree is unbuilt, untypechecked
+and unformatted. PR 457 merged on a true `npm test EXIT 0, 2821/2821` and put
+`main` red on `format:check`, which blocks every agent's gate until a second PR
+fixes it. It also refuses a dirty tree, and it rules a CANCELLED run red —
+a hung run prints zero failures exactly like a green one.
+
+**Prose is not reachable from a shell.** That is why this is a script and not
+the list of four commands this paragraph used to be. Full detail:
+`docs/system/07-operations/gate.md`.
 
 **Tests under the node runner refuse the real `~/.chat-mcp` directory.**
 Set `process.env.CHAT_MCP_HOME` to a temp dir _before_ importing anything
