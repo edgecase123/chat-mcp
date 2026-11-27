@@ -1148,8 +1148,13 @@ export async function startSupervisor(
       // had no control that could fire.
       warnedGateUnderFloor = false;
 
+      // 🛑 SAY WHAT CROSSED, NOT WHAT WAS READ. `childFloor` is monotonic,
+      // so this branch is reached just as often by the operator RAISING the
+      // gate — which is what the warning above asked them to do. "now reads"
+      // credits the reading for work the operator did. Raised by claude1 on
+      // PR 487.
       log(
-        `${childHandle} now reads a lowest reading of ${childFloor.toFixed(1)}%, under its restart gate of ${gate}% — ` +
+        `${childHandle}'s lowest reading of ${childFloor.toFixed(1)}% is now under its restart gate of ${gate}% — ` +
           `the earlier warning is withdrawn and the gate is reachable again`,
       );
     }

@@ -871,3 +871,45 @@ test("a replacement that is NOT a gate restart still gets its own warning", asyn
     await h.sup.stop();
   }
 });
+
+test("RAISING the gate withdraws the warning too, and the message blames neither", async () => {
+  // 🛑 THE OTHER WAY INTO THE WITHDRAWAL, AND IT HAD NO CONTROL. Every other
+  // test reaches that branch by the floor FALLING. `childFloor` is monotonic,
+  // so it is reached just as often by the operator RAISING the gate — which is
+  // literally what the warning asks them to do. Raised by claude1 on PR 487.
+  const h = await harness("frais", 50);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+
+    assert.equal(
+      h.lines.filter((l) => /raise the gate/i.test(l)).length,
+      1,
+      `the child was never warned, so this test proves nothing; got ${JSON.stringify(h.lines)}`,
+    );
+
+    // The operator does exactly what the warning asked.
+    setHandleContextGate(h.db, h.childHandle, 60);
+    h.children[0]?.report(at(WRONG_FILL));
+
+    const undo = h.lines.find((l) => /is withdrawn/i.test(l));
+
+    assert.ok(
+      undo,
+      `raising the gate left the false warning standing; got ${JSON.stringify(h.lines)}`,
+    );
+    // Both numbers, so the operator can see the crossing.
+    assert.match(undo, /57\.4/);
+    assert.match(undo, /60/);
+
+    // 🛑 AND IT MUST NOT CREDIT THE READING. The floor did not move here, the
+    // gate did. "now reads" is true and misleading on this path.
+    assert.doesNotMatch(
+      undo,
+      /now reads/i,
+      "the message credits the reading for a gate the operator moved",
+    );
+  } finally {
+    await h.sup.stop();
+  }
+});
