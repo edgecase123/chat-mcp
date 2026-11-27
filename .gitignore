@@ -56,3 +56,17 @@ measurements/
 # A supervised Cursor child reads `<cwd>/.cursor/mcp.json`, and this repo is a
 # project an agent is supervised IN. See docs/system/05-supervision/vendors.md.
 .cursor/
+
+# The two files a supervised agent reads and writes in its own project
+# directory, and THIS REPO IS A PROJECT AN AGENT IS SUPERVISED IN.
+#
+# 🛑 NOT A TEST WORKAROUND. `chat-mcp project set <handle> <dir>` points a
+# supervisor at a real checkout, so the supervisor writes `ETIQUETTE.md` and
+# the agent writes `HANDOFF.md` straight into it. Untracked, they still leave
+# the tree DIRTY — and a dirty tree is what the gate-validity rule says must
+# not be true when a suite runs against it.
+#
+# ⚠️ ROOT-ANCHORED, so a real `docs/**/HANDOFF.md` written later is still
+# tracked. The supervisor only ever writes at the project root.
+/ETIQUETTE.md
+/HANDOFF.md
