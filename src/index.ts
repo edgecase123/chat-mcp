@@ -10,6 +10,9 @@ process.on("warning", (w) => {
 });
 
 import { Command } from "commander";
+// Type-only, so it erases at build time and `supervise`'s own modules stay
+// lazily loaded inside the action like every other subcommand's.
+import type { SuperviseCliOptions } from "./supervise/supervisorArgs.js";
 import { resolveDefaultHandle } from "./util/handle-default.js";
 import { handleRefusal, isHandle } from "./util/naming.js";
 import { KNOWN_SUBCOMMANDS } from "./util/subcommands.js";
@@ -669,12 +672,9 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       "run the child inside a Docker container (#129)",
       false,
     )
-    .action(async (handle: string, o: Record<string, string>) => {
+    .action(async (handle: string, o: SuperviseCliOptions) => {
       const { spawnFor } = await import("./adapters/index.js");
       const { selectionFor } = await import("./supervise/selection.js");
-      // commander stores `--container` as a boolean; the bag is typed for the
-      // dozen options that really are strings.
-      //
       // 🛑 `selectionFor`, NOT `resolveDriver`. This is the one place the
       // handle's stored (vendor, mode) pair can still reach `spawnFor`, and
       // reading the file only inside `startSupervisor` would build the image
@@ -682,7 +682,7 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       // vendor.
       const selection = selectionFor(handle, {
         driver: o.driver,
-        container: (o as unknown as { container?: boolean }).container,
+        container: o.container,
       });
       const vendor = spawnFor(selection.vendor);
 
@@ -738,29 +738,9 @@ if (!firstArg || !KNOWN_SUBCOMMANDS.has(firstArg)) {
       }
 
       const { startSupervisor } = await import("./supervise/index.js");
-      const sup = await startSupervisor({
-        handle,
-        vendor,
-        model: o.model,
-        binary: o.binary,
-        driver: o.driver,
-        cwd: o.cwd,
-        resumeSessionId: o.resume,
-        // 🛑 EXPLICIT --permission-mode STILL WINS. `--auto` is a shorthand,
-        // not an override, so a mode named on the command line is never
-        // silently replaced.
-        permissionMode:
-          o.permissionMode ??
-          ((o as unknown as { auto?: boolean }).auto ? "auto" : undefined),
-        permissionPrompts: o.permissionPrompts === "host" ? "host" : "none",
-        // commander turns --no-reply into reply:false and omits it otherwise.
-        reply: (o as unknown as { reply?: boolean }).reply,
-        allowedTools:
-          typeof o.allowedTools === "string"
-            ? o.allowedTools.split(",")
-            : undefined,
-        container: (o as unknown as { container?: boolean }).container,
-      });
+      const { supervisorArgsFrom } =
+        await import("./supervise/supervisorArgs.js");
+      const sup = await startSupervisor(supervisorArgsFrom(handle, vendor, o));
       // A bus-delivered `agents stop` reaches the supervisor, not this signal
       // handler, so the exit has to be wired to the stop itself. Without it the
       // process survives its own stop — the #136 symptom all over again.
