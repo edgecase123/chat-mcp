@@ -196,6 +196,36 @@ export interface Supervisor {
   onStopped(cb: () => void): void;
 }
 
+/**
+ * How often the restart gate is re-evaluated without a new reading.
+ *
+ * 🛑 IT CANNOT CLOSE THE BAND IN #478, AND NOTHING HERE PRETENDS IT DOES. A
+ * cadence cannot manufacture a reading: `cursor1-agent` fired at 54.3% and
+ * then at 94.8%, and its replacement ran 23 turns in between without one
+ * reading reaching `checkContextGate`. What this buys is an operator who
+ * lowers a gate mid-run having it honoured on the next tick instead of on a
+ * reading that may never arrive.
+ *
+ * ⚠️ WHY THE BAND IS STILL UNDIAGNOSED IS AN INSTRUMENT GAP, which is why
+ * every reading now logs the gap since the one before it. Two causes fit the
+ * log equally well — readings that never arrived, and readings that arrived
+ * under the gate and jumped past it — and they call for opposite fixes.
+ */
+export const CONTEXT_GATE_CADENCE_MS = 60_000;
+
+/**
+ * Whether a reading carries a window the gate can divide by.
+ *
+ * 🛑 ONE PREDICATE, BECAUSE TWO COPIES DRIFTED INSIDE ONE PR. The gate's own
+ * guard refuses a windowless reading, and the cadence's cache did not — so one
+ * such reading overwrote a valid standing reading and every later tick
+ * returned early, leaving the cadence dead until the next valid reading.
+ * Caught by claude1 reviewing PR 489.
+ */
+function hasUsableWindow(total: number): boolean {
+  return Number.isFinite(total) && total > 0;
+}
+
 /** How an arriving message is presented to the agent, and who is owed a reply. */
 export function formatPrompt(
   envelope: WakeEnvelope,
@@ -951,6 +981,12 @@ export async function startSupervisor(
    * container that no longer exists.
    */
   const finishShutdown = async (): Promise<void> => {
+    // 🛑 BOTH STOP PATHS CONVERGE HERE, which is why the clear is not in
+    // `doStop`. An uncleared cadence evaluates the gate on a dead child, and
+    // the gate's action is a restart — so a stopped supervisor would respawn
+    // the child it had just killed.
+    if (gateCadence !== null) clearInterval(gateCadence);
+
     // 🛑 THE SOCKET GOES LAST, SO ITS DISAPPEARANCE MEANS THE CHILD IS REALLY
     // GONE. What makes that true differs per caller: `doStop` awaits the
     // child's teardown before calling this, and the own-exit path is called BY
@@ -1078,6 +1114,33 @@ export async function startSupervisor(
   let warnedGateUnderFloor = false;
 
   /**
+   * The last reading this child gave, and when it arrived, or `null` before
+   * its first one.
+   *
+   * 🛑 PER CHILD, FOR `gateRestartRequested`'S REASON. A process-lifetime cache
+   * lets the cadence restart a REPLACEMENT on its predecessor's last reading,
+   * on the first tick after the respawn and before the new child has reported
+   * anything — which is the restart loop #135 exists to end.
+   *
+   * 🛑 THE PAIR IS WRITTEN TOGETHER OR NOT AT ALL. An age measured against a
+   * stale timestamp reads as a sampling gap that did not happen, and the whole
+   * point of the log line below is to measure sampling.
+   */
+  let lastReading: { used: number; total: number } | null = null;
+  let lastReadingAt: number | null = null;
+
+  /**
+   * The cadence timer, `null` until `startSupervisor` reaches it.
+   *
+   * 🛑 A `let` ASSIGNED LATER, NOT A `const` REFERENCED BACKWARDS, for
+   * `runGracefulRestart`'s reason. `finishShutdown` is declared above the
+   * timer and clears it, so a `const` makes the shutdown path a
+   * `ReferenceError` the day anyone moves `wireChild()` above the timer —
+   * and that throw would be swallowed as "FAILED to shut down".
+   */
+  let gateCadence: ReturnType<typeof setInterval> | null = null;
+
+  /**
    * Restart the child if this reading has reached the handle's gate.
    *
    * 🛑 THE GATE IS RESOLVED PER READING, NOT CACHED AT SPAWN. An operator who
@@ -1114,7 +1177,7 @@ export async function startSupervisor(
     // floor here would cost. Unreachable on the claude driver, whose fallback
     // window is 200000, and reachable at the `ContextSnapshot` vendor seam.
     // Measured by claude2 on PR 311.
-    if (!Number.isFinite(total) || total <= 0) return;
+    if (!hasUsableWindow(total)) return;
 
     const percent = contextPercent(used, total);
     const gate = resolveContextGate(approvalsDb, childHandle);
@@ -1172,6 +1235,44 @@ export async function startSupervisor(
   };
 
   /**
+   * Re-evaluate the gate against the standing reading, on a cadence.
+   *
+   * 🛑 IT RE-READS THE GATE, NOT THE CONTEXT. `checkContextGate` resolves the
+   * handle's gate per call, so a gate the operator lowered between readings is
+   * honoured here. See `CONTEXT_GATE_CADENCE_MS` for what this cannot do.
+   *
+   * 🛑 NO READING MEANS NO TICK. A cached `0 / 0` is not a reading, and
+   * evaluating one latches a floor of 0 — which turns the loop guard off for
+   * the child's whole life. The cache starts `null` and is cleared per child,
+   * so the window between a respawn and the replacement's first reading is
+   * silent rather than acted on.
+   *
+   * ⚠️ `unref`'d, SO IT NEVER HOLDS THE PROCESS OPEN. A supervisor whose child
+   * has exited must be free to exit too, and an interval is the one handle
+   * that outlives every other thing here.
+   */
+  gateCadence = setInterval(() => {
+    const standing = lastReading;
+
+    if (standing === null) return;
+
+    const childHandle = childBusHandle();
+
+    // Its own catch, for the report path's reason: the gate is the half that
+    // can throw, and losing the cadence to one throw costs every later tick.
+    try {
+      checkContextGate(childHandle, standing.used, standing.total);
+    } catch (err) {
+      log(
+        `FAILED to re-check ${childHandle}'s restart gate on the cadence: ${String(err)}; ` +
+          `NOTHING restarted this child`,
+      );
+    }
+  }, CONTEXT_GATE_CADENCE_MS);
+
+  gateCadence.unref();
+
+  /**
    * Register every callback on the CURRENT child.
    *
    * 🛑 CALLED AGAIN AFTER A REPLACEMENT. Callbacks live on the instance, so a
@@ -1197,6 +1298,8 @@ export async function startSupervisor(
     gateRestartRequested = false;
     childFloor = null;
     warnedGateUnderFloor = false;
+    lastReading = null;
+    lastReadingAt = null;
 
     /**
      * 🛑 EVERY CALLBACK GOES THROUGH THIS, NOT JUST THE ONE THAT BIT.
@@ -1420,6 +1523,40 @@ export async function startSupervisor(
           // to record the context gauge", naming the half that still worked.
           // Raised by claude2, who went looking for the catch that swallowed a
           // mutant's `ReferenceError`.
+          // 🛑 THE GAP, NOT JUST THE VALUE. #478's own `What is NOT proven`
+          // is "what triggers a context report for a Cursor child", and the
+          // log carried no line per reading — so a 55-point span between two
+          // firings could not be told apart from readings arriving every turn
+          // and jumping. One line per reading settles it without spending a
+          // probe spawn.
+          //
+          // ⚠️ BEFORE THE GATE CHECK, because the gate's own action ends this
+          // child's turn and a reading that restarted something must still be
+          // in the log above the restart that followed it.
+          if (!hasUsableWindow(snapshot.total)) {
+            // 🛑 NOT CACHED, AND THE TIMESTAMP IS NOT TOUCHED EITHER. Standing
+            // in for a valid reading kills the cadence; resetting the gap
+            // anchor makes the NEXT reading look closer than it was, and
+            // measuring sampling is half of what this PR is for.
+            log(
+              `${childHandle} reported a context reading with NO window; ` +
+                `the standing reading and the gate are unchanged`,
+            );
+          } else {
+            const sinceLast =
+              lastReadingAt === null ? null : Date.now() - lastReadingAt;
+
+            lastReading = { used, total: snapshot.total };
+            lastReadingAt = Date.now();
+
+            log(
+              `${childHandle} context ${contextPercent(used, snapshot.total).toFixed(1)}%, ` +
+                (sinceLast === null
+                  ? `first reading from this child`
+                  : `${Math.round(sinceLast / 1000)}s since the last reading`),
+            );
+          }
+
           try {
             checkContextGate(childHandle, used, snapshot.total);
           } catch (err) {
