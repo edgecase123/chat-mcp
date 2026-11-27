@@ -3,7 +3,11 @@ import { z } from "zod";
 import * as dao from "../../storage/dao.js";
 import { notifyPeer } from "../../notify/bus.js";
 import type { ShimContext } from "../index.js";
-import { roomTargetRefusal, unknownPeerRefusal } from "../../util/naming.js";
+import {
+  noReplyRefusal,
+  roomTargetRefusal,
+  unknownPeerRefusal,
+} from "../../util/naming.js";
 import { childHandleFor } from "../../supervise/grant.js";
 import { tickBacklogSafely } from "../backlog-check.js";
 
@@ -54,6 +58,14 @@ export function installSend(server: McpServer, ctx: ShimContext): void {
             to,
             dao.getAgent(ctx.db, child) ? child : null,
             "Call list_agents to see who is registered.",
+          ),
+        );
+      }
+      if (recipient.can_reply === 0) {
+        throw new Error(
+          noReplyRefusal(
+            to,
+            `Post in a room it has joined, or ask its operator to restart it with a reply tool.`,
           ),
         );
       }

@@ -167,3 +167,22 @@ export function unknownPeerRefusal(
 
   return `Unknown peer: ${target}. ${nextStep}`;
 }
+
+/**
+ * The refusal for a DM to a child that holds no `send` tool (#475).
+ *
+ * 🛑 IT BLAMES THE FLAG, NEVER THE AGENT. `silentReplyWarning` says the agent
+ * kept its answer, which is an accusation (#417). Here the agent was never
+ * given the tool, so the same words would fault it for an operator's
+ * `--no-reply`.
+ *
+ * ⚠️ IT NAMES THE FLAG ON PURPOSE. The only person who can change this is the
+ * operator who passed it, so a generic refusal would leave the sender with
+ * nothing to ask for.
+ */
+export function noReplyRefusal(target: string, nextStep: string): string {
+  return (
+    `${target} has no reply tool, so it cannot answer a DM. ` +
+    `Its operator started it with --no-reply. ${nextStep}`
+  );
+}

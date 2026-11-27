@@ -45,6 +45,14 @@ export interface Agent {
    * does not.
    */
   context_gate: number | null;
+  /**
+   * Whether a supervised child can answer a DM, or null when nothing knows.
+   *
+   * 🛑 NULL IS NOT 0. Null means no supervisor has published a value for this
+   * handle, so a sender must go ahead; 0 is a supervisor saying the child was
+   * started with `--no-reply` and holds no `send` tool.
+   */
+  can_reply: number | null;
 }
 
 export interface Message {
@@ -75,6 +83,7 @@ interface AgentRow {
   context_warned_threshold: number | null;
   unread_warned_threshold: number | null;
   context_gate: number | null;
+  can_reply: number | null;
 }
 
 interface MessageRow {
@@ -130,6 +139,7 @@ function hydrate(row: AgentRow): Agent {
     context_warned_threshold: row.context_warned_threshold,
     unread_warned_threshold: row.unread_warned_threshold,
     context_gate: row.context_gate,
+    can_reply: row.can_reply,
   };
 }
 
@@ -214,6 +224,28 @@ export function setAgentContextGate(
     gate,
     handle,
   );
+}
+
+/**
+ * Publish whether `handle` can answer a DM, and report whether a row took it.
+ *
+ * 🛑 IT RETURNS THE ROW COUNT BECAUSE AN UPDATE AGAINST A MISSING ROW IS A
+ * SILENT NO-OP, and that is the common case here: the `agents` row is written
+ * by the SHIM when the child registers, which is after the supervisor starts.
+ * A caller that ignores the result publishes nothing and never learns.
+ */
+export function setAgentCanReply(
+  db: Db,
+  handle: string,
+  canReply: number | null,
+): boolean {
+  assertLiveDatabase(db, "setAgentCanReply");
+
+  const result = db
+    .prepare(`UPDATE agents SET can_reply = ? WHERE handle = ?`)
+    .run(canReply, handle);
+
+  return Number(result.changes) > 0;
 }
 
 /**

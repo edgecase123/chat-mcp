@@ -274,3 +274,34 @@ body   "<agent> answered your message inside its own transcript only — <verdic
 🛑 **UNKNOWN stays a third state.** A tool call the driver could not name may
 have BEEN the send, so that case says delivery is UNKNOWN rather than claiming
 nobody received it.
+
+## A DM that cannot be answered is REFUSED at send time, not reported later
+
+The row above says a DM the child cannot answer notifies nobody. That was
+correct about the accusation and wrong about the sender, who was told nothing
+at all and waited indefinitely (#475).
+
+**The fix refuses the send instead of reporting the silence.** `send` and
+`chat-mcp send` both throw `noReplyRefusal` when the recipient's `can_reply`
+is `0`, so the sender learns before spending a turn waiting.
+
+```
+agents.can_reply   0     the supervisor says this child holds no send tool
+                   1     it holds one
+                   NULL  nobody has published an answer — SEND
+```
+
+| decision                               | why                                                                                                      |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| the supervisor writes it, not the shim | `--no-reply` yields no grant, and that fact lives only in the supervisor                                 |
+| **the write RETRIES**                  | the row is created by the shim at registration, so the first write lands on nothing and silently no-ops  |
+| `stop` writes NULL, not 0              | a stopped supervisor is nobody publishing an answer; debris must not refuse a child that can reply       |
+| **the withdrawal cannot THROW**        | it runs before the socket closes, and a throw skipped that close — the socket then held the event loop   |
+| **NULL sends**                         | a DM refused by a stale flag is worse than the silence this ticket is about, and invisible to the sender |
+| the refusal names `--no-reply`         | only the operator who passed it can change it, so a generic refusal leaves the sender nothing to ask for |
+| it does not reuse `silentReplyWarning` | that text says the agent KEPT its answer, which faults it for an operator's flag — #417's class          |
+| **a room post is unaffected**          | a room reader was never told to reply, so nothing about a room post changes                              |
+
+🛑 **AN ABSENT ROW IS ALREADY REFUSED.** Before the child registers there is no
+row at all, and `send` answers `unknownPeerRefusal` naming the child handle. The
+retry window is therefore never a silent one.
