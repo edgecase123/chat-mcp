@@ -1061,18 +1061,21 @@ export async function startSupervisor(
    */
   let childFloor: number | null = null;
 
-  /** Once per child: see `childFloor`, and `warnedFallbackWindows` for why. */
-  let warnedGateUnderFloor = false;
-
   /**
-   * Once per child, and only after `warnedGateUnderFloor`.
+   * Whether the operator has been told this child's gate is unreachable.
    *
-   * 🛑 THE WARNING SAYS "NOTHING WILL RESTART THIS CHILD", WHICH A LOWER
-   * READING MAKES FALSE. An operator acts on that sentence — raising the gate
-   * is what it asks for — so leaving it standing is worse than never having
-   * logged it.
+   * 🛑 IT IS A STATE, NOT A SPENT BAND, AND IT IS FLIPPED BOTH WAYS. The
+   * warning says "NOTHING will restart this child", and an operator acts on
+   * that sentence by lowering or raising the gate. So the crossing in each
+   * direction is logged once, rather than each state being logged once for the
+   * child's whole life. See `childFloor`, and `warnedFallbackWindows` for the
+   * once-per-child shape this deliberately is NOT.
+   *
+   * ⚠️ A SECOND FLAG FOR THE WITHDRAWAL WAS DECORATIVE AND IS GONE. Two of
+   * its three clauses could be deleted with every test still green, because
+   * this one flipping false already closes the branch. Measured, not reasoned.
    */
-  let withdrewGateUnderFloor = false;
+  let warnedGateUnderFloor = false;
 
   /**
    * Restart the child if this reading has reached the handle's gate.
@@ -1127,14 +1130,6 @@ export async function startSupervisor(
       if (!warnedGateUnderFloor) {
         warnedGateUnderFloor = true;
 
-        // 🛑 SO THE OPPOSITE TRANSITION CAN SPEAK AGAIN. Each latch
-        // clears the other, which makes each CROSSING log once rather than
-        // each STATE logging once for the child's whole life. An operator who
-        // lowers the gate after a withdrawal would otherwise be left with
-        // "the gate is reachable again" as the last thing they read, about a
-        // child nothing can restart. Raised by claude1 on PR 487.
-        withdrewGateUnderFloor = false;
-
         log(
           `restart gate of ${gate}% is at or below ${childHandle}'s lowest reading of ${childFloor.toFixed(1)}%; ` +
             `a restart cannot reclaim that, so NOTHING will restart this child — raise the gate`,
@@ -1147,10 +1142,10 @@ export async function startSupervisor(
     // 🛑 WITHDRAWN THE MOMENT IT STOPS BEING TRUE, not at the next restart.
     // Reaching here means the floor is now under the gate, so the sentence the
     // operator read above no longer holds.
-    if (warnedGateUnderFloor && !withdrewGateUnderFloor) {
-      withdrewGateUnderFloor = true;
-
-      // See the warning above: each latch clears the other.
+    if (warnedGateUnderFloor) {
+      // 🛑 FALSE, SO A GATE LOWERED LATER CAN WARN AGAIN. This is the only
+      // thing closing this branch, which is why the second flag it replaced
+      // had no control that could fire.
       warnedGateUnderFloor = false;
 
       log(
@@ -1197,7 +1192,6 @@ export async function startSupervisor(
     gateRestartRequested = false;
     childFloor = null;
     warnedGateUnderFloor = false;
-    withdrewGateUnderFloor = false;
 
     /**
      * 🛑 EVERY CALLBACK GOES THROUGH THIS, NOT JUST THE ONE THAT BIT.
