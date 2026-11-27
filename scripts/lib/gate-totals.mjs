@@ -26,9 +26,10 @@ export function parseTestTotals(text) {
   const found = new Map();
 
   for (const line of String(text).split(/\r?\n/)) {
-    const m = /^\D*\b(tests|suites|pass|fail|cancelled|skipped|todo)\s+(\d+)\s*$/.exec(
-      line,
-    );
+    const m =
+      /^\D*\b(tests|suites|pass|fail|cancelled|skipped|todo)\s+(\d+)\s*$/.exec(
+        line,
+      );
     // Last wins: two reporters are attached and both print a block.
     if (m) found.set(m[1], Number(m[2]));
   }
