@@ -12,7 +12,8 @@ process.env.CHAT_MCP_HOME = mkdtempSync(
 
 const { migrate } = await import("../../src/storage/db.js");
 const dao = await import("../../src/storage/dao.js");
-const { startSupervisor } = await import("../../src/supervise/index.js");
+const { startSupervisor, CONTEXT_GATE_CADENCE_MS } =
+  await import("../../src/supervise/index.js");
 const { childHandleFor } = await import("../../src/supervise/grant.js");
 const { setHandleContextGate } =
   await import("../../src/storage/context-gate.js");
@@ -910,6 +911,212 @@ test("RAISING the gate withdraws the warning too, and the message blames neither
       "the message credits the reading for a gate the operator moved",
     );
   } finally {
+    await h.sup.stop();
+  }
+});
+
+/**
+ * #478 — the gate was only ever evaluated when a reading arrived.
+ *
+ * 🛑 WHAT THE CADENCE DOES NOT FIX, AND THE PR SAYS SO TOO. A timer cannot
+ * manufacture a reading, so it cannot close the 55-point band in the ticket:
+ * `cursor1-agent` fired at 54.3% and then at 94.8%, and child #2 ran 23 turns
+ * in between without one reading reaching this function. What the cadence DOES
+ * buy is an operator lowering a gate mid-run and having it honoured without
+ * waiting for a reading that may never come.
+ *
+ * ⚠️ `mock.timers` IS ENABLED BEFORE `harness`, NOT AFTER. The interval is
+ * created inside `startSupervisor`, and enabling the mock afterwards leaves a
+ * REAL interval running — the tick then does nothing, the test fails for the
+ * wrong reason, and a 60s wall-clock timer is left in the suite.
+ */
+test("a gate lowered mid-run is honoured on the cadence, with no new reading", async () => {
+  mock.timers.enable({ apis: ["setInterval"] });
+
+  const h = await harness("cad", 90);
+
+  try {
+    spawned(h.children[0]);
+
+    // Below 90, so nothing acts and this is the last reading the child gives.
+    h.children[0]?.report(at(50));
+
+    assert.deepEqual(
+      notices(h.children[0]),
+      [],
+      "a reading below the gate restarted the child",
+    );
+
+    // The operator lowers the gate under that standing reading. Today nothing
+    // re-reads it, so the child runs on until a reading that may never arrive.
+    setHandleContextGate(h.db, h.childHandle, 40);
+
+    mock.timers.tick(CONTEXT_GATE_CADENCE_MS);
+
+    assert.equal(
+      notices(h.children[0]).length,
+      1,
+      `the lowered gate was never re-evaluated; got ${JSON.stringify(h.children[0]?.sent)}`,
+    );
+  } finally {
+    mock.timers.reset();
+    await h.sup.stop();
+  }
+});
+
+test("🚨 the cadence does not restart a child whose last reading is under its gate", async () => {
+  // 🛑 THE NEGATIVE CONTROL FOR THE TEST ABOVE. A tick wired to restart
+  // unconditionally passes that one and restarts every supervised child once a
+  // minute for its whole life.
+  mock.timers.enable({ apis: ["setInterval"] });
+
+  const h = await harness("cadno", 40);
+
+  try {
+    spawned(h.children[0]);
+    h.children[0]?.report(at(30));
+
+    mock.timers.tick(CONTEXT_GATE_CADENCE_MS * 5);
+
+    assert.deepEqual(
+      notices(h.children[0]),
+      [],
+      "the cadence restarted a child that is under its gate",
+    );
+    assert.equal(h.children.length, 1, "the cadence replaced the child");
+  } finally {
+    mock.timers.reset();
+    await h.sup.stop();
+  }
+});
+
+test("🚨 a replacement child is not restarted on the reading that replaced it", async () => {
+  // 🛑 THE CACHED READING IS PER CHILD, FOR THE SAME REASON `gateRestartRequested`
+  // IS. A process-lifetime cache restarts the REPLACEMENT on its predecessor's
+  // last reading — on the first tick after the respawn, before the new child
+  // has reported anything at all. That is the restart loop #135 exists to end,
+  // and the cadence is what makes it reachable.
+  mock.timers.enable({ apis: ["setInterval"] });
+
+  const h = await harness("cadrepl", 40);
+
+  try {
+    spawned(h.children[0])?.report(at(50));
+
+    h.children[0]?.finishTurn();
+    h.children[0]?.finishTurn();
+
+    assert.equal(h.children.length, 2, "the child was never replaced");
+
+    mock.timers.tick(CONTEXT_GATE_CADENCE_MS * 2);
+
+    assert.deepEqual(
+      notices(h.children[1]),
+      [],
+      "the replacement was told to restart on its predecessor's reading",
+    );
+    assert.equal(
+      h.children.length,
+      2,
+      "the cadence replaced a child that had not reported",
+    );
+
+    // 🛑 THE SYMPTOM IS THE FLOOR, NOT THE RESTART, AND MY FIRST CUT OF THIS
+    // TEST MISSED IT. Dropping the per-child reset is GREEN on the two
+    // assertions above: the stale 50% becomes the REPLACEMENT's floor, which
+    // sits above the gate, so the #477 loop guard refuses the restart and logs
+    // this line instead. The child is then left with no restart for the rest of
+    // its life — the #477 failure, reached through the cadence. Caught by the
+    // control for this test coming back green.
+    assert.deepEqual(
+      h.lines.filter((l) => /raise the gate/i.test(l)),
+      [],
+      "the replacement inherited its predecessor's reading as its spawn floor",
+    );
+  } finally {
+    mock.timers.reset();
+    await h.sup.stop();
+  }
+});
+
+test("🚨 the cadence stops when the supervisor does", async () => {
+  // 🛑 AN UNCLEARED INTERVAL EVALUATES THE GATE ON A DEAD CHILD, and the gate's
+  // action is a restart — so a stopped supervisor would respawn the child it
+  // just killed. `finishShutdown` is the one place both the stop path and the
+  // own-exit path converge.
+  mock.timers.enable({ apis: ["setInterval"] });
+
+  const h = await harness("cadstop", 90);
+
+  try {
+    spawned(h.children[0]);
+    h.children[0]?.report(at(50));
+
+    await h.sup.stop();
+
+    // The gate is now reachable by that standing reading.
+    setHandleContextGate(h.db, h.childHandle, 40);
+
+    mock.timers.tick(CONTEXT_GATE_CADENCE_MS * 3);
+
+    assert.deepEqual(
+      notices(h.children[0]),
+      [],
+      "the cadence ran after the supervisor stopped",
+    );
+    assert.equal(
+      h.children.length,
+      1,
+      "a stopped supervisor respawned its child on the cadence",
+    );
+  } finally {
+    mock.timers.reset();
+    await h.sup.stop();
+  }
+});
+
+test("every context reading logs the gap since the one before it", async () => {
+  // 🛑 THIS IS THE INSTRUMENT THE TICKET ASKS FOR BY NAME. #478's own
+  // `What is NOT proven` is "what triggers a context report for a Cursor
+  // child", and the log carried NO line per reading — so a 55-point band
+  // between two firings cannot be told apart from readings that arrived every
+  // turn and jumped. One line per reading answers it with no probe spawn.
+  mock.timers.enable({ apis: ["setInterval", "Date"] });
+
+  const h = await harness("cadlog", 90);
+
+  try {
+    h.children[0]?.report(at(20));
+
+    const first = h.lines.filter((l) => /context 20\.0%/.test(l));
+
+    assert.equal(
+      first.length,
+      1,
+      `the first reading logged nothing; got ${JSON.stringify(h.lines)}`,
+    );
+    assert.match(
+      first[0]!,
+      /first reading/i,
+      "the first reading claimed a gap it cannot know",
+    );
+
+    mock.timers.tick(90_000);
+    h.children[0]?.report(at(25));
+
+    const second = h.lines.find((l) => /context 25\.0%/.test(l));
+
+    assert.ok(
+      second,
+      `the second reading logged nothing; got ${JSON.stringify(h.lines)}`,
+    );
+    assert.match(
+      second,
+      /90s since/i,
+      `the gap was wrong or missing; got ${JSON.stringify(second)}`,
+    );
+  } finally {
+    mock.timers.reset();
     await h.sup.stop();
   }
 });
