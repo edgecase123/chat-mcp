@@ -68,16 +68,37 @@ say "transcript: $LOG"
 # `>` not `>>`: one log per worktree, overwritten each run.
 : > "$LOG"
 
+# 🛑 NOT `npm test -- --test-timeout=X`. That lands AFTER the glob and node
+# SILENTLY IGNORES it, so the knob reads as live and does nothing. Measured
+# both ways. The `test` script interpolates this variable instead, which keeps
+# one source of truth and makes the override real.
+export GATE_TEST_TIMEOUT_MS="$TEST_TIMEOUT_MS"
+
+# 🛑 `set -m` gives the run its OWN PROCESS GROUP so the ceiling can kill the
+# GROUP. Killing the npm pid alone leaves `node --test` alive and reparented to
+# pid 1: the ceiling would not end the hang it exists for, and the orphan then
+# poisons the next session's `pgrep -f "node --test"` pre-flight.
+set -m
 set +e
-npm test -- --test-timeout="$TEST_TIMEOUT_MS" >"$LOG" 2>&1 &
+npm test >"$LOG" 2>&1 &
 TEST_PID=$!
 
-( sleep "$WALL_SECONDS"; kill -0 "$TEST_PID" 2>/dev/null && kill -9 "$TEST_PID" 2>/dev/null ) &
+# 🛑 THE CEILING IS REAPED BY GROUP, BECAUSE `kill $KILLER_PID` TAKES THE
+# SUBSHELL AND LEAVES THE `sleep` IT SPAWNED. That orphan holds the stdout it
+# inherited. Writing to a file nobody notices; read through a PIPE, which is
+# how CI reads this, a GREEN gate blocks for the whole ceiling before the
+# caller ever sees EOF.
+( sleep "$WALL_SECONDS"
+  if kill -0 "$TEST_PID" 2>/dev/null; then
+    kill -9 -- "-$TEST_PID" 2>/dev/null || kill -9 "$TEST_PID" 2>/dev/null
+  fi
+) &
 KILLER_PID=$!
+set +m
 
 wait "$TEST_PID"
 TEST_STATUS=$?
-kill "$KILLER_PID" 2>/dev/null
+kill -- "-$KILLER_PID" 2>/dev/null || kill "$KILLER_PID" 2>/dev/null
 set -e
 
 tail -40 "$LOG"

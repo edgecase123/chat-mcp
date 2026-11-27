@@ -62,9 +62,21 @@ They are different failures and neither ceiling catches the other.
 | `--test-timeout`, per test | 60000ms | one test that never resolves                               |
 | wall clock, whole run      | 1800s   | a run whose tests finished and whose process will not exit |
 
-Override with `GATE_TEST_TIMEOUT_MS` and `GATE_WALL_SECONDS`. The per-test
-default also lives in `package.json`'s `test` script, so a bare `npm test`
-cannot hang forever either.
+Override with `GATE_TEST_TIMEOUT_MS` and `GATE_WALL_SECONDS`.
+
+🛑 **The per-test knob travels as an ENV VAR, not a flag.**
+`npm test -- --test-timeout=X` puts the flag after the glob and node
+**silently ignores it**, so the override reads as live and does nothing.
+`package.json`'s `test` script interpolates `${GATE_TEST_TIMEOUT_MS:-60000}`
+instead. One source of truth, and a bare `npm test` still cannot hang forever.
+
+🛑 **The wall ceiling kills process GROUPS, both of them.** `kill` on the npm
+pid leaves `node --test` alive and reparented to pid 1 — the ceiling would not
+end the hang it exists for, and the orphan then poisons the next session's
+`pgrep -f "node --test"` pre-flight. The same applies to the ceiling's own
+subshell: killing it leaves the `sleep` it spawned holding the stdout it
+inherited, so a GREEN gate read through a pipe blocks for the full ceiling
+before the caller sees EOF.
 
 ## Exit codes
 
