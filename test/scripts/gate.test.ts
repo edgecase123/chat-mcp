@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -241,7 +242,12 @@ test("🛑 the wall ceiling kills the RUNNER, not just the npm wrapper", () => {
   // 🛑 REAP BEFORE ASSERTING. When this test fails, it fails BECAUSE the stub
   // is still alive — so asserting first strands it on a shared host, which is
   // the poisoned `pgrep` pre-flight this very change exists to prevent.
-  const pid = Number(readFileSync(pidFile, "utf8").trim());
+  // ⚠️ READ DEFENSIVELY. A `gate.sh` that dies UPSTREAM of the ceiling never
+  // runs the stub, so a bare read throws ENOENT and buries the named assertion
+  // below under a filesystem error.
+  const pid = existsSync(pidFile)
+    ? Number(readFileSync(pidFile, "utf8").trim())
+    : 0;
   const alive = isAlive(pid);
   if (alive) {
     try {
@@ -261,6 +267,16 @@ test("🛑 the wall ceiling kills the RUNNER, not just the npm wrapper", () => {
 });
 
 function isAlive(pid: number): boolean {
+  // 🛑 pid 0 IS EVERY PROCESS IN THE CALLER'S GROUP, and -1 is reserved too.
+  // Measured: `process.kill(0, 0)` SUCCEEDS. So a sentinel from a pidfile the
+  // stub never wrote would read as alive, and the SIGKILL the caller then
+  // sends would take this test runner with it.
+  //
+  // ⚠️ ONE CLAUSE ON PURPOSE. A `!Number.isInteger(pid)` half looks prudent and
+  // changes no outcome: every non-integer, `NaN` included, makes
+  // `process.kill` throw and the catch below already answers false. An
+  // untestable half of a guard is worse than no half.
+  if (pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
