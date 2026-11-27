@@ -24,15 +24,24 @@ export interface CanReplyDeps {
   readonly canSend: () => boolean;
   readonly retryMs: number;
   readonly schedule?: (fn: () => void, ms: number) => ScheduledRetry;
+  /**
+   * Where a write that threw is reported.
+   *
+   * 🛑 IT IS NOT OPTIONAL IN SPIRIT. Both callers that swallow a throw do it
+   * because the alternative is worse, and a swallow with nowhere to report
+   * leaves a row still reading `can_reply = 0` for a child that is gone.
+   */
+  readonly onError?: (err: unknown) => void;
 }
 
 export interface CanReplyPublisher {
   /** Publish the current answer. Returns whether a row took it. */
   publish(): boolean;
-  /** Withdraw the answer, because nothing is publishing one any more. */
+  /**
+   * Withdraw the answer, because nothing is publishing one any more. Also
+   * cancels a pending retry, so this is the only teardown call needed.
+   */
   clear(): void;
-  /** Drop a pending retry without writing. */
-  stop(): void;
 }
 
 function defaultSchedule(fn: () => void, ms: number): ScheduledRetry {
@@ -64,7 +73,19 @@ export function createCanReplyPublisher(deps: CanReplyDeps): CanReplyPublisher {
     if (!pending) {
       pending = schedule(() => {
         pending = null;
-        attempt();
+
+        // 🛑 THE RETRY HAS NO CALLER. A throw here is not a failed write, it is
+        // an unhandled exception in a timer callback and it takes the process
+        // with it. Found by claude2 reviewing PR 486, from source.
+        //
+        // 🛑 AND IT DOES NOT RESCHEDULE. The only thing that throws is a
+        // database that has gone away, and that does not revive — retrying
+        // would be a timer logging forever.
+        try {
+          attempt();
+        } catch (e) {
+          deps.onError?.(e);
+        }
       }, deps.retryMs);
     }
 
@@ -85,11 +106,12 @@ export function createCanReplyPublisher(deps: CanReplyDeps): CanReplyPublisher {
       // which closes its database on purpose.
       try {
         deps.write(null);
-      } catch {
+      } catch (e) {
         // A withdrawal that cannot land is not worth failing a teardown over.
-        // The row is stale either way, and `NULL` is the fail-open value.
+        // It is worth SAYING: the row still reads 0, so DMs to a child that is
+        // already gone keep being refused until something rewrites it.
+        deps.onError?.(e);
       }
     },
-    stop: cancelPending,
   };
 }

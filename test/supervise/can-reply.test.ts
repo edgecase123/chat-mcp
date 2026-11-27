@@ -100,7 +100,7 @@ test("🚨 a child with no send tool publishes 0, and one with it publishes 1", 
       0,
       "a landed write must not schedule a retry",
     );
-    pub.stop();
+    pub.clear();
   }
 });
 
@@ -135,7 +135,7 @@ test("🚨 an absent row RETRIES, and the retry lands once the child registers",
     "the retry did not publish on registration",
   );
   assert.equal(clock.pending, 0, "a landed write must stop the retry");
-  pub.stop();
+  pub.clear();
 });
 
 test("🚨 two failed publishes keep ONE retry, not one per call", () => {
@@ -151,7 +151,7 @@ test("🚨 two failed publishes keep ONE retry, not one per call", () => {
   pub.publish();
   pub.publish();
   assert.equal(clock.scheduled, 1, "the second call duplicated the timer");
-  pub.stop();
+  pub.clear();
 });
 
 /**
@@ -174,7 +174,7 @@ test("🚨 clear publishes NULL and cancels a pending retry", () => {
   assert.deepEqual(row.writes, [0, null], "clear must publish NULL");
 });
 
-test("🚨 stop cancels the retry, so a gone child stops being written", () => {
+test("🚨 clear cancels the retry, so a gone child stops being written", () => {
   const row = fakeRow();
   const clock = fakeClock();
   const pub = createCanReplyPublisher({
@@ -186,12 +186,12 @@ test("🚨 stop cancels the retry, so a gone child stops being written", () => {
 
   pub.publish();
   assert.equal(clock.pending, 1);
-  pub.stop();
-  assert.equal(clock.cancelled, 1, "stop did not cancel the pending retry");
+  pub.clear();
+  assert.equal(clock.cancelled, 1, "clear did not cancel the pending retry");
   assert.equal(clock.pending, 0);
 
   clock.fire();
-  assert.deepEqual(row.writes, [], "a cancelled retry must not write");
+  assert.deepEqual(row.writes, [], "a cancelled retry must not write again");
 });
 
 /**
@@ -220,11 +220,11 @@ test("🚨 clear SWALLOWS a write that throws, so a teardown cannot be skipped",
 });
 
 /**
- * ⚠️ `publish` IS NOT GIVEN THE SAME TREATMENT, and that is the decision. It
- * runs inside the supervisor's own startup and turn paths, where a database
- * that cannot be written is worth a throw the caller sees.
+ * ⚠️ A DIRECT `publish` STILL THROWS, and that is the decision. It runs inside
+ * the supervisor's own startup and grant-change paths, where a caller exists
+ * to see it.
  */
-test("🚨 publish still THROWS, because only the teardown path is protected", () => {
+test("🚨 a direct publish still THROWS, because a caller is there to see it", () => {
   const clock = fakeClock();
   const pub = createCanReplyPublisher({
     write: () => {
@@ -236,4 +236,64 @@ test("🚨 publish still THROWS, because only the teardown path is protected", (
   });
 
   assert.throws(() => pub.publish(), /database was replaced/);
+});
+
+/**
+ * 🛑 THE RETRY HAS NO CALLER, SO A THROW THERE IS NOT A FAILED WRITE — IT IS AN
+ * UNHANDLED EXCEPTION AND IT TAKES THE PROCESS WITH IT. The pending retry
+ * exists on exactly the path the ticket describes: a row that is not there yet.
+ * Found by claude2 reviewing PR 486, from source, before it could be measured.
+ */
+test("🚨 a throw inside the RETRY is reported, never thrown at the loop", () => {
+  const clock = fakeClock();
+  const seen: unknown[] = [];
+  let calls = 0;
+  const pub = createCanReplyPublisher({
+    write: () => {
+      calls += 1;
+      // The first call fails cleanly, so a retry is scheduled. The retry then
+      // hits a database that has gone away.
+      if (calls === 1) return false;
+      throw new Error("database was replaced");
+    },
+    canSend: () => false,
+    retryMs: 1000,
+    schedule: clock.schedule,
+    onError: (e) => seen.push(e),
+  });
+
+  assert.equal(pub.publish(), false, "the first write must fail cleanly");
+  assert.equal(clock.pending, 1, "there must be a retry to fire");
+
+  assert.doesNotThrow(
+    () => clock.fire(),
+    "the retry threw at the event loop; that is a process exit",
+  );
+  assert.equal(seen.length, 1, "the failure was swallowed silently");
+  assert.equal(
+    clock.pending,
+    0,
+    "a database that threw will not revive, so the retry must STOP",
+  );
+});
+
+/**
+ * ⚠️ THE TEARDOWN CATCH REPORTS TOO. A silent catch hides a row still reading
+ * `can_reply = 0`, which refuses DMs to a child that is gone.
+ */
+test("🚨 a failed withdrawal is REPORTED, not silently dropped", () => {
+  const clock = fakeClock();
+  const seen: unknown[] = [];
+  const pub = createCanReplyPublisher({
+    write: () => {
+      throw new Error("database was replaced");
+    },
+    canSend: () => false,
+    retryMs: 1000,
+    schedule: clock.schedule,
+    onError: (e) => seen.push(e),
+  });
+
+  assert.doesNotThrow(() => pub.clear());
+  assert.equal(seen.length, 1, "the withdrawal failure was never reported");
 });

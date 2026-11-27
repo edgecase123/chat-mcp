@@ -803,6 +803,12 @@ export async function startSupervisor(
       dao.setAgentCanReply(approvalsDb, childBusHandle(), value),
     canSend: childCanSend,
     retryMs: opts.canReplyRetryMs ?? 1000,
+    onError: (e) =>
+      log(
+        `FAILED to publish ${childBusHandle()}'s reply capability: ${
+          e instanceof Error ? e.message : String(e)
+        }; a DM to it may be refused until something rewrites the row`,
+      ),
   });
   canReply.publish();
 
