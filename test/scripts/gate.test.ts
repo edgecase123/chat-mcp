@@ -271,7 +271,12 @@ function isAlive(pid: number): boolean {
   // Measured: `process.kill(0, 0)` SUCCEEDS. So a sentinel from a pidfile the
   // stub never wrote would read as alive, and the SIGKILL the caller then
   // sends would take this test runner with it.
-  if (!Number.isInteger(pid) || pid <= 0) return false;
+  //
+  // ⚠️ ONE CLAUSE ON PURPOSE. A `!Number.isInteger(pid)` half looks prudent and
+  // changes no outcome: every non-integer, `NaN` included, makes
+  // `process.kill` throw and the catch below already answers false. An
+  // untestable half of a guard is worse than no half.
+  if (pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
