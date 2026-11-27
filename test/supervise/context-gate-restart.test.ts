@@ -17,6 +17,7 @@ const { childHandleFor } = await import("../../src/supervise/grant.js");
 const { setHandleContextGate } =
   await import("../../src/storage/context-gate.js");
 const { deadPid } = await import("../support/dead-pid.js");
+const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 import type { ContextSnapshot } from "../../src/supervise/context-gauge.js";
 import { supervisorOptions } from "../support/supervisor-options.js";
 import { releasePointerTurn } from "../support/handoff-pointer.js";
@@ -572,7 +573,7 @@ test("a reading with no window cannot set the floor", async () => {
     );
     assert.equal(h.children.length, 1);
     assert.ok(
-      h.lines.find((l) => /spawn fill/i.test(l)),
+      h.lines.find((l) => /lowest reading/i.test(l)),
       `the gate was not reported as unreachable; got ${JSON.stringify(h.lines)}`,
     );
   } finally {
@@ -613,6 +614,301 @@ test("the gate restart is logged, naming the reading and the gate it crossed", a
     // the gate or the reading is the thing they want to change.
     assert.match(line, /50/);
     assert.match(line, new RegExp(h.childHandle));
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+/**
+ * #477 — the spawn floor latched the FIRST reading, and that reading can be
+ * wrong.
+ *
+ * 🛑 THE NUMBERS BELOW ARE THE MEASURED ONES, NOT CHOSEN ONES. `cursor1-agent`
+ * reported 57.4% while its real fill was 23.9%, against a gate of 40. The
+ * first reading disabled the gate for the child's whole life, so nothing
+ * restarted it and it ran until it stopped answering.
+ *
+ * 🛑 WHAT MAKES THESE ABLE TO FAIL IS THE PAIRED SEQUENCE THAT NEVER DROPS.
+ * A floor that simply stopped disabling the gate would pass the first test and
+ * reintroduce the restart loop the guard exists to prevent — which is the arm
+ * lee rejected by name on the ticket.
+ */
+
+/** The reading `cursor1-agent` gave, which was wrong. */
+const WRONG_FILL = 57.4;
+
+/** What its window actually held at the same moment. */
+const REAL_FILL = 23.9;
+
+test("a LOWER later reading pulls the floor down, and the gate works again", async () => {
+  const h = await harness("fmin", 40);
+
+  try {
+    // The wrong reading first, exactly as it arrived. Today this latches as
+    // the floor and the gate is dead from here on.
+    h.children[0]?.report(at(WRONG_FILL));
+
+    // The real fill, which is well under the gate.
+    h.children[0]?.report(at(REAL_FILL));
+
+    // A reading that has genuinely reached the operator's gate.
+    h.children[0]?.report(at(40));
+
+    assert.equal(
+      notices(h.children[0]).length,
+      1,
+      `the gate stayed disabled by a wrong first reading; sent ${JSON.stringify(h.children[0]?.sent)}`,
+    );
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("a floor that never drops keeps the gate off, so nothing restart-loops", async () => {
+  // 🛑 THE PAIRED CONTROL. lee rejected clamping on #477 because a replacement
+  // child boots straight back above the gate and restarts again, burning
+  // billed turns without finishing one. A floor that only ever falls cannot do
+  // that; one that is reset or ignored can.
+  const h = await harness("fhigh", 40);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+    h.children[0]?.report(at(60));
+    h.children[0]?.report(at(58));
+
+    assert.deepEqual(
+      notices(h.children[0]),
+      [],
+      "a child whose fill never fell below its gate was restarted anyway",
+    );
+    assert.equal(h.children.length, 1, "the child was replaced");
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("the unreachable-gate warning is RETRACTED once a lower floor revives it", async () => {
+  // 🛑 WITHOUT THIS THE OPERATOR IS LEFT WITH A FALSE SENTENCE. The first
+  // warning says "NOTHING will restart this child", and the moment a lower
+  // reading pulls the floor under the gate that is no longer true. A warning
+  // that cannot be withdrawn is worse than none, because it is acted on.
+  const h = await harness("fundo", 40);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+
+    assert.ok(
+      h.lines.find((l) => /NOTHING will restart/i.test(l)),
+      `the gate was never reported unreachable; got ${JSON.stringify(h.lines)}`,
+    );
+
+    h.children[0]?.report(at(REAL_FILL));
+
+    const undo = h.lines.find((l) => /can restart|is reachable again/i.test(l));
+
+    assert.ok(
+      undo,
+      `the unreachable warning was never withdrawn; got ${JSON.stringify(h.lines)}`,
+    );
+    // Both numbers, so the operator can see WHICH reading revived it.
+    assert.match(undo, /40/);
+    assert.match(undo, /23\.9/);
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("the retraction is logged ONCE, not on every reading under the gate", async () => {
+  // The warning's own `warnedGateUnderFloor` latch exists because a line per
+  // reading is a line an operator stops reading. Its withdrawal needs the
+  // same property, and a fresh flag is the thing most likely to be forgotten.
+  const h = await harness("fonce", 40);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+    h.children[0]?.report(at(REAL_FILL));
+    h.children[0]?.report(at(20));
+    h.children[0]?.report(at(21));
+
+    const undos = h.lines.filter((l) =>
+      /can restart|is reachable again/i.test(l),
+    );
+
+    assert.equal(
+      undos.length,
+      1,
+      `the retraction repeated; got ${JSON.stringify(undos)}`,
+    );
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("a replacement child can be warned and retracted on its own account", async () => {
+  // 🛑 THE RETRACTION FLAG NEEDS THE SAME RESET THE WARNING FLAG HAS. Without
+  // it the first child spends the retraction for every child after it, and a
+  // replacement that recovers is never reported as recovered. This is the
+  // clause most likely to be left out, because nothing else in the file reads
+  // it. `feedback_pin_every_clause_of_a_compound_guard`.
+  const h = await harness("frepl", 40);
+
+  try {
+    // Child one: warned, then withdrawn, then restarted at its gate.
+    h.children[0]?.report(at(WRONG_FILL));
+    h.children[0]?.report(at(REAL_FILL));
+    h.children[0]?.report(at(40));
+    h.children[0]?.finishTurn();
+    h.children[0]?.finishTurn();
+
+    assert.equal(h.children.length, 2, "the child was never replaced");
+
+    const before = h.lines.filter((l) => /is reachable again/i.test(l)).length;
+
+    // Child two walks the same path, so it is owed its own pair of lines.
+    h.children[1]?.report(at(WRONG_FILL));
+    h.children[1]?.report(at(REAL_FILL));
+
+    assert.equal(
+      h.lines.filter((l) => /is reachable again/i.test(l)).length,
+      before + 1,
+      "the replacement child was never told its gate came back",
+    );
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("a gate LOWERED after the retraction warns again, so the last line is true", async () => {
+  // 🛑 EACH CROSSING LOGS ONCE, NOT EACH STATE ONCE EVER. Both latches are
+  // per-child, so without them clearing each other the operator who lowers the
+  // gate after a withdrawal is left reading "the gate is reachable again"
+  // about a child nothing can restart. The floor only falls, but the GATE
+  // moves — `resolveContextGate` is read on every reading, which
+  // `a gate changed mid-run is honoured by the NEXT reading` already pins.
+  // Raised by claude1 reviewing PR 487.
+  const h = await harness("fredo", 40);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+    h.children[0]?.report(at(REAL_FILL));
+
+    assert.equal(
+      h.lines.filter((l) => /is reachable again/i.test(l)).length,
+      1,
+      "the withdrawal never happened, so this test proves nothing",
+    );
+
+    // The operator lowers the gate under the floor the child now reads.
+    setHandleContextGate(h.db, h.childHandle, 20);
+    h.children[0]?.report(at(REAL_FILL));
+
+    const warns = h.lines.filter((l) => /NOTHING will restart/i.test(l));
+
+    assert.equal(
+      warns.length,
+      2,
+      `the child became unrestartable in silence; got ${JSON.stringify(h.lines)}`,
+    );
+    // The SECOND warning carries the new gate, not the old one.
+    assert.match(warns[1]!, /20/);
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("a replacement that is NOT a gate restart still gets its own warning", async () => {
+  // 🛑 THE CONTROL FOR THE PER-CHILD RESET, AND MY FIRST ATTEMPT AT IT COULD
+  // NOT FAIL. Every other replacement in this file is driven BY the gate, and
+  // the gate retracts the warning on its way there — so the flag was already
+  // false at replacement and deleting the reset changed nothing. Measured: the
+  // reset's mutant passed 21 of 21.
+  //
+  // 🛑 AN OPERATOR APPROVAL IS THE PATH THAT REACHES IT. It replaces the child
+  // for reasons that have nothing to do with the gate, so the warning is still
+  // standing when the new child arrives. A child that inherits it is a child
+  // whose own unreachable gate is never reported.
+  const h = await harness("fappr", 40);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+
+    const warned = h.lines.filter((l) => /NOTHING will restart/i.test(l));
+
+    assert.equal(
+      warned.length,
+      1,
+      `the first child was never warned, so this test proves nothing; got ${JSON.stringify(h.lines)}`,
+    );
+
+    await deliverToSupervisor(h.handle, {
+      id: 1,
+      to: h.handle,
+      from: "lee",
+      ts: Date.now(),
+      approval: {
+        approvalId: 1,
+        decision: "approve",
+        requested: "rm in '/tmp/gate.txt'",
+        grant: "Bash(rm -f /tmp/gate.txt)",
+        sessionId: "sess-1",
+      },
+    });
+
+    assert.equal(
+      h.children.length,
+      2,
+      "the approval did not replace the child, so there is no second child to warn",
+    );
+
+    h.children[1]?.report(at(WRONG_FILL));
+
+    assert.equal(
+      h.lines.filter((l) => /NOTHING will restart/i.test(l)).length,
+      2,
+      `the replacement inherited the warning and its own dead gate went unreported; got ${JSON.stringify(h.lines)}`,
+    );
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("RAISING the gate withdraws the warning too, and the message blames neither", async () => {
+  // 🛑 THE OTHER WAY INTO THE WITHDRAWAL, AND IT HAD NO CONTROL. Every other
+  // test reaches that branch by the floor FALLING. `childFloor` is monotonic,
+  // so it is reached just as often by the operator RAISING the gate — which is
+  // literally what the warning asks them to do. Raised by claude1 on PR 487.
+  const h = await harness("frais", 50);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+
+    assert.equal(
+      h.lines.filter((l) => /raise the gate/i.test(l)).length,
+      1,
+      `the child was never warned, so this test proves nothing; got ${JSON.stringify(h.lines)}`,
+    );
+
+    // The operator does exactly what the warning asked.
+    setHandleContextGate(h.db, h.childHandle, 60);
+    h.children[0]?.report(at(WRONG_FILL));
+
+    const undo = h.lines.find((l) => /is withdrawn/i.test(l));
+
+    assert.ok(
+      undo,
+      `raising the gate left the false warning standing; got ${JSON.stringify(h.lines)}`,
+    );
+    // Both numbers, so the operator can see the crossing.
+    assert.match(undo, /57\.4/);
+    assert.match(undo, /60/);
+
+    // 🛑 AND IT MUST NOT CREDIT THE READING. The floor did not move here, the
+    // gate did. "now reads" is true and misleading on this path.
+    assert.doesNotMatch(
+      undo,
+      /now reads/i,
+      "the message credits the reading for a gate the operator moved",
+    );
   } finally {
     await h.sup.stop();
   }

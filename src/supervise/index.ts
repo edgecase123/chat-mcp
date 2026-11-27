@@ -1042,7 +1042,7 @@ export async function startSupervisor(
   let gateRestartRequested = false;
 
   /**
-   * This child's first reading, which is as close to its spawn fill as the
+   * This child's LOWEST reading, which is as close to its spawn fill as the
    * driver reports. `null` until one arrives.
    *
    * 🛑 A GATE AT OR BELOW IT IS AN INFINITE RESTART LOOP, AND EVERY GATE FROM
@@ -1052,18 +1052,29 @@ export async function startSupervisor(
    * first reading is the same number. The restart reclaims nothing and the next
    * reading asks for another. Found by claude2 reviewing this before it merged.
    *
-   * ⚠️ IT IS THE FIRST READING, NOT A TRUE TURN-0 FILL, AND THE GAP IS
-   * NARROWER THAN THAT SOUNDS. `claudeContextUsage` takes a reading from every
-   * main-session `assistant` event, so a turn that reads twenty files emits
-   * twenty of them and only the first sets this — before any tool result comes
-   * back. What is left uncovered is a first PROMPT large enough to exceed the
-   * gate alone. That child is refused a restart it could have used, the log
-   * names the reason, and the operator is left where they were before this
-   * trigger existed. Better than a loop. claude2 asked which one it was.
+   * ⚠️ IT IS THE LOWEST READING SEEN, NOT THE FIRST ONE. A first reading
+   * can be wrong: `cursor1-agent` reported 57.4% while its window actually
+   * held 23.9%, which latched a floor above the gate and left the child with
+   * no restart for the rest of its life. The minimum only ever falls, so a
+   * child whose fill genuinely never drops below its gate still never
+   * restarts — which is the loop guard above, intact.
    */
   let childFloor: number | null = null;
 
-  /** Once per child: see `childFloor`, and `warnedFallbackWindows` for why. */
+  /**
+   * Whether the operator has been told this child's gate is unreachable.
+   *
+   * 🛑 IT IS A STATE, NOT A SPENT BAND, AND IT IS FLIPPED BOTH WAYS. The
+   * warning says "NOTHING will restart this child", and an operator acts on
+   * that sentence by lowering or raising the gate. So the crossing in each
+   * direction is logged once, rather than each state being logged once for the
+   * child's whole life. See `childFloor`, and `warnedFallbackWindows` for the
+   * once-per-child shape this deliberately is NOT.
+   *
+   * ⚠️ A SECOND FLAG FOR THE WITHDRAWAL WAS DECORATIVE AND IS GONE. Two of
+   * its three clauses could be deleted with every test still green, because
+   * this one flipping false already closes the branch. Measured, not reasoned.
+   */
   let warnedGateUnderFloor = false;
 
   /**
@@ -1108,7 +1119,9 @@ export async function startSupervisor(
     const percent = contextPercent(used, total);
     const gate = resolveContextGate(approvalsDb, childHandle);
 
-    childFloor ??= percent;
+    // 🛑 THE MINIMUM, NOT THE FIRST READING. See the declaration: a wrong
+    // first reading otherwise disables this child's gate permanently.
+    childFloor = childFloor === null ? percent : Math.min(childFloor, percent);
 
     // 🛑 REFUSED FOR THIS CHILD'S WHOLE LIFETIME, not just for the reading
     // that showed it. Skipping one reading halves the loop's rate and does not
@@ -1116,13 +1129,34 @@ export async function startSupervisor(
     if (childFloor >= gate) {
       if (!warnedGateUnderFloor) {
         warnedGateUnderFloor = true;
+
         log(
-          `restart gate of ${gate}% is at or below ${childHandle}'s spawn fill of ${childFloor.toFixed(1)}%; ` +
+          `restart gate of ${gate}% is at or below ${childHandle}'s lowest reading of ${childFloor.toFixed(1)}%; ` +
             `a restart cannot reclaim that, so NOTHING will restart this child — raise the gate`,
         );
       }
 
       return;
+    }
+
+    // 🛑 WITHDRAWN THE MOMENT IT STOPS BEING TRUE, not at the next restart.
+    // Reaching here means the floor is now under the gate, so the sentence the
+    // operator read above no longer holds.
+    if (warnedGateUnderFloor) {
+      // 🛑 FALSE, SO A GATE LOWERED LATER CAN WARN AGAIN. This is the only
+      // thing closing this branch, which is why the second flag it replaced
+      // had no control that could fire.
+      warnedGateUnderFloor = false;
+
+      // 🛑 SAY WHAT CROSSED, NOT WHAT WAS READ. `childFloor` is monotonic,
+      // so this branch is reached just as often by the operator RAISING the
+      // gate — which is what the warning above asked them to do. "now reads"
+      // credits the reading for work the operator did. Raised by claude1 on
+      // PR 487.
+      log(
+        `${childHandle}'s lowest reading of ${childFloor.toFixed(1)}% is now under its restart gate of ${gate}% — ` +
+          `the earlier warning is withdrawn and the gate is reachable again`,
+      );
     }
 
     if (percent < gate) return;
