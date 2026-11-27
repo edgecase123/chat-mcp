@@ -193,3 +193,47 @@ test("🚨 stop cancels the retry, so a gone child stops being written", () => {
   clock.fire();
   assert.deepEqual(row.writes, [], "a cancelled retry must not write");
 });
+
+/**
+ * 🛑 THE WITHDRAWAL RUNS DURING TEARDOWN, SO IT MUST NOT THROW. Measured: it
+ * does run before `listener.close()`, and a throw there skipped the socket
+ * close entirely — the supervisor's own comment says the socket going last is
+ * what proves the child is gone. `context-gauge.test.ts` closes its database
+ * on purpose, and the whole file then hung for the full test timeout.
+ *
+ * ⚠️ THE POSITION IS DELIBERATE AND STAYS. Clearing after the socket widens
+ * the window where the row still claims an answer. The fix is a write that
+ * cannot fail the teardown, not a later write.
+ */
+test("🚨 clear SWALLOWS a write that throws, so a teardown cannot be skipped", () => {
+  const clock = fakeClock();
+  const pub = createCanReplyPublisher({
+    write: () => {
+      throw new Error("database was replaced");
+    },
+    canSend: () => false,
+    retryMs: 1000,
+    schedule: clock.schedule,
+  });
+
+  assert.doesNotThrow(() => pub.clear());
+});
+
+/**
+ * ⚠️ `publish` IS NOT GIVEN THE SAME TREATMENT, and that is the decision. It
+ * runs inside the supervisor's own startup and turn paths, where a database
+ * that cannot be written is worth a throw the caller sees.
+ */
+test("🚨 publish still THROWS, because only the teardown path is protected", () => {
+  const clock = fakeClock();
+  const pub = createCanReplyPublisher({
+    write: () => {
+      throw new Error("database was replaced");
+    },
+    canSend: () => false,
+    retryMs: 1000,
+    schedule: clock.schedule,
+  });
+
+  assert.throws(() => pub.publish(), /database was replaced/);
+});

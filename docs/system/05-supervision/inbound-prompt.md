@@ -296,6 +296,7 @@ agents.can_reply   0     the supervisor says this child holds no send tool
 | the supervisor writes it, not the shim | `--no-reply` yields no grant, and that fact lives only in the supervisor                                 |
 | **the write RETRIES**                  | the row is created by the shim at registration, so the first write lands on nothing and silently no-ops  |
 | `stop` writes NULL, not 0              | a stopped supervisor is nobody publishing an answer; debris must not refuse a child that can reply       |
+| **the withdrawal cannot THROW**        | it runs before the socket closes, and a throw skipped that close — the socket then held the event loop   |
 | **NULL sends**                         | a DM refused by a stale flag is worse than the silence this ticket is about, and invisible to the sender |
 | the refusal names `--no-reply`         | only the operator who passed it can change it, so a generic refusal leaves the sender nothing to ask for |
 | it does not reuse `silentReplyWarning` | that text says the agent KEPT its answer, which faults it for an operator's flag — #417's class          |

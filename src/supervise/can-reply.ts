@@ -75,9 +75,20 @@ export function createCanReplyPublisher(deps: CanReplyDeps): CanReplyPublisher {
     publish: attempt,
     clear: () => {
       cancelPending();
+
       // 🛑 NULL, NOT 0. A stopped supervisor is not a child that cannot reply,
       // it is nobody publishing an answer — and the sender must go ahead.
-      deps.write(null);
+      //
+      // 🛑 AND IT CANNOT THROW. This runs during teardown, BEFORE the socket
+      // closes, and a throw here skipped that close — the socket then held the
+      // event loop and a whole test file hung. Measured on `context-gauge`,
+      // which closes its database on purpose.
+      try {
+        deps.write(null);
+      } catch {
+        // A withdrawal that cannot land is not worth failing a teardown over.
+        // The row is stale either way, and `NULL` is the fail-open value.
+      }
     },
     stop: cancelPending,
   };
