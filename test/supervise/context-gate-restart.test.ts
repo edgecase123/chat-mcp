@@ -1120,3 +1120,83 @@ test("every context reading logs the gap since the one before it", async () => {
     await h.sup.stop();
   }
 });
+
+test("🚨 a windowless reading does not stand in for the gate's standing reading", async () => {
+  // 🛑 THE FINDING THAT KILLED THE FIRST CUT OF THIS CADENCE. The cache was
+  // written before the gate's own window guard, so ONE windowless reading
+  // overwrote a valid standing one and every later tick returned early — the
+  // cadence dead until the next valid reading, which by this ticket's own
+  // premise is 23 turns away. Raised by claude1 reviewing PR 489.
+  mock.timers.enable({ apis: ["setInterval"] });
+
+  const h = await harness("cadnw", 90);
+
+  try {
+    spawned(h.children[0]);
+    h.children[0]?.report(at(50));
+
+    // The vendor seam emits one of these; `cursorContextSnapshot` returns a
+    // fallback window, but `ContextSnapshot` is the seam and the next driver
+    // is not bound by that.
+    h.children[0]?.report(NO_WINDOW);
+
+    // 🛑 MATCHED ON THIS LINE'S OWN CLAUSE, NOT ON "no window". The gauge path
+    // logs "no window size known for model ..." for the SAME reading, so a
+    // case-insensitive /NO window/ counts two lines and fails on the real fix.
+    assert.equal(
+      h.lines.filter((l) =>
+        /the standing reading and the gate are unchanged/.test(l),
+      ).length,
+      1,
+      `the windowless reading was never reported; got ${JSON.stringify(h.lines)}`,
+    );
+
+    setHandleContextGate(h.db, h.childHandle, 40);
+
+    mock.timers.tick(CONTEXT_GATE_CADENCE_MS);
+
+    assert.equal(
+      notices(h.children[0]).length,
+      1,
+      `a windowless reading killed the cadence; got ${JSON.stringify(h.children[0]?.sent)}`,
+    );
+  } finally {
+    mock.timers.reset();
+    await h.sup.stop();
+  }
+});
+
+test("🚨 the logged gap spans a windowless reading rather than restarting at it", async () => {
+  // 🛑 A SKIPPED READING MUST NOT RESET THE GAP ANCHOR. It would make the next
+  // reading look closer than it was, and the gap is the measurement #478's own
+  // `What is NOT proven` needs — a sampling gap read as 60s when it was 90s
+  // argues for the wrong fix.
+  mock.timers.enable({ apis: ["setInterval", "Date"] });
+
+  const h = await harness("cadgap", 90);
+
+  try {
+    h.children[0]?.report(at(20));
+
+    mock.timers.tick(30_000);
+    h.children[0]?.report(NO_WINDOW);
+
+    mock.timers.tick(60_000);
+    h.children[0]?.report(at(25));
+
+    const second = h.lines.find((l) => /context 25\.0%/.test(l));
+
+    assert.ok(
+      second,
+      `the reading logged nothing; got ${JSON.stringify(h.lines)}`,
+    );
+    assert.match(
+      second,
+      /90s since/i,
+      `the windowless reading reset the gap anchor; got ${JSON.stringify(second)}`,
+    );
+  } finally {
+    mock.timers.reset();
+    await h.sup.stop();
+  }
+});

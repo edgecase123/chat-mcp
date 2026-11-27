@@ -213,6 +213,19 @@ export interface Supervisor {
  */
 export const CONTEXT_GATE_CADENCE_MS = 60_000;
 
+/**
+ * Whether a reading carries a window the gate can divide by.
+ *
+ * 🛑 ONE PREDICATE, BECAUSE TWO COPIES DRIFTED INSIDE ONE PR. The gate's own
+ * guard refuses a windowless reading, and the cadence's cache did not — so one
+ * such reading overwrote a valid standing reading and every later tick
+ * returned early, leaving the cadence dead until the next valid reading.
+ * Caught by claude1 reviewing PR 489.
+ */
+function hasUsableWindow(total: number): boolean {
+  return Number.isFinite(total) && total > 0;
+}
+
 /** How an arriving message is presented to the agent, and who is owed a reply. */
 export function formatPrompt(
   envelope: WakeEnvelope,
@@ -1164,7 +1177,7 @@ export async function startSupervisor(
     // floor here would cost. Unreachable on the claude driver, whose fallback
     // window is 200000, and reachable at the `ContextSnapshot` vendor seam.
     // Measured by claude2 on PR 311.
-    if (!Number.isFinite(total) || total <= 0) return;
+    if (!hasUsableWindow(total)) return;
 
     const percent = contextPercent(used, total);
     const gate = resolveContextGate(approvalsDb, childHandle);
@@ -1520,18 +1533,29 @@ export async function startSupervisor(
           // ⚠️ BEFORE THE GATE CHECK, because the gate's own action ends this
           // child's turn and a reading that restarted something must still be
           // in the log above the restart that followed it.
-          const sinceLast =
-            lastReadingAt === null ? null : Date.now() - lastReadingAt;
+          if (!hasUsableWindow(snapshot.total)) {
+            // 🛑 NOT CACHED, AND THE TIMESTAMP IS NOT TOUCHED EITHER. Standing
+            // in for a valid reading kills the cadence; resetting the gap
+            // anchor makes the NEXT reading look closer than it was, and
+            // measuring sampling is half of what this PR is for.
+            log(
+              `${childHandle} reported a context reading with NO window; ` +
+                `the standing reading and the gate are unchanged`,
+            );
+          } else {
+            const sinceLast =
+              lastReadingAt === null ? null : Date.now() - lastReadingAt;
 
-          lastReading = { used, total: snapshot.total };
-          lastReadingAt = Date.now();
+            lastReading = { used, total: snapshot.total };
+            lastReadingAt = Date.now();
 
-          log(
-            `${childHandle} context ${contextPercent(used, snapshot.total).toFixed(1)}%, ` +
-              (sinceLast === null
-                ? `first reading from this child`
-                : `${Math.round(sinceLast / 1000)}s since the last reading`),
-          );
+            log(
+              `${childHandle} context ${contextPercent(used, snapshot.total).toFixed(1)}%, ` +
+                (sinceLast === null
+                  ? `first reading from this child`
+                  : `${Math.round(sinceLast / 1000)}s since the last reading`),
+            );
+          }
 
           try {
             checkContextGate(childHandle, used, snapshot.total);
