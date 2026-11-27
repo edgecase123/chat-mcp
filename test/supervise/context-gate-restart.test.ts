@@ -17,6 +17,7 @@ const { childHandleFor } = await import("../../src/supervise/grant.js");
 const { setHandleContextGate } =
   await import("../../src/storage/context-gate.js");
 const { deadPid } = await import("../support/dead-pid.js");
+const { deliverToSupervisor } = await import("../../src/supervise/socket.js");
 import type { ContextSnapshot } from "../../src/supervise/context-gauge.js";
 import { supervisorOptions } from "../support/supervisor-options.js";
 import { releasePointerTurn } from "../support/handoff-pointer.js";
@@ -810,6 +811,62 @@ test("a gate LOWERED after the retraction warns again, so the last line is true"
     );
     // The SECOND warning carries the new gate, not the old one.
     assert.match(warns[1]!, /20/);
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("a replacement that is NOT a gate restart still gets its own warning", async () => {
+  // 🛑 THE CONTROL FOR THE PER-CHILD RESET, AND MY FIRST ATTEMPT AT IT COULD
+  // NOT FAIL. Every other replacement in this file is driven BY the gate, and
+  // the gate retracts the warning on its way there — so the flag was already
+  // false at replacement and deleting the reset changed nothing. Measured: the
+  // reset's mutant passed 21 of 21.
+  //
+  // 🛑 AN OPERATOR APPROVAL IS THE PATH THAT REACHES IT. It replaces the child
+  // for reasons that have nothing to do with the gate, so the warning is still
+  // standing when the new child arrives. A child that inherits it is a child
+  // whose own unreachable gate is never reported.
+  const h = await harness("fappr", 40);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+
+    const warned = h.lines.filter((l) => /NOTHING will restart/i.test(l));
+
+    assert.equal(
+      warned.length,
+      1,
+      `the first child was never warned, so this test proves nothing; got ${JSON.stringify(h.lines)}`,
+    );
+
+    await deliverToSupervisor(h.handle, {
+      id: 1,
+      to: h.handle,
+      from: "lee",
+      ts: Date.now(),
+      approval: {
+        approvalId: 1,
+        decision: "approve",
+        requested: "rm in '/tmp/gate.txt'",
+        grant: "Bash(rm -f /tmp/gate.txt)",
+        sessionId: "sess-1",
+      },
+    });
+
+    assert.equal(
+      h.children.length,
+      2,
+      "the approval did not replace the child, so there is no second child to warn",
+    );
+
+    h.children[1]?.report(at(WRONG_FILL));
+
+    assert.equal(
+      h.lines.filter((l) => /NOTHING will restart/i.test(l)).length,
+      2,
+      `the replacement inherited the warning and its own dead gate went unreported; got ${JSON.stringify(h.lines)}`,
+    );
   } finally {
     await h.sup.stop();
   }
