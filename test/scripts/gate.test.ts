@@ -238,17 +238,21 @@ test("🛑 the wall ceiling kills the RUNNER, not just the npm wrapper", () => {
 
   const { status } = runGate(dir, { PIDFILE: pidFile, GATE_WALL_SECONDS: "2" });
 
-  assert.notEqual(status, 0, "a run the ceiling killed is RED, never green");
-
+  // 🛑 REAP BEFORE ASSERTING. When this test fails, it fails BECAUSE the stub
+  // is still alive — so asserting first strands it on a shared host, which is
+  // the poisoned `pgrep` pre-flight this very change exists to prevent.
   const pid = Number(readFileSync(pidFile, "utf8").trim());
-  assert.ok(pid > 0, "the stub must really have recorded a grandchild pid");
-
-  let alive = true;
-  try {
-    process.kill(pid, 0);
-  } catch {
-    alive = false;
+  const alive = isAlive(pid);
+  if (alive) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* it exited between the check and the kill */
+    }
   }
+
+  assert.notEqual(status, 0, "a run the ceiling killed is RED, never green");
+  assert.ok(pid > 0, "the stub must really have recorded a grandchild pid");
   assert.equal(
     alive,
     false,
@@ -256,13 +260,19 @@ test("🛑 the wall ceiling kills the RUNNER, not just the npm wrapper", () => {
   );
 });
 
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 test("🛑 GATE_TEST_TIMEOUT_MS is a LIVE knob, not a printed one", () => {
   // `npm test -- --test-timeout=X` lands AFTER the glob and node silently
   // ignores it. The knob read as live and did nothing. So it travels as an
   // env var the `test` script interpolates, and this proves it arrives.
-  const slow = `node -e "setTimeout(() => {}, 400)" --test-timeout=\${GATE_TEST_TIMEOUT_MS:-60000}`;
-  void slow;
-
   const dir = mkdtempSync(join(tmpdir(), "chat-mcp-gateknob-"));
   mkdirSync(join(dir, "scripts", "lib"), { recursive: true });
   mkdirSync(join(dir, "test"));
