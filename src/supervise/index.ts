@@ -536,7 +536,11 @@ export async function startSupervisor(
     // offer below must not: the rules are a convenience and a supervisor that
     // never starts reports nothing. `etiquette-write.test.ts` makes this throw
     // and asserts BOTH halves — the log line, and that the start survives.
-    writeFileSync(etiquetteHostPath(childCwd), etiquetteBody(), "utf8");
+    try {
+      writeFileSync(etiquetteHostPath(childCwd), etiquetteBody(), "utf8");
+    } catch (err) {
+      log(`FAILED to write the etiquette file: ${String(err)}`);
+    }
 
     // 🛑 ONE OFFER CARRYING BOTH, NEVER TWO. Each offer is its own turn, and
     // PR 469 measured what a spare turn costs: the pointer turn consumed the
