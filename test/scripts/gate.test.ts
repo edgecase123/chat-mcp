@@ -267,6 +267,11 @@ test("🛑 the wall ceiling kills the RUNNER, not just the npm wrapper", () => {
 });
 
 function isAlive(pid: number): boolean {
+  // 🛑 pid 0 IS EVERY PROCESS IN THE CALLER'S GROUP, and -1 is reserved too.
+  // Measured: `process.kill(0, 0)` SUCCEEDS. So a sentinel from a pidfile the
+  // stub never wrote would read as alive, and the SIGKILL the caller then
+  // sends would take this test runner with it.
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
     return true;
