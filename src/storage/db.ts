@@ -317,6 +317,18 @@ const MIGRATIONS: readonly ((db: Db) => void)[] = [
     `);
     db.exec(`ALTER TABLE agents ADD COLUMN context_gate INTEGER`);
   },
+
+  // Whether a supervised child holds the one tool a DM reply needs (#475).
+  //
+  // 🛑 NULLABLE, AND NULL MEANS UNKNOWN AND SENDABLE. The supervisor is the
+  // only writer and it can crash, so a non-null default would turn debris
+  // into a permanent refusal for a handle that can answer perfectly well.
+  //
+  // ⚠️ A SEPARATE MIGRATION, per migration 8's docblock. Editing an earlier
+  // one never reaches a database that already ran it.
+  (db) => {
+    db.exec(`ALTER TABLE agents ADD COLUMN can_reply INTEGER`);
+  },
 ];
 
 /**

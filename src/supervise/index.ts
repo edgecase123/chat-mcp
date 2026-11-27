@@ -27,6 +27,7 @@ import {
   defaultAllowed,
   type ChildGrant,
 } from "./grant.js";
+import { createCanReplyPublisher } from "./can-reply.js";
 import { announceChildExit } from "./exit-event.js";
 import {
   newTurn,
@@ -91,6 +92,15 @@ export interface SupervisorOptions extends SpawnOptions {
    * Throwaway harnesses opt in; `chat-mcp supervise` does not.
    */
   readonly ephemeral?: boolean;
+
+  /**
+   * How long to wait before re-publishing `can_reply` to an absent row (#475).
+   *
+   * ⚠️ IT EXISTS FOR THE TEST, not for an operator. The child's `agents` row
+   * is written by the shim at registration, so the supervisor's first write
+   * lands on nothing and has to be retried.
+   */
+  readonly canReplyRetryMs?: number;
 
   /** Allowlist override. Default `DEFAULT_ALLOWED` — lee's narrow list. */
   readonly allowedTools?: readonly string[];
@@ -780,6 +790,22 @@ export async function startSupervisor(
       (t) => t === "mcp__chat__send" || t === "mcp__chat",
     );
 
+  /**
+   * Publishes `childCanSend()` on the child's row, so a SENDER can refuse a
+   * DM that would never be answered (#475).
+   *
+   * 🛑 IT RETRIES, BECAUSE THE ROW IS NOT THERE YET. The shim writes it when
+   * the child registers, which is after this. `can-reply.ts` carries the full
+   * reason; the short version is that an unretried write publishes nothing.
+   */
+  const canReply = createCanReplyPublisher({
+    write: (value) =>
+      dao.setAgentCanReply(approvalsDb, childBusHandle(), value),
+    canSend: childCanSend,
+    retryMs: opts.canReplyRetryMs ?? 1000,
+  });
+  canReply.publish();
+
   // 🛑 SAID OUT LOUD, both ways. A doorbell that cannot answer and a child
   // holding a bus identity are both things an operator must be able to see in
   // the log rather than deduce from a flag they did not pass.
@@ -924,6 +950,12 @@ export async function startSupervisor(
     // child's teardown before calling this, and the own-exit path is called BY
     // the exit. Envelopes arriving in this window are refused above, not
     // delivered to a dead child.
+    // 🛑 BEFORE THE SOCKET GOES, so the window where the row still claims an
+    // answer is as short as it can be. `clear` writes NULL, not 0 — nobody is
+    // publishing now, and a sender must go ahead rather than be refused by
+    // debris.
+    canReply.clear();
+
     await listener.close();
     await hostBus?.close();
 
@@ -1652,6 +1684,9 @@ export async function startSupervisor(
         allowed,
         available: availableBuiltins(allowed),
       };
+
+      // The grant just moved, and `can_reply` is derived from it.
+      canReply.publish();
     }
 
     // 🛑 THE SUPERVISOR STAYS UP, per lee's ruling of 2026-11-15. It already

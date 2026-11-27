@@ -2,7 +2,11 @@ import * as dao from "../storage/dao.js";
 import { openDb } from "../storage/db.js";
 import { notifyPeer } from "../notify/bus.js";
 import { readStdinAll, resolveHandle } from "./common.js";
-import { roomTargetRefusal, unknownPeerRefusal } from "../util/naming.js";
+import {
+  noReplyRefusal,
+  roomTargetRefusal,
+  unknownPeerRefusal,
+} from "../util/naming.js";
 import { childHandleFor } from "../supervise/grant.js";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -44,6 +48,14 @@ export async function runSend(opts: SendOpts): Promise<void> {
           opts.to,
           dao.getAgent(db, child) ? child : null,
           "Run 'chat-mcp list --all' to see registered handles.",
+        ),
+      );
+    }
+    if (recipient.can_reply === 0) {
+      throw new Error(
+        noReplyRefusal(
+          opts.to,
+          `Run 'chat-mcp cli --handle ${from}' and post in a room it has joined, or ask its operator to restart it with a reply tool.`,
         ),
       );
     }
