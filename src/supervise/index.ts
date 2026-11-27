@@ -1052,19 +1052,27 @@ export async function startSupervisor(
    * first reading is the same number. The restart reclaims nothing and the next
    * reading asks for another. Found by claude2 reviewing this before it merged.
    *
-   * ⚠️ IT IS THE FIRST READING, NOT A TRUE TURN-0 FILL, AND THE GAP IS
-   * NARROWER THAN THAT SOUNDS. `claudeContextUsage` takes a reading from every
-   * main-session `assistant` event, so a turn that reads twenty files emits
-   * twenty of them and only the first sets this — before any tool result comes
-   * back. What is left uncovered is a first PROMPT large enough to exceed the
-   * gate alone. That child is refused a restart it could have used, the log
-   * names the reason, and the operator is left where they were before this
-   * trigger existed. Better than a loop. claude2 asked which one it was.
+   * ⚠️ IT IS THE LOWEST READING SEEN, NOT THE FIRST ONE. A first reading
+   * can be wrong: `cursor1-agent` reported 57.4% while its window actually
+   * held 23.9%, which latched a floor above the gate and left the child with
+   * no restart for the rest of its life. The minimum only ever falls, so a
+   * child whose fill genuinely never drops below its gate still never
+   * restarts — which is the loop guard above, intact.
    */
   let childFloor: number | null = null;
 
   /** Once per child: see `childFloor`, and `warnedFallbackWindows` for why. */
   let warnedGateUnderFloor = false;
+
+  /**
+   * Once per child, and only after `warnedGateUnderFloor`.
+   *
+   * 🛑 THE WARNING SAYS "NOTHING WILL RESTART THIS CHILD", WHICH A LOWER
+   * READING MAKES FALSE. An operator acts on that sentence — raising the gate
+   * is what it asks for — so leaving it standing is worse than never having
+   * logged it.
+   */
+  let withdrewGateUnderFloor = false;
 
   /**
    * Restart the child if this reading has reached the handle's gate.
@@ -1108,7 +1116,9 @@ export async function startSupervisor(
     const percent = contextPercent(used, total);
     const gate = resolveContextGate(approvalsDb, childHandle);
 
-    childFloor ??= percent;
+    // 🛑 THE MINIMUM, NOT THE FIRST READING. See the declaration: a wrong
+    // first reading otherwise disables this child's gate permanently.
+    childFloor = childFloor === null ? percent : Math.min(childFloor, percent);
 
     // 🛑 REFUSED FOR THIS CHILD'S WHOLE LIFETIME, not just for the reading
     // that showed it. Skipping one reading halves the loop's rate and does not
@@ -1123,6 +1133,17 @@ export async function startSupervisor(
       }
 
       return;
+    }
+
+    // 🛑 WITHDRAWN THE MOMENT IT STOPS BEING TRUE, not at the next restart.
+    // Reaching here means the floor is now under the gate, so the sentence the
+    // operator read above no longer holds.
+    if (warnedGateUnderFloor && !withdrewGateUnderFloor) {
+      withdrewGateUnderFloor = true;
+      log(
+        `${childHandle} now reads a floor of ${childFloor.toFixed(1)}%, under its restart gate of ${gate}% — ` +
+          `the earlier warning is withdrawn and the gate is reachable again`,
+      );
     }
 
     if (percent < gate) return;
@@ -1163,6 +1184,7 @@ export async function startSupervisor(
     gateRestartRequested = false;
     childFloor = null;
     warnedGateUnderFloor = false;
+    withdrewGateUnderFloor = false;
 
     /**
      * 🛑 EVERY CALLBACK GOES THROUGH THIS, NOT JUST THE ONE THAT BIT.

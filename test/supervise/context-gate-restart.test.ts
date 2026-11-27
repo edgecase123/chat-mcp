@@ -617,3 +617,162 @@ test("the gate restart is logged, naming the reading and the gate it crossed", a
     await h.sup.stop();
   }
 });
+
+/**
+ * #477 — the spawn floor latched the FIRST reading, and that reading can be
+ * wrong.
+ *
+ * 🛑 THE NUMBERS BELOW ARE THE MEASURED ONES, NOT CHOSEN ONES. `cursor1-agent`
+ * reported 57.4% while its real fill was 23.9%, against a gate of 40. The
+ * first reading disabled the gate for the child's whole life, so nothing
+ * restarted it and it ran until it stopped answering.
+ *
+ * 🛑 WHAT MAKES THESE ABLE TO FAIL IS THE PAIRED SEQUENCE THAT NEVER DROPS.
+ * A floor that simply stopped disabling the gate would pass the first test and
+ * reintroduce the restart loop the guard exists to prevent — which is the arm
+ * lee rejected by name on the ticket.
+ */
+
+/** The reading `cursor1-agent` gave, which was wrong. */
+const WRONG_FILL = 57.4;
+
+/** What its window actually held at the same moment. */
+const REAL_FILL = 23.9;
+
+test("a LOWER later reading pulls the floor down, and the gate works again", async () => {
+  const h = await harness("fmin", 40);
+
+  try {
+    // The wrong reading first, exactly as it arrived. Today this latches as
+    // the floor and the gate is dead from here on.
+    h.children[0]?.report(at(WRONG_FILL));
+
+    // The real fill, which is well under the gate.
+    h.children[0]?.report(at(REAL_FILL));
+
+    // A reading that has genuinely reached the operator's gate.
+    h.children[0]?.report(at(40));
+
+    assert.equal(
+      notices(h.children[0]).length,
+      1,
+      `the gate stayed disabled by a wrong first reading; sent ${JSON.stringify(h.children[0]?.sent)}`,
+    );
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("a floor that never drops keeps the gate off, so nothing restart-loops", async () => {
+  // 🛑 THE PAIRED CONTROL. lee rejected clamping on #477 because a replacement
+  // child boots straight back above the gate and restarts again, burning
+  // billed turns without finishing one. A floor that only ever falls cannot do
+  // that; one that is reset or ignored can.
+  const h = await harness("fhigh", 40);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+    h.children[0]?.report(at(60));
+    h.children[0]?.report(at(58));
+
+    assert.deepEqual(
+      notices(h.children[0]),
+      [],
+      "a child whose fill never fell below its gate was restarted anyway",
+    );
+    assert.equal(h.children.length, 1, "the child was replaced");
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("the unreachable-gate warning is RETRACTED once a lower floor revives it", async () => {
+  // 🛑 WITHOUT THIS THE OPERATOR IS LEFT WITH A FALSE SENTENCE. The first
+  // warning says "NOTHING will restart this child", and the moment a lower
+  // reading pulls the floor under the gate that is no longer true. A warning
+  // that cannot be withdrawn is worse than none, because it is acted on.
+  const h = await harness("fundo", 40);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+
+    assert.ok(
+      h.lines.find((l) => /NOTHING will restart/i.test(l)),
+      `the gate was never reported unreachable; got ${JSON.stringify(h.lines)}`,
+    );
+
+    h.children[0]?.report(at(REAL_FILL));
+
+    const undo = h.lines.find((l) => /can restart|is reachable again/i.test(l));
+
+    assert.ok(
+      undo,
+      `the unreachable warning was never withdrawn; got ${JSON.stringify(h.lines)}`,
+    );
+    // Both numbers, so the operator can see WHICH reading revived it.
+    assert.match(undo, /40/);
+    assert.match(undo, /23\.9/);
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("the retraction is logged ONCE, not on every reading under the gate", async () => {
+  // The warning's own `warnedGateUnderFloor` latch exists because a line per
+  // reading is a line an operator stops reading. Its withdrawal needs the
+  // same property, and a fresh flag is the thing most likely to be forgotten.
+  const h = await harness("fonce", 40);
+
+  try {
+    h.children[0]?.report(at(WRONG_FILL));
+    h.children[0]?.report(at(REAL_FILL));
+    h.children[0]?.report(at(20));
+    h.children[0]?.report(at(21));
+
+    const undos = h.lines.filter((l) =>
+      /can restart|is reachable again/i.test(l),
+    );
+
+    assert.equal(
+      undos.length,
+      1,
+      `the retraction repeated; got ${JSON.stringify(undos)}`,
+    );
+  } finally {
+    await h.sup.stop();
+  }
+});
+
+test("a replacement child can be warned and retracted on its own account", async () => {
+  // 🛑 THE RETRACTION FLAG NEEDS THE SAME RESET THE WARNING FLAG HAS. Without
+  // it the first child spends the retraction for every child after it, and a
+  // replacement that recovers is never reported as recovered. This is the
+  // clause most likely to be left out, because nothing else in the file reads
+  // it. `feedback_pin_every_clause_of_a_compound_guard`.
+  const h = await harness("frepl", 40);
+
+  try {
+    // Child one: warned, then withdrawn, then restarted at its gate.
+    h.children[0]?.report(at(WRONG_FILL));
+    h.children[0]?.report(at(REAL_FILL));
+    h.children[0]?.report(at(40));
+    h.children[0]?.finishTurn();
+    h.children[0]?.finishTurn();
+
+    assert.equal(h.children.length, 2, "the child was never replaced");
+
+    const before = h.lines.filter((l) => /is reachable again/i.test(l)).length;
+
+    // Child two walks the same path, so it is owed its own pair of lines.
+    h.children[1]?.report(at(WRONG_FILL));
+    h.children[1]?.report(at(REAL_FILL));
+
+    assert.equal(
+      h.lines.filter((l) => /is reachable again/i.test(l)).length,
+      before + 1,
+      "the replacement child was never told its gate came back",
+    );
+  } finally {
+    await h.sup.stop();
+  }
+});
